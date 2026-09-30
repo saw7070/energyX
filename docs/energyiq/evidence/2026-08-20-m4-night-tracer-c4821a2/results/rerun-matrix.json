@@ -1,0 +1,69 @@
+{
+  "sameDefinition": true,
+  "definitionFingerprint": "f15af821c12ebb277fc90c871f64ce5c2a2bb3ea8be53b4a3d5a311bc244aeec",
+  "attempts": [
+    {
+      "label": "Day01",
+      "definitionFingerprint": "f15af821c12ebb277fc90c871f64ce5c2a2bb3ea8be53b4a3d5a311bc244aeec",
+      "sourceSha256": "e015a06ebd047abb37fd792f0854db59451ea070736ea29adbd379b076a4da42",
+      "sourceSnapshotId": "m4-source-e015a06ebd047abb",
+      "readingCount": 6750,
+      "validIntervalCount": 6480,
+      "totalUsageKwh": 1211.7859,
+      "typicalIntervalMinutes": 60,
+      "qualityCounts": {
+        "ok": 6480,
+        "negative_delta": 0,
+        "gap": 0,
+        "irregular_interval": 0,
+        "duplicate_conflict": 0
+      },
+      "coverageFrom": "2026-06-01T00:00:00.000Z",
+      "coverageTo": "2026-06-02T00:00:00.000Z",
+      "result": "pass",
+      "truthBoundary": "source-level-deterministic-witness-only"
+    },
+    {
+      "label": "Day07",
+      "definitionFingerprint": "f15af821c12ebb277fc90c871f64ce5c2a2bb3ea8be53b4a3d5a311bc244aeec",
+      "sourceSha256": "9b9d7578b21c6e9826cbebd1d5725af428df69e3a6e840c0d236a719b4bf3be7",
+      "sourceSnapshotId": "m4-source-9b9d7578b21c6e98",
+      "readingCount": 45630,
+      "validIntervalCount": 45360,
+      "totalUsageKwh": 6376.9696,
+      "typicalIntervalMinutes": 60,
+      "qualityCounts": {
+        "ok": 45360,
+        "negative_delta": 0,
+        "gap": 0,
+        "irregular_interval": 0,
+        "duplicate_conflict": 0
+      },
+      "coverageFrom": "2026-06-01T00:00:00.000Z",
+      "coverageTo": "2026-06-08T00:00:00.000Z",
+      "result": "pass",
+      "truthBoundary": "source-level-deterministic-witness-only"
+    },
+    {
+      "label": "Day30",
+      "definitionFingerprint": "f15af821c12ebb277fc90c871f64ce5c2a2bb3ea8be53b4a3d5a311bc244aeec",
+      "sourceSha256": "c50183898a00ea7dc76660960e496af58ef8434ab8e1d0ad1e9b1dfe4a50c199",
+      "sourceSnapshotId": "m4-source-c50183898a00ea7d",
+      "readingCount": 194670,
+      "validIntervalCount": 194400,
+      "totalUsageKwh": 26912.0807,
+      "typicalIntervalMinutes": 60,
+      "qualityCounts": {
+        "ok": 194400,
+        "negative_delta": 0,
+        "gap": 0,
+        "irregular_interval": 0,
+        "duplicate_conflict": 0
+      },
+      "coverageFrom": "2026-06-01T00:00:00.000Z",
+      "coverageTo": "2026-07-01T00:00:00.000Z",
+      "result": "pass",
+      "truthBoundary": "source-level-deterministic-witness-only"
+    }
+  ]
+}

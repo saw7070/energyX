@@ -1,0 +1,21 @@
+{
+  "name": "@datafoundry-evaluation/pi-ai-gateway",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "test": "vitest run src/pi-ai-gateway-evaluation.test.ts src/pi-ai-dependency-gate.test.ts",
+    "test:cold-repeat": "vitest run src/pi-ai-gateway-evaluation.test.ts -t \"captures the actual\" --maxWorkers=1 --minWorkers=1 --testTimeout=15000 && vitest run src/pi-ai-gateway-evaluation.test.ts -t \"captures the actual\" --maxWorkers=1 --minWorkers=1 --testTimeout=15000 && vitest run src/pi-ai-gateway-evaluation.test.ts -t \"captures the actual\" --maxWorkers=1 --minWorkers=1 --testTimeout=15000",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.84.2",
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3",
+    "vitest": "3.2.6",
+    "zod": "4.4.3"
+  }
+}

@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+case "${ENERGYIQ_BACKUP_TEST_CURL_MODE:-success}" in
+  fail)
+    exit 22
+    ;;
+  fail-until-restart)
+    state_dir="${ENERGYIQ_BACKUP_TEST_STATE_DIR:?test state directory is required}"
+    restart_count="$(<"$state_dir/restart-count")"
+    (( restart_count > 0 )) || exit 22
+    success_count="$(<"$state_dir/ready-success-count")"
+    printf '%s\n' "$(( success_count + 1 ))" > "$state_dir/ready-success-count"
+    ;;
+  fail-and-count-after-restart)
+    state_dir="${ENERGYIQ_BACKUP_TEST_STATE_DIR:?test state directory is required}"
+    restart_count="$(<"$state_dir/restart-count")"
+    if (( restart_count > 0 )); then
+      attempt_count="$(<"$state_dir/post-restart-ready-attempts")"
+      printf '%s\n' "$(( attempt_count + 1 ))" > "$state_dir/post-restart-ready-attempts"
+    fi
+    exit 22
+    ;;
+esac

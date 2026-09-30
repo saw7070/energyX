@@ -1,0 +1,62 @@
+{
+  "definitionFingerprint": "f15af821c12ebb277fc90c871f64ce5c2a2bb3ea8be53b4a3d5a311bc244aeec",
+  "definition": {
+    "contractRevision": "energyiq-overview-definition@1",
+    "timePolicyRevisionId": "m4-clean-room-report-time@1",
+    "sections": [
+      {
+        "key": "portfolio-consumption",
+        "title": "Portfolio consumption",
+        "managementQuestion": "How much electricity did the portfolio use, and where should management look first?",
+        "primaryWindowId": "current-overview",
+        "supportingWindowIds": [],
+        "blocks": [
+          {
+            "key": "portfolio-consumption-summary",
+            "capabilityRevisionId": "overview.consumption@1",
+            "windowId": "current-overview",
+            "emphasis": "primary"
+          }
+        ]
+      }
+    ]
+  },
+  "templateDocument": {
+    "schema_version": 2,
+    "templates": [
+      {
+        "template_id": "project",
+        "target_kind": "project",
+        "sections": [
+          {
+            "section_id": "portfolio-consumption",
+            "title": "Portfolio consumption",
+            "navigation_label": "Portfolio consumption",
+            "description": "How much electricity did the portfolio use, and where should management look first?"
+          }
+        ],
+        "components": [
+          {
+            "placement_id": "portfolio-consumption-summary",
+            "component_revision_id": "overview.consumption@1",
+            "enabled": true,
+            "section_id": "portfolio-consumption",
+            "layout": {
+              "span": 12,
+              "height": "compact"
+            },
+            "presentation": {
+              "visual_preset": "cards",
+              "density": "comfortable",
+              "tone": "highlight",
+              "show_legend": false,
+              "limit": 10
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "diff": [],
+  "deterministicBytesSha256": "e050f7c639f7557c5b8b89ee250af3f59f5b460a4f3442d6d286a3ad54452b31"
+}

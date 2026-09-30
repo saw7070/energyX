@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="zh-CN" xml:lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc 3.10" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>EnergyIQ 交接手册：架构、任务路径与本地部署</title>
+  <style>
+
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: 1.5em;}
+div.column{flex: auto;}
+@media screen {
+div.columns{gap: min(4vw, 1.5em);}
+div.column{overflow-x: auto;}
+}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+
+ul.task-list[class]{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+font-size: inherit;
+width: 0.8em;
+margin: 0 0.8em 0.2em -1.6em;
+vertical-align: middle;
+}
+.display.math{display: block; text-align: center; margin: 0.5rem auto;}
+
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+{ counter-reset: source-line 0; }
+pre.numberSource code > span
+{ position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+{ content: counter(source-line);
+position: relative; left: -1em; text-align: right; vertical-align: baseline;
+border: none; display: inline-block;
+-webkit-touch-callout: none; -webkit-user-select: none;
+-khtml-user-select: none; -moz-user-select: none;
+-ms-user-select: none; user-select: none;
+padding: 0 4px; width: 4em;
+color: #aaaaaa;
+}
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa; padding-left: 4px; }
+div.sourceCode
+{ }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; }
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; }
+code span.at { color: #7d9029; }
+code span.bn { color: #40a070; }
+code span.bu { color: #008000; }
+code span.cf { color: #007020; font-weight: bold; }
+code span.ch { color: #4070a0; }
+code span.cn { color: #880000; }
+code span.co { color: #60a0b0; font-style: italic; }
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; }
+code span.do { color: #ba2121; font-style: italic; }
+code span.dt { color: #902000; }
+code span.dv { color: #40a070; }
+code span.er { color: #ff0000; font-weight: bold; }
+code span.ex { }
+code span.fl { color: #40a070; }
+code span.fu { color: #06287e; }
+code span.im { color: #008000; font-weight: bold; }
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; }
+code span.kw { color: #007020; font-weight: bold; }
+code span.op { color: #666666; }
+code span.ot { color: #007020; }
+code span.pp { color: #bc7a00; }
+code span.sc { color: #4070a0; }
+code span.ss { color: #bb6688; }
+code span.st { color: #4070a0; }
+code span.va { color: #19177c; }
+code span.vs { color: #4070a0; }
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; }
+</style>
+  <style type="text/css">:root {color-scheme: light;--ink: #172033;--muted: #5d687b;--line: #d8deea;--soft: #f4f7fb;--blue: #2457d6;--blue-soft: #edf3ff;--green: #147a56;--amber: #8a5b00;}* { box-sizing: border-box; }html { scroll-behavior: smooth; }body {margin: 0;background: #eef2f7;color: var(--ink);font: 16px/1.75 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;}main {max-width: 1120px;margin: 32px auto;padding: 48px 64px 72px;background: #fff;box-shadow: 0 16px 48px rgba(27, 44, 78, .10);}h1, h2, h3 { line-height: 1.25; color: #10182a; }h1 { margin-top: 0; font-size: 2.25rem; letter-spacing: -.02em; }h2 { margin-top: 2.5rem; padding-bottom: .45rem; border-bottom: 1px solid var(--line); font-size: 1.55rem; }h3 { margin-top: 1.8rem; font-size: 1.15rem; }p, ul, ol, table, pre, blockquote { margin-top: 1rem; margin-bottom: 1rem; }a { color: var(--blue); text-decoration: none; }a:hover { text-decoration: underline; }code {padding: .12rem .35rem;border-radius: 4px;background: #f0f3f8;color: #293653;font: .92em/1.4 Consolas, "Cascadia Code", monospace;}pre {overflow-x: auto;padding: 18px 20px;border: 1px solid #dbe3f0;border-radius: 8px;background: #f7f9fc;line-height: 1.55;}pre code { padding: 0; background: transparent; }blockquote {margin-left: 0;padding: 8px 18px;border-left: 4px solid #8ba8ef;background: var(--blue-soft);color: #34415a;}table {width: 100%;border-collapse: collapse;display: block;overflow-x: auto;}th, td {min-width: 120px;padding: 10px 12px;border: 1px solid var(--line);text-align: left;vertical-align: top;}th { background: var(--soft); font-weight: 700; }tr:nth-child(even) td { background: #fbfcfe; }li { margin: .3rem 0; }hr { border: 0; border-top: 1px solid var(--line); margin: 2rem 0; }header#title-block-header {margin-bottom: 2.5rem;padding: 28px 32px;border-radius: 12px;background: linear-gradient(135deg, #172a63, #2862d5);color: #fff;}header#title-block-header h1 { color: #fff; margin-bottom: .5rem; }header#title-block-header .subtitle,header#title-block-header p { color: #e6edff; }section.level1 > h1 { margin-top: 2.8rem; }input[type="checkbox"] { accent-color: var(--blue); }@media (max-width: 760px) {body { background: #fff; }main { margin: 0; padding: 28px 20px 48px; box-shadow: none; }h1 { font-size: 1.8rem; }h2 { font-size: 1.35rem; }header#title-block-header { padding: 22px 20px; }}@media print {body { background: #fff; font-size: 11pt; }main { max-width: none; margin: 0; padding: 0; box-shadow: none; }header#title-block-header { print-color-adjust: exact; -webkit-print-color-adjust: exact; }pre, table { break-inside: avoid; }a { color: inherit; text-decoration: none; }}</style>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">EnergyIQ 交接手册：架构、任务路径与本地部署</h1>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#energyiq-交接手册架构任务路径与本地部署" id="toc-energyiq-交接手册架构任务路径与本地部署">EnergyIQ
+交接手册：架构、任务路径与本地部署</a>
+<ul>
+<li><a href="#0-2026-08-27-交接状态快照" id="toc-0-2026-08-27-交接状态快照">0. 2026-08-27 交接状态快照</a></li>
+<li><a href="#1-先给交接人的一句话" id="toc-1-先给交接人的一句话">1.
+先给交接人的一句话</a></li>
+<li><a href="#2-项目整体构思" id="toc-2-项目整体构思">2.
+项目整体构思</a></li>
+<li><a href="#3-技术栈和代码地图" id="toc-3-技术栈和代码地图">3.
+技术栈和代码地图</a></li>
+<li><a href="#4-任务路径从哪里开始按什么顺序读" id="toc-4-任务路径从哪里开始按什么顺序读">4.
+任务路径：从哪里开始、按什么顺序读</a></li>
+<li><a href="#5-本地部署交接人自己的干净环境" id="toc-5-本地部署交接人自己的干净环境">5.
+本地部署：交接人自己的干净环境</a></li>
+<li><a href="#6-env-能不能直接发给交接人" id="toc-6-env-能不能直接发给交接人">6. <code>.env</code>
+能不能直接发给交接人？</a></li>
+<li><a href="#7-下午会议建议讲法2030-分钟" id="toc-7-下午会议建议讲法2030-分钟">7. 下午会议建议讲法（20–30
+分钟）</a></li>
+<li><a href="#8-交接完成判据" id="toc-8-交接完成判据">8.
+交接完成判据</a></li>
+</ul></li>
+</ul>
+</nav>
+<h1 id="energyiq-交接手册架构任务路径与本地部署">EnergyIQ
+交接手册：架构、任务路径与本地部署</h1>
+<p>本文是交接导航，不替代 GitHub Issue 的验收标准，也不把历史 Runlog
+当成当前实现状态。交接时以“当前确认的代码 head + GitHub ticket +
+可复现测试证据”为准。</p>
+<h2 id="0-2026-08-27-交接状态快照">0. 2026-08-27 交接状态快照</h2>
+<p>这是本轮收尾的单一状态入口；使用前仍须执行
+<code>git fetch origin --prune</code> 与 <code>git ls-remote</code> 防止
+SHA 漂移。</p>
+<table>
+<thead>
+<tr>
+<th>对象</th>
+<th>交接时 exact 状态</th>
+<th>已确认边界</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>origin/main</code></td>
+<td><code>752e09ed0836cdec07f6e2dda0108414aa8bb72c</code></td>
+<td>稳定代码线；最新合并 PR #120 只是隔离 pi-ai Model Gateway
+evaluation，不代表生产 adapter、Runtime 切换、真实 Provider 验收或 #105
+授权</td>
+</tr>
+<tr>
+<td><code>origin/dev</code></td>
+<td><code>a437c07f6186337600c999503230586de805dc96</code></td>
+<td>测试候选线；已含 PR #179 DPL-03、PR #187 AI evidence-first 与 PR
+#192 Holiday-only replacement</td>
+</tr>
+<tr>
+<td>香港测试服务器</td>
+<td>当前仍为 <code>e825ae7b6a11088d9342ec2b1e8f1e6eeb181f39</code></td>
+<td>API/Web/nginx 与内外健康检查正常；<code>dev@a437c07f</code>
+<strong>尚未部署</strong></td>
+</tr>
+<tr>
+<td>生产服务器</td>
+<td>本次收尾未执行部署或写操作</td>
+<td>不得用 <code>main</code> 分支名推断实际生产
+Release；任何动作前重新核对 physical
+<code>current</code>、manifest、BUILD_ID、备份与健康状态</td>
+</tr>
+</tbody>
+</table>
+<h3 id="已合并或关闭">已合并或关闭</h3>
+<ul>
+<li>PR #192 已经双轴复审并合入 <code>dev@a437c07f</code>：Ngee Ann
+Holiday 第五 Section、旧 Release 四 Section、Saved Analysis
+compatibility 与 current exact <code>@3</code> dynamic headline
+均保留；没有生产/Provider/浏览器验收声明。</li>
+<li>PR #190 已合入 <code>main</code>：只记录受保护模型请求 Payload 的
+proposed design；Issue #102 保持 open，#105 继续冻结。</li>
+<li>PR #120 已合入 <code>main@752e09ed</code>：完成隔离 pi-ai Model
+Gateway evaluation；候选依赖不进入生产安装图、Providers public seam 或
+Runtime，不能据此宣称 production adapter 已完成。</li>
+<li>旧 PR #166、#128 已因 replacement
+合并而关闭，禁止整支复活或合并。</li>
+<li>PR #191 已在最新 <code>dev</code> 上形成 remote
+checkpoint：base/merge-base <code>a437c07f</code>，head
+<code>7e4add26fbbb21fba92aedc64cfef5d9e0711a6c</code>；本地 evaluation
+53/53、Providers 27/27、cold 3×3、typecheck/build/docs/diff 和 fresh CI
+已通过，post-Holiday EnergyIQ seams 与独立 exact-head review
+仍是合并门。它只是隔离 evaluation，不是生产 Model
+Gateway/Runtime/Provider adapter，也不解锁 #105。</li>
+<li>Draft PR #193 是 #161 Accepted Finding Phase A 的可恢复 WIP
+checkpoint：base/merge-base <code>dev@a437c07f</code>，head
+<code>a91b13aaff998edf653c943ed96b48c22383613c</code>；focused 2
+files/20 tests、root build、docs/diff 和 fresh CI 已通过，8
+files/96、显式 Contracts/API builds、EnergyIQ seams
+与独立复审仍未完成。不得在这些门完成前合并或启动 #162/#135。</li>
+<li>PR #194 是香港测试服务器的 docs-only 事故/部署交接：remote head
+<code>9736bdf6dfecafb531770afccd90d5b24e87a664</code>，包含 retained
+lock/staging 的 fail-closed 恢复门、DPL-03 exact Node/layer
+约束和测试数据/备份未知项；它不代表候选已经部署。</li>
+<li>Draft PR #195 是 #172 Managed Overview materialization 的安全 WIP
+checkpoint：remote head
+<code>0ebefddc2d33d609a3764980b7a70ae7a74b8ab7</code>，17 个 owned
+files，focused 7 files/87 tests、API build、docs/diff 通过；但分支落后
+<code>origin/main</code> 30 commits，PR 当前
+<code>CONFLICTING/DIRTY</code>。它只用于恢复工作，必须在 clean latest
+baseline 上选择性 replay、解决冲突并完成双轴复审/完整
+seams/CI，禁止直接合并。</li>
+</ul>
+<h3 id="测试服务器当前-blocker">测试服务器当前 blocker</h3>
+<p>测试服务器的上一轮中断部署留下
+<code>/opt/energyiq-datafoundry/.deploy.lock</code> 和目标
+<code>.staging-e5533ac9…</code>。锁内 PID 已不存在，<code>current</code>
+仍安全指向健康的 <code>e825ae7b…</code>；但 Runbook 要求 fail
+closed，不能直接删除锁或 staging。交接人必须先按<a href="../plans/2026-08-18-生产不可变Release部署与回滚Runbook.md">生产不可变
+Release 部署与回滚
+Runbook</a>完成一次“中断部署事故恢复”审计，再部署唯一候选
+<code>dev@a437c07f</code>。同时先确认测试专用 Shared Storage、备份
+checksum 与隔离恢复证据；不得从生产环境复制数据来补证。</p>
+<h3 id="下一位交接人的执行顺序">下一位交接人的执行顺序</h3>
+<ol type="1">
+<li><strong>恢复测试服务器部署现场</strong>：先读 <a href="https://github.com/Zion74/energyiq-datafoundry/pull/194">PR
+#194</a> 及其新增的测试服务器交接记录；核对
+<code>current=e825ae7b…</code>、残留 PID 不存在、服务健康、锁/staging
+精确归属；经负责人授权后归档事故证据并释放现场，不得猜测性删除。</li>
+<li><strong>部署并验收 <code>dev@a437c07f</code></strong>：使用 Node
+<code>v22.23.2</code> 和 DPL-03 lock-hash layer，必须命中现有 ready
+layer、<code>npm ci=0</code>；记录 Artifact SHA256、Release
+identity、回滚点。验收 login、多账户、三项目切换、Overview
+minimum/full、Holiday dynamic headline、AI Analysis direct/top-nav exact
+window、旧 Saved read-only、普通 GET 0 Provider/0 mutation。</li>
+<li><strong>完成 #172 不可变 Managed Overview Projection</strong>：从 <a href="https://github.com/Zion74/energyiq-datafoundry/pull/195">Draft PR
+#195</a> 的 <code>0ebefddc…</code> 只读恢复 17-file WIP，在负责人固定的
+latest baseline 上选择性 replay，不能整支 merge；新
+Snapshot/Release/Report-time/revision 身份变化时物化一次，普通 Overview
+与 AI Analysis 读取已验证的 immutable
+<code>OverviewContextPackage</code>，无身份变化严格不重算。禁止创建第二套计算/Store，也禁止放宽
+timeout。</li>
+<li><strong>独立修复 #168 DuckDB cleanup / SQL_TIMEOUT</strong>：证明
+retained resource 并做有界清理；不要和 #172 混成一个大 PR。</li>
+<li><strong>Harness 严格串行</strong>：从 <code>dev@a437c07f</code>
+replay #161 五文件 Phase A；通过后才做 #162 四个 Web 文件；最后做
+#135，并证明 direct/top-nav 普通 AI Analysis 不隐式加载 Skill。#105
+始终冻结，除非负责人重新显式授权。</li>
+<li><strong>收口 #191</strong>：补 post-Holiday EnergyIQ seams，重新做
+exact-head review 后才能考虑合入 <code>dev</code>；不得把 evaluation
+晋升为 production adapter。</li>
+<li><strong>其余独立工作</strong>：#174 generic Session lifecycle、#189
+legacy docs 资产盘点、Tuya Office Overview
+产品结构，均不得阻塞上述测试部署与 #172 主线。</li>
+</ol>
+<h3 id="当前不能宣称完成的事项">当前不能宣称完成的事项</h3>
+<ul>
+<li><code>dev@a437c07f</code> 尚未部署到测试服务器，因而没有该 exact
+Release 的浏览器、多账户或真实 AI Trace 验收。</li>
+<li>AI Analyst 已有 Preparing 观测和 evidence-first 行为，但 #172
+尚未完成，所以首答前仍可能执行完整 ProjectAnalysis；#168 仍可能导致
+DuckDB/SQL timeout。</li>
+<li>#191、#193（#161
+replacement）均只是远端候选/checkpoint；没有合并、部署或 Provider
+证据。PR #194 也只是事故/部署交接文档，不是服务器变更证据。</li>
+<li>PR #195 只是可恢复的 #172 WIP，而且当前冲突；focused tests 不能替代
+clean replay、完整测试、review 或部署。</li>
+<li>生产未更新；交接文档、PR 合并和 CI green
+都不能替代生产发布证据。</li>
+</ul>
+<h3 id="本地残留的处置边界">本地残留的处置边界</h3>
+<p>本轮没有把“所有能看到的文件”机械地提交。<code>energyiq-datafoundry-worker-3</code>
+的大批跟踪删除、Integration/Tuya/旧 worker 目录中的
+<code>.scratch</code>、<code>outputs</code>、SQLite/DuckDB、acceptance
+artifacts 与其他生成物，均因
+owner/来源/可恢复性不清而保留原位；它们不是交付物，也不得整包
+add/commit。Integration 中旧的
+<code>2026-08-23-Tuya-Office-API-Scene-Handoff.md</code> 仍是针对
+<code>codex/integration-20260818@760a24d0</code>
+的历史本地交接，当前远端权威入口是已分类的 Tuya Source Connector
+运行手册、Tuya Overview Runlog
+与本手册；下一位如需保留旧文，只能先做逐节去重、修复分类路径和敏感资料引用，再单独提
+docs PR。</p>
+<h2 id="1-先给交接人的一句话">1. 先给交接人的一句话</h2>
+<p>EnergyIQ 是一个面向能源运营决策的系统：</p>
+<ul>
+<li><strong>确定性 Overview</strong> 负责让 Boss/FM
+打开页面就看到本期最重要的问题、影响、证据和行动方向；</li>
+<li><strong>AI Energy Analyst</strong> 负责在同一个可信
+Project、Scope、Period 和 Snapshot 内继续查数、解释和追问；</li>
+<li>两者共用同一套能源事实和 Evidence，但 AI 不拥有官方
+KPI，也不负责生成 Overview 的权威指标。</li>
+</ul>
+<p>它不是通用 BI 看板，也不是让模型直接生成 SQL/React
+页面。核心原则是：<strong>数据事实和确定性计算先固定，模型只在服务端授权的范围内做受控分析和表达。</strong></p>
+<h2 id="2-项目整体构思">2. 项目整体构思</h2>
+<pre class="mermaid"><code>flowchart LR
+  A[Excel / Tuya API] --&gt; B[Source Adapter]
+  B --&gt; C[Raw Reading]
+  C --&gt; D[Interval Fact / Utility Fact]
+  D --&gt; E[Data Snapshot + Quality + Evidence]
+  E --&gt; F[Project Analysis Resolver]
+  F --&gt; G[Project Recipe]
+  G --&gt; H[Published Overview Renderer]
+  F --&gt; I[Energy Query Context]
+  I --&gt; J[DataFoundry AI Analyst]
+  J --&gt; K[Scoped read-only tools]
+  K --&gt; D
+  H --&gt; L[Analyze with AI / Evidence]
+  L --&gt; J
+  G --&gt; M[Saved Analysis / Artifact / Release]</code></pre>
+<h3 id="每一层做什么">每一层做什么</h3>
+<table>
+<thead>
+<tr>
+<th>层</th>
+<th>责任</th>
+<th>不应该做什么</th>
+<th>主要代码入口</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Energy Data Foundation</td>
+<td>把 Excel/API 统一成 Raw Reading、Interval Fact、Utility
+Fact、质量事件和 Data Snapshot</td>
+<td>不在页面或 Prompt 中临时计算官方指标</td>
+<td><code>apps/api/src/energy/energy-excel-import.ts</code>、<code>energy-import-materializer.ts</code>、<code>packages/metadata/src/energyiq-store.ts</code></td>
+</tr>
+<tr>
+<td>Project Analysis</td>
+<td>根据已登录身份、Project、Scope、Primary Period 和 Published Release
+解析可信分析上下文，执行确定性 Recipe</td>
+<td>不接受浏览器直接提交的 Snapshot/Release 作为权威身份</td>
+<td><code>apps/api/src/energy/project-analysis-resolver.ts</code>、<code>energy-analysis.ts</code>、<code>energy-query-context.ts</code></td>
+</tr>
+<tr>
+<td>Project Renderer</td>
+<td>把 Project Analysis Snapshot 渲染成 Ngee Ann、Preschool 或其他项目的
+Overview</td>
+<td>不直接查 DuckDB、不重新计算 KPI、不发明事实</td>
+<td><code>apps/web/src/app/energyiq/_components/energy-template-renderer.tsx</code>、各项目
+renderer</td>
+</tr>
+<tr>
+<td>DataFoundry Runtime</td>
+<td>提供 Provider、Session、Run、Trace、Task
+Console、Tools、Knowledge、MCP、Skills 和流式执行</td>
+<td>不接管 EnergyIQ 的官方 KPI、Overview 视觉和数据真相</td>
+<td><code>packages/agent-runtime/</code>、<code>packages/providers/</code>、<code>apps/api/src/server.ts</code></td>
+</tr>
+<tr>
+<td>Metadata / Storage</td>
+<td>保存用户、Workspace、Project、Mapping、Release、Template、Snapshot、Saved
+Analysis 和审计记录</td>
+<td>不把历史 Saved Analysis 静默改成当前结果</td>
+<td><code>packages/metadata/</code>、<code>storage/</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="技术路线的核心取舍">技术路线的核心取舍</h3>
+<ol type="1">
+<li><strong>继续在 DataFoundry
+内二次开发</strong>，复用已有登录、Session、Provider、Agent、审计和工作台能力。</li>
+<li><strong>能源事实层与 Overview 是 EnergyIQ
+自己的产品真相</strong>，不能被通用 Agent Runtime 反向定义。</li>
+<li><strong>Overview
+优先确定性、可复跑、可降级</strong>；模型不可用时，数字、图表、质量和官方
+Findings 仍然可用。</li>
+<li><strong>AI 通过显式 Energy Query Context
+进入系统</strong>，模型只能在服务端解析后的 Project
+范围内使用受控只读工具。</li>
+<li><strong>Excel 和 Tuya API 只是不同 Source Adapter</strong>；后面的
+Fact、Recipe、Renderer 和 AI Context 不应依赖具体来源。</li>
+<li><strong>版本和证据是产品能力</strong>：Data
+Snapshot、Metric/Rule、Template/Renderer、Project Release、Analysis Run
+和 Evidence 必须能解释一次结果从哪里来。</li>
+</ol>
+<h2 id="3-技术栈和代码地图">3. 技术栈和代码地图</h2>
+<h3 id="技术栈">技术栈</h3>
+<table>
+<thead>
+<tr>
+<th>领域</th>
+<th>当前技术</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>运行时</td>
+<td>Node.js 22+、npm workspaces</td>
+</tr>
+<tr>
+<td>语言</td>
+<td>TypeScript，ES modules</td>
+</tr>
+<tr>
+<td>Web</td>
+<td>Next.js 15、React 19、Tailwind CSS 4、Recharts</td>
+</tr>
+<tr>
+<td>API</td>
+<td>Node/TypeScript API，工作区包通过 npm workspace 组合</td>
+</tr>
+<tr>
+<td>Agent</td>
+<td>Mastra、AG-UI、CopilotKit runtime、AI SDK</td>
+</tr>
+<tr>
+<td>Provider</td>
+<td>OpenAI-compatible、DeepSeek、Alibaba/Qwen 等适配器</td>
+</tr>
+<tr>
+<td>数据访问</td>
+<td>Data Gateway；包含 DuckDB、PostgreSQL、MySQL 等 Connector</td>
+</tr>
+<tr>
+<td>持久化</td>
+<td>SQLite Metadata、DuckDB Energy Fact/分析数据、文件 Storage</td>
+</tr>
+<tr>
+<td>测试</td>
+<td>Vitest、TypeScript build、EnergyIQ 三条高层测试 Seam</td>
+</tr>
+</tbody>
+</table>
+<h3 id="新人先看哪些目录">新人先看哪些目录</h3>
+<pre class="text"><code>apps/api/src/energy/                    EnergyIQ 领域服务、解析、导入、API 合同
+apps/web/src/app/energyiq/               Overview、Explorer、AI、Admin 页面和组件
+packages/contracts/                      跨包共享类型和事件合同
+packages/metadata/                       SQLite 元数据、Project/Release/Snapshot/Saved 存储
+packages/data-gateway/                   DuckDB 与外部数据源的受控访问
+packages/agent-runtime/                  Agent、Session、Context、Tool、Trace 运行时
+packages/providers/                      模型 Provider 适配
+scripts/energyiq/                        EnergyIQ 重启、发布、备份和验证脚本
+docs/energyiq/                           产品决策、领域模型、实施记录和交接材料
+docs/agents/                             Issue、领域、Worktree 和测试基线</code></pre>
+<p>建议第一次小调整从一个纵向切片开始，例如：</p>
+<ol type="1">
+<li>先找到对应页面入口
+<code>apps/web/src/app/energyiq/&lt;surface&gt;/page.tsx</code>；</li>
+<li>再追它调用的 API/读取模型；</li>
+<li>再追 <code>apps/api/src/energy/</code> 中的确定性计算或 Context
+Resolver；</li>
+<li>最后补同目录或相邻的 focused test；</li>
+<li>不要先改通用 Agent Prompt 来“修正”官方 EnergyIQ 数值。</li>
+</ol>
+<h2 id="4-任务路径从哪里开始按什么顺序读">4.
+任务路径：从哪里开始、按什么顺序读</h2>
+<h3 id="41-第一轮只读阅读顺序">4.1 第一轮只读阅读顺序</h3>
+<ol type="1">
+<li>仓库根目录的 <code>CONTEXT.md</code>：确认仓库入口。</li>
+<li><a href="../CONTEXT.md">领域词汇表</a>：确认
+Project、Workspace、Tier、Meter、Fact、Snapshot、Release、Run、Evidence
+等名称。</li>
+<li><a href="../decisions/当前共识与新会话入口.md">当前共识与新会话入口</a>：看当前产品边界、已确认决策、现状和待补项。</li>
+<li><a href="../decisions/阶段技术选型-基于DataFoundry二次开发.md">阶段技术选型</a>：理解为什么复用
+DataFoundry、为什么不在 MVP 引入 Superset/Rill。</li>
+<li><a href="../decisions/决策-Overview改造与AI-Analysis打通最终方案.md">Overview
+与 AI 的最终方案</a>：理解四层架构和 AI 的边界。</li>
+<li><a href="../../agents/energyiq-execution-baseline.md">执行基线</a>：理解
+Integration/Worker Worktree、三条测试 Seam 和端口归属。</li>
+<li>最后才读与当前 ticket 直接相关的实施记录；带日期的 Runlog
+不是默认现状，必须和当前代码、测试一起核对。</li>
+</ol>
+<h3 id="42-github-issue-的阅读路径">4.2 GitHub Issue 的阅读路径</h3>
+<p>GitHub Issues
+是任务、规格和验收标准的权威来源。不要按编号从小到大通读，按下面的关系读：</p>
+<pre class="text"><code>产品地图 #1
+  ├─ Overview / AI 总体地图：#48、#54、#62
+  ├─ Overview / 时间 / Snapshot：#75、#80、#81、#83、#130–#134、#151、#154、#163、#172–#173
+  ├─ AI Analyst / 质量 / 复跑：#30、#35、#36、#39、#43–#47、#56、#57、#60、#90、#100、#141–#142、#158
+  ├─ Admin / Harness / 治理：#61–#66、#102、#114、#117、#122–#127
+  └─ 工程交付 / 运行：#92、#96、#150、#168、#174</code></pre>
+<p>每个 ticket 开始前，交接人至少确认：</p>
+<ul>
+<li>ticket 是否仍然 open、是否有 <code>ready-for-agent</code> 或
+<code>ready-for-human</code>；</li>
+<li>当前 reviewed head、分支和 owned paths；</li>
+<li>Acceptance、Forbidden paths、Required tests；</li>
+<li>这是本地/集成测试，还是还要求真实
+Provider、浏览器、部署或人工产品验收；</li>
+<li>完成后把 evidence 回写 ticket，不能只说“代码已改”。</li>
+</ul>
+<h3 id="43-推荐实现顺序">4.3 推荐实现顺序</h3>
+<p>如果需要解释“接下来怎么做”，可以按这条主线说：</p>
+<ol type="1">
+<li><strong>先守住运行和事实边界</strong>：能构建、能启动、Snapshot/Release/Scope
+不漂移，三条 Seam 有基线。</li>
+<li><strong>再补数据和确定性分析</strong>：Source Adapter → Fact →
+Snapshot → Project Analysis Resolver → Recipe。</li>
+<li><strong>再做项目页面和交互</strong>：Renderer 只消费 Analysis
+Snapshot，Overview/Explorer 的数字不能从前端另算。</li>
+<li><strong>再接 AI</strong>：Energy Query Context → scoped read-only
+tools → Finding/Evidence → AI Slot/AI Analyst。</li>
+<li><strong>再做 Admin
+和治理</strong>：Mapping、Metric/Rule、Template、Release、Model/Skill/Tool/Context
+配置和审计。</li>
+<li><strong>最后做真实质量和交付门</strong>：focused
+tests、Seam、build、真实
+Provider、生产浏览器、多账户、部署和人工价值验收分开记录。</li>
+</ol>
+<h3 id="44-分支服务器和本地-worktree-怎么对应">4.4 分支、服务器和本地
+Worktree 怎么对应</h3>
+<p>先记住一个简单规则：**测试服务器跟 <code>dev</code>，生产服务器跟
+<code>main</code>，日常开发跟
+<code>codex/&lt;ticket&gt;-&lt;slug&gt;</code>。**分支名不能单独证明代码已经部署；部署前还要核对服务器实际
+checkout 的 SHA、进程命令行和健康检查。</p>
+<p>以下是 2026-08-26 收口时的审计快照；分支 SHA
+会继续前移，使用前应重新执行 <code>git fetch</code> 和
+<code>git ls-remote</code> 核验：</p>
+<table>
+<thead>
+<tr>
+<th>分支/对象</th>
+<th>用途</th>
+<th>是否直接对应服务器</th>
+<th>交接人怎么使用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>main</code> / <code>origin/main</code></td>
+<td>稳定发布和生产基线</td>
+<td>生产服务器</td>
+<td>当前交接 exact 为 <code>752e09ed</code>；只通过 PR
+合并，不要直接在服务器改代码或直接 push；分支 SHA 不等于实际生产
+Release</td>
+</tr>
+<tr>
+<td><code>dev</code> / <code>origin/dev</code></td>
+<td>测试服务器的持续集成基线</td>
+<td>测试服务器</td>
+<td>exact 为 <code>a437c07f</code>，已包含 PR #179 DPL-03、PR #187 AI
+evidence-first 与 PR #192 Holiday-only replacement；香港测试服务器仍运行
+<code>e825ae7b</code>，部署被 retained lock/staging 阻断</td>
+</tr>
+<tr>
+<td><code>codex/&lt;ticket&gt;-&lt;slug&gt;</code></td>
+<td>一张 ticket 的开发分支</td>
+<td>不直接部署</td>
+<td>从负责人确认的 reviewed head 创建，使用独立 Worktree，完成后提 PR 到
+<code>dev</code></td>
+</tr>
+<tr>
+<td><code>codex/integration-20260818</code></td>
+<td>当前已有的本地 Integration 集成线</td>
+<td>仅本地长期集成环境</td>
+<td>对应
+<code>D:\Projects\energyiq-datafoundry-integration</code>；只有这里运行长期
+Web/API/DuckDB，不等同于 <code>dev</code> 或 <code>main</code></td>
+</tr>
+<tr>
+<td><code>codex/night-*</code>、<code>codex/release-*</code>
+及其他旧分支</td>
+<td>夜间执行、发布或历史 ticket 的专用分支</td>
+<td>以各自 Runlog 为准</td>
+<td>不要仅凭分支名继续开发；先查 owner、HEAD、Worktree 和状态</td>
+</tr>
+</tbody>
+</table>
+<p>旧源目录曾停在 <code>main@ccff860b</code>，含 175
+项工作区变化并落后远端 217 个提交。该状态已非破坏性收口：文档资产保存在
+<code>codex/legacy-main-docs-preservation-20260825@dfa6f565</code>，生成物移入带
+SHA-256 清单的本地归档，跟踪 ticket 为 #189；本地 <code>main</code>
+已恢复到远端稳定线。保全分支不是合并候选，不能整包 merge。Integration
+Worktree 的 <code>codex/integration-20260818@760a24d0</code>
+也不是服务器分支。</p>
+<h4 id="目标协作流程">目标协作流程</h4>
+<pre class="text"><code>codex/&lt;ticket&gt;  →  Pull Request  →  dev  →  测试服务器
+                                      ↓ 验收通过
+                                   Pull Request
+                                      ↓
+                                    main  →  生产服务器</code></pre>
+<p>交接人日常只需要记住以下操作：</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode powershell"><code class="sourceCode powershell"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 核验远端 dev 与 main 的 exact SHA；不要只看分支名</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>git fetch origin <span class="op">--</span>prune</span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>git branch <span class="op">-</span>r</span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a><span class="co"># 第一次建立本地 dev 跟踪分支</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>git <span class="cf">switch</span> <span class="op">--</span>track origin<span class="op">/</span>dev</span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>git pull <span class="op">--</span>ff-only origin dev</span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a><span class="co"># 开始一张 ticket：不要直接在 dev 上改</span></span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a>git <span class="cf">switch</span> <span class="op">-</span>c codex<span class="op">/&lt;</span>ticket<span class="op">&gt;-&lt;</span>slug<span class="op">&gt;</span> origin<span class="op">/</span>dev</span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a><span class="co"># 完成后推送自己的分支，发 PR 合并到 dev</span></span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a>git push <span class="op">-</span>u origin codex<span class="op">/&lt;</span>ticket<span class="op">&gt;-&lt;</span>slug<span class="op">&gt;</span></span></code></pre></div>
+<p><code>dev</code> 已由负责人从干净的 reviewed <code>main</code>
+创建，不能用旧保全分支或 <code>codex/integration-20260818</code>
+重建或覆盖。测试服务器部署时仍须记录实际 <code>dev</code> SHA、不可变
+Artifact 哈希、DPL-03 dependency layer
+hit/miss、服务进程和健康检查；分支或已合并 PR 本身不等于已经部署。</p>
+<h4 id="当前任务与-session-导航">当前任务与 Session 导航</h4>
+<p>GitHub Issue/PR 是可交接的权威任务状态；Codex Session
+只用于找到仍在运行的上下文，不能替代提交、CI 或部署证据。</p>
+<table>
+<thead>
+<tr>
+<th>角色</th>
+<th>Session</th>
+<th>当前职责</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>主 Agent</td>
+<td><code>codex://threads/019ff091-092f-7e42-8147-ff4c0c19b332</code></td>
+<td>合并决策、<code>dev</code>/<code>main</code>
+边界、最终交接与验收判断</td>
+</tr>
+<tr>
+<td>测试服务器</td>
+<td><code>codex://threads/01a036bc-996a-7601-9196-a9d7dd9cb8e3</code></td>
+<td>香港测试服务器恢复、exact <code>dev</code> 部署、DPL-03 与真实 AI
+Analysis 验收</td>
+</tr>
+<tr>
+<td>文档整理</td>
+<td><code>codex://threads/01a036ee-cdc3-7763-932f-3e19b3c054ff</code></td>
+<td><code>docs/energyiq</code> 分类、链接修复和交接材料维护；实现已交由
+PR 记录</td>
+</tr>
+<tr>
+<td>Harness Evolution</td>
+<td><code>codex://threads/01a00541-f7eb-7b03-a74f-43e1f5dff6f3</code></td>
+<td>历史 Harness/Accepted Finding 工作；继续前先核对 GitHub 当前
+Issue/PR 状态</td>
+</tr>
+<tr>
+<td>Tuya / 历史复审</td>
+<td><code>codex://threads/01a01f3b-02c7-73e1-b41d-be5fcd8072bb</code></td>
+<td>Tuya 及历史 PR 复审上下文；不是当前部署 Owner</td>
+</tr>
+<tr>
+<td>Backup / PR #153 历史工作</td>
+<td><code>codex://threads/01a03327-dd45-7c11-a845-152420bf61de</code></td>
+<td>Shared Storage backup 历史实现证据；当前状态以 #150 及后续 PR
+为准</td>
+</tr>
+</tbody>
+</table>
+<h2 id="5-本地部署交接人自己的干净环境">5.
+本地部署：交接人自己的干净环境</h2>
+<h3 id="51-推荐方式">5.1 推荐方式</h3>
+<p>交接人应从已确认的 reviewed head 重新 clone 或创建自己的 clean
+Worktree，不要复用旧保全分支或长期 Integration Worktree。交接会议上先用
+<code>git ls-remote</code> 确认当时的 <code>origin/main</code> /
+<code>origin/dev</code> exact SHA，再给对方命令；文档中的 SHA
+是审计快照，不是永久常量。</p>
+<p>Windows PowerShell 示例：</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode powershell"><code class="sourceCode powershell"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>git clone https<span class="op">://</span>github<span class="op">.</span><span class="fu">com</span><span class="op">/</span>Zion74<span class="op">/</span>energyiq-datafoundry<span class="op">.</span><span class="fu">git</span> energyiq-datafoundry-handoff</span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="fu">Set-Location</span> <span class="op">.</span>\energyiq-datafoundry-handoff</span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>git <span class="cf">switch</span> <span class="op">--</span>detach <span class="op">&lt;</span>reviewed-head<span class="op">&gt;</span></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>node <span class="op">-</span>v        <span class="co"># 需要 Node.js &gt;= 22</span></span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>npm ci</span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a><span class="fu">Copy-Item</span> <span class="op">.</span><span class="fu">env</span><span class="op">.</span><span class="fu">example</span> <span class="op">.</span><span class="fu">env</span></span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a><span class="fu">Copy-Item</span> apps<span class="op">/</span>web<span class="op">/.</span><span class="fu">env</span><span class="op">.</span><span class="fu">example</span> apps<span class="op">/</span>web<span class="op">/.</span><span class="fu">env</span><span class="op">.</span><span class="fu">local</span></span></code></pre></div>
+<h3 id="52-最小本地环境">5.2 最小本地环境</h3>
+<p>根目录 <code>.env</code>
+至少需要这些类别；值由交接人自己填写，不要把真实值写入文档：</p>
+<pre class="dotenv"><code>API_HOST=127.0.0.1
+API_PORT=8787
+
+LLM_PROVIDER=openai-compatible
+LLM_MODEL=&lt;test-model&gt;
+LLM_BASE_URL=&lt;openai-compatible-endpoint&gt;
+LLM_API_KEY=&lt;test-key&gt;
+
+STORAGE_ROOT_DIR=storage
+METADATA_DB_PATH=storage/metadata/workbench.sqlite
+SECRET_MASTER_KEY=&lt;new-random-local-key&gt;
+
+DATAFOUNDRY_AUTH_MODE=password
+AUTH_SESSION_SECRET=&lt;new-random-local-secret&gt;
+AUTH_PUBLIC_BASE_URL=http://127.0.0.1:3000
+AUTH_EMAIL_DELIVERY=test
+ENERGYIQ_ADMIN_EMAILS=&lt;交接人的测试管理员邮箱&gt;</code></pre>
+<p><code>apps/web/.env.local</code> 使用正式测试的同源 BFF 配置：</p>
+<pre class="dotenv"><code>NEXT_PUBLIC_DATAFOUNDRY_AUTH_MODE=password
+NEXT_PUBLIC_AGENT_RUNTIME_URL=
+NEXT_PUBLIC_CONFIG_API_URL=
+API_PROXY_TARGET=http://127.0.0.1:8787</code></pre>
+<p>如果只是做页面小调整，通常不需要 Tuya 访问密钥、真实 SMTP、真实生产
+Storage 或真实生产数据库。只有要复现 Tuya
+数据同步时，才在单独的测试环境配置
+<code>ENERGYIQ_TUYA_ACCESS_ID</code>、<code>ENERGYIQ_TUYA_ACCESS_SECRET</code>
+和 endpoint。</p>
+<h3 id="53-正式测试启动">5.3 正式测试启动</h3>
+<p>正式测试使用 <code>password + build/start</code>，不要把
+<code>npm run dev</code> 当成最终验收证据：</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode powershell"><code class="sourceCode powershell"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a>npm run build</span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>npm run build<span class="op">:</span>web</span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>npm run start<span class="op">:</span>api    <span class="co"># API: 127.0.0.1:8787</span></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>npm run start<span class="op">:</span>web    <span class="co"># Web: 127.0.0.1:3000</span></span></code></pre></div>
+<p>另开 PowerShell 检查：</p>
+<div class="sourceCode" id="cb10"><pre class="sourceCode powershell"><code class="sourceCode powershell"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="fu">Invoke-WebRequest</span> http<span class="op">://</span><span class="dv">127.0</span><span class="op">.</span><span class="dv">0.1</span><span class="op">:</span><span class="dv">8787</span><span class="op">/</span>healthz</span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a><span class="fu">Invoke-WebRequest</span> http<span class="op">://</span><span class="dv">127.0</span><span class="op">.</span><span class="dv">0.1</span><span class="op">:</span><span class="dv">8787</span><span class="op">/</span>ready</span></code></pre></div>
+<p>然后打开：</p>
+<ul>
+<li>登录：<code>http://127.0.0.1:3000/login</code></li>
+<li>通用 Data Tasks：<code>http://127.0.0.1:3000/data-tasks</code></li>
+<li>EnergyIQ
+Overview：<code>http://127.0.0.1:3000/energyiq/overview</code></li>
+</ul>
+<p><code>AUTH_EMAIL_DELIVERY=test</code> 时，注册/重置链接会打印在 API
+控制台，不会真的发送邮件。</p>
+<h3 id="54-改动后的最低验证">5.4 改动后的最低验证</h3>
+<div class="sourceCode" id="cb11"><pre class="sourceCode powershell"><code class="sourceCode powershell"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a>npm run build</span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>npm run test<span class="op">:</span>energyiq<span class="op">:</span>seams</span></code></pre></div>
+<p>EnergyIQ 三条高层 Seam 分别保护 Project Analysis Resolver、Project
+Renderer Registry 和 Energy Analyst。ticket 若要求 Web 全量、真实
+Provider、浏览器、多账户或部署验收，要单独执行并单独报告，不能用 build
+或 smoke 替代。</p>
+<h3 id="55-现有-integration-环境的使用边界">5.5 现有 Integration
+环境的使用边界</h3>
+<p>长期 API/Web/DuckDB 环境只由
+<code>D:\Projects\energyiq-datafoundry-integration</code>
+持有。使用前先核对其 branch、head 和工作树归属；不要从源目录或 Worker
+Worktree 启动共享服务。受控重启命令是：</p>
+<div class="sourceCode" id="cb12"><pre class="sourceCode powershell"><code class="sourceCode powershell"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="fu">Set-Location</span> D<span class="op">:</span>\Projects\energyiq-datafoundry-integration</span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a><span class="op">.</span>\scripts\energyiq\restart-overview<span class="op">.</span><span class="fu">ps1</span> <span class="op">-</span>PreflightOnly</span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a><span class="op">.</span>\scripts\energyiq\restart-overview<span class="op">.</span><span class="fu">ps1</span></span></code></pre></div>
+<p>该脚本会验证进程命令行确实属于 Integration Worktree，只输出
+<code>secretMasterKeyConfigured: true/false</code>，不会打印密钥。</p>
+<h2 id="6-env-能不能直接发给交接人">6. <code>.env</code>
+能不能直接发给交接人？</h2>
+<p><strong>技术上可以，交付上不建议直接发原始
+<code>.env</code>。</strong>“现在是测试环境”只能降低影响范围，不能消除风险。当前
+<code>.env</code> 中已经存在以下类型的敏感配置：</p>
+<ul>
+<li><code>SECRET_MASTER_KEY</code>：可能决定已有
+Metadata/模型配置能否解密；</li>
+<li><code>AUTH_SESSION_SECRET</code>：影响登录 Session；</li>
+<li>Tuya Access ID/Secret：可能直接访问外部能源数据；</li>
+<li>还可能包含模型 API Key、SMTP 密码、数据库或文件存储路径。</li>
+</ul>
+<p>建议采用下面的交接方式：</p>
+<ol type="1">
+<li>发送 <code>.env.example</code> 和上面的最小配置模板；</li>
+<li>对<strong>全新本地环境/全新空 Store</strong>，交接人自己生成新的
+<code>AUTH_SESSION_SECRET</code>、<code>SECRET_MASTER_KEY</code>，并使用自己的低额度测试模型
+Key；接手现有服务器和已有加密 Metadata 时不得直接替换
+<code>SECRET_MASTER_KEY</code>，否则历史加密配置可能无法解密；</li>
+<li>只有确实要复现现有加密配置或既有测试数据时，才单独交付对应的测试
+Storage 和同一 <code>SECRET_MASTER_KEY</code>；</li>
+<li>Tuya/模型密钥通过一对一、可撤回的方式传递，不放进
+Git、Issue、群聊或交接文档；</li>
+<li>交接完成后撤销或轮换旧的模型/Tuya/SMTP
+密钥，并让交接人确认本地已切换到自己的凭据。</li>
+</ol>
+<p>不要直接发送完整 <code>.env</code>，也不要发送个人 SSH
+私钥。交接所需的单项 secret
+只能经组织批准的密码库或点对点加密通道传递；服务器访问使用实名账号和交接人的独立公钥。交接结束后按权限清单撤销临时访问并轮换应轮换的外部密钥。</p>
+<h3 id="61-服务器权限怎么交接">6.1 服务器权限怎么交接</h3>
+<p>服务器地址、用途、当前 Release、端口/服务、Runbook、回滚点和 blocker
+属于<strong>非 secret 运维清单</strong>，统一从 <a href="https://github.com/Zion74/energyiq-datafoundry/pull/194">PR
+#194</a>
+的测试服务器交接记录读取；使用前仍要在阿里云控制台和服务器上重新核验。不要把密码、Private
+Key、Cookie、token 或 EnvironmentFile 内容写进该清单。</p>
+<p>SSH 推荐按人员建立独立身份，而不是发送现有操作者的私钥：</p>
+<ol type="1">
+<li>交接人本机生成自己的带口令 SSH key pair，只把 <code>.pub</code>
+公钥交给现有 operator；私钥始终留在交接人自己的设备或受控密码库中；</li>
+<li>现有 operator
+在服务器为交接人建立/确认具名账号，并把该公钥追加到该账号的
+<code>authorized_keys</code>；不要在演示或发布前用“替换
+key”覆盖现有入口；</li>
+<li>先在独立终端验证新账号可登录、只拥有所需 sudo/文件权限、能只读核对
+systemd/Release/health；旧入口暂时保留作为回退；</li>
+<li>交接确认后撤销不再需要的旧公钥和阿里云 RAM/Workbench 权限，并记录
+owner、添加时间、撤销时间；不要共享阿里云主账号；</li>
+<li>如果当前只有一份历史共享私钥，把它视为待淘汰凭据：只用于恢复访问，随后立即迁移到每人独立公钥并轮换共享
+key，不能把共享私钥当成长期交付物。</li>
+</ol>
+<p>现有服务器上的 EnvironmentFile
+应继续留在服务器受保护路径，由服务器账号和 sudo
+权限控制；交接人通常不需要把它复制到个人电脑。交接时交付的是“配置项名称、用途、owner、所在环境、轮换方式和
+present/missing
+状态”，不是明文值。只有必须迁移到另一台主机时，才通过组织批准的加密密码库/点对点加密通道传递对应
+secret，并在迁移验收后轮换；测试和生产的 secret、数据与 SSH
+权限必须完全分开。</p>
+<h2 id="7-下午会议建议讲法2030-分钟">7. 下午会议建议讲法（20–30
+分钟）</h2>
+<ol type="1">
+<li><strong>产品目标，3 分钟</strong>：EnergyIQ
+解决的是“本期哪里有问题、为什么、下一步做什么”，不是单纯展示图表。</li>
+<li><strong>架构，8 分钟</strong>：沿着 Excel/Tuya → Fact/Snapshot →
+Resolver/Recipe → Overview，以及 Context → AI Analyst 讲一遍；强调
+DataFoundry 只承载 AI Runtime。</li>
+<li><strong>分支和服务器，4 分钟</strong>：说明
+<code>main</code>=生产代码线、<code>dev</code>=测试候选线、<code>codex/&lt;ticket&gt;</code>=个人开发；明确交接快照为
+<code>main@752e09ed</code>、<code>dev@a437c07f</code>，香港测试服务器仍是
+<code>e825ae7b</code>，Integration 不是服务器分支，且分支 SHA 不等于部署
+SHA。</li>
+<li><strong>代码，5 分钟</strong>：展示
+<code>apps/api/src/energy</code>、<code>apps/web/src/app/energyiq</code>、<code>packages/metadata</code>、<code>packages/data-gateway</code>、<code>packages/agent-runtime</code>
+五个入口。</li>
+<li><strong>任务，5 分钟</strong>：从 GitHub #1
+的地图进入对应子地图，再进入一个 <code>ready-for-agent</code>
+ticket；说明 Acceptance、Forbidden paths 和证据边界。</li>
+<li><strong>上手，5 分钟</strong>：让对方在自己的 clean Worktree
+完成安装、配置、启动、<code>/healthz</code>、<code>/ready</code>，再做一个小改动跑
+<code>npm run build</code> 和聚焦测试。</li>
+<li><strong>最后确认</strong>：对方能说清楚“一个页面数字从哪来”“一个 AI
+问题能访问什么”“改动后先跑什么测试”“哪些密钥不能进仓库”“测试和生产分别跟哪个分支”。</li>
+</ol>
+<h2 id="8-交接完成判据">8. 交接完成判据</h2>
+<ul class="task-list">
+<li><p><label><input type="checkbox"></input>对方拿到 reviewed head、GitHub
+仓库和当前 ticket 路径。</label></p></li>
+<li><p><label><input type="checkbox"></input>对方能说清楚
+<code>main</code>、<code>dev</code>、<code>codex/&lt;ticket&gt;</code>
+和 Integration Worktree 的边界；测试服务器只跟踪
+<code>dev</code>，生产只跟踪 <code>main</code>，并能核对两端实际部署
+SHA。</label></p></li>
+<li><p><label><input type="checkbox"></input>对方读完领域词汇表、当前共识、阶段技术选型和最终架构方案。</label></p></li>
+<li><p><label><input type="checkbox"></input>对方能在自己的 Worktree
+安装并启动 API/Web。</label></p></li>
+<li><p><label><input type="checkbox"></input><code>/healthz</code> 和
+<code>/ready</code> 均通过，能打开登录页和 EnergyIQ
+页面。</label></p></li>
+<li><p><label><input type="checkbox"></input>对方能定位一次从页面到
+API/Resolver/Fact 的调用链。</label></p></li>
+<li><p><label><input type="checkbox"></input>对方完成一个小调整，并跑过对应
+focused test、<code>npm run build</code> 或 ticket
+要求的测试。</label></p></li>
+<li><p><label><input type="checkbox"></input>本地凭据与共享测试凭据边界已确认；没有把原始
+<code>.env</code>、生产 Storage
+或真实外部密钥提交到仓库。</label></p></li>
+</ul>
+<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+document.querySelectorAll("pre.mermaid").forEach((node) => {
+  node.textContent = node.textContent ?? "";
+});
+mermaid.initialize({ startOnLoad: true, securityLevel: "strict" });
+</script>
+</body>
+</html>

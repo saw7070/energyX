@@ -1,0 +1,7 @@
+{
+  "name": "duckdb",
+  "private": true,
+  "type": "commonjs",
+  "main": "index.cjs",
+  "exports": "./index.cjs"
+}

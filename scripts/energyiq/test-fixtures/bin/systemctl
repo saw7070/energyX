@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+state_dir="${ENERGYIQ_BACKUP_TEST_STATE_DIR:?test state directory is required}"
+command_name="${1:?systemctl command is required}"
+shift
+
+case "$command_name" in
+  is-active)
+    [[ "${1:-}" == "--quiet" ]] && shift
+    [[ "$(<"$state_dir/api-state")" == "active" ]]
+    ;;
+  stop)
+    printf 'inactive\n' > "$state_dir/api-state"
+    stop_mode="${ENERGYIQ_BACKUP_TEST_STOP_MODE:-success}"
+    if [[ "$stop_mode" == "signal-parent" ]]; then
+      kill -s "${ENERGYIQ_BACKUP_TEST_SIGNAL:?test signal is required}" "$PPID"
+      exit 0
+    fi
+    [[ "$stop_mode" == "success" ]]
+    ;;
+  start)
+    count="$(<"$state_dir/start-count")"
+    printf '%s\n' "$(( count + 1 ))" > "$state_dir/start-count"
+    start_mode="${ENERGYIQ_BACKUP_TEST_START_MODE:-success}"
+    if [[ "$start_mode" == "fail" || ( "$start_mode" == "fail-once" && "$count" == "0" ) ]]; then
+      exit 1
+    fi
+    printf 'active\n' > "$state_dir/api-state"
+    ;;
+  restart)
+    count="$(<"$state_dir/restart-count")"
+    printf '%s\n' "$(( count + 1 ))" > "$state_dir/restart-count"
+    if [[ "${ENERGYIQ_BACKUP_TEST_RESTART_MODE:-success}" == "fail" ]]; then
+      exit 1
+    fi
+    printf 'active\n' > "$state_dir/api-state"
+    ;;
+  show)
+    shift
+    case "${1:-}" in
+      --property=User) printf '%s\n' "${ENERGYIQ_BACKUP_TEST_SERVICE_USER:?test service user is required}" ;;
+      --property=Group) printf '%s\n' "${ENERGYIQ_BACKUP_TEST_SERVICE_GROUP:?test service group is required}" ;;
+      *) printf 'unexpected systemctl show property: %s\n' "${1:-missing}" >&2; exit 2 ;;
+    esac
+    ;;
+  *)
+    printf 'unexpected systemctl command: %s\n' "$command_name" >&2
+    exit 2
+    ;;
+esac

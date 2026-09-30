@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily EnergyIQ Shared Storage backup after the Singapore Tuya sync window
+Documentation=https://github.com/Zion74/energyiq-datafoundry/issues/150
+
+[Timer]
+OnCalendar=*-*-* 02:15:00 Asia/Shanghai
+AccuracySec=1min
+Persistent=true
+RandomizedDelaySec=0
+Unit=energyiq-shared-storage-backup.service
+
+[Install]
+WantedBy=timers.target

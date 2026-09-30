@@ -1,0 +1,15 @@
+{
+  "status": "bound",
+  "sectionKey": "portfolio-consumption",
+  "blockKey": "portfolio-consumption-summary",
+  "capabilityRevisionId": "overview.consumption@1",
+  "windowId": "current-overview",
+  "evidenceInputs": [
+    "scope_summary_v1"
+  ],
+  "readiness": "partial",
+  "classification": "R",
+  "limitations": [
+    "Official aggregation mapping is not present in the sanitized kit."
+  ]
+}

@@ -1,0 +1,48 @@
+.map, .legend { --zone-1:#2a78d6; --zone-2:#eb6834; --zone-3:#1baf7a; --zone-4:#eda100; --zone-5:#e87ba4; --zone-6:#4a3aa7; }
+.map { display:block; width:100%; height:auto; font-family:inherit; }
+.zone { fill-opacity:.07; stroke-opacity:.55; stroke-width:1.5; }
+.zoneLabel { font-weight:700; fill:#1f2d25; }
+.zoneSub { font-weight:500; fill:#58645d; }
+.room { fill:#ffffff; stroke-opacity:.45; stroke-width:1.2; }
+.roomLabel { fill:#24352b; font-weight:500; }
+.subgroup { fill-opacity:.12; stroke-dasharray:5 4; stroke-width:1.2; }
+.subgroupLabel { fill:#24352b; font-weight:600; }
+.entrance { fill:#1f2d25; }
+.entranceLabel { fill:#3c4a42; font-weight:600; }
+.caption { fill:#8a968e; }
+.pin { stroke:#ffffff; stroke-width:2; }
+.pinIcon { fill:#ffffff; }
+.pinLabel { fill:#24352b; font-weight:600; paint-order:stroke; stroke:#ffffff; stroke-width:3px; stroke-linejoin:round; }
+.pinLink { cursor:pointer; outline:none; }
+.faded { opacity:.32; transition:opacity 150ms; }
+.areaLink { cursor:pointer; outline:none; }
+.areaLink:hover .zone, .areaLink:focus-visible .zone { fill-opacity:.14; }
+.areaLink:focus-visible .zone, .areaLink:focus-visible .room { stroke-width:3; }
+.zoneActive { stroke-width:3 !important; stroke-opacity:.9 !important; }
+.pinFocus { fill:none; stroke:#1f2d25; stroke-width:2.5; stroke-dasharray:4 3; }
+.pinLink:hover .pin, .pinLink:focus-visible .pin { stroke:#1f2d25; stroke-width:3; }
+.pinLink:hover .pinLabel, .pinLink:focus-visible .pinLabel { text-decoration:underline; }
+
+.legend { display:grid; gap:10px; }
+.legend li { display:flex; gap:12px; align-items:flex-start; padding:12px 14px; border:1px solid #e1e7e1; border-radius:12px; background:#f8faf7; }
+.swatch { width:12px; height:12px; border-radius:4px; margin-top:4px; flex-shrink:0; }
+.legend strong { font-size:14px; font-weight:650; color:#1f2d25; }
+.legend strong span { font-weight:500; color:#58645d; }
+.legend p { margin-top:6px; font-size:13px; color:#3c4a42; }
+.chips { display:flex; flex-wrap:wrap; gap:6px; }
+.chips span { padding:3px 9px; border:1px solid #dce3de; border-radius:999px; background:white; font-size:12px; color:#3c4a42; }
+
+:global(:where(html[data-energyiq-theme="dark"])) .map, :global(:where(html[data-energyiq-theme="dark"])) .legend { --zone-1:#3987e5; --zone-2:#d95926; --zone-3:#199e70; --zone-4:#c98500; --zone-5:#d55181; --zone-6:#9085e9; }
+:global(:where(html[data-energyiq-theme="dark"])) .zone { fill-opacity:.12; }
+:global(:where(html[data-energyiq-theme="dark"])) .zoneLabel, :global(:where(html[data-energyiq-theme="dark"])) .roomLabel, :global(:where(html[data-energyiq-theme="dark"])) .subgroupLabel { fill:#e6ede9; }
+:global(:where(html[data-energyiq-theme="dark"])) .zoneSub, :global(:where(html[data-energyiq-theme="dark"])) .entranceLabel { fill:#9aa8a0; }
+:global(:where(html[data-energyiq-theme="dark"])) .room { fill:#1d2022; }
+:global(:where(html[data-energyiq-theme="dark"])) .entrance { fill:#e6ede9; }
+:global(:where(html[data-energyiq-theme="dark"])) .pin { stroke:#1d2022; }
+:global(:where(html[data-energyiq-theme="dark"])) .pinFocus { stroke:#e6ede9; }
+:global(:where(html[data-energyiq-theme="dark"])) .pinLabel { fill:#e6ede9; stroke:#161718; }
+:global(:where(html[data-energyiq-theme="dark"])) .pinLink:hover .pin, :global(:where(html[data-energyiq-theme="dark"])) .pinLink:focus-visible .pin { stroke:#e6ede9; }
+:global(:where(html[data-energyiq-theme="dark"])) .legend li { background:#1d2022; border-color:#32363b; }
+:global(:where(html[data-energyiq-theme="dark"])) .legend strong { color:#e6ede9; }
+:global(:where(html[data-energyiq-theme="dark"])) .legend strong span, :global(:where(html[data-energyiq-theme="dark"])) .legend p { color:#9aa8a0; }
+:global(:where(html[data-energyiq-theme="dark"])) .chips span { background:#191919; border-color:#32363b; color:#b9c5be; }

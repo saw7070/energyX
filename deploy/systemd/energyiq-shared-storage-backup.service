@@ -1,0 +1,36 @@
+[Unit]
+Description=EnergyIQ complete Shared Storage consistency backup
+Documentation=https://github.com/Zion74/energyiq-datafoundry/issues/150
+After=energyiq-datafoundry-api.service
+AssertPathIsDirectory=/opt/energyiq-datafoundry/shared/storage
+RequiresMountsFor=/opt/energyiq-datafoundry/shared/storage /var/backups/energyiq
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/local/libexec/energyiq/backup-shared-storage.sh create --storage-root /opt/energyiq-datafoundry/shared/storage --backup-root /var/backups/energyiq/managed-daily --app-root /opt/energyiq-datafoundry --api-service energyiq-datafoundry-api.service --node-bin /opt/energyiq-datafoundry/runtime/node22/bin/node --db-preflight /usr/local/libexec/energyiq/shared-storage-backup-preflight.mjs --health-url http://127.0.0.1:8787/ready --keep-count 7 --reserve-bytes 1073741824
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+CPUWeight=10
+IOWeight=10
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadOnlyPaths=/opt/energyiq-datafoundry
+ReadWritePaths=/var/backups/energyiq/managed-daily /run/lock
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictRealtime=true
+SystemCallArchitectures=native
+TimeoutStartSec=30min
+
+[Install]
+WantedBy=multi-user.target

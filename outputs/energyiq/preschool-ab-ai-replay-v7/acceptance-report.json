@@ -1,0 +1,74 @@
+{
+  "contract": "preschool-day30-b-ai-replay@1",
+  "status": "blocked-no-useful-findings",
+  "environment": {
+    "api": "isolated-8788",
+    "sharedApiTouched": false,
+    "sharedWebTouched": false,
+    "providerProfile": "workspace-default",
+    "providerModel": "deepseek-v4-flash",
+    "modelProfileRevision": 7,
+    "fallbackPolicy": "disabled",
+    "reasoningModelConfigured": false
+  },
+  "identity": {
+    "projectId": "preschool-demo",
+    "scopeId": "preschool-project",
+    "dataSnapshotId": "energy-snapshot-b22d0eabc6be53e809a168d2",
+    "projectReleaseId": "preschool-demo-template-v1",
+    "analysisPeriodFrom": "2026-06-02T16:00:00.000Z",
+    "analysisPeriodTo": "2026-06-30T16:00:00.000Z",
+    "analysisPackId": "preschool-analysis-pack",
+    "analysisPackRevision": "v1",
+    "outputContractRevision": "v13",
+    "validatorRevision": "preschool-ai-two-stage-fact-boundary-v3"
+  },
+  "artifact": {
+    "id": "overview-ai-artifact-6f0618bece5311e1fa4db20b",
+    "attemptCount": 1,
+    "technicalStatus": "available",
+    "productStatus": "unavailable",
+    "findingCount": 0,
+    "durationMs": 134543,
+    "investigator": {
+      "runId": "overview-ai-investigator-939fc3fd-1c03-4322-9c3c-302c5ed34856",
+      "promptRevision": "preschool-investigator-v7",
+      "startedAt": "2026-08-09T22:25:17.491Z",
+      "finishedAt": "2026-08-09T22:27:01.113Z",
+      "toolCallCount": 13,
+      "successfulSqlEvidenceCount": 10
+    },
+    "editor": {
+      "runId": "overview-ai-editor-a005ae21-33b0-4d91-bc18-049fa8252d10",
+      "promptRevision": "preschool-insight-editor-v2",
+      "startedAt": "2026-08-09T22:27:01.220Z",
+      "finishedAt": "2026-08-09T22:27:11.510Z"
+    }
+  },
+  "runtimeDecision": {
+    "editorSelectedCandidateCount": 2,
+    "runtimeAcceptedFindingCount": 0,
+    "reason": "Both selected candidates cited wrong successful-SQL indexes and also included derived or over-broad claims. Runtime correctly withheld them.",
+    "indexEvidence": [
+      {
+        "candidateId": "candidate-1",
+        "submittedIndexes": [5, 7, 8],
+        "factIndexes": [6, 8, 9]
+      },
+      {
+        "candidateId": "candidate-2",
+        "submittedIndexes": [9],
+        "factIndexes": [10]
+      }
+    ],
+    "nextMinimumFix": "Return a run-local evidence_index with each successful Overview SQL result and require the Agent to copy it instead of counting tool calls. Preserve the Runtime validator and do not retry this Artifact."
+  },
+  "savedA": {
+    "id": "saved-analysis-0ab0e542-01e5-4a3b-9f02-ece8f6276532",
+    "dataSnapshotId": "energy-snapshot-52ca9611e48b0d71c2efe7b7",
+    "responseSha256BeforeAndAfter": "b532a5977f78b1b7e1730ff610eb5982ec52d714763d21e9c92f7eaf412e2f69",
+    "byteStable": true,
+    "containsSnapshotB": false
+  },
+  "acceptanceBoundary": "This run proves the real Day30 B Snapshot can execute the current DeepSeek two-stage chain without re-materialization and without a 300-second timeout. It does not pass useful-AI or Chrome acceptance because no Finding survived Runtime validation."
+}

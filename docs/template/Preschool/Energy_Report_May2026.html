@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Energy Analysis Report — May 2026</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:#f0f2f5; color:#1a1a2e; line-height:1.6; }
+.header { background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%); color:#fff; padding:40px; }
+.header h1 { font-size:2.1rem; font-weight:700; margin-bottom:6px; }
+.header p { font-size:1rem; opacity:.85; }
+.nav { background:#0f3460; padding:0 24px; position:sticky; top:0; z-index:30; box-shadow:0 2px 8px rgba(0,0,0,.15); overflow-x:auto; }
+.nav-inner { max-width:1240px; margin:0 auto; display:flex; gap:2px; white-space:nowrap; }
+.nav a { color:#cbd6e8; text-decoration:none; padding:14px 16px; font-size:.86rem; font-weight:600; border-bottom:3px solid transparent; transition:all .15s; }
+.nav a:hover,.nav a.active { color:#fff; border-bottom-color:#4a9fe0; }
+.container { max-width:1240px; margin:0 auto; padding:32px 24px; }
+.section { margin-bottom:52px; scroll-margin-top:60px; }
+.section-title { font-size:1.5rem; font-weight:700; margin-bottom:6px; display:flex; align-items:center; gap:10px; }
+.section-title .tag { background:#0f3460; color:#fff; font-size:.7rem; padding:4px 10px; border-radius:6px; letter-spacing:1px; }
+.section-sub { color:#666; margin-bottom:22px; font-size:.92rem; max-width:900px; }
+.card-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:18px; margin-bottom:26px; }
+.s1-band { display:flex; background:linear-gradient(135deg,#1a1a2e 0%,#16213e 55%,#0f3460 100%); border-radius:10px; overflow:hidden; }
+.s1-band .bi { flex:1; padding:18px 24px; color:#fff; border-right:1px solid rgba(255,255,255,.13); }
+.s1-band .bi:last-child { border-right:none; }
+.s1-band .bi .n { font-size:1.95rem; font-weight:700; line-height:1.1; }
+.s1-band .bi .l { font-size:.76rem; opacity:.82; text-transform:uppercase; letter-spacing:.6px; margin-top:2px; }
+@media(max-width:680px){ .s1-band{ flex-direction:column; } .s1-band .bi{ border-right:none; border-bottom:1px solid rgba(255,255,255,.13);} }
+.card { background:#fff; border-radius:12px; padding:22px; box-shadow:0 2px 12px rgba(0,0,0,.06); }
+.card .label { font-size:.76rem; text-transform:uppercase; letter-spacing:1px; color:#999; margin-bottom:4px; }
+.card .value { font-size:1.9rem; font-weight:700; }
+.card .sub { font-size:.84rem; color:#777; margin-top:2px; }
+.card.kpi-blue .value{color:#2980b9;} .card.kpi-green .value{color:#27ae60;} .card.kpi-red .value{color:#e74c3c;}
+.card.kpi-purple .value{color:#8e44ad;} .card.kpi-orange .value{color:#e67e22;}
+.panel { background:#fff; border-radius:12px; padding:26px; box-shadow:0 2px 12px rgba(0,0,0,.06); margin-bottom:22px; }
+.panel h3 { font-size:1.12rem; margin-bottom:4px; }
+.panel .ph-sub { color:#777; font-size:.85rem; margin-bottom:18px; }
+.split { display:grid; grid-template-columns:1fr 1fr; gap:26px; align-items:center; }
+@media(max-width:880px){ .split{ grid-template-columns:1fr; } }
+.chart-box { position:relative; height:340px; }
+.chart-box.tall { height:420px; }
+.chart-box.xtall { height:520px; }
+table { width:100%; border-collapse:collapse; }
+th,td { padding:9px 12px; text-align:left; border-bottom:1px solid #eee; font-size:.86rem; }
+th { background:#f8f9fa; font-weight:600; color:#555; text-transform:uppercase; font-size:.72rem; letter-spacing:.5px; }
+td.num,th.num { text-align:right; }
+tr:hover td { background:#fafbfc; }
+.badge { display:inline-block; padding:2px 9px; border-radius:11px; font-size:.74rem; font-weight:600; }
+.badge.sen{background:#dbeafe;color:#1e40af;} .badge.act{background:#d1fae5;color:#065f46;} .badge.pre{background:#fde8e8;color:#c0392b;}
+.flag { color:#c0392b; font-weight:700; }
+.bar { height:7px; border-radius:4px; background:#ececec; position:relative; min-width:50px; }
+.bar i { position:absolute; left:0; top:0; height:100%; border-radius:4px; }
+.assumption { background:#fff8e6; border-left:4px solid #e6a817; border-radius:6px; padding:11px 15px; margin-bottom:20px; font-size:.85rem; color:#6b5a1e; }
+.key-rec { background:linear-gradient(135deg,#fff5f5 0%,#fffaf0 100%); border:1px solid #f3d4cf; border-left:5px solid #e74c3c; border-radius:10px; padding:18px 22px; margin-bottom:26px; box-shadow:0 2px 12px rgba(231,76,60,.08); }
+.key-rec .kr-head { display:flex; align-items:center; gap:9px; font-size:.78rem; font-weight:700; letter-spacing:1.2px; color:#c0392b; text-transform:uppercase; margin-bottom:8px; }
+.key-rec .kr-head .ico { background:#e74c3c; color:#fff; width:22px; height:22px; border-radius:6px; display:inline-flex; align-items:center; justify-content:center; font-size:.9rem; }
+.key-rec .kr-body { font-size:.95rem; color:#333; line-height:1.55; }
+.key-rec .kr-body b { color:#1a1a2e; }
+.key-rec .pill { display:inline-block; background:#e74c3c; color:#fff; font-weight:700; font-size:.82rem; padding:1px 9px; border-radius:11px; margin:0 2px; }
+.key-rec ul { margin:10px 0 0 4px; list-style:none; }
+.key-rec ul li { padding:3px 0 3px 20px; position:relative; font-size:.88rem; color:#444; }
+.key-rec ul li:before { content:'▸'; position:absolute; left:2px; color:#e74c3c; }
+.key-rec.kr-focus { background:linear-gradient(135deg,#eef6ff 0%,#eefbf6 100%); border-color:#cfe3f3; border-left-color:#0f3460; box-shadow:0 2px 12px rgba(15,52,96,.08); }
+.key-rec.kr-focus .kr-head { color:#0f3460; }
+.key-rec.kr-focus .kr-head .ico { background:#0f3460; }
+.key-rec.kr-focus ul li:before { color:#0f3460; }
+.key-rec.kr-focus .pill { background:#0f3460; }
+.kf-item { display:flex; gap:14px; align-items:flex-start; padding:13px 16px; border-radius:9px; margin-bottom:10px; background:#f8fafc; border:1px solid #eef2f7; border-left:4px solid #cbd5e1; }
+.kf-item:last-child { margin-bottom:0; }
+.kf-item .kf-sec { font-weight:800; font-size:.78rem; color:#fff; background:#64748b; border-radius:6px; padding:4px 9px; min-width:36px; text-align:center; flex-shrink:0; }
+.kf-item .kf-head { font-weight:700; font-size:.96rem; margin-bottom:2px; }
+.kf-item .kf-txt { font-size:.9rem; color:#444; line-height:1.5; }
+.kf-item .kf-txt b { color:#1a1a2e; }
+.kf-item.kf-2 { border-left-color:#8e44ad; } .kf-item.kf-2 .kf-sec { background:#8e44ad; }
+.kf-item.kf-3 { border-left-color:#e74c3c; } .kf-item.kf-3 .kf-sec { background:#e74c3c; }
+.kf-item.kf-4 { border-left-color:#2980b9; } .kf-item.kf-4 .kf-sec { background:#2980b9; }
+.kf-item.kf-5 { border-left-color:#e67e22; } .kf-item.kf-5 .kf-sec { background:#e67e22; }
+.seg { display:inline-flex; border:1px solid #cbd5e1; border-radius:8px; overflow:hidden; }
+.seg button { border:none; background:#fff; color:#555; font-size:.82rem; font-weight:600; padding:7px 14px; cursor:pointer; border-right:1px solid #e2e8f0; }
+.seg button:last-child { border-right:none; }
+.seg button:hover { background:#f1f5f9; }
+.seg button.active { background:#0f3460; color:#fff; }
+.fc-status { border-radius:12px; padding:18px 24px; margin-bottom:22px; display:flex; align-items:center; gap:18px; box-shadow:0 2px 12px rgba(0,0,0,.06); }
+.fc-status .badge-lg { font-size:1.5rem; font-weight:800; padding:8px 18px; border-radius:10px; color:#fff; white-space:nowrap; }
+.fc-status .msg { font-size:.96rem; line-height:1.5; }
+.fc-status.green { background:linear-gradient(135deg,#eafaf0,#f4fff8); border:1px solid #b9e6c9; }
+.fc-status.green .badge-lg { background:#27ae60; }
+.fc-status.orange { background:linear-gradient(135deg,#fff6ea,#fffaf2); border:1px solid #f3d9b0; }
+.fc-status.orange .badge-lg { background:#e67e22; }
+.fc-status.red { background:linear-gradient(135deg,#fdecea,#fff5f4); border:1px solid #f3c0ba; }
+.fc-status.red .badge-lg { background:#e74c3c; }
+.sb-row { cursor:pointer; } .sb-row:hover td { background:#f8f9fb; }
+.sb-row.open .arrow { transform:rotate(90deg); color:#0f3460; }
+.sb-inner { max-height:0; overflow:hidden; transition:max-height .3s ease; background:#fafbfc; }
+.sb-inner table { background:transparent; }
+.sb-inner .ip { padding:14px 18px 16px; }
+.sb-inner th { background:#eef1f5; }
+.note { background:#eef4fb; border-left:4px solid #2980b9; border-radius:6px; padding:11px 15px; margin:14px 0; font-size:.85rem; color:#355; }
+.legend-row { display:flex; flex-wrap:wrap; gap:14px; margin-top:10px; font-size:.8rem; color:#555; }
+.legend-row span { display:inline-flex; align-items:center; gap:6px; }
+.dot { width:11px; height:11px; border-radius:3px; display:inline-block; }
+/* benchmark table */
+.bench-table thead th { background:#1a1a2e; color:#fff; padding:14px 16px; font-size:.74rem; }
+.type-row { cursor:pointer; } .type-row:hover td { background:#f8f9fb; }
+.type-name { font-weight:700; display:flex; align-items:center; gap:10px; }
+.type-dot { width:13px; height:13px; border-radius:50%; }
+.rank-badge { background:#0f3460; color:#fff; font-size:.7rem; font-weight:700; width:21px; height:21px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; }
+.bench-val { text-align:center; font-size:1.1rem; font-weight:700; } .bench-val .u{ font-size:.68rem; color:#aaa; font-weight:400; display:block; }
+.b50{color:#2980b9;} .b75{color:#e67e22;}
+.outlet-chip { background:#fde8e8; color:#c0392b; font-weight:700; font-size:.8rem; padding:3px 10px; border-radius:13px; border:1px solid #f5c6c6; margin:2px; display:inline-block; }
+.outlet-chip .ov{ font-weight:400; opacity:.7; font-size:.72rem; }
+.arrow { display:inline-block; transition:transform .25s; color:#888; } .type-row.open .arrow{ transform:rotate(90deg); color:#0f3460; }
+.detail-inner { max-height:0; overflow:hidden; transition:max-height .35s ease; background:#fafbfc; }
+.detail-pad { padding:24px 28px; }
+.bench-detail-grid { display:grid; grid-template-columns:1.3fr 1fr; gap:24px; } @media(max-width:880px){ .bench-detail-grid{grid-template-columns:1fr;} }
+.footer { text-align:center; padding:24px; color:#999; font-size:.82rem; }
+</style>
+</head>
+<body>
+<div class="header"><div style="max-width:1240px;margin:0 auto;">
+  <h1>Energy Analysis Report</h1>
+  <p>31 Care Centres · May 2026 · Consumption, Benchmarking, Standby Wastage, Operating Profile &amp; June Forecast</p>
+</div></div>
+<div class="nav"><div class="nav-inner">
+  <a href="#s1" class="active">1 · Overview</a>
+  <a href="#s2">2 · Benchmarks</a>
+  <a href="#s3">3 · Standby Wastage</a>
+  <a href="#s4">4 · Operating Hours</a>
+  <a href="#s5">5 · June Forecast</a>
+</div></div>
+
+<div class="container">
+
+<!-- SECTION 1 -->
+<div class="section" id="s1">
+  <div class="section-title"><span class="tag">SECTION 1</span> Overall Consumption Summary</div>
+  <p class="section-sub">Total portfolio energy and cost for May 2026 across all care centres, with the outlet breakdown by centre type.</p>
+  <div class="panel">
+    <div class="s1-band" id="s1Band"></div>
+    <h3 style="margin-top:20px;">Energy &amp; Cost by Centre Type</h3><div class="ph-sub">May 2026 consumption and estimated cost</div>
+    <table id="typeTable"><thead><tr><th>Type</th><th class="num">Outlets</th><th class="num">Energy (kWh)</th><th class="num">Cost (S$)</th><th class="num">Share</th></tr></thead><tbody></tbody></table>
+    <div class="assumption" id="tariffNote"></div>
+  </div>
+
+  <div class="panel">
+    <h3>Key Findings — Sections 2–5</h3>
+    <div class="ph-sub">Auto-summarised highlights from the detailed analysis below.</div>
+    <div id="keyFindings"></div>
+  </div>
+</div>
+
+<!-- SECTION 2 -->
+<div class="section" id="s2">
+  <div class="section-title"><span class="tag">SECTION 2</span> Benchmark Analysis</div>
+  <p class="section-sub">EUI (energy per m²) and per-pax (energy per occupant) benchmarks by centre type, ranked by number of outlets. Click any benchmark row to expand its bell-curve distribution.</p>
+
+  <div class="key-rec" id="keyRec"></div>
+
+  <h3 style="margin:6px 0 10px;font-size:1.05rem;color:#0f3460;">2.1 — Efficiency Quadrant: EUI vs Per-Pax</h3>
+  <div class="panel">
+    <h3>Centre Efficiency Matrix</h3>
+    <div class="ph-sub">Each centre plotted by EUI (energy per m²) and per-pax (energy per person). Cross-hairs sit at the 75th percentile of each metric across all 31 centres. The bottom-left quadrant (both metrics above their 75% benchmark) holds the priority outliers.</div>
+    <div class="chart-box xtall"><canvas id="quadChart"></canvas></div>
+    <div class="legend-row" style="margin-top:14px;">
+      <span style="font-weight:700;color:#555;">Centre type (marker):</span>
+      <span><span style="color:#2980b9;font-size:1.05rem;line-height:1;">●</span> Senior Care Center</span>
+      <span><span style="color:#27ae60;font-size:1.05rem;line-height:1;">▲</span> Active Aging Center</span>
+      <span><span style="color:#e74c3c;font-size:1.05rem;line-height:1;">◆</span> Preschool</span>
+    </div>
+    <div class="legend-row" style="margin-top:8px;">
+      <span style="font-weight:700;color:#555;">Quadrant (background):</span>
+      <span><span class="dot" style="background:rgba(231,76,60,.55)"></span><b>Priority</b> — both above P75 (worst)</span>
+      <span><span class="dot" style="background:rgba(230,126,34,.5)"></span>High EUI only</span>
+      <span><span class="dot" style="background:rgba(241,196,15,.55)"></span>High per-pax only</span>
+      <span><span class="dot" style="background:rgba(39,174,96,.45)"></span>Efficient — both below P75 (best)</span>
+    </div>
+  </div>
+
+  <h3 style="margin:24px 0 10px;font-size:1.05rem;color:#0f3460;">2.2 — EUI Benchmark <span style="font-weight:400;color:#888;font-size:.85rem;">(kWh/m²/yr)</span></h3>
+  <table class="bench-table" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 14px rgba(0,0,0,.07);margin-bottom:30px;">
+    <thead><tr><th>Property Type</th><th class="num">Benchmark 50%</th><th class="num">Benchmark 75%</th><th>Outlets Above 75%</th><th style="text-align:center;">Detail</th></tr></thead>
+    <tbody id="body-eui"></tbody>
+  </table>
+  <h3 style="margin:6px 0 10px;font-size:1.05rem;color:#0f3460;">2.3 — Per-Pax Energy Benchmark <span style="font-weight:400;color:#888;font-size:.85rem;">(kWh/person/month · May 2026 · pax = Teachers + Customers)</span></h3>
+  <table class="bench-table" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 14px rgba(0,0,0,.07);margin-bottom:10px;">
+    <thead><tr><th>Property Type</th><th class="num">Benchmark 50%</th><th class="num">Benchmark 75%</th><th>Outlets Above 75%</th><th style="text-align:center;">Detail</th></tr></thead>
+    <tbody id="body-pax"></tbody>
+  </table>
+</div>
+
+<!-- SECTION 3 -->
+<div class="section" id="s3">
+  <div class="section-title"><span class="tag">SECTION 3</span> Standby Energy Wastage — Post Operating Hours</div>
+  <p class="section-sub">Energy consumed while centres are closed (weekday off-hours 1900–0700 plus all weekend/holiday hours). Operating window is 0700–1900 on weekdays for every centre.</p>
+
+  <div class="key-rec kr-focus" id="s3KeyFocus"></div>
+
+  <h3 style="margin:6px 0 10px;font-size:1.05rem;color:#0f3460;">3.1 — Standby Energy by Appliance Type</h3>
+  <div class="card-grid" id="standbyCards"></div>
+  <div class="split">
+    <div class="panel"><h3>Standby Energy by Appliance</h3><div class="ph-sub">Share of post-operation consumption across all centres, ranked by appliance</div>
+      <div class="chart-box"><canvas id="standbyPie"></canvas></div></div>
+    <div class="panel"><h3>Appliance Ranking</h3><div class="ph-sub">Highest standby consumer first · cost at S$<span id="sbTariff"></span>/kWh</div>
+      <table id="applianceTable"><thead><tr><th>#</th><th>Appliance</th><th class="num">Standby (kWh)</th><th class="num">Cost (S$)</th><th class="num">Share</th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+
+  <h3 style="margin:26px 0 10px;font-size:1.05rem;color:#0f3460;">3.2 — Non-Operating Hour Spike Analysis (all sites)</h3>
+  <div class="note" id="sbMethod" style="margin-bottom:18px;"></div>
+
+  <div class="panel">
+    <h3>Spike Summary by Site</h3>
+    <div class="ph-sub">Each site's per-hour-slot baseline is its own May average for that exact hour (e.g. the average 0200–0300 across the month). A <b>spike</b> = a non-operating hour exceeding <b>150%</b> of that slot average (&gt;50% above). <b>Click a site row</b> to expand its individual spike hours. Sites with no spike are omitted.</div>
+    <table id="sbSummary"><thead><tr>
+      <th>Site</th><th>Type</th><th class="num">Spikes</th><th class="num">Worst variance</th><th>Worst hour</th><th>Main cause</th><th style="text-align:center;width:54px;">Detail</th>
+    </tr></thead><tbody></tbody></table>
+    <div class="note" id="standbyNote" style="margin-top:16px;"></div>
+  </div>
+
+  <h3 style="margin:26px 0 10px;font-size:1.05rem;color:#0f3460;">3.3 — SOP Compliance Score</h3>
+  <div class="card-grid" id="sopCards"></div>
+  <div class="panel">
+    <h3>Standby SOP Compliance by Site</h3>
+    <div class="ph-sub">Every site starts at <b>100</b>. Each non-operating-hour spike (&gt;50% above its slot average, from 3.2) deducts <b>1 point</b>. All 30 sites are listed with the <b>lowest compliance on top</b>; breaching sites are highlighted.</div>
+    <div style="max-height:560px;overflow:auto;"><table id="sopTable"><thead><tr>
+      <th>Rank</th><th>Site</th><th>Type</th><th class="num">Spikes (&gt;50%)</th><th class="num">SOP Score</th><th>Compliance</th>
+    </tr></thead><tbody></tbody></table></div>
+  </div>
+</div>
+
+<!-- SECTION 4 -->
+<div class="section" id="s4">
+  <div class="section-title"><span class="tag">SECTION 4</span> Operating Hour Analysis</div>
+  <p class="section-sub">Energy consumed during operating hours (0700–1900, weekdays) — when centres are open. Same format and logic as Section 3, applied to the active-hours dataset.</p>
+
+  <div class="key-rec kr-focus" id="s4KeyFocus"></div>
+
+  <h3 style="margin:6px 0 10px;font-size:1.05rem;color:#0f3460;">4.1 — Operating Energy by Appliance Type</h3>
+  <div class="card-grid" id="opCards"></div>
+  <div class="split">
+    <div class="panel"><h3>Operating Energy by Appliance</h3><div class="ph-sub">Share of operating-hour consumption across all centres, ranked by appliance</div>
+      <div class="chart-box"><canvas id="opPie"></canvas></div></div>
+    <div class="panel"><h3>Appliance Ranking</h3><div class="ph-sub">Highest operating consumer first · cost at S$<span id="opTariff"></span>/kWh</div>
+      <table id="opApplianceTable"><thead><tr><th>#</th><th>Appliance</th><th class="num">Operating (kWh)</th><th class="num">Cost (S$)</th><th class="num">Share</th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+
+  <h3 style="margin:26px 0 10px;font-size:1.05rem;color:#0f3460;">4.2 — Operating Hour Spike Analysis (all sites)</h3>
+  <div class="note" id="opMethod" style="margin-bottom:18px;"></div>
+  <div class="panel">
+    <h3>Spike Summary by Site</h3>
+    <div class="ph-sub">Each site's per-hour-slot baseline is its own May average for that exact operating hour (e.g. the average 1400–1500 across weekdays). A <b>spike</b> = an operating hour exceeding <b>150%</b> of that slot average (&gt;50% above). <b>Click a site row</b> to expand its individual spike hours. Sites with no spike are omitted.</div>
+    <table id="opSummary"><thead><tr>
+      <th>Site</th><th>Type</th><th class="num">Spikes</th><th class="num">Worst variance</th><th>Worst hour</th><th>Main cause</th><th style="text-align:center;width:54px;">Detail</th>
+    </tr></thead><tbody></tbody></table>
+    <div class="note" id="opNote" style="margin-top:16px;"></div>
+  </div>
+</div>
+
+<!-- SECTION 5 -->
+<div class="section" id="s5">
+  <div class="section-title"><span class="tag">SECTION 5</span> June 2026 Forecast</div>
+  <p class="section-sub">Full-month estimate from May's per-site hourly profiles, tracked live against simulated actuals as of <b id="fcAsOf">7 June 2026</b>. The dotted line is the May-based estimate; the solid line is actual consumption to the current hour.</p>
+
+  <div class="fc-status" id="fcStatus"></div>
+  <div class="card-grid" id="fcCards"></div>
+
+  <div class="panel">
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px;margin-bottom:8px;">
+      <div><h3>June Consumption — Estimate vs Actual (to date)</h3>
+        <div class="ph-sub"><span style="border-bottom:2px dashed #94a3b8;">dotted</span> = May-based estimate, <span style="border-bottom:2px solid #0f3460;">solid</span> = simulated actual to now</div></div>
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+        <div class="seg" id="fcGran"><button data-g="daily" class="active">Daily</button><button data-g="weekly">Weekly</button><button data-g="monthly">Monthly</button></div>
+        <div><label for="fcSelect" style="font-size:.82rem;color:#666;font-weight:600;margin-right:6px;">View:</label>
+          <select id="fcSelect" style="padding:7px 10px;border:1px solid #cbd5e1;border-radius:7px;font-size:.85rem;background:#fff;"></select></div>
+      </div>
+    </div>
+    <div class="chart-box xtall"><canvas id="forecastChart"></canvas></div>
+  </div>
+</div>
+
+</div>
+<div class="footer">Generated from Preschool_Database_Template_0706 1500.xlsx — Report Date: June 7, 2026</div>
+
+<script>
+const A = {"tariff": 0.2727, "days_in_month": 31, "month": "May 2026", "summary": {"total_centers": 30, "type_counts": {"Senior Care Center": 14, "Active Aging Center": 8, "Preschool": 8}, "total_kwh": 24921.8, "total_cost": 6796.17}, "circuits": ["Aircon 1", "Aircon 2", "Heater", "Kitchen Lighting", "Living Room Lighting", "Other Lighting3", "Kitchen Plug Load", "Living Area Plug Load", "Plug Load3"], "appliances": ["Aircon", "Heater", "Lighting", "Plugload"], "bench": [{"preschool": "A", "type": "Senior Care Center", "annual_eui": 13.62, "pax": 58, "per_pax": 174.43}, {"preschool": "B", "type": "Active Aging Center", "annual_eui": 6.43, "pax": 60, "per_pax": 165.97}, {"preschool": "C", "type": "Preschool", "annual_eui": 13.93, "pax": 47, "per_pax": 210.41}, {"preschool": "D", "type": "Senior Care Center", "annual_eui": 6.05, "pax": 48, "per_pax": 206.64}, {"preschool": "E", "type": "Active Aging Center", "annual_eui": 6.44, "pax": 54, "per_pax": 193.44}, {"preschool": "F", "type": "Active Aging Center", "annual_eui": 6.5, "pax": 34, "per_pax": 287.51}, {"preschool": "G", "type": "Active Aging Center", "annual_eui": 19.39, "pax": 27, "per_pax": 362.62}, {"preschool": "H", "type": "Preschool", "annual_eui": 9.13, "pax": 27, "per_pax": 368.03}, {"preschool": "I", "type": "Senior Care Center", "annual_eui": 5.24, "pax": 39, "per_pax": 255.82}, {"preschool": "J", "type": "Senior Care Center", "annual_eui": 10.63, "pax": 37, "per_pax": 267.1}, {"preschool": "K", "type": "Senior Care Center", "annual_eui": 8.07, "pax": 45, "per_pax": 220.61}, {"preschool": "L", "type": "Preschool", "annual_eui": 5.73, "pax": 39, "per_pax": 265.54}, {"preschool": "M", "type": "Active Aging Center", "annual_eui": 14.28, "pax": 37, "per_pax": 263.57}, {"preschool": "N", "type": "Senior Care Center", "annual_eui": 9.58, "pax": 53, "per_pax": 196.83}, {"preschool": "O", "type": "Active Aging Center", "annual_eui": 5.4, "pax": 47, "per_pax": 209.05}, {"preschool": "P", "type": "Preschool", "annual_eui": 8.87, "pax": 52, "per_pax": 193.11}, {"preschool": "Q", "type": "Senior Care Center", "annual_eui": 7.95, "pax": 40, "per_pax": 249.33}, {"preschool": "R", "type": "Senior Care Center", "annual_eui": 14.51, "pax": 45, "per_pax": 220.87}, {"preschool": "S", "type": "Preschool", "annual_eui": 6.59, "pax": 43, "per_pax": 232.87}, {"preschool": "T", "type": "Senior Care Center", "annual_eui": 5.78, "pax": 56, "per_pax": 178.36}, {"preschool": "U", "type": "Senior Care Center", "annual_eui": 6.4, "pax": 43, "per_pax": 234.14}, {"preschool": "V", "type": "Senior Care Center", "annual_eui": 5.94, "pax": 44, "per_pax": 223.6}, {"preschool": "W", "type": "Active Aging Center", "annual_eui": 17.69, "pax": 49, "per_pax": 198.93}, {"preschool": "X", "type": "Preschool", "annual_eui": 13.15, "pax": 45, "per_pax": 223.3}, {"preschool": "Y", "type": "Preschool", "annual_eui": 5.19, "pax": 48, "per_pax": 202.65}, {"preschool": "Z", "type": "Senior Care Center", "annual_eui": 7.12, "pax": 40, "per_pax": 245.36}, {"preschool": "AA", "type": "Preschool", "annual_eui": 10.22, "pax": 51, "per_pax": 194.01}, {"preschool": "AB", "type": "Active Aging Center", "annual_eui": 6.95, "pax": 49, "per_pax": 203.58}, {"preschool": "AC", "type": "Senior Care Center", "annual_eui": 6.19, "pax": 40, "per_pax": 250.42}, {"preschool": "AD", "type": "Senior Care Center", "annual_eui": 5.34, "pax": 53, "per_pax": 188.49}], "standby": {"by_circuit": {"Aircon 1": 31.0, "Aircon 2": 30.9, "Heater": 3.9, "Kitchen Lighting": 5.1, "Living Room Lighting": 4.9, "Other Lighting3": 5.6, "Kitchen Plug Load": 1006.0, "Living Area Plug Load": 1007.9, "Plug Load3": 1008.6}, "by_appliance": {"Aircon": 61.9, "Heater": 3.9, "Lighting": 15.5, "Plugload": 3022.5}, "by_site": {"A": 102.9, "B": 102.1, "C": 102.9, "D": 102.7, "E": 109.7, "F": 102.4, "G": 103.1, "H": 102.5, "I": 103.0, "J": 102.9, "K": 102.8, "L": 114.4, "M": 102.6, "N": 106.4, "O": 102.3, "P": 102.6, "Q": 102.7, "R": 102.7, "S": 102.4, "T": 102.8, "U": 103.0, "V": 103.4, "W": 102.7, "X": 102.5, "Y": 102.8, "Z": 102.4, "AA": 102.3, "AB": 103.1, "AC": 102.5, "AD": 102.9}, "mean": 103.5, "threshold": 124.2, "flagged": [], "total": 3103.8, "anomalies": {"A": {"base_hour": 3.247, "threshold": 3.896, "spike_count": 0, "top": []}, "B": {"base_hour": 3.192, "threshold": 3.83, "spike_count": 0, "top": []}, "C": {"base_hour": 3.163, "threshold": 3.796, "spike_count": 0, "top": []}, "D": {"base_hour": 3.175, "threshold": 3.81, "spike_count": 0, "top": []}, "E": {"base_hour": 3.337, "threshold": 4.004, "spike_count": 1, "top": [{"day": 4, "hour": "2300-2400", "kwh": 4.052}]}, "F": {"base_hour": 3.124, "threshold": 3.749, "spike_count": 0, "top": []}, "G": {"base_hour": 3.126, "threshold": 3.751, "spike_count": 0, "top": []}, "H": {"base_hour": 3.182, "threshold": 3.819, "spike_count": 0, "top": []}, "I": {"base_hour": 3.195, "threshold": 3.834, "spike_count": 0, "top": []}, "J": {"base_hour": 3.161, "threshold": 3.793, "spike_count": 0, "top": []}, "K": {"base_hour": 3.178, "threshold": 3.813, "spike_count": 0, "top": []}, "L": {"base_hour": 3.283, "threshold": 3.94, "spike_count": 2, "top": [{"day": 25, "hour": "0100-0200", "kwh": 5.038}, {"day": 15, "hour": "2000-2100", "kwh": 3.992}]}, "M": {"base_hour": 3.114, "threshold": 3.737, "spike_count": 0, "top": []}, "N": {"base_hour": 3.346, "threshold": 4.015, "spike_count": 1, "top": [{"day": 8, "hour": "2200-2300", "kwh": 4.171}]}, "O": {"base_hour": 3.143, "threshold": 3.771, "spike_count": 0, "top": []}, "P": {"base_hour": 3.22, "threshold": 3.864, "spike_count": 0, "top": []}, "Q": {"base_hour": 3.195, "threshold": 3.834, "spike_count": 0, "top": []}, "R": {"base_hour": 3.182, "threshold": 3.819, "spike_count": 0, "top": []}, "S": {"base_hour": 3.211, "threshold": 3.853, "spike_count": 0, "top": []}, "T": {"base_hour": 3.2, "threshold": 3.84, "spike_count": 0, "top": []}, "U": {"base_hour": 3.228, "threshold": 3.874, "spike_count": 0, "top": []}, "V": {"base_hour": 3.142, "threshold": 3.771, "spike_count": 0, "top": []}, "W": {"base_hour": 3.112, "threshold": 3.735, "spike_count": 0, "top": []}, "X": {"base_hour": 3.223, "threshold": 3.868, "spike_count": 0, "top": []}, "Y": {"base_hour": 3.104, "threshold": 3.725, "spike_count": 0, "top": []}, "Z": {"base_hour": 3.138, "threshold": 3.765, "spike_count": 0, "top": []}, "AA": {"base_hour": 3.168, "threshold": 3.801, "spike_count": 0, "top": []}, "AB": {"base_hour": 3.194, "threshold": 3.832, "spike_count": 0, "top": []}, "AC": {"base_hour": 3.211, "threshold": 3.854, "spike_count": 0, "top": []}, "AD": {"base_hour": 3.2, "threshold": 3.84, "spike_count": 0, "top": []}}, "spike_pct": 30, "spike_total": 7, "spikes": [{"site": "L", "type": "Preschool", "day": 25, "hour": "0100-0200", "daytype": "Weekday", "kwh": 5.038, "avg": 0.222, "var_pct": 2172.3, "var_kwh": 4.816, "circuit": "Living Room Lighting", "circuit_kwh": 4.851, "circuit_share": 96.0, "appliance": "Lighting"}, {"site": "N", "type": "Senior Care Center", "day": 8, "hour": "2200-2300", "daytype": "Weekday", "kwh": 4.171, "avg": 0.206, "var_pct": 1922.0, "var_kwh": 3.965, "circuit": "Other Lighting3", "circuit_kwh": 3.958, "circuit_share": 95.0, "appliance": "Lighting"}, {"site": "E", "type": "Active Aging Center", "day": 4, "hour": "2300-2400", "daytype": "Weekday", "kwh": 4.052, "avg": 0.213, "var_pct": 1806.3, "var_kwh": 3.839, "circuit": "Heater", "circuit_kwh": 3.861, "circuit_share": 95.0, "appliance": "Heater"}, {"site": "L", "type": "Preschool", "day": 15, "hour": "2000-2100", "daytype": "Weekday", "kwh": 3.992, "avg": 0.222, "var_pct": 1700.6, "var_kwh": 3.77, "circuit": "Kitchen Lighting", "circuit_kwh": 3.803, "circuit_share": 95.0, "appliance": "Lighting"}, {"site": "E", "type": "Active Aging Center", "day": 8, "hour": "0500-0600", "daytype": "Weekday", "kwh": 2.572, "avg": 0.213, "var_pct": 1110.0, "var_kwh": 2.359, "circuit": "Plug Load3", "circuit_kwh": 2.433, "circuit_share": 95.0, "appliance": "Plugload"}, {"site": "L", "type": "Preschool", "day": 15, "hour": "0100-0200", "daytype": "Weekday", "kwh": 1.776, "avg": 0.222, "var_pct": 701.0, "var_kwh": 1.554, "circuit": "Other Lighting3", "circuit_kwh": 1.599, "circuit_share": 90.0, "appliance": "Lighting"}, {"site": "L", "type": "Preschool", "day": 15, "hour": "1900-2000", "daytype": "Weekday", "kwh": 1.49, "avg": 0.222, "var_pct": 572.1, "var_kwh": 1.268, "circuit": "Kitchen Lighting", "circuit_kwh": 1.323, "circuit_share": 89.0, "appliance": "Lighting"}], "site_summary": {"A": {"avg_hour": 0.199, "threshold": 0.259, "spike_count": 0, "worst": null}, "B": {"avg_hour": 0.198, "threshold": 0.257, "spike_count": 0, "worst": null}, "C": {"avg_hour": 0.199, "threshold": 0.259, "spike_count": 0, "worst": null}, "D": {"avg_hour": 0.199, "threshold": 0.259, "spike_count": 0, "worst": null}, "E": {"avg_hour": 0.213, "threshold": 0.276, "spike_count": 2, "worst": {"site": "E", "type": "Active Aging Center", "day": 4, "hour": "2300-2400", "daytype": "Weekday", "kwh": 4.052, "avg": 0.213, "var_pct": 1806.3, "var_kwh": 3.839, "circuit": "Heater", "circuit_kwh": 3.861, "circuit_share": 95.0, "appliance": "Heater"}}, "F": {"avg_hour": 0.198, "threshold": 0.258, "spike_count": 0, "worst": null}, "G": {"avg_hour": 0.2, "threshold": 0.26, "spike_count": 0, "worst": null}, "H": {"avg_hour": 0.199, "threshold": 0.258, "spike_count": 0, "worst": null}, "I": {"avg_hour": 0.2, "threshold": 0.26, "spike_count": 0, "worst": null}, "J": {"avg_hour": 0.199, "threshold": 0.259, "spike_count": 0, "worst": null}, "K": {"avg_hour": 0.199, "threshold": 0.259, "spike_count": 0, "worst": null}, "L": {"avg_hour": 0.222, "threshold": 0.288, "spike_count": 4, "worst": {"site": "L", "type": "Preschool", "day": 25, "hour": "0100-0200", "daytype": "Weekday", "kwh": 5.038, "avg": 0.222, "var_pct": 2172.3, "var_kwh": 4.816, "circuit": "Living Room Lighting", "circuit_kwh": 4.851, "circuit_share": 96.0, "appliance": "Lighting"}}, "M": {"avg_hour": 0.199, "threshold": 0.258, "spike_count": 0, "worst": null}, "N": {"avg_hour": 0.206, "threshold": 0.268, "spike_count": 1, "worst": {"site": "N", "type": "Senior Care Center", "day": 8, "hour": "2200-2300", "daytype": "Weekday", "kwh": 4.171, "avg": 0.206, "var_pct": 1922.0, "var_kwh": 3.965, "circuit": "Other Lighting3", "circuit_kwh": 3.958, "circuit_share": 95.0, "appliance": "Lighting"}}, "O": {"avg_hour": 0.198, "threshold": 0.258, "spike_count": 0, "worst": null}, "P": {"avg_hour": 0.199, "threshold": 0.259, "spike_count": 0, "worst": null}, "Q": {"avg_hour": 0.199, "threshold": 0.259, "spike_count": 0, "worst": null}, "R": {"avg_hour": 0.199, "threshold": 0.259, "spike_count": 0, "worst": null}, "S": {"avg_hour": 0.199, "threshold": 0.258, "spike_count": 0, "worst": null}, "T": {"avg_hour": 0.199, "threshold": 0.259, "spike_count": 0, "worst": null}, "U": {"avg_hour": 0.2, "threshold": 0.26, "spike_count": 0, "worst": null}, "V": {"avg_hour": 0.2, "threshold": 0.261, "spike_count": 0, "worst": null}, "W": {"avg_hour": 0.199, "threshold": 0.259, "spike_count": 0, "worst": null}, "X": {"avg_hour": 0.199, "threshold": 0.258, "spike_count": 0, "worst": null}, "Y": {"avg_hour": 0.199, "threshold": 0.259, "spike_count": 0, "worst": null}, "Z": {"avg_hour": 0.199, "threshold": 0.258, "spike_count": 0, "worst": null}, "AA": {"avg_hour": 0.198, "threshold": 0.258, "spike_count": 0, "worst": null}, "AB": {"avg_hour": 0.2, "threshold": 0.26, "spike_count": 0, "worst": null}, "AC": {"avg_hour": 0.199, "threshold": 0.258, "spike_count": 0, "worst": null}, "AD": {"avg_hour": 0.199, "threshold": 0.259, "spike_count": 0, "worst": null}}, "hour_spike_pct": 50, "hour_anomaly_total": 7, "hour_anomalies": {"E": [{"day": 4, "hour": "2300-2400", "daytype": "Weekday", "kwh": 4.052, "avg": 0.325, "var_pct": 1144.9, "var_kwh": 3.727, "circuit": "Heater", "circuit_kwh": 3.861, "circuit_share": 95.0, "appliance": "Heater"}, {"day": 8, "hour": "0500-0600", "daytype": "Weekday", "kwh": 2.572, "avg": 0.274, "var_pct": 837.9, "var_kwh": 2.298, "circuit": "Plug Load3", "circuit_kwh": 2.433, "circuit_share": 95.0, "appliance": "Plugload"}], "L": [{"day": 25, "hour": "0100-0200", "daytype": "Weekday", "kwh": 5.038, "avg": 0.403, "var_pct": 1149.4, "var_kwh": 4.635, "circuit": "Living Room Lighting", "circuit_kwh": 4.851, "circuit_share": 96.0, "appliance": "Lighting"}, {"day": 15, "hour": "2000-2100", "daytype": "Weekday", "kwh": 3.992, "avg": 0.321, "var_pct": 1143.5, "var_kwh": 3.671, "circuit": "Kitchen Lighting", "circuit_kwh": 3.803, "circuit_share": 95.0, "appliance": "Lighting"}, {"day": 15, "hour": "1900-2000", "daytype": "Weekday", "kwh": 1.49, "avg": 0.244, "var_pct": 509.8, "var_kwh": 1.246, "circuit": "Kitchen Lighting", "circuit_kwh": 1.323, "circuit_share": 89.0, "appliance": "Lighting"}, {"day": 15, "hour": "0100-0200", "daytype": "Weekday", "kwh": 1.776, "avg": 0.403, "var_pct": 340.4, "var_kwh": 1.373, "circuit": "Other Lighting3", "circuit_kwh": 1.599, "circuit_share": 90.0, "appliance": "Lighting"}], "N": [{"day": 8, "hour": "2200-2300", "daytype": "Weekday", "kwh": 4.171, "avg": 0.328, "var_pct": 1173.0, "var_kwh": 3.843, "circuit": "Other Lighting3", "circuit_kwh": 3.958, "circuit_share": 95.0, "appliance": "Lighting"}]}}, "operating": {"by_circuit": {"Aircon 1": 2738.2, "Aircon 2": 2732.0, "Heater": 877.9, "Kitchen Lighting": 1371.8, "Living Room Lighting": 1375.0, "Other Lighting3": 1376.8, "Kitchen Plug Load": 3813.3, "Living Area Plug Load": 3762.2, "Plug Load3": 3770.8}, "by_appliance": {"Aircon": 5470.3, "Heater": 877.9, "Lighting": 4123.6, "Plugload": 11346.3}, "by_site": {"A": 740.2, "B": 727.8, "C": 721.2, "D": 723.8, "E": 760.8, "F": 712.3, "G": 712.8, "H": 725.5, "I": 728.4, "J": 720.7, "K": 724.5, "L": 748.6, "M": 710.1, "N": 762.9, "O": 716.5, "P": 734.2, "Q": 728.4, "R": 725.5, "S": 732.0, "T": 729.6, "U": 736.0, "V": 716.4, "W": 709.6, "X": 734.9, "Y": 707.8, "Z": 715.4, "AA": 722.2, "AB": 728.2, "AC": 732.2, "AD": 729.6}, "mean": 727.3, "threshold": 872.7, "flagged": [], "total": 21818.0, "anomalies": {"A": {"base_hour": 3.247, "threshold": 3.896, "spike_count": 23, "top": [{"day": 18, "hour": "1200-1300", "kwh": 19.503}, {"day": 18, "hour": "1400-1500", "kwh": 14.896}, {"day": 6, "hour": "1600-1700", "kwh": 4.745}, {"day": 26, "hour": "1600-1700", "kwh": 4.649}, {"day": 19, "hour": "1000-1100", "kwh": 4.54}]}, "B": {"base_hour": 3.192, "threshold": 3.83, "spike_count": 24, "top": [{"day": 15, "hour": "1300-1400", "kwh": 4.715}, {"day": 11, "hour": "1000-1100", "kwh": 4.709}, {"day": 14, "hour": "1600-1700", "kwh": 4.523}, {"day": 19, "hour": "1500-1600", "kwh": 4.313}, {"day": 11, "hour": "1400-1500", "kwh": 4.312}]}, "C": {"base_hour": 3.163, "threshold": 3.796, "spike_count": 29, "top": [{"day": 12, "hour": "0900-1000", "kwh": 4.814}, {"day": 28, "hour": "1200-1300", "kwh": 4.813}, {"day": 21, "hour": "0700-0800", "kwh": 4.511}, {"day": 25, "hour": "1500-1600", "kwh": 4.381}, {"day": 22, "hour": "1500-1600", "kwh": 4.326}]}, "D": {"base_hour": 3.175, "threshold": 3.81, "spike_count": 30, "top": [{"day": 29, "hour": "1100-1200", "kwh": 4.872}, {"day": 29, "hour": "0800-0900", "kwh": 4.642}, {"day": 18, "hour": "1600-1700", "kwh": 4.638}, {"day": 8, "hour": "1100-1200", "kwh": 4.512}, {"day": 5, "hour": "1500-1600", "kwh": 4.472}]}, "E": {"base_hour": 3.337, "threshold": 4.004, "spike_count": 16, "top": [{"day": 8, "hour": "0900-1000", "kwh": 35.837}, {"day": 14, "hour": "0800-0900", "kwh": 5.08}, {"day": 15, "hour": "1100-1200", "kwh": 4.764}, {"day": 18, "hour": "1200-1300", "kwh": 4.659}, {"day": 11, "hour": "1400-1500", "kwh": 4.591}]}, "F": {"base_hour": 3.124, "threshold": 3.749, "spike_count": 27, "top": [{"day": 7, "hour": "1300-1400", "kwh": 4.429}, {"day": 19, "hour": "1800-1900", "kwh": 4.416}, {"day": 7, "hour": "1500-1600", "kwh": 4.235}, {"day": 12, "hour": "1200-1300", "kwh": 4.211}, {"day": 8, "hour": "0800-0900", "kwh": 4.209}]}, "G": {"base_hour": 3.126, "threshold": 3.751, "spike_count": 29, "top": [{"day": 21, "hour": "1600-1700", "kwh": 4.899}, {"day": 4, "hour": "0700-0800", "kwh": 4.488}, {"day": 13, "hour": "0900-1000", "kwh": 4.377}, {"day": 21, "hour": "1100-1200", "kwh": 4.318}, {"day": 20, "hour": "1100-1200", "kwh": 4.306}]}, "H": {"base_hour": 3.182, "threshold": 3.819, "spike_count": 30, "top": [{"day": 22, "hour": "0800-0900", "kwh": 4.717}, {"day": 6, "hour": "1300-1400", "kwh": 4.699}, {"day": 7, "hour": "1200-1300", "kwh": 4.483}, {"day": 20, "hour": "1200-1300", "kwh": 4.434}, {"day": 4, "hour": "1100-1200", "kwh": 4.415}]}, "I": {"base_hour": 3.195, "threshold": 3.834, "spike_count": 27, "top": [{"day": 26, "hour": "1500-1600", "kwh": 5.046}, {"day": 20, "hour": "1300-1400", "kwh": 4.653}, {"day": 4, "hour": "1200-1300", "kwh": 4.568}, {"day": 4, "hour": "1300-1400", "kwh": 4.397}, {"day": 25, "hour": "1600-1700", "kwh": 4.377}]}, "J": {"base_hour": 3.161, "threshold": 3.793, "spike_count": 30, "top": [{"day": 13, "hour": "1700-1800", "kwh": 4.941}, {"day": 19, "hour": "0700-0800", "kwh": 4.521}, {"day": 25, "hour": "1100-1200", "kwh": 4.493}, {"day": 22, "hour": "0800-0900", "kwh": 4.489}, {"day": 8, "hour": "1100-1200", "kwh": 4.485}]}, "K": {"base_hour": 3.178, "threshold": 3.813, "spike_count": 26, "top": [{"day": 18, "hour": "1000-1100", "kwh": 4.711}, {"day": 25, "hour": "0900-1000", "kwh": 4.583}, {"day": 6, "hour": "1000-1100", "kwh": 4.412}, {"day": 18, "hour": "1100-1200", "kwh": 4.394}, {"day": 7, "hour": "0800-0900", "kwh": 4.312}]}, "L": {"base_hour": 3.283, "threshold": 3.94, "spike_count": 20, "top": [{"day": 19, "hour": "0800-0900", "kwh": 30.847}, {"day": 19, "hour": "1400-1500", "kwh": 6.444}, {"day": 7, "hour": "1000-1100", "kwh": 4.814}, {"day": 20, "hour": "0900-1000", "kwh": 4.579}, {"day": 21, "hour": "0700-0800", "kwh": 4.372}]}, "M": {"base_hour": 3.114, "threshold": 3.737, "spike_count": 27, "top": [{"day": 14, "hour": "1800-1900", "kwh": 4.951}, {"day": 28, "hour": "1200-1300", "kwh": 4.483}, {"day": 19, "hour": "0800-0900", "kwh": 4.444}, {"day": 6, "hour": "1000-1100", "kwh": 4.385}, {"day": 21, "hour": "0900-1000", "kwh": 4.319}]}, "N": {"base_hour": 3.346, "threshold": 4.015, "spike_count": 13, "top": [{"day": 22, "hour": "1500-1600", "kwh": 45.331}, {"day": 8, "hour": "1700-1800", "kwh": 11.071}, {"day": 18, "hour": "1700-1800", "kwh": 4.712}, {"day": 25, "hour": "0700-0800", "kwh": 4.454}, {"day": 6, "hour": "1500-1600", "kwh": 4.348}]}, "O": {"base_hour": 3.143, "threshold": 3.771, "spike_count": 27, "top": [{"day": 21, "hour": "1200-1300", "kwh": 4.76}, {"day": 11, "hour": "1400-1500", "kwh": 4.746}, {"day": 8, "hour": "1100-1200", "kwh": 4.342}, {"day": 7, "hour": "1000-1100", "kwh": 4.321}, {"day": 4, "hour": "0700-0800", "kwh": 4.309}]}, "P": {"base_hour": 3.22, "threshold": 3.864, "spike_count": 32, "top": [{"day": 6, "hour": "1000-1100", "kwh": 4.921}, {"day": 19, "hour": "0900-1000", "kwh": 4.483}, {"day": 18, "hour": "0900-1000", "kwh": 4.481}, {"day": 11, "hour": "0900-1000", "kwh": 4.478}, {"day": 15, "hour": "1300-1400", "kwh": 4.471}]}, "Q": {"base_hour": 3.195, "threshold": 3.834, "spike_count": 27, "top": [{"day": 21, "hour": "1300-1400", "kwh": 4.989}, {"day": 25, "hour": "0800-0900", "kwh": 4.297}, {"day": 22, "hour": "1000-1100", "kwh": 4.294}, {"day": 26, "hour": "1000-1100", "kwh": 4.241}, {"day": 11, "hour": "0800-0900", "kwh": 4.175}]}, "R": {"base_hour": 3.182, "threshold": 3.819, "spike_count": 27, "top": [{"day": 20, "hour": "0700-0800", "kwh": 4.881}, {"day": 4, "hour": "1300-1400", "kwh": 4.632}, {"day": 7, "hour": "1500-1600", "kwh": 4.532}, {"day": 28, "hour": "1300-1400", "kwh": 4.497}, {"day": 8, "hour": "1100-1200", "kwh": 4.419}]}, "S": {"base_hour": 3.211, "threshold": 3.853, "spike_count": 34, "top": [{"day": 29, "hour": "1100-1200", "kwh": 4.801}, {"day": 12, "hour": "0700-0800", "kwh": 4.721}, {"day": 21, "hour": "1400-1500", "kwh": 4.66}, {"day": 19, "hour": "1200-1300", "kwh": 4.622}, {"day": 18, "hour": "1300-1400", "kwh": 4.504}]}, "T": {"base_hour": 3.2, "threshold": 3.84, "spike_count": 27, "top": [{"day": 6, "hour": "1800-1900", "kwh": 4.91}, {"day": 29, "hour": "1700-1800", "kwh": 4.633}, {"day": 26, "hour": "1700-1800", "kwh": 4.534}, {"day": 14, "hour": "0800-0900", "kwh": 4.516}, {"day": 8, "hour": "1600-1700", "kwh": 4.387}]}, "U": {"base_hour": 3.228, "threshold": 3.874, "spike_count": 30, "top": [{"day": 28, "hour": "1000-1100", "kwh": 4.554}, {"day": 12, "hour": "1100-1200", "kwh": 4.536}, {"day": 14, "hour": "1000-1100", "kwh": 4.443}, {"day": 29, "hour": "0800-0900", "kwh": 4.401}, {"day": 20, "hour": "1300-1400", "kwh": 4.372}]}, "V": {"base_hour": 3.142, "threshold": 3.771, "spike_count": 29, "top": [{"day": 22, "hour": "1700-1800", "kwh": 4.878}, {"day": 14, "hour": "1800-1900", "kwh": 4.64}, {"day": 29, "hour": "1700-1800", "kwh": 4.614}, {"day": 21, "hour": "0900-1000", "kwh": 4.548}, {"day": 19, "hour": "1100-1200", "kwh": 4.494}]}, "W": {"base_hour": 3.112, "threshold": 3.735, "spike_count": 27, "top": [{"day": 26, "hour": "1100-1200", "kwh": 4.44}, {"day": 18, "hour": "1500-1600", "kwh": 4.405}, {"day": 19, "hour": "1500-1600", "kwh": 4.27}, {"day": 18, "hour": "1400-1500", "kwh": 4.121}, {"day": 19, "hour": "0800-0900", "kwh": 4.07}]}, "X": {"base_hour": 3.223, "threshold": 3.868, "spike_count": 30, "top": [{"day": 5, "hour": "1200-1300", "kwh": 4.765}, {"day": 20, "hour": "0800-0900", "kwh": 4.66}, {"day": 14, "hour": "1800-1900", "kwh": 4.517}, {"day": 7, "hour": "1200-1300", "kwh": 4.434}, {"day": 5, "hour": "1600-1700", "kwh": 4.432}]}, "Y": {"base_hour": 3.104, "threshold": 3.725, "spike_count": 30, "top": [{"day": 5, "hour": "1400-1500", "kwh": 5.033}, {"day": 21, "hour": "1000-1100", "kwh": 4.864}, {"day": 6, "hour": "0700-0800", "kwh": 4.69}, {"day": 19, "hour": "1200-1300", "kwh": 4.554}, {"day": 20, "hour": "1400-1500", "kwh": 4.419}]}, "Z": {"base_hour": 3.138, "threshold": 3.765, "spike_count": 30, "top": [{"day": 11, "hour": "1800-1900", "kwh": 4.732}, {"day": 15, "hour": "1200-1300", "kwh": 4.697}, {"day": 22, "hour": "1600-1700", "kwh": 4.613}, {"day": 19, "hour": "1400-1500", "kwh": 4.422}, {"day": 8, "hour": "1300-1400", "kwh": 4.416}]}, "AA": {"base_hour": 3.168, "threshold": 3.801, "spike_count": 26, "top": [{"day": 28, "hour": "1300-1400", "kwh": 4.851}, {"day": 21, "hour": "1500-1600", "kwh": 4.641}, {"day": 19, "hour": "1600-1700", "kwh": 4.555}, {"day": 7, "hour": "0900-1000", "kwh": 4.396}, {"day": 20, "hour": "0900-1000", "kwh": 4.32}]}, "AB": {"base_hour": 3.194, "threshold": 3.832, "spike_count": 33, "top": [{"day": 5, "hour": "0900-1000", "kwh": 4.886}, {"day": 21, "hour": "1400-1500", "kwh": 4.648}, {"day": 12, "hour": "0800-0900", "kwh": 4.526}, {"day": 6, "hour": "1100-1200", "kwh": 4.524}, {"day": 4, "hour": "1600-1700", "kwh": 4.505}]}, "AC": {"base_hour": 3.211, "threshold": 3.854, "spike_count": 28, "top": [{"day": 28, "hour": "0700-0800", "kwh": 4.703}, {"day": 5, "hour": "1800-1900", "kwh": 4.611}, {"day": 19, "hour": "1000-1100", "kwh": 4.592}, {"day": 6, "hour": "1000-1100", "kwh": 4.523}, {"day": 7, "hour": "1300-1400", "kwh": 4.505}]}, "AD": {"base_hour": 3.2, "threshold": 3.84, "spike_count": 31, "top": [{"day": 19, "hour": "0800-0900", "kwh": 5.045}, {"day": 7, "hour": "0800-0900", "kwh": 4.861}, {"day": 21, "hour": "1800-1900", "kwh": 4.619}, {"day": 21, "hour": "0800-0900", "kwh": 4.614}, {"day": 4, "hour": "1500-1600", "kwh": 4.533}]}}, "hour_spike_pct": 50, "hour_anomaly_total": 21, "hour_anomalies": {"A": [{"day": 18, "hour": "1200-1300", "daytype": "Weekday", "kwh": 19.503, "avg": 4.069, "var_pct": 379.3, "var_kwh": 15.434, "circuit": "Kitchen Plug Load", "circuit_kwh": 15.493, "circuit_share": 79.0, "appliance": "Plugload"}, {"day": 18, "hour": "1400-1500", "daytype": "Weekday", "kwh": 14.896, "avg": 3.785, "var_pct": 293.5, "var_kwh": 11.111, "circuit": "Other Lighting3", "circuit_kwh": 12.657, "circuit_share": 85.0, "appliance": "Lighting"}], "C": [{"day": 28, "hour": "1200-1300", "daytype": "Weekday", "kwh": 4.813, "avg": 3.08, "var_pct": 56.3, "var_kwh": 1.733, "circuit": "Plug Load3", "circuit_kwh": 0.944, "circuit_share": 20.0, "appliance": "Plugload"}], "D": [{"day": 5, "hour": "1500-1600", "daytype": "Weekday", "kwh": 4.472, "avg": 2.97, "var_pct": 50.6, "var_kwh": 1.502, "circuit": "Kitchen Plug Load", "circuit_kwh": 0.951, "circuit_share": 21.0, "appliance": "Plugload"}], "E": [{"day": 8, "hour": "0900-1000", "daytype": "Weekday", "kwh": 35.837, "avg": 4.999, "var_pct": 616.9, "var_kwh": 30.838, "circuit": "Plug Load3", "circuit_kwh": 34.323, "circuit_share": 96.0, "appliance": "Plugload"}, {"day": 15, "hour": "1100-1200", "daytype": "Weekday", "kwh": 4.764, "avg": 3.027, "var_pct": 57.4, "var_kwh": 1.737, "circuit": "Living Area Plug Load", "circuit_kwh": 0.98, "circuit_share": 21.0, "appliance": "Plugload"}], "H": [{"day": 6, "hour": "1300-1400", "daytype": "Weekday", "kwh": 4.699, "avg": 3.096, "var_pct": 51.8, "var_kwh": 1.603, "circuit": "Kitchen Plug Load", "circuit_kwh": 0.987, "circuit_share": 21.0, "appliance": "Plugload"}], "I": [{"day": 26, "hour": "1500-1600", "daytype": "Weekday", "kwh": 5.046, "avg": 3.12, "var_pct": 61.7, "var_kwh": 1.926, "circuit": "Living Area Plug Load", "circuit_kwh": 0.983, "circuit_share": 19.0, "appliance": "Plugload"}], "J": [{"day": 13, "hour": "1700-1800", "daytype": "Weekday", "kwh": 4.941, "avg": 3.202, "var_pct": 54.3, "var_kwh": 1.739, "circuit": "Plug Load3", "circuit_kwh": 0.977, "circuit_share": 20.0, "appliance": "Plugload"}], "L": [{"day": 19, "hour": "0800-0900", "daytype": "Weekday", "kwh": 30.847, "avg": 4.638, "var_pct": 565.1, "var_kwh": 26.209, "circuit": "Heater", "circuit_kwh": 27.651, "circuit_share": 90.0, "appliance": "Heater"}, {"day": 19, "hour": "1400-1500", "daytype": "Weekday", "kwh": 6.444, "avg": 3.345, "var_pct": 92.6, "var_kwh": 3.099, "circuit": "Aircon 1", "circuit_kwh": 5.002, "circuit_share": 78.0, "appliance": "Aircon"}, {"day": 7, "hour": "1000-1100", "daytype": "Weekday", "kwh": 4.814, "avg": 3.102, "var_pct": 55.2, "var_kwh": 1.712, "circuit": "Heater", "circuit_kwh": 0.9, "circuit_share": 19.0, "appliance": "Heater"}], "M": [{"day": 14, "hour": "1800-1900", "daytype": "Weekday", "kwh": 4.951, "avg": 3.234, "var_pct": 53.1, "var_kwh": 1.717, "circuit": "Kitchen Plug Load", "circuit_kwh": 0.97, "circuit_share": 20.0, "appliance": "Plugload"}], "N": [{"day": 22, "hour": "1500-1600", "daytype": "Weekday", "kwh": 45.331, "avg": 5.367, "var_pct": 744.7, "var_kwh": 39.964, "circuit": "Kitchen Plug Load", "circuit_kwh": 43.711, "circuit_share": 96.0, "appliance": "Plugload"}, {"day": 8, "hour": "1700-1800", "daytype": "Weekday", "kwh": 11.071, "avg": 3.915, "var_pct": 182.8, "var_kwh": 7.156, "circuit": "Kitchen Plug Load", "circuit_kwh": 8.303, "circuit_share": 75.0, "appliance": "Plugload"}], "Q": [{"day": 21, "hour": "1300-1400", "daytype": "Weekday", "kwh": 4.989, "avg": 3.319, "var_pct": 50.3, "var_kwh": 1.67, "circuit": "Kitchen Plug Load", "circuit_kwh": 0.998, "circuit_share": 20.0, "appliance": "Plugload"}], "T": [{"day": 6, "hour": "1800-1900", "daytype": "Weekday", "kwh": 4.91, "avg": 3.262, "var_pct": 50.5, "var_kwh": 1.648, "circuit": "Living Area Plug Load", "circuit_kwh": 0.955, "circuit_share": 19.0, "appliance": "Plugload"}], "Y": [{"day": 5, "hour": "1400-1500", "daytype": "Weekday", "kwh": 5.033, "avg": 3.232, "var_pct": 55.7, "var_kwh": 1.801, "circuit": "Living Area Plug Load", "circuit_kwh": 0.999, "circuit_share": 20.0, "appliance": "Plugload"}, {"day": 21, "hour": "1000-1100", "daytype": "Weekday", "kwh": 4.864, "avg": 3.163, "var_pct": 53.8, "var_kwh": 1.701, "circuit": "Heater", "circuit_kwh": 0.982, "circuit_share": 20.0, "appliance": "Heater"}, {"day": 19, "hour": "1200-1300", "daytype": "Weekday", "kwh": 4.554, "avg": 3.001, "var_pct": 51.7, "var_kwh": 1.553, "circuit": "Kitchen Plug Load", "circuit_kwh": 0.976, "circuit_share": 21.0, "appliance": "Plugload"}], "AB": [{"day": 5, "hour": "0900-1000", "daytype": "Weekday", "kwh": 4.886, "avg": 3.127, "var_pct": 56.2, "var_kwh": 1.759, "circuit": "Plug Load3", "circuit_kwh": 0.988, "circuit_share": 20.0, "appliance": "Plugload"}]}}, "forecast": {"A": {"weekday_avg": 41.36, "weekend_avg": 4.77, "june_series": [41.36, 41.36, 41.36, 41.36, 41.36, 4.77, 4.77, 41.36, 41.36, 41.36, 41.36, 41.36, 4.77, 4.77, 41.36, 41.36, 41.36, 41.36, 41.36, 4.77, 4.77, 41.36, 41.36, 41.36, 41.36, 41.36, 4.77, 4.77, 41.36, 41.36], "june_total": 948.1, "type": "Senior Care Center"}, "B": {"weekday_avg": 40.66, "weekend_avg": 4.78, "june_series": [40.66, 40.66, 40.66, 40.66, 40.66, 4.78, 4.78, 40.66, 40.66, 40.66, 40.66, 40.66, 4.78, 4.78, 40.66, 40.66, 40.66, 40.66, 40.66, 4.78, 4.78, 40.66, 40.66, 40.66, 40.66, 40.66, 4.78, 4.78, 40.66, 40.66], "june_total": 932.8, "type": "Active Aging Center"}, "C": {"weekday_avg": 40.36, "weekend_avg": 4.78, "june_series": [40.36, 40.36, 40.36, 40.36, 40.36, 4.78, 4.78, 40.36, 40.36, 40.36, 40.36, 40.36, 4.78, 4.78, 40.36, 40.36, 40.36, 40.36, 40.36, 4.78, 4.78, 40.36, 40.36, 40.36, 40.36, 40.36, 4.78, 4.78, 40.36, 40.36], "june_total": 926.2, "type": "Preschool"}, "D": {"weekday_avg": 40.47, "weekend_avg": 4.8, "june_series": [40.47, 40.47, 40.47, 40.47, 40.47, 4.8, 4.8, 40.47, 40.47, 40.47, 40.47, 40.47, 4.8, 4.8, 40.47, 40.47, 40.47, 40.47, 40.47, 4.8, 4.8, 40.47, 40.47, 40.47, 40.47, 40.47, 4.8, 4.8, 40.47, 40.47], "june_total": 928.7, "type": "Senior Care Center"}, "E": {"weekday_avg": 42.79, "weekend_avg": 4.79, "june_series": [42.79, 42.79, 42.79, 42.79, 42.79, 4.79, 4.79, 42.79, 42.79, 42.79, 42.79, 42.79, 4.79, 4.79, 42.79, 42.79, 42.79, 42.79, 42.79, 4.79, 4.79, 42.79, 42.79, 42.79, 42.79, 42.79, 4.79, 4.79, 42.79, 42.79], "june_total": 979.7, "type": "Active Aging Center"}, "F": {"weekday_avg": 39.87, "weekend_avg": 4.76, "june_series": [39.87, 39.87, 39.87, 39.87, 39.87, 4.76, 4.76, 39.87, 39.87, 39.87, 39.87, 39.87, 4.76, 4.76, 39.87, 39.87, 39.87, 39.87, 39.87, 4.76, 4.76, 39.87, 39.87, 39.87, 39.87, 39.87, 4.76, 4.76, 39.87, 39.87], "june_total": 915.2, "type": "Active Aging Center"}, "G": {"weekday_avg": 39.92, "weekend_avg": 4.79, "june_series": [39.92, 39.92, 39.92, 39.92, 39.92, 4.79, 4.79, 39.92, 39.92, 39.92, 39.92, 39.92, 4.79, 4.79, 39.92, 39.92, 39.92, 39.92, 39.92, 4.79, 4.79, 39.92, 39.92, 39.92, 39.92, 39.92, 4.79, 4.79, 39.92, 39.92], "june_total": 916.6, "type": "Active Aging Center"}, "H": {"weekday_avg": 40.56, "weekend_avg": 4.78, "june_series": [40.56, 40.56, 40.56, 40.56, 40.56, 4.78, 4.78, 40.56, 40.56, 40.56, 40.56, 40.56, 4.78, 4.78, 40.56, 40.56, 40.56, 40.56, 40.56, 4.78, 4.78, 40.56, 40.56, 40.56, 40.56, 40.56, 4.78, 4.78, 40.56, 40.56], "june_total": 930.6, "type": "Preschool"}, "I": {"weekday_avg": 40.73, "weekend_avg": 4.8, "june_series": [40.73, 40.73, 40.73, 40.73, 40.73, 4.8, 4.8, 40.73, 40.73, 40.73, 40.73, 40.73, 4.8, 4.8, 40.73, 40.73, 40.73, 40.73, 40.73, 4.8, 4.8, 40.73, 40.73, 40.73, 40.73, 40.73, 4.8, 4.8, 40.73, 40.73], "june_total": 934.5, "type": "Senior Care Center"}, "J": {"weekday_avg": 40.32, "weekend_avg": 4.79, "june_series": [40.32, 40.32, 40.32, 40.32, 40.32, 4.79, 4.79, 40.32, 40.32, 40.32, 40.32, 40.32, 4.79, 4.79, 40.32, 40.32, 40.32, 40.32, 40.32, 4.79, 4.79, 40.32, 40.32, 40.32, 40.32, 40.32, 4.79, 4.79, 40.32, 40.32], "june_total": 925.4, "type": "Senior Care Center"}, "K": {"weekday_avg": 40.51, "weekend_avg": 4.8, "june_series": [40.51, 40.51, 40.51, 40.51, 40.51, 4.8, 4.8, 40.51, 40.51, 40.51, 40.51, 40.51, 4.8, 4.8, 40.51, 40.51, 40.51, 40.51, 40.51, 4.8, 4.8, 40.51, 40.51, 40.51, 40.51, 40.51, 4.8, 4.8, 40.51, 40.51], "june_total": 929.6, "type": "Senior Care Center"}, "L": {"weekday_avg": 42.38, "weekend_avg": 4.82, "june_series": [42.38, 42.38, 42.38, 42.38, 42.38, 4.82, 4.82, 42.38, 42.38, 42.38, 42.38, 42.38, 4.82, 4.82, 42.38, 42.38, 42.38, 42.38, 42.38, 4.82, 4.82, 42.38, 42.38, 42.38, 42.38, 42.38, 4.82, 4.82, 42.38, 42.38], "june_total": 970.9, "type": "Preschool"}, "M": {"weekday_avg": 39.76, "weekend_avg": 4.78, "june_series": [39.76, 39.76, 39.76, 39.76, 39.76, 4.78, 4.78, 39.76, 39.76, 39.76, 39.76, 39.76, 4.78, 4.78, 39.76, 39.76, 39.76, 39.76, 39.76, 4.78, 4.78, 39.76, 39.76, 39.76, 39.76, 39.76, 4.78, 4.78, 39.76, 39.76], "june_total": 913.0, "type": "Active Aging Center"}, "N": {"weekday_avg": 42.74, "weekend_avg": 4.77, "june_series": [42.74, 42.74, 42.74, 42.74, 42.74, 4.77, 4.77, 42.74, 42.74, 42.74, 42.74, 42.74, 4.77, 4.77, 42.74, 42.74, 42.74, 42.74, 42.74, 4.77, 4.77, 42.74, 42.74, 42.74, 42.74, 42.74, 4.77, 4.77, 42.74, 42.74], "june_total": 978.4, "type": "Senior Care Center"}, "O": {"weekday_avg": 40.08, "weekend_avg": 4.78, "june_series": [40.08, 40.08, 40.08, 40.08, 40.08, 4.78, 4.78, 40.08, 40.08, 40.08, 40.08, 40.08, 4.78, 4.78, 40.08, 40.08, 40.08, 40.08, 40.08, 4.78, 4.78, 40.08, 40.08, 40.08, 40.08, 40.08, 4.78, 4.78, 40.08, 40.08], "june_total": 920.0, "type": "Active Aging Center"}, "P": {"weekday_avg": 41.0, "weekend_avg": 4.81, "june_series": [41.0, 41.0, 41.0, 41.0, 41.0, 4.81, 4.81, 41.0, 41.0, 41.0, 41.0, 41.0, 4.81, 4.81, 41.0, 41.0, 41.0, 41.0, 41.0, 4.81, 4.81, 41.0, 41.0, 41.0, 41.0, 41.0, 4.81, 4.81, 41.0, 41.0], "june_total": 940.5, "type": "Preschool"}, "Q": {"weekday_avg": 40.72, "weekend_avg": 4.78, "june_series": [40.72, 40.72, 40.72, 40.72, 40.72, 4.78, 4.78, 40.72, 40.72, 40.72, 40.72, 40.72, 4.78, 4.78, 40.72, 40.72, 40.72, 40.72, 40.72, 4.78, 4.78, 40.72, 40.72, 40.72, 40.72, 40.72, 4.78, 4.78, 40.72, 40.72], "june_total": 934.1, "type": "Senior Care Center"}, "R": {"weekday_avg": 40.57, "weekend_avg": 4.79, "june_series": [40.57, 40.57, 40.57, 40.57, 40.57, 4.79, 4.79, 40.57, 40.57, 40.57, 40.57, 40.57, 4.79, 4.79, 40.57, 40.57, 40.57, 40.57, 40.57, 4.79, 4.79, 40.57, 40.57, 40.57, 40.57, 40.57, 4.79, 4.79, 40.57, 40.57], "june_total": 930.9, "type": "Senior Care Center"}, "S": {"weekday_avg": 40.91, "weekend_avg": 4.77, "june_series": [40.91, 40.91, 40.91, 40.91, 40.91, 4.77, 4.77, 40.91, 40.91, 40.91, 40.91, 40.91, 4.77, 4.77, 40.91, 40.91, 40.91, 40.91, 40.91, 4.77, 4.77, 40.91, 40.91, 40.91, 40.91, 40.91, 4.77, 4.77, 40.91, 40.91], "june_total": 938.2, "type": "Preschool"}, "T": {"weekday_avg": 40.78, "weekend_avg": 4.79, "june_series": [40.78, 40.78, 40.78, 40.78, 40.78, 4.79, 4.79, 40.78, 40.78, 40.78, 40.78, 40.78, 4.79, 4.79, 40.78, 40.78, 40.78, 40.78, 40.78, 4.79, 4.79, 40.78, 40.78, 40.78, 40.78, 40.78, 4.79, 4.79, 40.78, 40.78], "june_total": 935.5, "type": "Senior Care Center"}, "U": {"weekday_avg": 41.13, "weekend_avg": 4.79, "june_series": [41.13, 41.13, 41.13, 41.13, 41.13, 4.79, 4.79, 41.13, 41.13, 41.13, 41.13, 41.13, 4.79, 4.79, 41.13, 41.13, 41.13, 41.13, 41.13, 4.79, 4.79, 41.13, 41.13, 41.13, 41.13, 41.13, 4.79, 4.79, 41.13, 41.13], "june_total": 943.2, "type": "Senior Care Center"}, "V": {"weekday_avg": 40.11, "weekend_avg": 4.82, "june_series": [40.11, 40.11, 40.11, 40.11, 40.11, 4.82, 4.82, 40.11, 40.11, 40.11, 40.11, 40.11, 4.82, 4.82, 40.11, 40.11, 40.11, 40.11, 40.11, 4.82, 4.82, 40.11, 40.11, 40.11, 40.11, 40.11, 4.82, 4.82, 40.11, 40.11], "june_total": 921.0, "type": "Senior Care Center"}, "W": {"weekday_avg": 39.73, "weekend_avg": 4.78, "june_series": [39.73, 39.73, 39.73, 39.73, 39.73, 4.78, 4.78, 39.73, 39.73, 39.73, 39.73, 39.73, 4.78, 4.78, 39.73, 39.73, 39.73, 39.73, 39.73, 4.78, 4.78, 39.73, 39.73, 39.73, 39.73, 39.73, 4.78, 4.78, 39.73, 39.73], "june_total": 912.3, "type": "Active Aging Center"}, "X": {"weekday_avg": 41.06, "weekend_avg": 4.77, "june_series": [41.06, 41.06, 41.06, 41.06, 41.06, 4.77, 4.77, 41.06, 41.06, 41.06, 41.06, 41.06, 4.77, 4.77, 41.06, 41.06, 41.06, 41.06, 41.06, 4.77, 4.77, 41.06, 41.06, 41.06, 41.06, 41.06, 4.77, 4.77, 41.06, 41.06], "june_total": 941.5, "type": "Preschool"}, "Y": {"weekday_avg": 39.65, "weekend_avg": 4.77, "june_series": [39.65, 39.65, 39.65, 39.65, 39.65, 4.77, 4.77, 39.65, 39.65, 39.65, 39.65, 39.65, 4.77, 4.77, 39.65, 39.65, 39.65, 39.65, 39.65, 4.77, 4.77, 39.65, 39.65, 39.65, 39.65, 39.65, 4.77, 4.77, 39.65, 39.65], "june_total": 910.5, "type": "Preschool"}, "Z": {"weekday_avg": 40.03, "weekend_avg": 4.78, "june_series": [40.03, 40.03, 40.03, 40.03, 40.03, 4.78, 4.78, 40.03, 40.03, 40.03, 40.03, 40.03, 4.78, 4.78, 40.03, 40.03, 40.03, 40.03, 40.03, 4.78, 4.78, 40.03, 40.03, 40.03, 40.03, 40.03, 4.78, 4.78, 40.03, 40.03], "june_total": 918.9, "type": "Senior Care Center"}, "AA": {"weekday_avg": 40.38, "weekend_avg": 4.77, "june_series": [40.38, 40.38, 40.38, 40.38, 40.38, 4.77, 4.77, 40.38, 40.38, 40.38, 40.38, 40.38, 4.77, 4.77, 40.38, 40.38, 40.38, 40.38, 40.38, 4.77, 4.77, 40.38, 40.38, 40.38, 40.38, 40.38, 4.77, 4.77, 40.38, 40.38], "june_total": 926.5, "type": "Preschool"}, "AB": {"weekday_avg": 40.71, "weekend_avg": 4.82, "june_series": [40.71, 40.71, 40.71, 40.71, 40.71, 4.82, 4.82, 40.71, 40.71, 40.71, 40.71, 40.71, 4.82, 4.82, 40.71, 40.71, 40.71, 40.71, 40.71, 4.82, 4.82, 40.71, 40.71, 40.71, 40.71, 40.71, 4.82, 4.82, 40.71, 40.71], "june_total": 934.2, "type": "Active Aging Center"}, "AC": {"weekday_avg": 40.92, "weekend_avg": 4.77, "june_series": [40.92, 40.92, 40.92, 40.92, 40.92, 4.77, 4.77, 40.92, 40.92, 40.92, 40.92, 40.92, 4.77, 4.77, 40.92, 40.92, 40.92, 40.92, 40.92, 4.77, 4.77, 40.92, 40.92, 40.92, 40.92, 40.92, 4.77, 4.77, 40.92, 40.92], "june_total": 938.4, "type": "Senior Care Center"}, "AD": {"weekday_avg": 40.8, "weekend_avg": 4.77, "june_series": [40.8, 40.8, 40.8, 40.8, 40.8, 4.77, 4.77, 40.8, 40.8, 40.8, 40.8, 40.8, 4.77, 4.77, 40.8, 40.8, 40.8, 40.8, 40.8, 4.77, 4.77, 40.8, 40.8, 40.8, 40.8, 40.8, 4.77, 4.77, 40.8, 40.8], "june_total": 935.8, "type": "Senior Care Center"}}, "hourly_profile": {"A": {"wd": [0.1976, 0.2052, 0.1985, 0.1999, 0.1996, 0.2001, 0.205, 2.8428, 3.0515, 3.0301, 3.2481, 3.2495, 4.0689, 3.1528, 3.7854, 2.8863, 3.4785, 3.0433, 3.1225, 0.1982, 0.1942, 0.2037, 0.2009, 0.2006], "we": [0.1971, 0.199, 0.1928, 0.2039, 0.1982, 0.1953, 0.1871, 0.1941, 0.196, 0.1999, 0.1967, 0.2014, 0.2041, 0.2023, 0.2045, 0.199, 0.1928, 0.2059, 0.194, 0.1962, 0.2007, 0.2028, 0.1957, 0.2067]}, "B": {"wd": [0.1981, 0.1935, 0.1961, 0.1965, 0.2017, 0.1996, 0.1943, 3.0728, 3.2452, 2.8298, 3.1901, 2.9963, 3.2328, 3.3657, 3.2613, 3.2141, 3.2698, 3.1942, 3.4309, 0.1925, 0.196, 0.1973, 0.1943, 0.1963], "we": [0.2037, 0.1997, 0.1936, 0.1947, 0.2079, 0.1974, 0.2011, 0.1978, 0.1999, 0.2018, 0.1965, 0.2077, 0.2019, 0.2002, 0.1987, 0.1972, 0.1932, 0.1977, 0.2052, 0.2025, 0.1909, 0.2007, 0.1905, 0.1965]}, "C": {"wd": [0.1999, 0.2027, 0.2014, 0.1976, 0.2032, 0.1941, 0.2045, 3.0613, 3.0498, 3.3853, 3.1707, 3.1075, 3.0799, 3.1426, 3.1597, 3.303, 3.2791, 3.1673, 3.0502, 0.2028, 0.198, 0.1996, 0.2012, 0.1949], "we": [0.1957, 0.2, 0.1998, 0.1937, 0.1987, 0.2, 0.1951, 0.1964, 0.1924, 0.2043, 0.1993, 0.1948, 0.2036, 0.2054, 0.201, 0.195, 0.2039, 0.1911, 0.2055, 0.2026, 0.207, 0.1933, 0.1974, 0.2014]}, "D": {"wd": [0.1991, 0.2003, 0.1958, 0.1979, 0.1979, 0.2023, 0.1938, 3.2726, 3.2439, 3.1849, 3.2017, 3.4316, 3.2296, 2.9782, 3.2292, 2.9697, 3.2502, 2.9251, 3.1798, 0.1982, 0.1942, 0.1958, 0.2002, 0.1979], "we": [0.1924, 0.2022, 0.2048, 0.1983, 0.1985, 0.1973, 0.2042, 0.1941, 0.1974, 0.2036, 0.2043, 0.1997, 0.1976, 0.1983, 0.1968, 0.2077, 0.1954, 0.1997, 0.2068, 0.2063, 0.1975, 0.1983, 0.2027, 0.2005]}, "E": {"wd": [0.202, 0.2051, 0.2052, 0.2019, 0.2049, 0.3207, 0.1984, 3.1105, 3.4145, 4.9992, 3.0218, 3.0271, 3.1639, 3.2718, 3.1862, 3.4068, 3.1265, 3.3307, 2.9841, 0.2026, 0.201, 0.2001, 0.1999, 0.4044], "we": [0.1999, 0.2071, 0.1953, 0.196, 0.1966, 0.2007, 0.1979, 0.2018, 0.198, 0.1946, 0.204, 0.1948, 0.1957, 0.1993, 0.2038, 0.1993, 0.2004, 0.2018, 0.2023, 0.2082, 0.1945, 0.1975, 0.2017, 0.2006]}, "F": {"wd": [0.1976, 0.1941, 0.1993, 0.1962, 0.1988, 0.199, 0.1996, 3.1049, 3.1447, 3.1253, 3.0657, 3.0048, 3.0484, 3.3515, 2.9828, 3.1506, 3.1114, 3.0983, 3.2995, 0.1993, 0.1988, 0.1978, 0.2022, 0.1967], "we": [0.2027, 0.2042, 0.2009, 0.204, 0.1931, 0.1982, 0.1984, 0.2013, 0.1946, 0.1911, 0.1953, 0.1977, 0.199, 0.1993, 0.1996, 0.2029, 0.2, 0.2024, 0.1993, 0.1939, 0.1957, 0.2, 0.1923, 0.1961]}, "G": {"wd": [0.1968, 0.2011, 0.2003, 0.2041, 0.2026, 0.2051, 0.1949, 3.1659, 2.9988, 3.2258, 3.0603, 3.1532, 3.2475, 3.0249, 3.1001, 2.9612, 3.2832, 3.1772, 3.1159, 0.2027, 0.1985, 0.1977, 0.1977, 0.1997], "we": [0.2047, 0.206, 0.2066, 0.1991, 0.1916, 0.1938, 0.1977, 0.1953, 0.2005, 0.2048, 0.1909, 0.203, 0.2057, 0.1977, 0.1943, 0.2051, 0.1957, 0.2034, 0.1967, 0.201, 0.2051, 0.1963, 0.1989, 0.1983]}, "H": {"wd": [0.1983, 0.1969, 0.1969, 0.1976, 0.2003, 0.1969, 0.1978, 3.2097, 3.4537, 3.1517, 3.0608, 3.1537, 3.2396, 3.0962, 3.2921, 3.238, 3.2886, 3.0201, 2.9822, 0.1999, 0.1979, 0.2009, 0.1951, 0.1999], "we": [0.2023, 0.1989, 0.2091, 0.1997, 0.2029, 0.2033, 0.2007, 0.2003, 0.1972, 0.2073, 0.1967, 0.1907, 0.1964, 0.1938, 0.198, 0.1991, 0.2018, 0.197, 0.1969, 0.1964, 0.2081, 0.1908, 0.189, 0.2014]}, "I": {"wd": [0.2022, 0.1994, 0.2007, 0.1986, 0.1934, 0.1973, 0.1967, 3.3317, 3.0847, 3.1409, 3.0093, 3.1117, 3.2296, 3.3856, 3.1327, 3.1202, 3.2777, 3.2125, 3.2993, 0.2077, 0.1995, 0.1999, 0.1964, 0.199], "we": [0.2113, 0.2042, 0.2008, 0.1949, 0.2138, 0.1974, 0.1949, 0.205, 0.1973, 0.1965, 0.1951, 0.206, 0.1986, 0.1962, 0.1986, 0.1994, 0.191, 0.2004, 0.1988, 0.2047, 0.1999, 0.1988, 0.1968, 0.2004]}, "J": {"wd": [0.1974, 0.2043, 0.2022, 0.1948, 0.1988, 0.2, 0.1965, 3.1025, 3.2232, 3.0138, 3.047, 3.2295, 3.0635, 3.1974, 3.1871, 3.2125, 3.2642, 3.2023, 3.1894, 0.198, 0.1978, 0.2015, 0.199, 0.1954], "we": [0.2049, 0.2038, 0.1968, 0.1939, 0.2018, 0.1929, 0.2067, 0.1976, 0.2108, 0.1957, 0.2039, 0.2006, 0.1932, 0.1967, 0.2005, 0.2022, 0.2011, 0.2008, 0.1999, 0.1912, 0.1945, 0.1971, 0.2043, 0.2033]}, "K": {"wd": [0.2032, 0.1982, 0.1988, 0.1984, 0.1976, 0.1997, 0.2021, 3.2877, 3.2035, 3.2245, 3.1756, 3.1541, 3.2246, 3.0593, 3.1446, 3.1633, 3.2288, 3.2133, 3.0519, 0.1999, 0.1959, 0.1985, 0.1947, 0.1929], "we": [0.1964, 0.2037, 0.2007, 0.2054, 0.2068, 0.2058, 0.1946, 0.1981, 0.2003, 0.1943, 0.1977, 0.2008, 0.1981, 0.2028, 0.2038, 0.1953, 0.2023, 0.1951, 0.1963, 0.2004, 0.1956, 0.2073, 0.2053, 0.1918]}, "L": {"wd": [0.1943, 0.5329, 0.2001, 0.1939, 0.2037, 0.1977, 0.1962, 3.2123, 4.6377, 3.2202, 3.1018, 3.2086, 3.0016, 3.3051, 3.3455, 3.1889, 3.0241, 3.0696, 3.0852, 0.2707, 0.3962, 0.1994, 0.1981, 0.1959], "we": [0.2041, 0.1978, 0.1983, 0.2039, 0.2005, 0.2066, 0.1934, 0.1953, 0.2058, 0.2002, 0.1973, 0.1992, 0.2013, 0.2056, 0.2029, 0.1961, 0.2056, 0.1968, 0.2003, 0.2026, 0.2021, 0.1962, 0.2054, 0.2]}, "M": {"wd": [0.1965, 0.1992, 0.1999, 0.2001, 0.1998, 0.196, 0.1975, 3.0055, 3.1081, 3.1193, 3.0732, 3.2265, 3.1646, 3.0865, 3.1846, 3.1251, 2.9421, 3.104, 3.2343, 0.1981, 0.1997, 0.1955, 0.2039, 0.1967], "we": [0.2025, 0.1945, 0.2042, 0.1968, 0.196, 0.1954, 0.1908, 0.2014, 0.2016, 0.1986, 0.1991, 0.2015, 0.1963, 0.2043, 0.2052, 0.1876, 0.2034, 0.1987, 0.2006, 0.2008, 0.2017, 0.1979, 0.1946, 0.2019]}, "N": {"wd": [0.193, 0.2001, 0.1985, 0.1959, 0.1999, 0.2031, 0.1991, 3.3413, 2.9103, 3.003, 3.0154, 3.015, 3.0791, 2.9737, 3.1578, 5.3667, 3.1271, 3.9154, 3.2464, 0.2002, 0.1994, 0.1985, 0.4069, 0.1941], "we": [0.1988, 0.2037, 0.1928, 0.2002, 0.1985, 0.2007, 0.1962, 0.1957, 0.2043, 0.2014, 0.1953, 0.199, 0.195, 0.2008, 0.1879, 0.1986, 0.1923, 0.2023, 0.2004, 0.2063, 0.2033, 0.1978, 0.2022, 0.1984]}, "O": {"wd": [0.1949, 0.2017, 0.1962, 0.1975, 0.1978, 0.1957, 0.1981, 3.1806, 3.1445, 3.0065, 3.2287, 3.1016, 3.2788, 3.1167, 3.3916, 3.1663, 2.8765, 3.264, 2.9565, 0.1957, 0.1901, 0.1986, 0.2015, 0.1965], "we": [0.1998, 0.2015, 0.2033, 0.1974, 0.196, 0.1961, 0.2015, 0.1946, 0.2016, 0.1993, 0.2011, 0.1894, 0.1956, 0.2068, 0.2025, 0.1966, 0.2019, 0.2012, 0.2014, 0.1997, 0.2003, 0.1928, 0.1998, 0.1972]}, "P": {"wd": [0.1966, 0.2032, 0.1955, 0.1955, 0.1936, 0.1956, 0.1991, 3.2587, 3.1425, 3.271, 3.3764, 2.9602, 3.2936, 3.2561, 3.1584, 3.3088, 3.2398, 3.3065, 3.0678, 0.1988, 0.1969, 0.1921, 0.1998, 0.1973], "we": [0.2031, 0.1976, 0.1985, 0.1995, 0.1933, 0.1957, 0.1914, 0.2052, 0.1994, 0.2028, 0.2036, 0.2057, 0.1991, 0.1985, 0.197, 0.2052, 0.1951, 0.1989, 0.2057, 0.1996, 0.2024, 0.2032, 0.2076, 0.2023]}, "Q": {"wd": [0.1953, 0.2024, 0.2021, 0.1925, 0.1978, 0.201, 0.1941, 3.125, 3.3012, 3.3774, 3.2666, 3.1958, 3.0, 3.3186, 3.3374, 3.0676, 2.9834, 3.2458, 3.1183, 0.1975, 0.2015, 0.1966, 0.1973, 0.2074], "we": [0.2056, 0.1928, 0.1994, 0.1993, 0.2011, 0.2042, 0.1963, 0.1997, 0.2047, 0.199, 0.1964, 0.2002, 0.1974, 0.1985, 0.2017, 0.2011, 0.1986, 0.2029, 0.201, 0.1991, 0.1949, 0.1943, 0.1962, 0.1981]}, "R": {"wd": [0.1956, 0.1963, 0.1977, 0.1931, 0.2032, 0.1975, 0.1964, 3.3238, 3.1066, 3.2635, 3.0907, 3.0937, 3.1255, 3.1193, 3.057, 3.384, 3.1634, 3.0987, 3.3597, 0.1981, 0.1975, 0.2011, 0.2052, 0.2003], "we": [0.1942, 0.1987, 0.2011, 0.1993, 0.2034, 0.2047, 0.1925, 0.2018, 0.2014, 0.1983, 0.2053, 0.1994, 0.1953, 0.1967, 0.1964, 0.1986, 0.1994, 0.1977, 0.2014, 0.1987, 0.1973, 0.2026, 0.2079, 0.1968]}, "S": {"wd": [0.1941, 0.1965, 0.2, 0.1997, 0.1973, 0.1993, 0.2003, 3.3641, 3.0687, 3.253, 3.1494, 3.2358, 3.1064, 3.3146, 3.2814, 3.2328, 3.2241, 3.1091, 3.1869, 0.2005, 0.1972, 0.2015, 0.1998, 0.1953], "we": [0.1998, 0.1932, 0.1962, 0.206, 0.2007, 0.1996, 0.1968, 0.192, 0.1975, 0.1997, 0.2033, 0.1964, 0.1951, 0.2008, 0.201, 0.1938, 0.2007, 0.2012, 0.1935, 0.195, 0.2009, 0.2014, 0.2054, 0.196]}, "T": {"wd": [0.1996, 0.1999, 0.1965, 0.1963, 0.2001, 0.2011, 0.1997, 3.233, 3.3158, 3.4253, 2.8983, 3.0707, 2.9753, 3.0952, 3.1496, 3.3885, 3.2132, 3.3715, 3.2615, 0.2014, 0.1959, 0.1968, 0.1935, 0.2048], "we": [0.2041, 0.203, 0.2008, 0.2004, 0.207, 0.1922, 0.1965, 0.1908, 0.1965, 0.2038, 0.1996, 0.2029, 0.1873, 0.1966, 0.1981, 0.1986, 0.2037, 0.2018, 0.2005, 0.2021, 0.194, 0.202, 0.2044, 0.2037]}, "U": {"wd": [0.1992, 0.2011, 0.2001, 0.2027, 0.202, 0.1986, 0.1979, 2.9741, 3.3559, 3.0898, 3.425, 3.2948, 3.266, 3.3513, 3.2291, 3.2238, 3.1531, 3.0556, 3.3175, 0.1937, 0.2019, 0.1977, 0.1985, 0.2037], "we": [0.2001, 0.2015, 0.1992, 0.2001, 0.2088, 0.1985, 0.2013, 0.2008, 0.198, 0.1927, 0.1971, 0.1974, 0.1958, 0.2036, 0.2003, 0.1963, 0.1964, 0.1961, 0.2079, 0.1971, 0.2001, 0.1966, 0.2009, 0.2021]}, "V": {"wd": [0.2027, 0.1974, 0.2013, 0.2044, 0.1968, 0.2022, 0.2059, 2.9981, 3.0395, 3.1112, 3.0154, 3.2362, 2.9687, 3.0033, 3.1424, 3.3294, 3.1353, 3.3501, 3.3773, 0.2023, 0.1999, 0.1951, 0.1977, 0.1975], "we": [0.1949, 0.1942, 0.2004, 0.2027, 0.2004, 0.1986, 0.1993, 0.2045, 0.2083, 0.2043, 0.1913, 0.2037, 0.1884, 0.2002, 0.2014, 0.2085, 0.1983, 0.2048, 0.2067, 0.1959, 0.2036, 0.1962, 0.2056, 0.2029]}, "W": {"wd": [0.1853, 0.1959, 0.1965, 0.1995, 0.1951, 0.1926, 0.2038, 3.1361, 3.3093, 2.9547, 3.1521, 3.0613, 2.9793, 2.9558, 3.0752, 3.2924, 2.9253, 3.0909, 3.414, 0.1991, 0.2033, 0.2026, 0.2072, 0.2064], "we": [0.2021, 0.2061, 0.1945, 0.2027, 0.1974, 0.197, 0.2033, 0.1908, 0.2, 0.1983, 0.1941, 0.1981, 0.1935, 0.1995, 0.1958, 0.2043, 0.1987, 0.1995, 0.2029, 0.2033, 0.201, 0.1954, 0.2102, 0.1908]}, "X": {"wd": [0.2008, 0.1989, 0.2018, 0.1985, 0.1963, 0.1986, 0.2038, 3.2434, 3.1406, 3.2779, 3.1655, 3.1568, 3.2998, 3.3059, 3.1743, 3.1478, 3.1427, 3.3506, 3.272, 0.2062, 0.1964, 0.1895, 0.195, 0.1996], "we": [0.1929, 0.2035, 0.2045, 0.185, 0.1993, 0.2068, 0.2007, 0.2054, 0.2042, 0.1951, 0.1927, 0.1888, 0.1988, 0.202, 0.197, 0.2008, 0.1994, 0.2035, 0.1928, 0.1943, 0.1922, 0.1923, 0.2046, 0.2097]}, "Y": {"wd": [0.1976, 0.1973, 0.1913, 0.2007, 0.2017, 0.1995, 0.2057, 3.2006, 3.0665, 3.0019, 3.1628, 3.1218, 3.0014, 3.0832, 3.2324, 3.0205, 3.1005, 3.0256, 3.2354, 0.1992, 0.2007, 0.2006, 0.2024, 0.1982], "we": [0.2042, 0.1972, 0.1948, 0.1997, 0.1917, 0.1983, 0.207, 0.1987, 0.2037, 0.1987, 0.1989, 0.1983, 0.1923, 0.1971, 0.2003, 0.1988, 0.1958, 0.2005, 0.1993, 0.1994, 0.1992, 0.1962, 0.1944, 0.2086]}, "Z": {"wd": [0.1979, 0.2008, 0.1938, 0.1972, 0.1954, 0.2003, 0.2056, 3.1804, 2.9463, 3.1108, 3.1089, 2.9756, 3.1604, 3.1821, 3.1866, 3.1809, 3.2193, 3.1336, 3.2685, 0.1972, 0.2019, 0.197, 0.1914, 0.1956], "we": [0.1963, 0.1983, 0.2027, 0.1933, 0.2018, 0.1992, 0.2076, 0.1961, 0.2004, 0.2079, 0.1973, 0.1961, 0.1976, 0.2058, 0.2013, 0.2026, 0.1952, 0.1922, 0.2014, 0.1911, 0.1988, 0.2028, 0.1926, 0.1997]}, "AA": {"wd": [0.197, 0.1991, 0.2009, 0.1963, 0.1973, 0.2003, 0.1999, 2.8236, 3.1047, 3.4341, 3.3716, 3.1646, 3.0867, 3.26, 3.1326, 3.2937, 3.1238, 3.1367, 3.0787, 0.1963, 0.1927, 0.1997, 0.1974, 0.1951], "we": [0.1943, 0.1981, 0.2028, 0.2051, 0.2, 0.201, 0.2008, 0.2026, 0.1941, 0.2009, 0.2029, 0.1956, 0.2017, 0.1951, 0.1988, 0.1983, 0.2003, 0.2048, 0.2015, 0.1988, 0.1974, 0.191, 0.1959, 0.1908]}, "AB": {"wd": [0.196, 0.1975, 0.1978, 0.21, 0.1962, 0.1946, 0.1974, 3.0822, 3.1581, 3.1271, 3.1169, 3.3407, 3.0347, 3.1063, 3.4067, 3.3427, 3.1568, 3.2118, 3.2409, 0.1974, 0.1979, 0.195, 0.2006, 0.2023], "we": [0.2057, 0.1993, 0.2049, 0.2016, 0.2062, 0.1951, 0.1889, 0.199, 0.2052, 0.2014, 0.197, 0.2043, 0.1893, 0.1958, 0.2116, 0.2018, 0.211, 0.2046, 0.1977, 0.1985, 0.2048, 0.1943, 0.2009, 0.2015]}, "AC": {"wd": [0.2038, 0.1979, 0.2018, 0.2026, 0.1977, 0.2011, 0.2023, 3.2889, 3.2731, 3.1921, 3.1678, 3.0355, 3.3354, 3.2448, 3.0263, 3.2867, 3.3232, 3.0822, 3.2813, 0.1953, 0.201, 0.1963, 0.1935, 0.1933], "we": [0.1947, 0.1911, 0.1961, 0.2002, 0.1958, 0.1952, 0.198, 0.1919, 0.1971, 0.1996, 0.2017, 0.2026, 0.1974, 0.1947, 0.2006, 0.1981, 0.2014, 0.2035, 0.2077, 0.2016, 0.2007, 0.1948, 0.1993, 0.202]}, "AD": {"wd": [0.2006, 0.2033, 0.1915, 0.203, 0.1973, 0.1977, 0.2012, 3.1983, 3.4304, 3.2463, 3.2645, 3.0449, 3.0517, 3.1008, 3.1901, 3.0576, 3.368, 3.3332, 3.1147, 0.2005, 0.2019, 0.2025, 0.1984, 0.2052], "we": [0.2036, 0.1949, 0.2082, 0.2005, 0.2002, 0.2048, 0.1987, 0.1983, 0.1958, 0.1979, 0.1908, 0.1915, 0.1961, 0.1979, 0.2025, 0.1983, 0.1986, 0.1943, 0.1968, 0.2004, 0.197, 0.2014, 0.1986, 0.2028]}}, "june_days": [{"day": 1, "weekend": false, "dow": "Mon"}, {"day": 2, "weekend": false, "dow": "Tue"}, {"day": 3, "weekend": false, "dow": "Wed"}, {"day": 4, "weekend": false, "dow": "Thu"}, {"day": 5, "weekend": false, "dow": "Fri"}, {"day": 6, "weekend": true, "dow": "Sat"}, {"day": 7, "weekend": true, "dow": "Sun"}, {"day": 8, "weekend": false, "dow": "Mon"}, {"day": 9, "weekend": false, "dow": "Tue"}, {"day": 10, "weekend": false, "dow": "Wed"}, {"day": 11, "weekend": false, "dow": "Thu"}, {"day": 12, "weekend": false, "dow": "Fri"}, {"day": 13, "weekend": true, "dow": "Sat"}, {"day": 14, "weekend": true, "dow": "Sun"}, {"day": 15, "weekend": false, "dow": "Mon"}, {"day": 16, "weekend": false, "dow": "Tue"}, {"day": 17, "weekend": false, "dow": "Wed"}, {"day": 18, "weekend": false, "dow": "Thu"}, {"day": 19, "weekend": false, "dow": "Fri"}, {"day": 20, "weekend": true, "dow": "Sat"}, {"day": 21, "weekend": true, "dow": "Sun"}, {"day": 22, "weekend": false, "dow": "Mon"}, {"day": 23, "weekend": false, "dow": "Tue"}, {"day": 24, "weekend": false, "dow": "Wed"}, {"day": 25, "weekend": false, "dow": "Thu"}, {"day": 26, "weekend": false, "dow": "Fri"}, {"day": 27, "weekend": true, "dow": "Sat"}, {"day": 28, "weekend": true, "dow": "Sun"}, {"day": 29, "weekend": false, "dow": "Mon"}, {"day": 30, "weekend": false, "dow": "Tue"}], "anomaly_log": {"counts": {"Spike": 16, "Flatline": 25, "Drop (Equipment Failure)": 18}, "by_site": {"L": 22, "AA": 1, "A": 7, "Y": 2, "E": 7, "N": 20}, "total": 59}};
+const BENCH = [{"preschool": "A", "type": "Senior Care Center", "annual_eui": 13.62, "pax": 58, "per_pax": 14.54}, {"preschool": "B", "type": "Active Aging Center", "annual_eui": 6.43, "pax": 60, "per_pax": 13.83}, {"preschool": "C", "type": "Preschool", "annual_eui": 13.93, "pax": 47, "per_pax": 17.53}, {"preschool": "D", "type": "Senior Care Center", "annual_eui": 6.05, "pax": 48, "per_pax": 17.22}, {"preschool": "E", "type": "Active Aging Center", "annual_eui": 6.44, "pax": 54, "per_pax": 16.12}, {"preschool": "F", "type": "Active Aging Center", "annual_eui": 6.5, "pax": 34, "per_pax": 23.96}, {"preschool": "G", "type": "Active Aging Center", "annual_eui": 19.39, "pax": 27, "per_pax": 30.22}, {"preschool": "H", "type": "Preschool", "annual_eui": 9.13, "pax": 27, "per_pax": 30.67}, {"preschool": "I", "type": "Senior Care Center", "annual_eui": 5.24, "pax": 39, "per_pax": 21.32}, {"preschool": "J", "type": "Senior Care Center", "annual_eui": 10.63, "pax": 37, "per_pax": 22.26}, {"preschool": "K", "type": "Senior Care Center", "annual_eui": 8.07, "pax": 45, "per_pax": 18.38}, {"preschool": "L", "type": "Preschool", "annual_eui": 5.73, "pax": 39, "per_pax": 22.13}, {"preschool": "M", "type": "Active Aging Center", "annual_eui": 14.28, "pax": 37, "per_pax": 21.96}, {"preschool": "N", "type": "Senior Care Center", "annual_eui": 9.58, "pax": 53, "per_pax": 16.4}, {"preschool": "O", "type": "Active Aging Center", "annual_eui": 5.4, "pax": 47, "per_pax": 17.42}, {"preschool": "P", "type": "Preschool", "annual_eui": 8.87, "pax": 52, "per_pax": 16.09}, {"preschool": "Q", "type": "Senior Care Center", "annual_eui": 7.95, "pax": 40, "per_pax": 20.78}, {"preschool": "R", "type": "Senior Care Center", "annual_eui": 14.51, "pax": 45, "per_pax": 18.41}, {"preschool": "S", "type": "Preschool", "annual_eui": 6.59, "pax": 43, "per_pax": 19.41}, {"preschool": "T", "type": "Senior Care Center", "annual_eui": 5.78, "pax": 56, "per_pax": 14.86}, {"preschool": "U", "type": "Senior Care Center", "annual_eui": 6.4, "pax": 43, "per_pax": 19.51}, {"preschool": "V", "type": "Senior Care Center", "annual_eui": 5.94, "pax": 44, "per_pax": 18.63}, {"preschool": "W", "type": "Active Aging Center", "annual_eui": 17.69, "pax": 49, "per_pax": 16.58}, {"preschool": "X", "type": "Preschool", "annual_eui": 13.15, "pax": 45, "per_pax": 18.61}, {"preschool": "Y", "type": "Preschool", "annual_eui": 5.19, "pax": 48, "per_pax": 16.89}, {"preschool": "Z", "type": "Senior Care Center", "annual_eui": 7.12, "pax": 40, "per_pax": 20.45}, {"preschool": "AA", "type": "Preschool", "annual_eui": 10.22, "pax": 51, "per_pax": 16.17}, {"preschool": "AB", "type": "Active Aging Center", "annual_eui": 6.95, "pax": 49, "per_pax": 16.96}, {"preschool": "AC", "type": "Senior Care Center", "annual_eui": 6.19, "pax": 40, "per_pax": 20.87}, {"preschool": "AD", "type": "Senior Care Center", "annual_eui": 5.34, "pax": 53, "per_pax": 15.71}];
+
+const TYPES = { 'Senior Care Center':{c:'#2980b9',cls:'sen',sh:'Senior'},
+                'Active Aging Center':{c:'#27ae60',cls:'act',sh:'Active Aging'},
+                'Preschool':{c:'#e74c3c',cls:'pre',sh:'Preschool'} };
+const CIRCUIT_COLORS = ['#2980b9','#3aa0d8','#e67e22','#f1c40f','#f39c12','#d4ac0d','#27ae60','#16a085','#1ab5a3'];
+const fmt = n => n.toLocaleString(undefined,{maximumFractionDigits:0});
+const fmt1 = n => n.toLocaleString(undefined,{minimumFractionDigits:1,maximumFractionDigits:1});
+const fmt2 = n => n.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const siteType = {}; BENCH.forEach(b=>siteType[b.preschool]=b.type);
+
+/* ---------- SECTION 1 ---------- */
+(function(){
+  const s=A.summary;
+  const order=['Senior Care Center','Active Aging Center','Preschool'];
+
+  // header band: portfolio totals
+  document.getElementById('s1Band').innerHTML = `
+    <div class="bi"><div class="n" style="color:#4a9fe0;">${s.total_centers}</div><div class="l">Total Centres</div></div>
+    <div class="bi"><div class="n" style="color:#b39ddb;">${fmt(s.total_kwh)}</div><div class="l">Total Energy · ${A.month} (kWh)</div></div>
+    <div class="bi"><div class="n" style="color:#f5b041;">S$${fmt(s.total_cost)}</div><div class="l">Total Cost · ${A.month}</div></div>`;
+
+  // energy by type
+  const siteMonthly={}; for(const st in A.standby.by_site){ siteMonthly[st]=A.standby.by_site[st]+A.operating.by_site[st]; }
+  const byType={}; order.forEach(t=>byType[t]={kwh:0,n:0});
+  for(const st in siteMonthly){ const t=siteType[st]; byType[t].kwh+=siteMonthly[st]; byType[t].n++; }
+  const tb=document.querySelector('#typeTable tbody');
+  order.forEach(t=>{ const d=byType[t]; const cost=d.kwh*A.tariff; const share=d.kwh/s.total_kwh*100;
+    tb.innerHTML+=`<tr><td><span class="badge ${TYPES[t].cls}">${t}</span></td><td class="num">${d.n}</td>
+      <td class="num">${fmt(d.kwh)}</td><td class="num">${fmt(cost)}</td><td class="num">${share.toFixed(1)}%</td></tr>`; });
+  document.getElementById('tariffNote').innerHTML=`<strong>Cost assumption:</strong> S$${A.tariff}/kWh (Singapore regulated tariff). Adjust the tariff in the source to recost. Energy is metered May 2026 (31 days).`;
+})();
+
+/* ---------- SECTION 2 : benchmark tables ---------- */
+const mean=a=>a.reduce((x,y)=>x+y,0)/a.length;
+const std=a=>{const m=mean(a);return Math.sqrt(a.reduce((s,v)=>s+(v-m)**2,0)/a.length);};
+const normalPDF=(x,mu,s)=>(1/(s*Math.sqrt(2*Math.PI)))*Math.exp(-0.5*((x-mu)/s)**2);
+function percentile(sv,p){const n=sv.length;if(n===1)return sv[0];const r=(p/100)*(n-1),lo=Math.floor(r),f=r-lo;return lo+1<n?sv[lo]+f*(sv[lo+1]-sv[lo]):sv[lo];}
+const bgroups={}; BENCH.forEach(d=>(bgroups[d.type]=bgroups[d.type]||[]).push(d));
+const typeOrder=Object.keys(bgroups).sort((a,b)=>bgroups[b].length-bgroups[a].length||a.localeCompare(b));
+const charts={};
+function renderBench(cfg){
+  const{key,bodyId,benchDec,outletDec,xLabel,valSuffix}=cfg;
+  const tb=document.getElementById(bodyId);
+  typeOrder.forEach((type,i)=>{
+    const idx=key+'-'+i, T=TYPES[type], items=bgroups[type];
+    const vals=items.map(d=>d[key]).sort((a,b)=>a-b);
+    const p50=percentile(vals,50),p75=percentile(vals,75);
+    const above=items.filter(d=>d[key]>p75).sort((a,b)=>b[key]-a[key]);
+    const chips=above.length?above.map(o=>`<span class="outlet-chip">${o.preschool} <span class="ov">${o[key].toFixed(outletDec)}</span></span>`).join(''):'<span style="color:#999;font-style:italic;font-size:.85rem;">None above benchmark</span>';
+    const tr=document.createElement('tr'); tr.className='type-row'; tr.dataset.idx=idx; tr.dataset.body=bodyId;
+    tr.innerHTML=`<td><div class="type-name"><span class="rank-badge">${i+1}</span><span class="type-dot" style="background:${T.c}"></span>${type}</div>
+        <div style="font-size:.76rem;color:#888;margin-left:31px;">${items.length} outlets</div></td>
+      <td class="bench-val b50">${p50.toFixed(benchDec)}<span class="u">median</span></td>
+      <td class="bench-val b75">${p75.toFixed(benchDec)}<span class="u">P75</span></td>
+      <td>${chips}</td><td style="text-align:center;"><span class="arrow">▶</span></td>`;
+    tb.appendChild(tr);
+    const mu=mean(vals),sigma=std(vals),maxV=Math.max(...vals);
+    const ranked=[...items].sort((a,b)=>b[key]-a[key]);
+    const rk=ranked.map(r=>{const fl=r[key]>p75;return `<div style="display:flex;align-items:center;gap:9px;padding:4px 0;font-size:.84rem;">
+        <span style="font-weight:700;min-width:30px;${fl?'color:#c0392b;':''}">${r.preschool}</span>
+        <span class="bar" style="flex:1;"><i style="width:${(r[key]/maxV*100).toFixed(0)}%;background:${fl?'#e74c3c':T.c}"></i></span>
+        <span style="min-width:92px;text-align:right;font-weight:600;${fl?'color:#c0392b;':''}">${r[key].toFixed(benchDec)} ${valSuffix?`<small style="color:#999;font-weight:400;">${valSuffix(r)}</small>`:''}</span></div>`;}).join('');
+    const det=document.createElement('tr'); det.className='detail-row';
+    det.innerHTML=`<td colspan="5" style="padding:0;"><div class="detail-inner"><div class="detail-pad"><div class="bench-detail-grid">
+        <div><h4 style="font-size:.9rem;margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px;color:#333;">Bell Curve — ${type}</h4>
+          <div style="position:relative;height:300px;"><canvas id="chart-${idx}"></canvas></div>
+          <div style="font-size:.77rem;color:#888;margin-top:8px;">Dashed: 50% (blue) &amp; 75% (orange) benchmarks. Red markers = outlets above 75%.</div></div>
+        <div><h4 style="font-size:.9rem;margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px;color:#333;">Statistics</h4>
+          <div style="font-size:.86rem;">
+          <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px dashed #e2e2e2;"><span style="color:#666;">Mean (μ)</span><b>${mu.toFixed(benchDec)}</b></div>
+          <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px dashed #e2e2e2;"><span style="color:#666;">Std Dev (σ)</span><b>${sigma.toFixed(benchDec)}</b></div>
+          <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px dashed #e2e2e2;"><span style="color:#666;">Benchmark 50%</span><b style="color:#2980b9;">${p50.toFixed(benchDec)}</b></div>
+          <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px dashed #e2e2e2;"><span style="color:#666;">Benchmark 75%</span><b style="color:#e67e22;">${p75.toFixed(benchDec)}</b></div>
+          <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px dashed #e2e2e2;"><span style="color:#666;">Min / Max</span><b>${Math.min(...vals).toFixed(benchDec)} / ${maxV.toFixed(benchDec)}</b></div>
+          <div style="margin-top:12px;">${rk}</div></div></div>
+      </div></div></div></td>`;
+    tb.appendChild(det);
+    charts[idx]={built:false,key,type,T,mu,sigma,p50,p75,items,xLabel,benchDec};
+  });
+}
+function buildBenchChart(idx){
+  const c=charts[idx]; if(c.built)return; c.built=true;
+  const{key,T,mu,sigma,p50,p75,items,xLabel,benchDec}=c;
+  const lo=Math.max(0,mu-3.5*sigma),hi=mu+3.5*sigma,xs=[],ys=[];
+  for(let i=0;i<=200;i++){const x=lo+(hi-lo)*i/200;xs.push(x);ys.push(normalPDF(x,mu,sigma));}
+  const peak=normalPDF(mu,mu,sigma);
+  c.obj=new Chart(document.getElementById('chart-'+idx),{data:{datasets:[
+    {type:'line',label:'Distribution',data:xs.map((x,i)=>({x,y:ys[i]})),borderColor:T.c,backgroundColor:T.c+'22',fill:true,pointRadius:0,borderWidth:2.4,tension:.4,order:3},
+    {type:'line',label:'P50',data:[{x:p50,y:0},{x:p50,y:normalPDF(p50,mu,sigma)}],borderColor:'#2980b9',borderDash:[6,4],borderWidth:2,pointRadius:0,order:1},
+    {type:'line',label:'P75',data:[{x:p75,y:0},{x:p75,y:normalPDF(p75,mu,sigma)}],borderColor:'#e67e22',borderDash:[6,4],borderWidth:2,pointRadius:0,order:1},
+    {type:'scatter',label:'Above 75%',data:items.filter(d=>d[key]>p75).map(d=>({x:d[key],y:-peak*0.05,nm:d.preschool})),backgroundColor:'#e74c3c',borderColor:'#c0392b',pointRadius:7,pointStyle:'triangle',order:0},
+    {type:'scatter',label:'Within',data:items.filter(d=>d[key]<=p75).map(d=>({x:d[key],y:-peak*0.05,nm:d.preschool})),backgroundColor:T.c,pointRadius:6,pointStyle:'circle',order:0}
+  ]},options:{responsive:true,maintainAspectRatio:false,
+    plugins:{legend:{display:true,position:'top',labels:{usePointStyle:true,boxWidth:8,padding:9,font:{size:10},filter:i=>i.text!=='Distribution'}},
+      tooltip:{callbacks:{label:ctx=>{if(ctx.raw&&ctx.raw.nm)return `${ctx.raw.nm}: ${ctx.parsed.x.toFixed(benchDec)}`;
+        if(ctx.dataset.label==='P50')return `Benchmark 50%: ${p50.toFixed(benchDec)}`;
+        if(ctx.dataset.label==='P75')return `Benchmark 75%: ${p75.toFixed(benchDec)}`;return '';}}}},
+    scales:{x:{type:'linear',title:{display:true,text:xLabel,font:{size:11}}},
+      y:{type:'linear',title:{display:true,text:'Density'},ticks:{callback:v=>v<0?'':v.toFixed(4)}}}}});
+}
+function setOpen(row,open){
+  const inner=row.nextElementSibling.querySelector('.detail-inner');
+  if(open){row.classList.add('open');buildBenchChart(row.dataset.idx);
+    requestAnimationFrame(()=>{inner.style.maxHeight=inner.scrollHeight+'px';const o=charts[row.dataset.idx].obj;if(o)o.resize();
+      setTimeout(()=>{if(o)o.resize();inner.style.maxHeight=inner.scrollHeight+'px';},160);});
+  }else{row.classList.remove('open');inner.style.maxHeight='0px';}
+}
+renderBench({key:'annual_eui',bodyId:'body-eui',benchDec:2,outletDec:1,xLabel:'EUI (kWh/m²/yr)'});
+renderBench({key:'per_pax',bodyId:'body-pax',benchDec:1,outletDec:1,xLabel:'Energy per person (kWh/person/month)',valSuffix:r=>`(${r.pax}p)`});
+document.querySelectorAll('.type-row').forEach(row=>row.addEventListener('click',()=>{
+  const was=row.classList.contains('open');
+  document.querySelectorAll(`.type-row[data-body="${row.dataset.body}"]`).forEach(r=>{if(r!==row)setOpen(r,false);});
+  setOpen(row,!was);
+}));
+
+/* ---------- shared: circuit pie ---------- */
+function circuitPie(canvasId,byCircuit,total){
+  const labels=A.circuits, data=labels.map(c=>byCircuit[c]);
+  new Chart(document.getElementById(canvasId),{type:'doughnut',
+    data:{labels,datasets:[{data,backgroundColor:CIRCUIT_COLORS,borderWidth:2,borderColor:'#fff'}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:'52%',
+      plugins:{legend:{position:'right',labels:{usePointStyle:true,padding:9,font:{size:10.5}}},
+        tooltip:{callbacks:{label:c=>`${c.label}: ${fmt(c.parsed)} kWh (${(c.parsed/total*100).toFixed(1)}%)`}}}}});
+}
+
+/* ---------- shared: appliance pie (ranked) ---------- */
+const APP_COLOR={'Aircon':'#2980b9','Heater':'#e74c3c','Lighting':'#f1c40f','Plugload':'#16a085'};
+function appliancePie(canvasId,byApp,total){
+  const labels=[...A.appliances].sort((a,b)=>byApp[b]-byApp[a]);  // ranked high→low
+  const data=labels.map(a=>byApp[a]);
+  new Chart(document.getElementById(canvasId),{type:'doughnut',
+    data:{labels,datasets:[{data,backgroundColor:labels.map(a=>APP_COLOR[a]),borderWidth:2,borderColor:'#fff'}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:'52%',animation:false,
+      plugins:{legend:{position:'right',labels:{usePointStyle:true,padding:11,font:{size:11.5}}},
+        tooltip:{callbacks:{label:c=>`${c.label}: ${fmt(c.parsed)} kWh (${(c.parsed/total*100).toFixed(1)}%)`}}}}});
+}
+
+/* ---------- SECTION 3.1 : standby by appliance ---------- */
+(function(){
+  const sb=A.standby, pctStandby=sb.total/A.summary.total_kwh*100;
+  const ranked=[...A.appliances].sort((a,b)=>sb.by_appliance[b]-sb.by_appliance[a]);
+  const top=ranked[0], topShare=sb.by_appliance[top]/sb.total*100;
+  const sbExcess=Object.values(sb.hour_anomalies||{}).flat().reduce((a,x)=>a+x.var_kwh,0);
+  const sbSaving=sbExcess*A.tariff;
+  document.getElementById('standbyCards').innerHTML=`
+    <div class="card kpi-red"><div class="label">Total Standby Energy · ${A.month}</div><div class="value">${fmt(sb.total)}</div><div class="sub">kWh consumed while closed</div></div>
+    <div class="card kpi-orange"><div class="label">Standby Cost · ${A.month}</div><div class="value">S$${fmt(sb.total*A.tariff)}</div><div class="sub">@ S$${A.tariff}/kWh · saving target</div></div>
+    <div class="card kpi-purple"><div class="label">Share of Total</div><div class="value">${pctStandby.toFixed(1)}%</div><div class="sub">of all energy used</div></div>
+    <div class="card kpi-blue"><div class="label">Top Standby Appliance</div><div class="value">${top}</div><div class="sub">${topShare.toFixed(0)}% of standby (${fmt(sb.by_appliance[top])} kWh)</div></div>
+    <div class="card kpi-green"><div class="label">Potential Saving · spikes fixed</div><div class="value">S$${fmt2(sbSaving)}</div><div class="sub">${fmt2(sbExcess)} kWh excess · ${sb.hour_anomaly_total} spike${sb.hour_anomaly_total!==1?'s':''} &gt;50% · ~S$${fmt(sbSaving*12)}/yr</div></div>`;
+  appliancePie('standbyPie',sb.by_appliance,sb.total);
+  document.getElementById('sbTariff').textContent=A.tariff;
+  const at=document.querySelector('#applianceTable tbody');
+  ranked.forEach((a,i)=>{const v=sb.by_appliance[a],share=v/sb.total*100;
+    at.innerHTML+=`<tr><td><b>${i+1}</b></td>
+      <td><span style="display:inline-flex;align-items:center;gap:7px;"><span class="dot" style="background:${APP_COLOR[a]}"></span><b>${a}</b></span></td>
+      <td class="num">${fmt(v)}</td><td class="num">${fmt(v*A.tariff)}</td>
+      <td class="num"><span style="display:inline-flex;align-items:center;gap:7px;justify-content:flex-end;"><span class="bar" style="width:60px;"><i style="width:${share.toFixed(0)}%;background:${APP_COLOR[a]}"></i></span>${share.toFixed(1)}%</span></td></tr>`;});
+  at.innerHTML+=`<tr style="font-weight:700;"><td></td><td>Total</td><td class="num">${fmt(sb.total)}</td><td class="num">${fmt(sb.total*A.tariff)}</td><td class="num">100%</td></tr>`;
+})();
+
+/* ---------- SECTION 3.2 : non-operating hour spike analysis (per-hour-slot baseline, all sites) ---------- */
+(function(){
+  const sb=A.standby, HA=sb.hour_anomalies||{};
+  // per-site rollup
+  const siteRows=Object.entries(HA).map(([s,arr])=>({
+      s, type:siteType[s], n:arr.length, worst:arr[0], anoms:arr
+    })).sort((a,b)=>b.worst.var_pct-a.worst.var_pct);
+
+  document.getElementById('sbMethod').innerHTML=`<strong>Method:</strong> this is the Site-A deep-dive applied to every centre. For each site, each non-operating hour is benchmarked against <b>that site's own average for the same hour slot</b> across May. A spike is any hour <b>&gt;50% above</b> its slot average. <b>${fmt(sb.hour_anomaly_total)} spike${sb.hour_anomaly_total!==1?'s':''}</b> were flagged across <b>${siteRows.length}</b> of 30 sites.`;
+
+  // summary by site with expandable per-site detail dropdown
+  const sumTb=document.querySelector('#sbSummary tbody');
+  siteRows.forEach(r=>{const T=TYPES[r.type],w=r.worst;
+    const detailRows=r.anoms.map(a=>`<tr>
+        <td>Day ${a.day} · ${a.hour} <small style="color:#999;">(${a.daytype})</small></td>
+        <td class="num">${fmt2(a.kwh)}</td>
+        <td class="num" style="color:#888;">${fmt2(a.avg)}</td>
+        <td class="num flag">+${fmt(a.var_pct)}%<br><small style="color:#999;font-weight:400;">+${fmt2(a.var_kwh)} kWh</small></td>
+        <td>${a.circuit} <small style="color:#999;">(${a.appliance} · ${fmt(a.circuit_share)}% of hr)</small></td></tr>`).join('');
+    sumTb.innerHTML+=`<tr class="sb-row">
+      <td><b>${r.s}</b></td><td><span class="badge ${T.cls}">${T.sh}</span></td>
+      <td class="num">${r.n}</td>
+      <td class="num flag">+${fmt(w.var_pct)}%</td>
+      <td>Day ${w.day} · ${w.hour} <small style="color:#999;">(${w.daytype})</small></td>
+      <td>${w.circuit} <small style="color:#999;">(${w.appliance})</small></td>
+      <td style="text-align:center;"><span class="arrow">▶</span></td></tr>
+      <tr class="sb-detail"><td colspan="7" style="padding:0;border:none;"><div class="sb-inner"><div class="ip">
+        <table><thead><tr><th>When (day · hour)</th><th class="num">Hour kWh</th><th class="num">Slot avg</th><th class="num">Variance</th><th>Cause (circuit · appliance)</th></tr></thead>
+        <tbody>${detailRows}</tbody></table>
+      </div></div></td></tr>`;});
+
+  // accordion behaviour
+  document.querySelectorAll('#sbSummary .sb-row').forEach(row=>{
+    row.addEventListener('click',()=>{
+      const inner=row.nextElementSibling.querySelector('.sb-inner');
+      const open=row.classList.toggle('open');
+      inner.style.maxHeight=open?inner.scrollHeight+'px':'0px';
+    });
+  });
+
+  document.getElementById('standbyNote').innerHTML=`<strong>How to read this:</strong> with the threshold at <b>+50%</b>, the normal standby jitter is filtered out — only genuine events remain. <b>${siteRows[0].s}</b> is the worst at <b>+${fmt(siteRows[0].worst.var_pct)}%</b>, driven by <b>${siteRows[0].worst.circuit}</b> (Day ${siteRows[0].worst.day} ${siteRows[0].worst.hour}). Expand any site to see each spike: when it happened, how far above the site's own slot average it ran ("variance"), and the circuit contributing the most in that hour ("cause").`;
+})();
+
+/* ---------- SECTION 3.3 : SOP compliance score + Section-3 key focus ---------- */
+(function(){
+  const sb=A.standby, HA=sb.hour_anomalies||{};
+  const sites=Object.keys(sb.by_site);
+  const rows=sites.map(s=>{const sp=HA[s]?HA[s].length:0; return {s, type:siteType[s], spikes:sp, score:100-sp};});
+  rows.sort((a,b)=>a.score-b.score || b.spikes-a.spikes || a.s.localeCompare(b.s));
+  const breaches=rows.filter(r=>r.score<100);
+  const fullyOk=rows.length-breaches.length;
+  const avgScore=rows.reduce((a,r)=>a+r.score,0)/rows.length;
+
+  document.getElementById('sopCards').innerHTML=`
+    <div class="card kpi-green"><div class="label">Fully Compliant Sites</div><div class="value">${fullyOk} / ${rows.length}</div><div class="sub">score = 100</div></div>
+    <div class="card kpi-red"><div class="label">Sites Breaching SOP</div><div class="value">${breaches.length}</div><div class="sub">${breaches.map(b=>b.s).join(', ')||'none'}</div></div>
+    <div class="card kpi-blue"><div class="label">Avg Compliance Score</div><div class="value">${fmt1(avgScore)}</div><div class="sub">portfolio average</div></div>
+    <div class="card kpi-orange"><div class="label">Lowest Score</div><div class="value">${rows[0].score}</div><div class="sub">site ${rows[0].s} · ${rows[0].spikes} spike${rows[0].spikes!==1?'s':''}</div></div>`;
+
+  const tb=document.querySelector('#sopTable tbody');
+  rows.forEach((r,i)=>{const T=TYPES[r.type];
+    const color=r.score>=100?'#27ae60':r.score>=99?'#e67e22':'#e74c3c';
+    tb.innerHTML+=`<tr${r.score<100?' class="over"':''}>
+      <td>${i+1}</td><td><b>${r.s}</b></td><td><span class="badge ${T.cls}">${T.sh}</span></td>
+      <td class="num">${r.spikes}</td>
+      <td class="num" style="color:${color};font-weight:700;font-size:1.08rem;">${r.score}</td>
+      <td><span style="display:inline-flex;align-items:center;gap:8px;"><span class="bar" style="width:130px;"><i style="width:${r.score}%;background:${color}"></i></span><small style="color:#999;">${r.score}/100</small></span></td></tr>`;});
+
+  // Section-3 Next Step / Key Focus box
+  const pct=sb.total/A.summary.total_kwh*100;
+  const ranked=[...A.appliances].sort((a,b)=>sb.by_appliance[b]-sb.by_appliance[a]);
+  const topApp=ranked[0], topShare=sb.by_appliance[topApp]/sb.total*100;
+  const breachList=breaches.map(b=>`<span class="pill">${b.s}</span>`).join(' ')||'—';
+  document.getElementById('s3KeyFocus').innerHTML=`
+    <div class="kr-head"><span class="ico">◎</span>Next Step · Key Focus</div>
+    <div class="kr-body">
+      Closed-hours <b>standby is ${pct.toFixed(1)}% of all energy (~S$${fmt(sb.total*A.tariff)}/month)</b>, and <b>${topApp} alone is ${topShare.toFixed(0)}%</b> of it — almost pure phantom plug-load.
+      <ul>
+        <li><b>Biggest lever:</b> cut ${topApp} phantom draw — smart power strips / timer shut-offs on plug circuits can reclaim most of the <b>S$${fmt(sb.total*A.tariff)}/month</b> standby cost.</li>
+        <li><b>SOP breaches:</b> only <b>${breaches.length} of ${rows.length} sites</b> (${breachList}) leave equipment running after hours — investigate lighting/heater left on past 1900 first.</li>
+        <li><b>Make it a KPI:</b> track the §3.3 SOP compliance score monthly; target 100 for every site.</li>
+      </ul>
+    </div>`;
+})();
+
+/* ---------- SECTION 4.1 : operating energy by appliance ---------- */
+(function(){
+  const op=A.operating, pctOp=op.total/A.summary.total_kwh*100;
+  const ranked=[...A.appliances].sort((a,b)=>op.by_appliance[b]-op.by_appliance[a]);
+  const top=ranked[0], topShare=op.by_appliance[top]/op.total*100;
+  const opExcess=Object.values(op.hour_anomalies||{}).flat().reduce((a,x)=>a+x.var_kwh,0);
+  const opSaving=opExcess*A.tariff;
+  document.getElementById('opCards').innerHTML=`
+    <div class="card kpi-blue"><div class="label">Total Operating Energy · ${A.month}</div><div class="value">${fmt(op.total)}</div><div class="sub">kWh during 0700–1900 weekdays</div></div>
+    <div class="card kpi-orange"><div class="label">Operating Cost · ${A.month}</div><div class="value">S$${fmt(op.total*A.tariff)}</div><div class="sub">@ S$${A.tariff}/kWh · productive use</div></div>
+    <div class="card kpi-green"><div class="label">Share of Total</div><div class="value">${pctOp.toFixed(1)}%</div><div class="sub">of all energy used</div></div>
+    <div class="card kpi-purple"><div class="label">Top Operating Appliance</div><div class="value">${top}</div><div class="sub">${topShare.toFixed(0)}% of operating (${fmt(op.by_appliance[top])} kWh)</div></div>
+    <div class="card kpi-red"><div class="label">Potential Saving · spikes fixed</div><div class="value">S$${fmt2(opSaving)}</div><div class="sub">${fmt2(opExcess)} kWh excess · ${op.hour_anomaly_total} spike${op.hour_anomaly_total!==1?'s':''} &gt;50% · ~S$${fmt(opSaving*12)}/yr</div></div>`;
+  appliancePie('opPie',op.by_appliance,op.total);
+  document.getElementById('opTariff').textContent=A.tariff;
+  const at=document.querySelector('#opApplianceTable tbody');
+  ranked.forEach((a,i)=>{const v=op.by_appliance[a],share=v/op.total*100;
+    at.innerHTML+=`<tr><td><b>${i+1}</b></td>
+      <td><span style="display:inline-flex;align-items:center;gap:7px;"><span class="dot" style="background:${APP_COLOR[a]}"></span><b>${a}</b></span></td>
+      <td class="num">${fmt(v)}</td><td class="num">${fmt(v*A.tariff)}</td>
+      <td class="num"><span style="display:inline-flex;align-items:center;gap:7px;justify-content:flex-end;"><span class="bar" style="width:60px;"><i style="width:${share.toFixed(0)}%;background:${APP_COLOR[a]}"></i></span>${share.toFixed(1)}%</span></td></tr>`;});
+  at.innerHTML+=`<tr style="font-weight:700;"><td></td><td>Total</td><td class="num">${fmt(op.total)}</td><td class="num">${fmt(op.total*A.tariff)}</td><td class="num">100%</td></tr>`;
+})();
+
+/* ---------- SECTION 4.2 : operating hour spike analysis (per-hour-slot baseline) ---------- */
+(function(){
+  const op=A.operating, HA=op.hour_anomalies||{};
+  const siteRows=Object.entries(HA).map(([s,arr])=>({s,type:siteType[s],n:arr.length,worst:arr[0],anoms:arr}))
+    .sort((a,b)=>b.worst.var_pct-a.worst.var_pct);
+
+  document.getElementById('opMethod').innerHTML=`<strong>Method:</strong> the same per-hour-slot logic as §3.2, on operating hours. Each operating hour is benchmarked against <b>that site's own average for the same hour slot</b> across May weekdays. A spike is any hour <b>&gt;50% above</b> its slot average. <b>${fmt(op.hour_anomaly_total)} spike${op.hour_anomaly_total!==1?'s':''}</b> were flagged across <b>${siteRows.length}</b> of 30 sites.`;
+
+  const sumTb=document.querySelector('#opSummary tbody');
+  siteRows.forEach(r=>{const T=TYPES[r.type],w=r.worst;
+    const detailRows=r.anoms.map(a=>`<tr>
+        <td>Day ${a.day} · ${a.hour} <small style="color:#999;">(${a.daytype})</small></td>
+        <td class="num">${fmt2(a.kwh)}</td>
+        <td class="num" style="color:#888;">${fmt2(a.avg)}</td>
+        <td class="num flag">+${fmt(a.var_pct)}%<br><small style="color:#999;font-weight:400;">+${fmt2(a.var_kwh)} kWh</small></td>
+        <td>${a.circuit} <small style="color:#999;">(${a.appliance} · ${fmt(a.circuit_share)}% of hr)</small></td></tr>`).join('');
+    sumTb.innerHTML+=`<tr class="sb-row">
+      <td><b>${r.s}</b></td><td><span class="badge ${T.cls}">${T.sh}</span></td>
+      <td class="num">${r.n}</td>
+      <td class="num flag">+${fmt(w.var_pct)}%</td>
+      <td>Day ${w.day} · ${w.hour} <small style="color:#999;">(${w.daytype})</small></td>
+      <td>${w.circuit} <small style="color:#999;">(${w.appliance})</small></td>
+      <td style="text-align:center;"><span class="arrow">▶</span></td></tr>
+      <tr class="sb-detail"><td colspan="7" style="padding:0;border:none;"><div class="sb-inner"><div class="ip">
+        <table><thead><tr><th>When (day · hour)</th><th class="num">Hour kWh</th><th class="num">Slot avg</th><th class="num">Variance</th><th>Cause (circuit · appliance)</th></tr></thead>
+        <tbody>${detailRows}</tbody></table>
+      </div></div></td></tr>`;});
+
+  document.querySelectorAll('#opSummary .sb-row').forEach(row=>{
+    row.addEventListener('click',()=>{
+      const inner=row.nextElementSibling.querySelector('.sb-inner');
+      const open=row.classList.toggle('open');
+      inner.style.maxHeight=open?inner.scrollHeight+'px':'0px';
+    });
+  });
+
+  const w0=siteRows.length?siteRows[0]:null;
+  document.getElementById('opNote').innerHTML=w0?`<strong>How to read this:</strong> these are operating-hour readings that ran <b>&gt;50% above</b> the same site's typical level for that hour. <b>${w0.s}</b> is the worst at <b>+${fmt(w0.worst.var_pct)}%</b>, driven by <b>${w0.worst.circuit}</b> (Day ${w0.worst.day} ${w0.worst.hour}). Unlike standby, daytime spikes can be legitimate demand peaks — but the large ones (faulty equipment, manual overrides, or appliances run far above norm) are worth a check. Expand any site for its full list.`:`No operating-hour spikes above +50% were detected.`;
+
+  // Section-4 Next Step / Key Focus
+  const pct=op.total/A.summary.total_kwh*100;
+  const r2=[...A.appliances].sort((a,b)=>op.by_appliance[b]-op.by_appliance[a]);
+  const a1=r2[0],a2=r2[1];
+  const s1=op.by_appliance[a1]/op.total*100, s2=op.by_appliance[a2]/op.total*100;
+  document.getElementById('s4KeyFocus').innerHTML=`
+    <div class="kr-head"><span class="ico">◎</span>Next Step · Key Focus</div>
+    <div class="kr-body">
+      Operating hours are <b>${pct.toFixed(1)}% of all energy (~S$${fmt(op.total*A.tariff)}/month)</b> — the productive core of the bill. <b>${a1} (${s1.toFixed(0)}%)</b> and <b>${a2} (${s2.toFixed(0)}%)</b> are the two biggest active loads.
+      <ul>
+        <li><b>Biggest lever:</b> efficiency of ${a1} &amp; ${a2} during open hours — setpoint/scheduling tuning on aircon and right-sizing plug loads give the largest absolute savings here.</li>
+        <li><b>Investigate spikes:</b> <b>${op.hour_anomaly_total} operating hour${op.hour_anomaly_total!==1?'s':''}</b> across <b>${siteRows.length} sites</b> ran &gt;50% above the norm — check the high-variance ones (§4.2) for faulty equipment or manual overrides.</li>
+        <li><b>Benchmark vs peers:</b> pair this with the §2 EUI / per-pax benchmarks to target the least-efficient outlets during their busiest hours.</li>
+      </ul>
+    </div>`;
+})();
+
+/* ---------- SECTION 5 : June forecast vs live actual (hourly) ---------- */
+(function(){
+  const HP=A.hourly_profile, JD=A.june_days, tariff=A.tariff;
+  const order=['Senior Care Center','Active Aging Center','Preschool'];
+  const sites=Object.keys(HP).sort((a,b)=>order.indexOf(siteType[a])-order.indexOf(siteType[b])||a.localeCompare(b));
+  const D=JD.length, N=D*24;
+
+  // current moment: live if the machine clock is in June 2026, else default to 7 Jun 12:00
+  const now=new Date(); let cd,ch;
+  if(now.getFullYear()===2026 && now.getMonth()===5){ cd=Math.min(D-1,now.getDate()-1); ch=now.getHours(); }
+  else { cd=6; ch=12; }
+  const curIdx=cd*24+ch;                       // index of the current (partial) hour
+  document.getElementById('fcAsOf').textContent=`${JD[cd].day} June 2026, ${String(ch).padStart(2,'0')}:00`;
+
+  // deterministic pseudo-noise so the simulated actual is stable across reloads
+  const rnd=n=>{const x=Math.sin(n*12.9898)*43758.5453; return x-Math.floor(x);};
+  function series(sel){   // sel = 'ALL' or a site id
+    const fc=new Array(N), ac=new Array(N), seed=sel==='ALL'?0:sites.indexOf(sel)+1;
+    for(let d=0; d<D; d++){
+      const dt=JD[d].weekend?'we':'wd';
+      for(let h=0; h<24; h++){
+        const idx=d*24+h;
+        let f; if(sel==='ALL'){ f=0; for(const s of sites) f+=HP[s][dt][h]; } else f=HP[sel][dt][h];
+        fc[idx]=+f.toFixed(3);
+        const bias=0.94+0.006*d;                          // mild upward creep through the month
+        const noise=1+0.14*(rnd(idx*7+seed)-0.5);         // ±7% hourly jitter
+        ac[idx]=+Math.max(0,f*bias*noise).toFixed(3);
+      }
+    }
+    return {fc,ac};
+  }
+
+  // ----- portfolio summary -----
+  const tot=series('ALL');
+  const estE=tot.fc.reduce((a,b)=>a+b,0);
+  const fcToDate=tot.fc.slice(0,curIdx+1).reduce((a,b)=>a+b,0);
+  const acToDate=tot.ac.slice(0,curIdx+1).reduce((a,b)=>a+b,0);
+  const utilPct=acToDate/estE*100;
+  const pace=fcToDate>0?acToDate/fcToDate:0;              // actual vs expected-so-far
+  const projected=estE*pace;                              // projected month-end at this pace
+  const projPct=pace*100;
+  const cls=projPct<90?'green':(projPct<=100?'orange':'red');
+  const statusLabel=projPct<90?'UNDER BUDGET':(projPct<=100?'ON TRACK':'OVERSHOOT RISK');
+  const msg=projPct<90
+      ? `Running <b>below</b> the estimate — projected month-end <b>${fmt(projected)} kWh (${projPct.toFixed(0)}% of estimate)</b>, about <b>S$${fmt((estE-projected)*tariff)}</b> under the forecast cost.`
+      : (projPct<=100
+        ? `Tracking <b>close to</b> the estimate — projected month-end <b>${fmt(projected)} kWh (${projPct.toFixed(0)}% of estimate)</b>. Margin is thin; watch the high-demand weekdays.`
+        : `Trending to <b>overshoot</b> — at the current pace, projected month-end <b>${fmt(projected)} kWh (${projPct.toFixed(0)}% of estimate)</b>, about <b>S$${fmt((projected-estE)*tariff)}</b> over the forecast cost.`);
+  document.getElementById('fcStatus').className='fc-status '+cls;
+  document.getElementById('fcStatus').innerHTML=`<div class="badge-lg">${statusLabel}</div><div class="msg">${msg}</div>`;
+  window.__june={estE,cost:estE*tariff,projPct,statusLabel,cls,utilPct,projected};
+
+  document.getElementById('fcCards').innerHTML=`
+    <div class="card kpi-purple"><div class="label">June Estimated Energy</div><div class="value">${fmt(estE)}</div><div class="sub">kWh · full month (all centres)</div></div>
+    <div class="card kpi-orange"><div class="label">June Estimated Cost</div><div class="value">S$${fmt(estE*tariff)}</div><div class="sub">@ S$${tariff}/kWh</div></div>
+    <div class="card kpi-blue"><div class="label">Consumed So Far</div><div class="value">${fmt(acToDate)}</div><div class="sub">kWh · <b>${utilPct.toFixed(1)}%</b> of estimate utilised</div></div>
+    <div class="card kpi-${cls==='green'?'green':(cls==='orange'?'orange':'red')}"><div class="label">Pace vs Estimate</div><div class="value" style="color:${cls==='green'?'#27ae60':(cls==='orange'?'#e67e22':'#e74c3c')};">${projPct.toFixed(0)}%</div><div class="sub">projected S$${fmt(projected*tariff)} · ${statusLabel.toLowerCase()}</div></div>`;
+
+  // ----- chart with daily / weekly / monthly granularity toggle -----
+  const ctx=document.getElementById('forecastChart');
+  let chart, gran='daily', selVal='ALL';
+  const actualColor=sel=>sel==='ALL'?'#0f3460':TYPES[siteType[sel]].c;
+  const wkStart=Math.floor(cd/7)*7, wkEnd=Math.min(D,wkStart+7);
+  function buckets(g){           // [startHourIdx, endHourIdx, label] — zoom level
+    const b=[];
+    if(g==='daily'){             // current day -> hourly points
+      const ds=cd*24;
+      for(let h=0;h<24;h++) b.push([ds+h, ds+h+1, `${String(h).padStart(2,'0')}:00`]);
+    } else if(g==='weekly'){     // current week -> daily points
+      for(let d=wkStart;d<wkEnd;d++) b.push([d*24,(d+1)*24, `Jun ${JD[d].day}`]);
+    } else {                     // whole month -> daily points
+      for(let d=0;d<D;d++) b.push([d*24,(d+1)*24, `Jun ${JD[d].day}`]);
+    }
+    return b;
+  }
+  const yText={daily:'Energy per hour (kWh)',weekly:'Energy per day (kWh)',monthly:'Energy per day (kWh)'};
+  const xTitle={daily:`Jun ${JD[cd].day} (${JD[cd].dow}) — hourly`,
+                weekly:`Jun ${JD[wkStart].day}–${JD[wkEnd-1].day} — daily`,
+                monthly:'June 2026 — daily'};
+  function build(){
+    const s=series(selVal), bk=buckets(gran);
+    const labels=bk.map(x=>x[2]);
+    const est=bk.map(([a,b])=>{let t=0;for(let i=a;i<b;i++)t+=s.fc[i];return +t.toFixed(2);});
+    const act=bk.map(([a,b])=>{ if(a>curIdx) return null; let t=0;const e=Math.min(b,curIdx+1);for(let i=a;i<e;i++)t+=s.ac[i];return +t.toFixed(2);});
+    let curB=bk.findIndex(([a,b])=>curIdx>=a&&curIdx<b); if(curB<0)curB=-1;
+    const data={labels,datasets:[
+      {label:'Estimate (May-based)',data:est,borderColor:'#94a3b8',borderDash:[5,4],borderWidth:1.6,pointRadius:2,pointBackgroundColor:'#94a3b8',tension:.2,order:2},
+      {label:'Actual (to now)',data:act,borderColor:actualColor(selVal),borderWidth:2.2,pointRadius:2,pointBackgroundColor:actualColor(selVal),tension:.2,order:1},
+      {label:'Now',data:labels.map((_,i)=>i===curB?act[i]:null),borderColor:actualColor(selVal),backgroundColor:'#fff',borderWidth:2,pointRadius:labels.map((_,i)=>i===curB?6:0),pointStyle:'circle',showLine:false,order:0}
+    ]};
+    const xticks = gran==='daily' ? {autoSkip:false,maxRotation:45,minRotation:0,font:{size:9}}
+      : gran==='monthly' ? {autoSkip:false,maxRotation:60,minRotation:60,font:{size:9}}
+      : {autoSkip:false,maxRotation:0,font:{size:11}};
+    const opts={responsive:true,maintainAspectRatio:false,animation:false,interaction:{mode:'index',intersect:false},
+      plugins:{legend:{display:true,position:'top',labels:{usePointStyle:true,boxWidth:9,padding:12,font:{size:11},filter:i=>i.text!=='Now'}},
+        tooltip:{callbacks:{title:items=>items.length?labels[items[0].dataIndex]:'',label:c=>c.parsed.y==null?null:`${c.dataset.label}: ${fmt1(c.parsed.y)} kWh`}}},
+      scales:{x:{title:{display:true,text:xTitle[gran],font:{size:11}},ticks:xticks,grid:{display:true}},
+        y:{title:{display:true,text:yText[gran],font:{size:11}},beginAtZero:true}}};
+    if(chart){ chart.data=data; chart.options=opts; chart.update(); }
+    else chart=new Chart(ctx,{type:'line',data,options:opts});
+  }
+  build();
+
+  // granularity toggle
+  document.querySelectorAll('#fcGran button').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      document.querySelectorAll('#fcGran button').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active'); gran=btn.dataset.g; build();
+    });
+  });
+  // centre dropdown
+  const sel=document.getElementById('fcSelect');
+  sel.innerHTML=`<option value="ALL">All 30 centres (total)</option>`+
+    sites.map(s=>`<option value="${s}">${s} — ${siteType[s]}</option>`).join('');
+  sel.addEventListener('change',()=>{ selVal=sel.value; build(); });
+})();
+
+/* ---------- SECTION 2.3 : EUI vs Per-Pax efficiency quadrant ---------- */
+(function(){
+  const euiAll = BENCH.map(d=>d.annual_eui).sort((a,b)=>a-b);
+  const paxAll = BENCH.map(d=>d.per_pax).sort((a,b)=>a-b);
+  const euiP75 = percentile(euiAll,75), paxP75 = percentile(paxAll,75);
+  const xMax = Math.max(...euiAll)*1.06, yMax = Math.max(...paxAll)*1.04;
+  const xMin = Math.floor(Math.min(...euiAll)-1), yMin = Math.floor(Math.min(...paxAll)-10);
+
+  // point colour + shape represent the CENTRE TYPE (quadrant background shows performance)
+  const TYPE_STYLE = {
+    'Senior Care Center':  {color:'#2980b9', style:'circle',   sym:'●'},
+    'Active Aging Center': {color:'#27ae60', style:'triangle', sym:'▲'},
+    'Preschool':           {color:'#e74c3c', style:'rectRot',  sym:'◆'}
+  };
+  const points = BENCH.map(d=>({x:d.annual_eui, y:d.per_pax, nm:d.preschool, type:d.type,
+    tc:TYPE_STYLE[d.type].color, ts:TYPE_STYLE[d.type].style}));
+
+  // ----- Key Recommendation (derived from the quadrant) -----
+  const red    = BENCH.filter(d=>d.annual_eui>euiP75 && d.per_pax>paxP75);
+  const hiEui  = BENCH.filter(d=>d.annual_eui>euiP75 && d.per_pax<=paxP75).map(d=>d.preschool);
+  const hiPax  = BENCH.filter(d=>d.annual_eui<=euiP75 && d.per_pax>paxP75).map(d=>d.preschool);
+  const redList = red.sort((a,b)=>b.annual_eui-a.annual_eui)
+                     .map(d=>`<span class="pill">${d.preschool}</span>`).join(' ');
+  const redNames = red.map(d=>d.preschool).join(', ');
+  document.getElementById('keyRec').innerHTML = `
+    <div class="kr-head"><span class="ico">★</span>Key Recommendation</div>
+    <div class="kr-body">
+      <b>${red.length} centre${red.length!==1?'s':''} — ${redList}</b> breach the 75th-percentile benchmark on
+      <b>both</b> energy-per-m² (EUI) and energy-per-person (per-pax). These sit in the red <b>Priority</b> quadrant
+      and should be the <b>first targets for an energy-efficiency audit</b> — they are inefficient relative to peers
+      whether measured by floor area or by the number of people served.
+      <ul>
+        <li><b>Priority (audit first):</b> ${redNames || '—'} — high on both metrics.</li>
+        <li><b>High-EUI only</b> (${hiEui.join(', ')}): area/equipment-driven — review aircon, lighting &amp; building envelope.</li>
+        <li><b>High per-pax only</b> (${hiPax.join(', ')}): low occupancy vs load — right-size operating hours &amp; equipment to headcount.</li>
+        <li><b>Benchmarks (P75):</b> EUI ${euiP75.toFixed(1)} kWh/m²/yr · per-pax ${paxP75.toFixed(1)} kWh/person/month.</li>
+      </ul>
+    </div>`;
+
+  // Plugin: shade the four quadrants + draw P75 cross-hairs
+  const quadrantBg = { id:'quadrantBg',
+    beforeDatasetsDraw(chart){
+      const {ctx, chartArea:{left,right,top,bottom}, scales:{x,y}} = chart;
+      const xm = x.getPixelForValue(euiP75), ym = y.getPixelForValue(paxP75);
+      ctx.save();
+      // reversed axes: high EUI -> left of xm ; high per-pax -> below ym (bottom)
+      const fills = [
+        [left, ym, xm-left, bottom-ym, 'rgba(231,76,60,.16)'],   // bottom-left: both high (red)
+        [left, top, xm-left, ym-top,   'rgba(230,126,34,.13)'],  // top-left: high EUI only
+        [xm,  ym,  right-xm, bottom-ym,'rgba(241,196,15,.16)'],  // bottom-right: high per-pax only
+        [xm,  top, right-xm, ym-top,   'rgba(39,174,96,.13)'],   // top-right: both low (green)
+      ];
+      fills.forEach(([fx,fy,fw,fh,col])=>{ ctx.fillStyle=col; ctx.fillRect(fx,fy,fw,fh); });
+      // cross-hairs
+      ctx.strokeStyle='#7f8c8d'; ctx.lineWidth=1.4; ctx.setLineDash([6,4]);
+      ctx.beginPath(); ctx.moveTo(xm,top); ctx.lineTo(xm,bottom); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(left,ym); ctx.lineTo(right,ym); ctx.stroke();
+      ctx.setLineDash([]);
+      // quadrant captions
+      ctx.font='600 11px Segoe UI'; ctx.textBaseline='top';
+      ctx.fillStyle='rgba(192,57,43,.85)';  ctx.textAlign='left';  ctx.fillText('▲ PRIORITY (both > P75)', left+8, bottom-20);
+      ctx.fillStyle='rgba(160,90,20,.8)';   ctx.textAlign='left';  ctx.fillText('High EUI only', left+8, top+6);
+      ctx.fillStyle='rgba(150,120,10,.85)'; ctx.textAlign='right'; ctx.fillText('High per-pax only', right-8, bottom-20);
+      ctx.fillStyle='rgba(30,120,70,.85)';  ctx.textAlign='right'; ctx.fillText('EFFICIENT (both < P75) ✓', right-8, top+6);
+      // P75 axis values
+      ctx.fillStyle='#555'; ctx.font='600 10px Segoe UI'; ctx.textAlign='center'; ctx.textBaseline='bottom';
+      ctx.fillText('EUI P75 = '+euiP75.toFixed(1), xm, top+ (ym-top)/2);
+      ctx.restore();
+    }
+  };
+  // Plugin: label each point with the centre name
+  const pointLabels = { id:'pointLabels',
+    afterDatasetsDraw(chart){
+      const {ctx} = chart; const meta = chart.getDatasetMeta(0);
+      ctx.save(); ctx.font='700 11px Segoe UI'; ctx.fillStyle='#1a1a2e'; ctx.textBaseline='middle';
+      meta.data.forEach((pt,i)=>{ ctx.fillStyle='#1a1a2e'; ctx.textAlign='left'; ctx.fillText(points[i].nm, pt.x+8, pt.y); });
+      ctx.restore();
+    }
+  };
+
+  new Chart(document.getElementById('quadChart'),{
+    type:'scatter',
+    data:{datasets:[{data:points, parsing:false,
+      pointBackgroundColor:points.map(p=>p.tc), pointStyle:points.map(p=>p.ts),
+      pointBorderColor:'#fff', pointBorderWidth:1.2, pointRadius:8, pointHoverRadius:11}]},
+    options:{responsive:true, maintainAspectRatio:false, animation:false,
+      plugins:{legend:{display:false},
+        tooltip:{callbacks:{label:c=>{const p=points[c.dataIndex];
+          return `${p.nm} (${p.type}): EUI ${p.x.toFixed(1)}, per-pax ${p.y.toFixed(1)}`;}}}},
+      scales:{
+        x:{type:'linear', reverse:true, min:xMin, max:xMax,
+           title:{display:true, text:'◄ Higher EUI (kWh/m²/yr)        Lower EUI ►', font:{size:11}}},
+        y:{type:'linear', reverse:true, min:yMin, max:yMax,
+           title:{display:true, text:'◄ Lower per-pax    Higher per-pax (kWh/person/month) ►', font:{size:11}}}
+      }},
+    plugins:[quadrantBg, pointLabels]
+  });
+})();
+
+/* ---------- SECTION 1 : Key Findings summary (Sections 2-5) ---------- */
+(function(){
+  const sb=A.standby, op=A.operating, tot=A.summary.total_kwh, tf=A.tariff;
+  // §2 benchmarks: priority centres (both EUI & per-pax above P75)
+  const euiAll=BENCH.map(d=>d.annual_eui).sort((a,b)=>a-b), paxAll=BENCH.map(d=>d.per_pax).sort((a,b)=>a-b);
+  const e75=percentile(euiAll,75), p75=percentile(paxAll,75);
+  const prio=BENCH.filter(d=>d.annual_eui>e75&&d.per_pax>p75).sort((a,b)=>b.annual_eui-a.annual_eui).map(d=>d.preschool);
+  // §3 standby
+  const sbPct=sb.total/tot*100, sbApp=[...A.appliances].sort((a,b)=>sb.by_appliance[b]-sb.by_appliance[a])[0];
+  const sbAppShare=sb.by_appliance[sbApp]/sb.total*100;
+  const sbBreach=Object.keys(sb.hour_anomalies||{});
+  // §4 operating
+  const opPct=op.total/tot*100, opR=[...A.appliances].sort((a,b)=>op.by_appliance[b]-op.by_appliance[a]);
+  const opSites=Object.keys(op.hour_anomalies||{}).length;
+  // §5 forecast (live)
+  const J=window.__june||{};
+
+  const items=[
+    {s:'§2',cls:'kf-2',head:'Benchmarks — priority outliers',
+     txt:`<b>${prio.length} centre${prio.length!==1?'s':''} (${prio.join(', ')||'none'})</b> exceed <b>both</b> the EUI and per-pax 75th-percentile benchmarks — the first targets for an efficiency audit.`},
+    {s:'§3',cls:'kf-3',head:'Standby wastage (closed hours)',
+     txt:`<b>${sbPct.toFixed(1)}%</b> of energy (~<b>S$${fmt(sb.total*tf)}/mo</b>) is used while centres are closed — <b>${sbAppShare.toFixed(0)}%</b> of it phantom <b>${sbApp}</b>. ${sbBreach.length} of 30 sites breach after-hours SOP${sbBreach.length?` (${sbBreach.join(', ')})`:''}.`},
+    {s:'§4',cls:'kf-4',head:'Operating hours (open)',
+     txt:`<b>${opPct.toFixed(1)}%</b> of energy (~<b>S$${fmt(op.total*tf)}/mo</b>) is productive use, led by <b>${opR[0]} (${(op.by_appliance[opR[0]]/op.total*100).toFixed(0)}%)</b> &amp; <b>${opR[1]} (${(op.by_appliance[opR[1]]/op.total*100).toFixed(0)}%)</b>. ${op.hour_anomaly_total} operating-hour spikes flagged across ${opSites} sites.`},
+    {s:'§5',cls:'kf-5',head:'June forecast',
+     txt:J.estE!=null
+        ? `Projected <b>~${fmt(J.estE)} kWh</b> (~<b>S$${fmt(J.cost)}</b>) for June. As of now the portfolio is <b style="color:${J.cls==='green'?'#27ae60':(J.cls==='orange'?'#e67e22':'#e74c3c')};">${J.statusLabel}</b> at <b>${J.projPct.toFixed(0)}%</b> of pace (${J.utilPct.toFixed(0)}% of the month utilised).`
+        : `Full-month estimate and live pace tracking — see §5.`}
+  ];
+  document.getElementById('keyFindings').innerHTML=items.map(i=>
+    `<div class="kf-item ${i.cls}"><span class="kf-sec">${i.s}</span><div><div class="kf-head">${i.head}</div><div class="kf-txt">${i.txt}</div></div></div>`).join('');
+})();
+
+/* nav active-state */
+const navLinks=document.querySelectorAll('.nav a'), secs=[...document.querySelectorAll('.section')];
+window.addEventListener('scroll',()=>{let cur=secs[0].id;for(const s of secs){if(window.scrollY>=s.offsetTop-80)cur=s.id;}
+  navLinks.forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+cur));});
+</script>
+</body>
+</html>

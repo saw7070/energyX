@@ -1,0 +1,33 @@
+{
+  "renderer": "m4-tracer-structured-preview",
+  "customerRendererParity": "unproven",
+  "fixedIdentity": {
+    "dataSnapshotId": "m4-source-9b9d7578b21c6e98",
+    "projectReleaseId": "m4-tracer-c4821a227987"
+  },
+  "counters": {
+    "publicationMutationCount": 0,
+    "providerRunCount": 0,
+    "queueRunCount": 0
+  },
+  "section": {
+    "key": "portfolio-consumption",
+    "title": "Portfolio consumption",
+    "managementQuestion": "How much electricity did the portfolio use, and where should management look first?",
+    "blocks": [
+      {
+        "key": "portfolio-consumption-summary",
+        "capabilityRevisionId": "overview.consumption@1",
+        "windowId": "current-overview",
+        "emphasis": "primary"
+      }
+    ]
+  },
+  "compiledTemplateSha256": "145803fb107d196cddaf414e1ee6a78a2f094d0a90019dc1d5687b5d9d8e9016",
+  "readiness": "partial",
+  "dataWitness": {
+    "kind": "source-level-deterministic-witness",
+    "totalUsageKwh": 6376.9696,
+    "officialAggregationConfirmed": false
+  }
+}

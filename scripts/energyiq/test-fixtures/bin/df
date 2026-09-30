@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+if [[ -n "${ENERGYIQ_BACKUP_TEST_AVAILABLE_BYTES:-}" ]]; then
+  printf 'Avail\n%s\n' "$ENERGYIQ_BACKUP_TEST_AVAILABLE_BYTES"
+  exit 0
+fi
+exec /usr/bin/df "$@"

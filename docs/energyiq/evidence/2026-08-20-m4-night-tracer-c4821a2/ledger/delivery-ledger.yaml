@@ -1,0 +1,50 @@
+delivery_id: 2026-08-20-m4-night-tracer-c4821a2
+baseline_ref: c4821a227987ddbf48bcbc56fa8a5ed2eb73fb80
+generated_at: 2026-08-19T21:55:37.252Z
+evidence_scope: process-mechanics-only
+source_boundary:
+  reads:
+    - controlled Preschool reference HTML
+    - Preschool Day01 / Day07 / Day30 synthetic/acceptance workbooks
+  excludes:
+    - project Renderer implementation
+    - compiled project definition
+    - production database
+    - Provider response
+elapsed_automation_milliseconds: 2568
+human_minutes:
+  status: unavailable
+  reason: automated tracer execution was not a human time study
+blocks:
+  - key: portfolio-consumption-summary
+    class: R
+    capability_revision_id: overview.consumption@1
+    window_id: current-overview
+    readiness: partial
+definition_fingerprint: f15af821c12ebb277fc90c871f64ce5c2a2bb3ea8be53b4a3d5a311bc244aeec
+preview:
+  publication_mutation_count: 0
+  provider_run_count: 0
+  queue_run_count: 0
+  customer_renderer_parity: unproven
+rerun_attempts:
+  - label: Day01
+    source_snapshot_id: m4-source-e015a06ebd047abb
+    result: pass
+    total_usage_kwh: 1211.7859
+    truth_boundary: source-level-deterministic-witness-only
+  - label: Day07
+    source_snapshot_id: m4-source-9b9d7578b21c6e98
+    result: pass
+    total_usage_kwh: 6376.9696
+    truth_boundary: source-level-deterministic-witness-only
+  - label: Day30
+    source_snapshot_id: m4-source-c50183898a00ea7d
+    result: pass
+    total_usage_kwh: 26912.0807
+    truth_boundary: source-level-deterministic-witness-only
+exit_status: M4-NIGHT-TRACER-BLOCKED
+blockers:
+  - OFFICIAL_AGGREGATION_BINDING_UNAVAILABLE
+  - CUSTOMER_RENDERER_PARITY_UNPROVEN
+  - HUMAN_TIME_UNMEASURED

@@ -1,0 +1,48 @@
+.card { margin-bottom:18px; padding:18px 20px; border:1px solid #cfe3d7; border-radius:14px; background:linear-gradient(135deg,#f3f9f5 0%,#ffffff 70%); }
+.card header h4 { font-size:16px; font-weight:650; color:#1f2d25; }
+.card header p { margin-top:4px; max-width:80ch; font-size:13px; line-height:1.55; color:#4f5f55; }
+.list { display:grid; gap:8px; margin-top:14px; }
+.list li { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:12px; padding:10px 12px; border:1px solid #e1e7e1; border-radius:10px; background:white; }
+.list p { font-size:14px; color:#1f2d25; }
+.list small { margin-left:8px; font-size:12px; color:#7a867e; }
+.kind { padding:3px 9px; border-radius:999px; font-size:11px; font-weight:650; white-space:nowrap; background:#eef1ee; color:#4f5f55; }
+.afterHours { background:#fdf0e2; color:#8a4b12; }
+.alwaysOn { background:#e4efe7; color:#2f6b4c; }
+.changes { background:#e6effa; color:#24518a; }
+.upcoming { background:#f1ecfa; color:#5a3f93; }
+.remove { padding:4px 10px; border-radius:7px; color:#a4262c; font-size:12px; font-weight:600; }
+.remove:hover { background:#fdecec; }
+.examples { margin-top:14px; font-size:13px; color:#3c4a42; }
+.examples ul { display:grid; gap:6px; margin-top:8px; }
+.examples button { width:100%; padding:8px 12px; border:1px dashed #b9cfc0; border-radius:10px; background:white; color:#3c4a42; text-align:left; font-size:13px; }
+.examples button:hover { border-style:solid; background:#f4f9f5; }
+.examples b { margin-right:6px; color:#1d513a; font-weight:650; }
+.form { display:grid; gap:10px; margin-top:14px; }
+.kinds { display:flex; flex-wrap:wrap; gap:6px; }
+.kinds button { padding:5px 12px; border:1px solid #d0dbd2; border-radius:999px; background:white; color:#4f5f55; font-size:12px; font-weight:600; }
+.kinds button[aria-pressed=true] { border-color:#1d513a; background:#1d513a; color:white; }
+.row { display:flex; gap:8px; }
+.row input { flex:1; min-width:0; min-height:40px; padding:8px 12px; border:1px solid #d0dbd2; border-radius:9px; background:white; color:#1f2d25; font-size:14px; }
+.row input:focus { outline:2px solid #2f7d5a; outline-offset:1px; }
+.add { min-height:40px; padding:0 18px; border-radius:9px; background:#1d513a; color:white; font-size:14px; font-weight:600; }
+.add:hover:not(:disabled) { background:#246c4b; }
+.add:disabled { opacity:.5; cursor:not-allowed; }
+.status { margin-top:10px; font-size:13px; color:#1d513a; }
+.muted { margin-top:12px; font-size:13px; color:#6a786f; }
+.tip { margin-top:10px; font-size:12px; color:#6a786f; }
+
+:global(:where(html[data-energyiq-theme="dark"])) .card { border-color:#25503c; background:linear-gradient(135deg,#15201a 0%,#191919 70%); }
+:global(:where(html[data-energyiq-theme="dark"])) .card header h4, :global(:where(html[data-energyiq-theme="dark"])) .list p, :global(:where(html[data-energyiq-theme="dark"])) .row input { color:#e6ede9; }
+:global(:where(html[data-energyiq-theme="dark"])) .card header p, :global(:where(html[data-energyiq-theme="dark"])) .examples, :global(:where(html[data-energyiq-theme="dark"])) .examples button { color:#c8d2cc; }
+:global(:where(html[data-energyiq-theme="dark"])) .list li, :global(:where(html[data-energyiq-theme="dark"])) .examples button, :global(:where(html[data-energyiq-theme="dark"])) .kinds button, :global(:where(html[data-energyiq-theme="dark"])) .row input { background:#191919; border-color:#32363b; }
+:global(:where(html[data-energyiq-theme="dark"])) .kinds button { color:#b9c5be; }
+:global(:where(html[data-energyiq-theme="dark"])) .kinds button[aria-pressed=true] { background:#2f6b4c; border-color:#2f6b4c; color:white; }
+:global(:where(html[data-energyiq-theme="dark"])) .examples b, :global(:where(html[data-energyiq-theme="dark"])) .status { color:#8bc3b9; }
+:global(:where(html[data-energyiq-theme="dark"])) .kind { background:#232826; color:#b9c5be; }
+:global(:where(html[data-energyiq-theme="dark"])) .afterHours { background:#33240f; color:#efbd5c; }
+:global(:where(html[data-energyiq-theme="dark"])) .alwaysOn { background:#1c2a22; color:#9bdcbd; }
+:global(:where(html[data-energyiq-theme="dark"])) .changes { background:#16233a; color:#8fb8ef; }
+:global(:where(html[data-energyiq-theme="dark"])) .upcoming { background:#241c38; color:#b8a6ef; }
+:global(:where(html[data-energyiq-theme="dark"])) .list small, :global(:where(html[data-energyiq-theme="dark"])) .muted, :global(:where(html[data-energyiq-theme="dark"])) .tip { color:#9aa8a0; }
+:global(:where(html[data-energyiq-theme="dark"])) .remove { color:#f3908b; }
+:global(:where(html[data-energyiq-theme="dark"])) .remove:hover { background:#271c1c; }

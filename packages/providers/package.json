@@ -1,0 +1,19 @@
+{
+  "name": "@datafoundry/providers",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit false"
+  },
+  "dependencies": {
+    "@ai-sdk/alibaba": "1.0.41",
+    "@ai-sdk/deepseek": "2.0.51",
+    "@ai-sdk/openai": "3.0.90",
+    "@ai-sdk/openai-compatible": "2.0.63",
+    "@datafoundry/contracts": "0.2.0"
+  }
+}

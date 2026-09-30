@@ -1,0 +1,15 @@
+# Action feedback implementation: first slice
+
+Follow-up: [measurement and report execution slice](2026-09-14-action-feedback-second-slice.md) supersedes the data/readiness/linkage gaps below; remaining full-scope boundaries still apply.
+
+Status: in development, not integrated or deployed. Issue #245. Worker codex/action-feedback, based on main5ae07886 plus S2 capability contract74956c8c (local equivalent19899326).
+
+Implemented: private administrator-owned Action SQLite records, report association, append-only execution events, idempotent proposal/event retries, optimistic revisions, owner/project/workspace isolation, private scenario records, explicit lighting scenario arithmetic, conservative pure readiness calculation. Application routes under /api/v1/energy/report-actions/:projectId reuse config API authentication/CSRF path. Source report must be succeeded and owned by the caller. Proposed meters must belong to published mapping; baseline snapshot must match current publication at creation.
+
+UI: optional Actions & effects tab inside existing report preview; add recommendation, record progress with project-local datetime input, lighting estimate form. Preserves entered form values on errors; operation request IDs retained during same mounted-form retries. Defaults hidden with NEXT_PUBLIC_REPORT_ACTIONS_PILOT=true required at build; backend additionally requires ENERGYIQ_ACTIONS_PILOT_ENABLED=true. Do not enable in production for customer acceptance yet.
+
+Boundaries: pilot is only personal admin actions, not project shared/ordinary-user grants. Suggestions are manually recorded; AI suggestion-tool/import still pending. Baseline is a proposed window/current snapshot reference, not a frozen per-meter analytical extract. Readiness is a pure function tested with controlled daily inputs, not yet wired to real data. Scenario uses user-entered assumptions, not measured removable load. No automatic assessment/report linkage/notification, assignment, recurring execution schedule, pagination, scenario selection/history UI, persistent cross-tab mutation receipt, or real device verification yet. Full planned scope remains open.
+
+Validation: real temporary SQLite persistence and HTTP handler tests; date conversion tests cover Singapore and reject DST ambiguous/nonexistent dates; UI component test opens progress form and confirms no false automatic-results claim. Root npm run build passed after worker-local workspace dependency links were corrected (initial API-only build saw stale sibling package declarations). Full web tsc still reports repository test-fixture and react-dom declaration diagnostics; not a clean web typecheck. No live browser acceptance or production changes.
+
+Next: structured Agent proposal tools; frozen baseline/target hours and recurring execution contract; data adapter and readiness receipts; idempotent background assessment and same-author Pi jobs; publication linkage/grouped feedback, review facts; explicit user Action grants coordinated with S2; actual browser and Tuya validation; complete scenario adoption/expected-versus-observed comparison. Do not treat tests here as complete product delivery.

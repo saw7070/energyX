@@ -1,0 +1,71 @@
+{
+  "contractRevision": "m4-reference-bundle-manifest@1",
+  "runId": "2026-08-20-m4-night-tracer-c4821a2",
+  "baselineSha": "c4821a227987ddbf48bcbc56fa8a5ed2eb73fb80",
+  "createdAt": "2026-08-19T21:55:37.252Z",
+  "evidenceScope": "process-mechanics-only",
+  "sourceBoundary": {
+    "reads": [
+      "controlled-preschool-reference-html",
+      "preschool-synthetic-acceptance-workbooks-day01-day07-day30"
+    ],
+    "excludes": [
+      "project-renderer-implementation",
+      "compiled-project-definition",
+      "production-database",
+      "provider-response"
+    ]
+  },
+  "files": [
+    {
+      "path": "input/day01.xlsx",
+      "size": 111233,
+      "sha256": "e015a06ebd047abb37fd792f0854db59451ea070736ea29adbd379b076a4da42"
+    },
+    {
+      "path": "input/day07.xlsx",
+      "size": 820732,
+      "sha256": "9b9d7578b21c6e9826cbebd1d5725af428df69e3a6e840c0d236a719b4bf3be7"
+    },
+    {
+      "path": "input/day30.xlsx",
+      "size": 3449021,
+      "sha256": "c50183898a00ea7dc76660960e496af58ef8434ab8e1d0ad1e9b1dfe4a50c199"
+    },
+    {
+      "path": "input/reference.html",
+      "size": 121268,
+      "sha256": "fa2701a6d1f55eea6a57014e2ae684c28c15679270c475add98de27038442b90"
+    },
+    {
+      "path": "sanitized-kit/brief.json",
+      "size": 255,
+      "sha256": "f2dff4de5170364f2f4814ce512b8b6bf2a0f3359b91349bdd87c5fe2d6a74df"
+    },
+    {
+      "path": "sanitized-kit/component-catalog.json",
+      "size": 1373,
+      "sha256": "238ef86afcdab4442b1bd311d135c81f9cb33759ab345cf1d2eac12c74368321"
+    },
+    {
+      "path": "sanitized-kit/report-time-policy.json",
+      "size": 297,
+      "sha256": "f08f4cd11968887b7a8e9eea68b639df8be26ed76b38ffe9f334d12807035c16"
+    }
+  ],
+  "allowlist": [
+    "input/reference.html",
+    "input/day01.xlsx",
+    "input/day07.xlsx",
+    "input/day30.xlsx",
+    "sanitized-kit/brief.json",
+    "sanitized-kit/component-catalog.json",
+    "sanitized-kit/report-time-policy.json"
+  ],
+  "denylist": [
+    "project renderer implementation",
+    "compiled project definition",
+    "production database",
+    "provider response"
+  ]
+}

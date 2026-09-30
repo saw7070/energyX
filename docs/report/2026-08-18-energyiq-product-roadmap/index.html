@@ -1,0 +1,1031 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="EnergyIQ 产品战略、交付状态、客户价值证明与 90 天路线图。">
+  <title>EnergyIQ · 产品战略与交付路线图</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    /* === DESIGN TOKENS === */
+    :root {
+      --ink: #0a2430;
+      --ink-2: #173b46;
+      --paper: #f4f1e8;
+      --paper-2: #ebe6d9;
+      --white: #fffdf8;
+      --teal: #008b79;
+      --teal-light: #d8eee8;
+      --blue: #166a8f;
+      --blue-light: #dcebf2;
+      --amber: #d68b1e;
+      --amber-light: #faecc9;
+      --red: #b84d45;
+      --red-light: #f5ddda;
+      --green: #2c7a55;
+      --green-light: #dcecdf;
+      --muted: #637178;
+      --line: rgba(10, 36, 48, 0.14);
+      --shadow: 0 24px 70px rgba(10, 36, 48, 0.11);
+      --radius-xl: 30px;
+      --radius-lg: 20px;
+      --radius-md: 14px;
+      --max: 1360px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 12% 6%, rgba(0, 139, 121, 0.13), transparent 31rem),
+        linear-gradient(180deg, #f8f6ef 0%, var(--paper) 52%, #efeadf 100%);
+      font-family: "Noto Sans SC", sans-serif;
+      line-height: 1.65;
+    }
+
+    a { color: inherit; }
+    button { font: inherit; }
+    strong { font-weight: 800; }
+    section { scroll-margin-top: 96px; }
+
+    /* === TOP BAR === */
+    .topbar {
+      position: sticky;
+      inset: 0 0 auto;
+      z-index: 30;
+      height: 68px;
+      border-bottom: 1px solid rgba(255,255,255,.1);
+      background: rgba(8, 31, 42, 0.94);
+      backdrop-filter: blur(18px);
+      color: white;
+    }
+
+    .topbar-inner {
+      width: min(calc(100% - 40px), var(--max));
+      height: 100%;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-family: "Bricolage Grotesque", "Noto Sans SC", sans-serif;
+      letter-spacing: .02em;
+      font-weight: 800;
+    }
+
+    .brand-mark {
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      border-radius: 9px;
+      color: #062e2a;
+      background: #66dfc5;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.45);
+    }
+
+    .top-actions { display: flex; align-items: center; gap: 8px; }
+    .top-action {
+      border: 1px solid rgba(255,255,255,.17);
+      border-radius: 999px;
+      padding: 8px 13px;
+      color: white;
+      background: rgba(255,255,255,.07);
+      cursor: pointer;
+      transition: .2s ease;
+    }
+    .top-action:hover { background: rgba(255,255,255,.14); transform: translateY(-1px); }
+
+    /* === PAGE LAYOUT === */
+    .page {
+      width: min(calc(100% - 40px), var(--max));
+      margin: 0 auto;
+    }
+
+    .hero {
+      position: relative;
+      min-height: 710px;
+      display: grid;
+      grid-template-columns: minmax(0, 1.16fr) minmax(340px, .84fr);
+      align-items: center;
+      gap: 64px;
+      padding: 86px 0 64px;
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      width: 410px;
+      height: 410px;
+      right: 5%;
+      top: 18%;
+      border: 1px solid rgba(0,139,121,.18);
+      border-radius: 50%;
+      box-shadow: 0 0 0 42px rgba(0,139,121,.035), 0 0 0 84px rgba(0,139,121,.025);
+      pointer-events: none;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 20px;
+      color: var(--teal);
+      font-size: 13px;
+      font-weight: 900;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before { content: ""; width: 26px; height: 2px; background: currentColor; }
+
+    h1, h2, h3, .display {
+      font-family: "Bricolage Grotesque", "Noto Sans SC", sans-serif;
+      letter-spacing: -.035em;
+      line-height: 1.08;
+    }
+
+    h1 {
+      max-width: 830px;
+      margin: 0;
+      font-size: clamp(48px, 6.5vw, 92px);
+      font-weight: 800;
+    }
+
+    h1 span { color: var(--teal); }
+    .hero-lead {
+      max-width: 760px;
+      margin: 30px 0 0;
+      color: var(--ink-2);
+      font-size: clamp(20px, 2vw, 29px);
+      line-height: 1.55;
+      font-weight: 600;
+    }
+
+    .hero-meta { display: flex; flex-wrap: wrap; gap: 14px 24px; margin-top: 32px; color: var(--muted); font-size: 14px; }
+    .hero-meta strong { color: var(--ink); }
+    .quick-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+    .quick-nav a { padding: 8px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-2); background: rgba(255,253,248,.6); text-decoration: none; font-size: 12px; font-weight: 800; transition: .2s ease; }
+    .quick-nav a:hover { color: white; background: var(--teal); border-color: var(--teal); transform: translateY(-1px); }
+
+    .rag-panel {
+      position: relative;
+      z-index: 2;
+      padding: 32px;
+      color: white;
+      border-radius: var(--radius-xl);
+      background: linear-gradient(145deg, #0b3340 0%, #082631 100%);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .rag-panel::after {
+      content: "";
+      position: absolute;
+      width: 220px;
+      height: 220px;
+      right: -90px;
+      bottom: -100px;
+      border-radius: 50%;
+      background: rgba(102,223,197,.13);
+    }
+    .rag-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+    .rag-label { color: #a8c4cb; font-size: 12px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+    .rag-value { margin-top: 8px; color: #ffd471; font: 800 54px/1 "Bricolage Grotesque", sans-serif; }
+    .rag-chip { padding: 7px 11px; border-radius: 999px; color: #ffd471; background: rgba(255,212,113,.12); font-size: 12px; font-weight: 800; }
+    .rag-copy { margin: 24px 0 0; color: #dbe7e9; font-size: 17px; line-height: 1.75; }
+    .rag-rule { height: 1px; margin: 26px 0; background: rgba(255,255,255,.11); }
+    .rag-list { display: grid; gap: 14px; }
+    .rag-item { display: grid; grid-template-columns: 28px 1fr; gap: 12px; align-items: start; color: #dbe7e9; font-size: 14px; }
+    .rag-item b { color: white; }
+    .rag-number { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; color: #082631; background: #66dfc5; font-weight: 900; }
+
+    /* === CONTENT SECTIONS === */
+    .section-shell { padding: 86px 0; border-top: 1px solid var(--line); }
+    .section-head { display: grid; grid-template-columns: minmax(0, .75fr) minmax(300px, 1.25fr); gap: 64px; align-items: end; margin-bottom: 42px; }
+    .section-kicker { color: var(--teal); font-size: 12px; font-weight: 900; letter-spacing: .14em; text-transform: uppercase; }
+    h2 { margin: 10px 0 0; font-size: clamp(37px, 4.7vw, 64px); }
+    .section-intro { margin: 0; color: var(--muted); font-size: 19px; line-height: 1.75; }
+
+    .card {
+      border: 1px solid rgba(10,36,48,.12);
+      border-radius: var(--radius-lg);
+      background: rgba(255,253,248,.78);
+      box-shadow: 0 10px 30px rgba(10,36,48,.045);
+    }
+
+    /* === PRODUCT THESIS === */
+    .executive-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+    .signal-card { min-height: 260px; padding: 28px; position: relative; overflow: hidden; }
+    .signal-card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 5px; background: var(--teal); }
+    .signal-card.amber::before { background: var(--amber); }
+    .signal-card.blue::before { background: var(--blue); }
+    .signal-index { color: var(--muted); font: 800 13px/1 "Bricolage Grotesque", sans-serif; letter-spacing: .12em; }
+    .signal-card h3 { margin: 45px 0 14px; font-size: 26px; }
+    .signal-card p { margin: 0; color: var(--muted); }
+    .signal-foot { position: absolute; left: 28px; right: 28px; bottom: 25px; color: var(--ink); font-size: 13px; font-weight: 800; }
+
+    .decision-strip {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: auto repeat(3, 1fr);
+      border: 1px solid rgba(10,36,48,.12);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      background: var(--ink);
+      color: white;
+    }
+    .decision-title { padding: 24px; display: grid; place-items: center; color: #76e2cc; font-weight: 900; text-align: center; }
+    .decision { padding: 24px; border-left: 1px solid rgba(255,255,255,.12); }
+    .decision b { display: block; margin-bottom: 7px; font-size: 15px; }
+    .decision span { color: #b9cbd0; font-size: 13px; }
+
+    /* === VALUE CHAIN === */
+    .value-chain { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+    .value-step { min-height: 230px; padding: 26px; position: relative; }
+    .value-step:not(:last-child)::after { content: "→"; position: absolute; top: 50%; right: -22px; z-index: 2; color: var(--teal); font: 800 24px/1 sans-serif; }
+    .value-step .step-no { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; color: white; background: var(--teal); font-weight: 900; }
+    .value-step h3 { margin: 34px 0 10px; font-size: 25px; }
+    .value-step p { margin: 0; color: var(--muted); }
+    .value-step .outcome { display: block; margin-top: 20px; color: var(--teal); font-size: 13px; font-weight: 900; }
+    .audience-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 18px; }
+    .audience-card { padding: 20px 22px; display: grid; grid-template-columns: 44px 1fr; gap: 14px; align-items: center; }
+    .audience-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px; color: white; background: var(--ink); font-weight: 900; }
+    .audience-card b { display: block; margin-bottom: 3px; }
+    .audience-card span { color: var(--muted); font-size: 13px; }
+
+    /* === STATUS TABLE === */
+    .status-board { overflow: hidden; }
+    .status-row { display: grid; grid-template-columns: 1.25fr repeat(4, 1fr); min-height: 70px; align-items: stretch; border-top: 1px solid var(--line); }
+    .status-row:first-child { border-top: 0; color: white; background: var(--ink); font-size: 12px; font-weight: 900; letter-spacing: .05em; }
+    .status-cell { padding: 18px 20px; display: flex; align-items: center; }
+    .status-row:not(:first-child) .status-cell:not(:first-child) { justify-content: center; text-align: center; border-left: 1px solid var(--line); }
+    .workstream { font-weight: 900; }
+    .status-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 92px; padding: 7px 10px; border-radius: 999px; font-size: 12px; font-weight: 900; }
+    .verified { color: var(--green); background: var(--green-light); }
+    .integrated { color: var(--blue); background: var(--blue-light); }
+    .human { color: #8d631e; background: var(--amber-light); }
+    .planned { color: var(--muted); background: #e9e8e2; }
+
+    .truth-note { margin-top: 16px; padding: 18px 22px; display: flex; gap: 14px; align-items: flex-start; border-left: 5px solid var(--amber); background: rgba(250,236,201,.65); border-radius: 0 var(--radius-md) var(--radius-md) 0; }
+    .truth-note b { white-space: nowrap; }
+
+    /* === CUSTOMER PROOF === */
+    .proof-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .proof-card { padding: 34px; }
+    .proof-card.ngee { background: linear-gradient(145deg, rgba(216,238,232,.9), rgba(255,253,248,.82)); }
+    .project-tag { display: inline-flex; padding: 7px 11px; border-radius: 999px; color: var(--teal); background: var(--teal-light); font-size: 11px; font-weight: 900; letter-spacing: .1em; }
+    .proof-card h3 { margin: 24px 0 8px; font-size: 33px; }
+    .proof-card > p { margin: 0; color: var(--muted); font-size: 16px; }
+    .proof-list { margin-top: 28px; display: grid; gap: 14px; }
+    .proof-item { display: grid; grid-template-columns: 90px 1fr; gap: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+    .proof-item b { color: var(--teal); font-size: 13px; }
+    .proof-item span { font-size: 14px; }
+
+    /* === CONTINUOUS ANALYSIS / A-B === */
+    .ab-shell { padding: 34px; }
+    .ab-flow { display: grid; grid-template-columns: 1fr auto 1fr auto 1.1fr; gap: 18px; align-items: stretch; }
+    .ab-arrow { display: grid; place-items: center; color: var(--teal); font: 900 28px/1 sans-serif; }
+    .ab-node { min-height: 240px; padding: 24px; border-radius: 16px; background: var(--white); border: 1px solid var(--line); }
+    .ab-node.current { color: white; background: var(--ink); }
+    .ab-code { color: var(--teal); font: 900 12px/1 "Bricolage Grotesque", sans-serif; letter-spacing: .12em; }
+    .ab-node.current .ab-code { color: #6fe0c9; }
+    .ab-node h3 { margin: 28px 0 10px; font-size: 25px; }
+    .ab-node p { margin: 0; color: var(--muted); font-size: 14px; }
+    .ab-node.current p { color: #c0d0d4; }
+    .change-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 24px; }
+    .change { padding: 10px; border-radius: 10px; text-align: center; font-size: 12px; font-weight: 900; }
+    .change.retained { color: var(--green); background: var(--green-light); }
+    .change.updated { color: var(--blue); background: var(--blue-light); }
+    .change.new { color: var(--teal); background: var(--teal-light); }
+    .change.removed { color: var(--red); background: var(--red-light); }
+    .ab-proof { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 18px; }
+    .ab-proof div { padding: 15px 16px; border-radius: 12px; color: var(--ink-2); background: rgba(216,238,232,.55); font-size: 13px; }
+    .ab-proof b { display: block; margin-bottom: 3px; color: var(--teal); }
+
+    /* === ROADMAP === */
+    .roadmap { position: relative; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+    .roadmap::before { content: ""; position: absolute; top: 34px; left: 8%; right: 8%; height: 2px; background: linear-gradient(90deg, var(--amber), var(--blue), var(--teal), var(--green)); }
+    .phase { position: relative; padding-top: 72px; }
+    .phase-dot { position: absolute; top: 22px; left: 24px; width: 26px; height: 26px; border: 6px solid var(--paper); border-radius: 50%; background: var(--teal); box-shadow: 0 0 0 2px var(--teal); }
+    .phase-card { min-height: 310px; padding: 25px; }
+    .phase-code { color: var(--teal); font: 900 13px/1 "Bricolage Grotesque", sans-serif; letter-spacing: .1em; }
+    .phase-date { margin-top: 10px; color: var(--muted); font-size: 13px; }
+    .phase-card h3 { margin: 30px 0 12px; font-size: 25px; }
+    .phase-card p { margin: 0; color: var(--muted); font-size: 14px; }
+    .gate { margin-top: 28px; padding: 13px 14px; border-radius: 12px; color: var(--ink); background: var(--teal-light); font-size: 12px; font-weight: 900; }
+
+    /* === DELIVERY GANTT === */
+    .gantt-panel { margin-top: 30px; overflow: hidden; }
+    .gantt-panel-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 28px 30px 22px; border-bottom: 1px solid var(--line); }
+    .gantt-panel-head h3 { margin: 6px 0 0; font-size: 28px; }
+    .gantt-overline { color: var(--teal); font: 900 11px/1 "Bricolage Grotesque", sans-serif; letter-spacing: .12em; }
+    .gantt-legend { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px 16px; color: var(--muted); font-size: 11px; font-weight: 800; }
+    .gantt-legend span { display: inline-flex; align-items: center; gap: 7px; }
+    .gantt-legend i { width: 9px; height: 9px; border-radius: 50%; background: var(--teal); }
+    .gantt-legend .legend-complete { background: var(--green); }
+    .gantt-legend .legend-review { background: var(--amber); }
+    .gantt-legend .legend-active { background: var(--blue); }
+    .gantt-legend .legend-planned { background: #a9b6ba; }
+    .gantt-scroll { overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-color: var(--teal) var(--paper); }
+    .gantt-grid { min-width: 1120px; padding: 0 0 18px; }
+    .gantt-month-row, .gantt-week-row, .gantt-row { display: grid; grid-template-columns: 280px repeat(15, minmax(48px, 1fr)); }
+    .gantt-month-row { color: white; background: var(--ink); }
+    .gantt-corner { position: sticky; left: 0; z-index: 4; display: flex; align-items: center; padding: 12px 18px; color: #9fc4c9; background: var(--ink); font-size: 10px; font-weight: 900; letter-spacing: .12em; }
+    .gantt-month { padding: 12px 10px; border-left: 1px solid rgba(255,255,255,.12); text-align: center; font: 900 11px/1 "Bricolage Grotesque", sans-serif; letter-spacing: .1em; }
+    .gantt-month.aug { grid-column: 2 / span 5; }
+    .gantt-month.sep { grid-column: 7 / span 4; }
+    .gantt-month.oct { grid-column: 11 / span 4; }
+    .gantt-month.nov { grid-column: 15 / span 2; }
+    .gantt-week-row { color: var(--muted); background: #f4f3ee; }
+    .gantt-week-label { position: sticky; left: 0; z-index: 4; padding: 10px 18px; background: #f4f3ee; font-size: 10px; font-weight: 900; letter-spacing: .08em; }
+    .gantt-week { padding: 10px 2px; border-left: 1px solid var(--line); text-align: center; font-size: 10px; font-weight: 800; }
+    .gantt-row { min-height: 52px; border-top: 1px solid var(--line); background: rgba(255,253,248,.82); }
+    .gantt-row.group-start { border-top: 7px solid var(--paper); }
+    .gantt-task { position: sticky; left: 0; z-index: 3; display: flex; align-items: center; gap: 11px; padding: 8px 14px; background: rgba(255,253,248,.97); box-shadow: 8px 0 14px rgba(19,45,52,.035); }
+    .gantt-task i { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; background: var(--stream-color, var(--teal)); }
+    .gantt-task b { display: block; font-size: 12px; line-height: 1.25; }
+    .gantt-task small { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; line-height: 1.2; }
+    .gantt-track { position: relative; grid-column: 2 / -1; min-width: 0; background-image: repeating-linear-gradient(90deg, transparent 0, transparent calc(6.6667% - 1px), rgba(210,216,214,.72) calc(6.6667% - 1px), rgba(210,216,214,.72) 6.6667%); }
+    .gantt-bar { position: absolute; top: 11px; bottom: 11px; left: var(--left); width: var(--width); min-width: 12px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--stream-color, var(--teal)) 68%, white); border-radius: 7px; background: color-mix(in srgb, var(--stream-color, var(--teal)) 18%, white); box-shadow: 0 4px 10px rgba(11,53,63,.08); }
+    .gantt-bar::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--progress); background: var(--stream-color, var(--teal)); opacity: .92; }
+    .gantt-bar::before { content: attr(data-progress); position: absolute; z-index: 2; top: 50%; left: 8px; transform: translateY(-50%); color: var(--ink); font-size: 9px; font-weight: 900; }
+    .gantt-row.foundation { --stream-color: var(--green); }
+    .gantt-row.acceptance { --stream-color: var(--amber); }
+    .gantt-row.cross-project { --stream-color: var(--blue); }
+    .gantt-row.learning { --stream-color: var(--teal); }
+    .gantt-row.scale { --stream-color: #64747a; }
+    .gantt-row.foundation .gantt-bar::before, .gantt-row.cross-project .gantt-bar::before, .gantt-row.learning .gantt-bar::before { color: white; }
+    .gantt-milestone-row { background: #edf6f3; }
+    .gantt-milestone-row .gantt-task { background: #edf6f3; }
+    .gantt-milestone { position: absolute; top: 7px; left: var(--left); display: grid; place-items: center; width: 38px; height: 38px; transform: translateX(-19px) rotate(45deg); color: white; border: 3px solid #edf6f3; border-radius: 9px; background: var(--ink); box-shadow: 0 0 0 1px rgba(10,42,55,.22); }
+    .gantt-milestone b { transform: rotate(-45deg); font-size: 8px; letter-spacing: .04em; }
+    .gantt-source { display: flex; justify-content: space-between; gap: 18px; padding: 16px 30px 20px; color: var(--muted); background: #f4f3ee; font-size: 11px; }
+    .gantt-source b { color: var(--ink); }
+
+    /* === LAYERS === */
+    .layer-map { display: grid; gap: 10px; }
+    .layer { display: grid; grid-template-columns: 170px 1.1fr 1.6fr; gap: 20px; align-items: center; min-height: 72px; padding: 14px 20px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,253,248,.72); }
+    .layer-id { font-weight: 900; }
+    .layer-name { color: var(--teal); font-weight: 900; }
+    .layer-copy { color: var(--muted); font-size: 14px; }
+    .layer.control { color: white; background: var(--ink); }
+    .layer.control .layer-name { color: #6fe0c9; }
+    .layer.control .layer-copy { color: #c0d0d4; }
+
+    /* === LAUNCH ARCHITECTURE === */
+    .architecture-board { padding: 28px; }
+    .architecture-audience { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+    .architecture-person { padding: 13px 14px; border: 1px solid var(--line); border-radius: 11px; text-align: center; color: var(--ink); background: white; font-size: 12px; font-weight: 900; }
+    .architecture-person small { display: block; margin-top: 4px; color: var(--muted); font-size: 9px; font-weight: 700; }
+    .architecture-arrow { height: 25px; text-align: center; color: var(--teal); font-size: 22px; font-weight: 900; }
+    .architecture-body { display: grid; grid-template-columns: .8fr 2.2fr .85fr; gap: 14px; align-items: stretch; }
+    .architecture-side { display: flex; flex-direction: column; gap: 10px; padding: 16px; border: 1px dashed var(--line); border-radius: 15px; background: #f7f5ef; }
+    .architecture-side h4 { margin: 0 0 6px; color: var(--teal); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+    .architecture-side-item { flex: 1; display: grid; place-items: center; min-height: 52px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; text-align: center; background: white; font-size: 11px; font-weight: 800; }
+    .architecture-core { display: grid; gap: 7px; }
+    .architecture-tier { padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; }
+    .architecture-tier.experience { background: var(--blue-light); }
+    .architecture-tier.project { background: var(--teal-light); }
+    .architecture-tier.ai { color: white; background: var(--ink); }
+    .architecture-tier.contract { background: var(--green-light); }
+    .architecture-tier.data { background: #f5eee0; }
+    .architecture-tier-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
+    .architecture-tier-head b { font-size: 13px; }
+    .architecture-tier-head span { color: var(--muted); font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+    .architecture-tier.ai .architecture-tier-head span { color: #9fb8bd; }
+    .architecture-components { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+    .architecture-component { display: grid; place-items: center; min-height: 42px; padding: 8px; border: 1px solid rgba(12,61,70,.12); border-radius: 9px; text-align: center; background: rgba(255,255,255,.72); font-size: 10px; font-weight: 850; }
+    .architecture-tier.ai .architecture-component { color: #dcebed; border-color: rgba(255,255,255,.14); background: rgba(255,255,255,.07); }
+    .architecture-tier.project .architecture-component.highlight { color: white; background: var(--teal); }
+    .architecture-platform { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; }
+    .architecture-platform div { padding: 12px 14px; border-radius: 11px; color: var(--muted); background: #f4f3ee; font-size: 10px; text-align: center; }
+    .architecture-platform b { display: block; margin-bottom: 3px; color: var(--ink); font-size: 11px; }
+    .architecture-caption { margin: 15px 0 0; color: var(--muted); font-size: 11px; text-align: center; }
+    .architecture-caption a { color: var(--teal); }
+
+    /* === PRODUCT EVOLUTION === */
+    .evolution-track { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+    .evolution-stage { position: relative; min-height: 360px; padding: 26px; }
+    .evolution-stage:not(:last-child)::after { content: "→"; position: absolute; z-index: 2; top: 42px; right: -24px; display: grid; place-items: center; width: 34px; height: 34px; color: white; border: 6px solid var(--paper); border-radius: 50%; background: var(--teal); font-size: 16px; font-weight: 900; }
+    .evolution-now { color: var(--green); }
+    .evolution-next { color: var(--blue); }
+    .evolution-scale { color: var(--teal); }
+    .evolution-platform { color: var(--amber); }
+    .evolution-code { font: 900 11px/1 "Bricolage Grotesque", sans-serif; letter-spacing: .12em; }
+    .evolution-stage h3 { margin: 28px 0 10px; color: var(--ink); font-size: 24px; }
+    .evolution-stage > p { min-height: 64px; margin: 0; color: var(--muted); font-size: 13px; }
+    .evolution-list { display: grid; gap: 8px; margin-top: 22px; }
+    .evolution-list span { padding: 9px 10px; border-radius: 9px; color: var(--ink); background: #f4f3ee; font-size: 11px; font-weight: 800; }
+    .evolution-proof { display: block; margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--teal); font-size: 10px; font-weight: 900; }
+
+    /* === BUSINESS MODEL === */
+    .business-model { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 24px; }
+    .business-offer { padding: 26px; }
+    .business-offer .offer-code { color: var(--teal); font: 900 11px/1 "Bricolage Grotesque", sans-serif; letter-spacing: .12em; }
+    .business-offer h3 { margin: 26px 0 10px; font-size: 24px; }
+    .business-offer p { margin: 0; color: var(--muted); font-size: 13px; }
+    .business-offer ul { margin: 20px 0 0; padding: 0; list-style: none; }
+    .business-offer li { padding: 9px 0; border-top: 1px solid var(--line); font-size: 11px; font-weight: 800; }
+    .business-offer .revenue { display: block; margin-top: 22px; padding: 12px 13px; border-radius: 10px; color: var(--ink); background: var(--teal-light); font-size: 11px; font-weight: 900; }
+    .business-buyer-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin-top: 14px; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--line); }
+    .business-buyer-strip div { padding: 18px; background: white; }
+    .business-buyer-strip b { display: block; margin-bottom: 5px; color: var(--teal); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+    .business-buyer-strip span { color: var(--muted); font-size: 11px; }
+    .commercial-hypothesis { margin-top: 14px; padding: 14px 17px; border-left: 4px solid var(--amber); color: var(--muted); background: var(--amber-light); font-size: 12px; }
+
+    /* === VALUE MEASUREMENT === */
+    .value-scorecard { display: grid; grid-template-columns: 1.2fr repeat(4, 1fr); gap: 1px; margin-top: 16px; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--line); }
+    .value-equation, .value-measure { padding: 20px; background: white; }
+    .value-equation { color: white; background: var(--ink); }
+    .value-equation b, .value-measure b { display: block; margin-bottom: 6px; font-size: 12px; }
+    .value-equation span { color: #b7cbcf; font-size: 11px; }
+    .value-measure b { color: var(--teal); }
+    .value-measure span { color: var(--muted); font-size: 10px; }
+
+    /* === COMMERCIAL ROUTE === */
+    .commercial-route { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; align-items: end; }
+    .commercial-step { position: relative; padding: 24px; overflow: hidden; }
+    .commercial-step:nth-child(1) { min-height: 230px; }
+    .commercial-step:nth-child(2) { min-height: 270px; }
+    .commercial-step:nth-child(3) { min-height: 310px; }
+    .commercial-step:nth-child(4) { min-height: 350px; }
+    .commercial-step:nth-child(5) { min-height: 390px; color: white; background: var(--ink); }
+    .commercial-step:not(:last-child)::after { content: ""; position: absolute; inset: 0 0 auto; height: 4px; background: var(--teal); }
+    .commercial-stage { color: var(--teal); font: 900 12px/1 "Bricolage Grotesque", sans-serif; letter-spacing: .1em; }
+    .commercial-step:last-child .commercial-stage { color: #6fe0c9; }
+    .commercial-step h3 { margin: 28px 0 12px; font-size: 23px; }
+    .commercial-step p { margin: 0; color: var(--muted); font-size: 13px; }
+    .commercial-step:last-child p { color: #c0d0d4; }
+    .commercial-proof { display: block; margin-top: 24px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--teal); font-size: 11px; font-weight: 900; }
+    .commercial-step:last-child .commercial-proof { color: #6fe0c9; border-color: rgba(255,255,255,.14); }
+
+    /* === RISK / METRICS === */
+    .risk-grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 20px; }
+    .risk-list, .metric-panel { padding: 30px; }
+    .risk-list h3, .metric-panel h3 { margin: 0 0 24px; font-size: 28px; }
+    .risk-row { display: grid; grid-template-columns: 86px 1fr; gap: 16px; padding: 17px 0; border-top: 1px solid var(--line); }
+    .risk-row:first-of-type { border-top: 0; }
+    .risk-level { align-self: start; padding: 6px 8px; border-radius: 999px; text-align: center; color: var(--red); background: var(--red-light); font-size: 11px; font-weight: 900; }
+    .risk-row b { display: block; margin-bottom: 4px; }
+    .risk-row span { color: var(--muted); font-size: 14px; }
+    .metric-panel { color: white; background: var(--ink); }
+    .metric-panel h3 { color: white; }
+    .metric-list { display: grid; gap: 14px; }
+    .metric { padding: 16px 18px; border: 1px solid rgba(255,255,255,.12); border-radius: 14px; background: rgba(255,255,255,.055); }
+    .metric b { display: block; color: #6fe0c9; font-size: 14px; }
+    .metric span { color: #c0d0d4; font-size: 13px; }
+
+    /* === ACTION / DOWNLOADS === */
+    .action-section { padding: 84px 0 100px; }
+    .action-panel { display: grid; grid-template-columns: 1.1fr .9fr; gap: 40px; padding: 46px; color: white; border-radius: var(--radius-xl); background: linear-gradient(135deg, #0a2a37, #0c3c43); box-shadow: var(--shadow); }
+    .action-panel h2 { margin-top: 10px; color: white; font-size: clamp(38px, 4.6vw, 62px); }
+    .action-panel p { color: #c3d3d7; font-size: 17px; }
+    .next-list { display: grid; gap: 12px; margin-top: 28px; }
+    .next-item { display: grid; grid-template-columns: 34px 1fr; gap: 12px; align-items: center; }
+    .next-no { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; color: #082631; background: #66dfc5; font-weight: 900; }
+    .download-box { padding: 28px; border: 1px solid rgba(255,255,255,.15); border-radius: 20px; background: rgba(255,255,255,.06); }
+    .download-box h3 { margin: 0 0 10px; font-size: 25px; }
+    .download-box > p { margin: 0 0 22px; font-size: 14px; }
+    .download-link { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 10px; padding: 15px 17px; border-radius: 12px; text-decoration: none; color: white; background: rgba(255,255,255,.08); transition: .2s ease; }
+    .download-link:hover { background: rgba(255,255,255,.14); transform: translateX(3px); }
+    .download-link small { display: block; color: #a9c0c5; }
+    .download-link i { color: #6fe0c9; font-style: normal; font-weight: 900; }
+
+    .source-note { margin-top: 28px; color: #9db2b7; font-size: 12px; }
+    .source-note a { color: #d7e8eb; }
+
+    /* === EDITING MODE === */
+    body[data-editing="true"] [data-editable] { outline: 2px dashed rgba(214,139,30,.7); outline-offset: 5px; border-radius: 4px; }
+    body[data-editing="true"] [data-editable]:focus { outline-color: var(--teal); background: rgba(255,255,255,.08); }
+
+    /* === REVEAL MOTION === */
+    .reveal { opacity: 0; transform: translateY(22px); transition: opacity .65s ease, transform .65s ease; }
+    .reveal.visible { opacity: 1; transform: none; }
+
+    /* === RESPONSIVE === */
+    @media (max-width: 980px) {
+      .hero, .section-head, .action-panel, .risk-grid { grid-template-columns: 1fr; }
+      .hero { min-height: auto; gap: 42px; }
+      .hero::before { display: none; }
+      .executive-grid, .value-chain, .roadmap, .commercial-route { grid-template-columns: 1fr 1fr; align-items: stretch; }
+      .commercial-step:nth-child(n) { min-height: 250px; }
+      .audience-grid { grid-template-columns: 1fr; }
+      .ab-flow { grid-template-columns: 1fr; }
+      .ab-arrow { transform: rotate(90deg); padding: 2px 0; }
+      .decision-strip { grid-template-columns: 1fr; }
+      .decision { border-left: 0; border-top: 1px solid rgba(255,255,255,.12); }
+      .proof-grid { grid-template-columns: 1fr; }
+      .status-row { grid-template-columns: 1.4fr repeat(4, .9fr); }
+      .status-cell { padding: 14px 10px; }
+      .layer { grid-template-columns: 120px 1fr; }
+      .layer-copy { grid-column: 1 / -1; }
+      .architecture-body { grid-template-columns: 1fr; }
+      .architecture-side { display: grid; grid-template-columns: repeat(3, 1fr); }
+      .architecture-side h4 { grid-column: 1 / -1; }
+      .evolution-track, .business-model { grid-template-columns: 1fr 1fr; }
+      .evolution-stage:not(:last-child)::after { display: none; }
+      .value-scorecard { grid-template-columns: 1fr 1fr; }
+      .value-equation { grid-column: 1 / -1; }
+    }
+
+    @media (max-width: 700px) {
+      .page, .topbar-inner { width: min(calc(100% - 24px), var(--max)); }
+      .topbar { height: auto; min-height: 62px; }
+      .topbar-inner { padding: 10px 0; }
+      .brand span:last-child { display: none; }
+      .top-action span { display: none; }
+      .hero { padding-top: 58px; }
+      h1 { font-size: 48px; }
+      .section-shell { padding: 62px 0; }
+      .section-head { gap: 20px; }
+      .executive-grid, .value-chain, .roadmap, .commercial-route { grid-template-columns: 1fr; }
+      .ab-proof { grid-template-columns: 1fr; }
+      .value-step:not(:last-child)::after { content: "↓"; top: auto; right: 26px; bottom: -25px; }
+      .status-board { overflow-x: auto; }
+      .status-row { min-width: 760px; }
+      .phase { padding-top: 42px; }
+      .roadmap::before, .phase-dot { display: none; }
+      .layer { grid-template-columns: 1fr; gap: 4px; }
+      .layer-copy { grid-column: auto; }
+      .action-panel { padding: 28px; }
+      .architecture-board { padding: 18px; }
+      .architecture-audience, .architecture-components, .architecture-platform, .architecture-side, .evolution-track, .business-model, .business-buyer-strip, .value-scorecard { grid-template-columns: 1fr; }
+      .architecture-side h4, .value-equation { grid-column: auto; }
+      .gantt-panel-head { align-items: flex-start; flex-direction: column; }
+      .gantt-legend { justify-content: flex-start; }
+      .gantt-source { flex-direction: column; }
+    }
+
+    /* === PRINT === */
+    @media print {
+      @page { size: A4; margin: 13mm; }
+      body { background: white; color: black; }
+      .topbar { display: none; }
+      .page { width: 100%; }
+      .hero { min-height: auto; padding: 12mm 0; break-after: page; }
+      .section-shell, .action-section { padding: 10mm 0; }
+      .card, .rag-panel, .action-panel { box-shadow: none; break-inside: avoid; }
+      .reveal { opacity: 1 !important; transform: none !important; }
+      .roadmap, .executive-grid, .value-chain { gap: 8px; }
+      .gantt-scroll { overflow: visible; }
+      .gantt-grid { min-width: 0; }
+      .gantt-month-row, .gantt-week-row, .gantt-row { grid-template-columns: 280px repeat(15, minmax(28px, 1fr)); }
+      .gantt-panel { break-inside: avoid; }
+      a { text-decoration: none; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
+      .reveal { opacity: 1; transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <!-- === STICKY REPORT CONTROLS === -->
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand"><span class="brand-mark">E</span><span>ENERGYIQ · PRODUCT LAUNCH ROADMAP</span></div>
+      <div class="top-actions">
+        <button class="top-action" id="editButton" type="button" aria-label="编辑报告内容" title="直接编辑报告文字">✎ <span>编辑内容</span></button>
+        <button class="top-action" id="saveButton" type="button" aria-label="下载当前 HTML" title="下载包含当前修改的 HTML">↓ <span>下载当前 HTML</span></button>
+        <button class="top-action" type="button" aria-label="打印或另存为 PDF" onclick="window.print()" title="打印或另存为 PDF">▣ <span>打印 / PDF</span></button>
+      </div>
+    </div>
+  </header>
+
+  <main class="page">
+    <!-- === HERO: 20-SECOND MANAGEMENT READ === -->
+    <section class="hero" id="overview">
+      <div class="reveal">
+        <div class="eyebrow">Product launch brief · 18 Aug 2026</div>
+        <h1 data-editable>从可信数据，走向<span>可复跑的能源决策</span></h1>
+        <p class="hero-lead" data-editable>EnergyIQ 的工程底座和双项目产品形态已经形成。当前最重要的工作不是继续堆功能，而是把能力转化为<strong>客户可验证、数据更新后仍有价值、可以跨项目复用</strong>的产品。</p>
+        <div class="hero-meta">
+          <span>代码基线 <strong>main@a252d367</strong></span>
+          <span>项目证明 <strong>Preschool + Ngee Ann</strong></span>
+          <span>状态原则 <strong>Engineering ≠ Customer Acceptance</strong></span>
+        </div>
+        <nav class="quick-nav" aria-label="快速跳转">
+          <a href="#value">产品价值</a>
+          <a href="#progress">当前进度</a>
+          <a href="#architecture">技术架构</a>
+          <a href="#evolution">产品演进</a>
+          <a href="#roadmap">Roadmap</a>
+          <a href="#business">商业模式</a>
+          <a href="#actions">下一步</a>
+        </nav>
+      </div>
+
+      <aside class="rag-panel reveal" aria-label="当前管理状态">
+        <div class="rag-top">
+          <div><div class="rag-label">Current delivery status</div><div class="rag-value">AMBER</div></div>
+          <span class="rag-chip">聚焦验收</span>
+        </div>
+        <p class="rag-copy" data-editable>核心能力已经进入主线；客户验收、Ngee Ann 的真实 A→B，以及 Insight → Method/SOP 的学习闭环仍是 Release Gate。</p>
+        <div class="rag-rule"></div>
+        <div class="rag-list">
+          <div class="rag-item"><span class="rag-number">1</span><span><b>已经证明：</b>Snapshot / Evidence、项目 Overview、AI Analyst、Preschool Layer 1–3 与工程级 A→B。</span></div>
+          <div class="rag-item"><span class="rag-number">2</span><span><b>正在关闭：</b>Ngee Ann 服务端 AI、真实 A→B、人工内容价值审核与多账户客户旅程。</span></div>
+          <div class="rag-item"><span class="rag-number">3</span><span><b>下一道壁垒：</b>把用户认可的 Insight 沉淀成可审核、可复跑的 Method / SOP。</span></div>
+        </div>
+      </aside>
+    </section>
+
+    <!-- === PRODUCT THESIS === -->
+    <section class="section-shell" id="summary">
+      <div class="section-head reveal">
+        <div><div class="section-kicker">01 · Product thesis</div><h2>EnergyIQ 正在完成三次关键跃迁</h2></div>
+        <p class="section-intro" data-editable>从“展示图表”走向“以可信数据为底座、随新数据重新分析、把有效经验沉淀下来”。下一阶段要证明的是客户愿意持续使用、产品能够跨项目复制，并形成可规模化的行业智能。</p>
+      </div>
+
+      <div class="executive-grid">
+        <article class="card signal-card reveal">
+          <div class="signal-index">PROOF 01</div>
+          <h3 data-editable>产品骨架已经形成</h3>
+          <p data-editable>双项目 Overview、Evidence、AI 分析、Artifact 恢复和权限治理已经汇入同一产品主线。</p>
+          <div class="signal-foot">主线：main@a252d367</div>
+        </article>
+        <article class="card signal-card amber reveal">
+          <div class="signal-index">GATE 02</div>
+          <h3 data-editable>下一步是客户价值验收</h3>
+          <p data-editable>内容是否值得读、A→B 是否真的发现变化、多账户是否符合客户边界，需要 Charles 与 Ngee 用户完成验收。</p>
+          <div class="signal-foot">开放门：#47 · #55 · #56 · #65</div>
+        </article>
+        <article class="card signal-card blue reveal">
+          <div class="signal-index">MOAT 03</div>
+          <h3 data-editable>长期壁垒是经验复用</h3>
+          <p data-editable>有价值的 Insight 经过反馈和审批，沉淀为 Method / SOP，进入下一次 Snapshot 复跑，形成越用越强的产品。</p>
+          <div class="signal-foot">学习闭环：#57</div>
+        </article>
+      </div>
+
+      <div class="decision-strip reveal">
+        <div class="decision-title">下一阶段关键选择</div>
+        <div class="decision"><b>① 产品路径</b><span>先完成 Ngee + A→B + 反馈闭环，再扩大 Coding Agent。</span></div>
+        <div class="decision"><b>② 交付机制</b><span>建立 Product、Energy、QA/UAT 与 Operations 的明确责任链。</span></div>
+        <div class="decision"><b>③ 市场证明</b><span>用真实 Pilot 反馈验证产品包装、价值指标和 SOP 付费假设。</span></div>
+      </div>
+    </section>
+
+    <!-- === CUSTOMER VALUE CHAIN === -->
+    <section class="section-shell" id="value">
+      <div class="section-head reveal">
+        <div><div class="section-kicker">02 · Business value</div><h2>客户购买的不是图表</h2></div>
+        <p class="section-intro" data-editable>客户真正购买的是更快找到优先事项、更有依据地做判断，并且在新数据进来后不必从头再做一次分析。</p>
+      </div>
+      <div class="value-chain">
+        <article class="card value-step reveal"><span class="step-no">1</span><h3>可信数据</h3><p>把 Excel、API、Meter 与项目结构整理成可追溯 Snapshot 和 Evidence。</p><span class="outcome">结果：事实可核查</span></article>
+        <article class="card value-step reveal"><span class="step-no">2</span><h3>决策 Overview</h3><p>让决策者快速看到重点，让 FM 能定位图表、时段和证据。</p><span class="outcome">结果：更快找到重点</span></article>
+        <article class="card value-step reveal"><span class="step-no">3</span><h3>AI + A→B</h3><p>围绕 Section 产生新角度，并随 Snapshot B 保留、更新、新增或淘汰结论。</p><span class="outcome">结果：持续产生价值</span></article>
+        <article class="card value-step reveal"><span class="step-no">4</span><h3>Method / SOP</h3><p>把用户认可的分析角度固化为方法，经审核后跨 Snapshot 和项目复用。</p><span class="outcome">结果：形成产品壁垒</span></article>
+      </div>
+      <div class="audience-grid">
+        <article class="card audience-card reveal"><span class="audience-icon">D</span><div><b>Decision leaders</b><span>快速看懂重点、风险、变化和优先行动。</span></div></article>
+        <article class="card audience-card reveal"><span class="audience-icon">E</span><div><b>Energy / FM teams</b><span>从结论进入 Evidence 和 AI Analysis 深挖。</span></div></article>
+        <article class="card audience-card reveal"><span class="audience-icon">A</span><div><b>Admin / delivery teams</b><span>管理项目、模型、Skill、Method、Tool 与 Run Trace。</span></div></article>
+      </div>
+      <div class="value-scorecard reveal" aria-label="业务价值衡量框架">
+        <div class="value-equation"><b>VALUE EQUATION</b><span>更少的分析等待 + 更清晰的优先级 + 更稳定的复跑 + 可复用的专家经验</span></div>
+        <div class="value-measure"><b>Time to priority</b><span>从数据发布到识别首要问题所需时间</span></div>
+        <div class="value-measure"><b>Evidence coverage</b><span>关键结论中可追溯 Evidence 的覆盖率</span></div>
+        <div class="value-measure"><b>Action conversion</b><span>Insight 被深挖、采纳或转成行动的比例</span></div>
+        <div class="value-measure"><b>Repeatability</b><span>新 Snapshot 到来后可自动复跑的分析比例</span></div>
+      </div>
+    </section>
+
+    <!-- === DELIVERY STATUS === -->
+    <section class="section-shell" id="progress">
+      <div class="section-head reveal">
+        <div><div class="section-kicker">03 · Delivery truth</div><h2>进度必须分清“做完”和“被接受”</h2></div>
+        <p class="section-intro">以下状态综合当前主线提交和 GitHub Gate。即使代码已经合入，仍然可能处于人工验收或客户验收阶段。</p>
+      </div>
+
+      <div class="card status-board reveal" role="table" aria-label="EnergyIQ 交付状态">
+        <div class="status-row" role="row"><div class="status-cell">Workstream</div><div class="status-cell">可信数据</div><div class="status-cell">AI Layer 1–3</div><div class="status-cell">A→B</div><div class="status-cell">客户验收</div></div>
+        <div class="status-row" role="row"><div class="status-cell workstream">Foundation</div><div class="status-cell"><span class="status-pill verified">工程已验证</span></div><div class="status-cell">—</div><div class="status-cell">—</div><div class="status-cell"><span class="status-pill human">待人工验收</span></div></div>
+        <div class="status-row" role="row"><div class="status-cell workstream">Preschool</div><div class="status-cell"><span class="status-pill verified">工程已验证</span></div><div class="status-cell"><span class="status-pill integrated">已集成</span></div><div class="status-cell"><span class="status-pill verified">工程已验证</span></div><div class="status-cell"><span class="status-pill human">待客户验收</span></div></div>
+        <div class="status-row" role="row"><div class="status-cell workstream">Ngee Ann</div><div class="status-cell"><span class="status-pill verified">工程已验证</span></div><div class="status-cell"><span class="status-pill integrated">已集成</span></div><div class="status-cell"><span class="status-pill human">待真实复跑</span></div><div class="status-cell"><span class="status-pill human">待客户验收</span></div></div>
+        <div class="status-row" role="row"><div class="status-cell workstream">Admin / Harness</div><div class="status-cell"><span class="status-pill verified">控制面可用</span></div><div class="status-cell"><span class="status-pill human">待人审</span></div><div class="status-cell">—</div><div class="status-cell"><span class="status-pill human">待运营验收</span></div></div>
+        <div class="status-row" role="row"><div class="status-cell workstream">Method / SOP</div><div class="status-cell">—</div><div class="status-cell"><span class="status-pill planned">规划中</span></div><div class="status-cell"><span class="status-pill planned">规划中</span></div><div class="status-cell"><span class="status-pill planned">规划中</span></div></div>
+        <div class="status-row" role="row"><div class="status-cell workstream">Coding Agent</div><div class="status-cell">—</div><div class="status-cell">—</div><div class="status-cell">—</div><div class="status-cell"><span class="status-pill planned">发现阶段</span></div></div>
+      </div>
+      <div class="truth-note reveal"><b>产品判断</b><span data-editable>当前最短关键路径是：客户验收 → Ngee 真实 A→B → Feedback → SOP。工程测试是产品可信度的基础，真实用户持续使用才是下一阶段的证明。</span></div>
+    </section>
+
+    <!-- === CUSTOMER PROOF === -->
+    <section class="section-shell" id="proof">
+      <div class="section-head reveal">
+        <div><div class="section-kicker">04 · Customer proof</div><h2>两个项目证明两种能力</h2></div>
+        <p class="section-intro">Preschool 证明分析深度，Ngee Ann 证明跨项目复用。它们不共享一套 Section，但共享可信身份、Artifact、恢复、权限和治理机制。</p>
+      </div>
+      <div class="proof-grid">
+        <article class="card proof-card reveal">
+          <span class="project-tag">PRESCHOOL</span>
+          <h3>Portfolio decision intelligence</h3>
+          <p>从 Centre benchmark 到 operating behaviour，再到 Key Findings、Section Interpretation 和 Additional Insights。</p>
+          <div class="proof-list">
+            <div class="proof-item"><b>已形成</b><span>可信 Overview、Layer 1–3、Explore with AI、A→B 变化恢复。</span></div>
+            <div class="proof-item"><b>当前 Gate</b><span>人工判断内容价值、视觉层级、自然表达与多账户客户旅程。</span></div>
+            <div class="proof-item"><b>要证明</b><span>AI 能在事实之上提供值得追问的新角度，而不是只复述数据。</span></div>
+          </div>
+        </article>
+        <article class="card proof-card ngee reveal">
+          <span class="project-tag">NGEE ANN</span>
+          <h3>Campus operational intelligence</h3>
+          <p>围绕 Level、Circuit、时段行为和决策优先级形成项目专属 Overview 与 AI 分析。</p>
+          <div class="proof-list">
+            <div class="proof-item"><b>已形成</b><span>项目专属 Renderer、Section Pack、服务端持久化 AI 与 Saved restore 主线。</span></div>
+            <div class="proof-item"><b>当前 Gate</b><span>真实 Snapshot A→B、内容人审、账户隔离和客户现场可用性。</span></div>
+            <div class="proof-item"><b>要证明</b><span>同一平台能服务不同管理问题，而不是把 Preschool 复制一遍。</span></div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- === CONTINUOUS ANALYSIS / A-B === -->
+    <section class="section-shell" id="continuous">
+      <div class="section-head reveal">
+        <div><div class="section-kicker">05 · Continuous analysis</div><h2>A→B 不是比较两份报告</h2></div>
+        <p class="section-intro" data-editable>它要证明系统会随新数据重新计算事实、切换 AI 数据域，并诚实告诉用户哪些结论被保留、更新、新增或淘汰。</p>
+      </div>
+      <div class="card ab-shell reveal">
+        <div class="ab-flow">
+          <article class="ab-node">
+            <div class="ab-code">SNAPSHOT A</div>
+            <h3>历史可信档案</h3>
+            <p>保留当时的 Metrics、Key Findings、Section Insights、Additional Insights 和 Evidence identity。</p>
+          </article>
+          <div class="ab-arrow" aria-hidden="true">→</div>
+          <article class="ab-node current">
+            <div class="ab-code">SNAPSHOT B</div>
+            <h3>用新数据重新思考</h3>
+            <p>重新计算 Facts、生成新 Artifact、切换 AI Analyst Context，并检测新的异常或机会。</p>
+          </article>
+          <div class="ab-arrow" aria-hidden="true">→</div>
+          <article class="ab-node">
+            <div class="ab-code">WHAT CHANGED?</div>
+            <h3>把变化说清楚</h3>
+            <div class="change-grid"><span class="change retained">保留 retained</span><span class="change updated">更新 updated</span><span class="change new">新增 new</span><span class="change removed">淘汰 removed</span></div>
+          </article>
+        </div>
+        <div class="ab-proof">
+          <div><b>身份隔离</b>旧 Artifact 不得冒充当前 Snapshot。</div>
+          <div><b>成本纪律</b>普通打开和刷新不应新增 Provider Run。</div>
+          <div><b>价值验收</b>每次复跑都要判断新内容是否值得用户思考。</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- === 90-DAY ROADMAP === -->
+    <section class="section-shell" id="roadmap">
+      <div class="section-head reveal">
+        <div><div class="section-kicker">06 · 90-day roadmap</div><h2>验收 → 复用 → 学习 → 规模化</h2></div>
+        <p class="section-intro">日期是规划假设。只有 owner、依赖、出口条件和证据路径确认后，才可以把它转成客户承诺。</p>
+      </div>
+      <div class="roadmap">
+        <div class="phase reveal"><span class="phase-dot"></span><article class="card phase-card"><div class="phase-code">R1</div><div class="phase-date">17–28 Aug</div><h3>Acceptance Hardening</h3><p>内容价值、视觉层级、多账户、Admin 操作和发布 Runbook。</p><div class="gate">G1 · Named-user acceptance</div></article></div>
+        <div class="phase reveal"><span class="phase-dot"></span><article class="card phase-card"><div class="phase-code">R2</div><div class="phase-date">31 Aug–18 Sep</div><h3>Cross-project AI</h3><p>Ngee Layer 1–3、Saved restore、真实 Snapshot A→B 与 AI Context 切换。</p><div class="gate">G2 · Repeatability</div></article></div>
+        <div class="phase reveal"><span class="phase-dot"></span><article class="card phase-card"><div class="phase-code">R3</div><div class="phase-date">21 Sep–9 Oct</div><h3>Learning Loop</h3><p>Usefulness 反馈、Explore 事件、Method Proposal、审核与 SOP 发布。</p><div class="gate">G3 · One approved Method</div></article></div>
+        <div class="phase reveal"><span class="phase-dot"></span><article class="card phase-card"><div class="phase-code">R4</div><div class="phase-date">12 Oct–6 Nov</div><h3>Pilot Scale</h3><p>模板提案、Visual Canvas、Coding Agent spike 与下一次发布决策。</p><div class="gate">G4 · Next release decision</div></article></div>
+      </div>
+      <article class="card gantt-panel reveal" aria-labelledby="delivery-gantt-title">
+        <div class="gantt-panel-head">
+          <div><div class="gantt-overline">DELIVERY VIEW · AUG–NOV 2026</div><h3 id="delivery-gantt-title">整体 Roadmap 甘特图</h3></div>
+          <div class="gantt-legend" aria-label="任务状态图例">
+            <span><i class="legend-complete"></i>已完成</span><span><i class="legend-review"></i>验收中</span><span><i class="legend-active"></i>执行中</span><span><i class="legend-planned"></i>已规划</span>
+          </div>
+        </div>
+        <div class="gantt-scroll" role="region" aria-label="EnergyIQ 2026 年 8 月至 11 月交付甘特图" tabindex="0">
+          <div class="gantt-grid" role="table" aria-label="工作流、任务、周次与当前进度">
+            <div class="gantt-month-row" role="row"><div class="gantt-corner" role="columnheader">WORKSTREAM / DELIVERY</div><div class="gantt-month aug" role="columnheader">AUGUST</div><div class="gantt-month sep" role="columnheader">SEPTEMBER</div><div class="gantt-month oct" role="columnheader">OCTOBER</div><div class="gantt-month nov" role="columnheader">NOVEMBER</div></div>
+            <div class="gantt-week-row" role="row"><div class="gantt-week-label" role="columnheader">15-WEEK EXECUTION WINDOW</div><span class="gantt-week">03</span><span class="gantt-week">10</span><span class="gantt-week">17</span><span class="gantt-week">24</span><span class="gantt-week">31</span><span class="gantt-week">07</span><span class="gantt-week">14</span><span class="gantt-week">21</span><span class="gantt-week">28</span><span class="gantt-week">05</span><span class="gantt-week">12</span><span class="gantt-week">19</span><span class="gantt-week">26</span><span class="gantt-week">02</span><span class="gantt-week">09</span></div>
+
+            <div class="gantt-row foundation" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Verified data + AI foundation</b><small>Identity · Overview · Saved · Preschool A→B</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="100%" title="3–17 Aug · Engineering verified" style="--left:0%;--width:15.15%;--progress:100%"></span></div></div>
+
+            <div class="gantt-row acceptance group-start" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Preschool Key Findings review</b><small>17–21 Aug · Product</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="90%" title="17–21 Aug · Acceptance pending" style="--left:14.14%;--width:5.05%;--progress:90%"></span></div></div>
+            <div class="gantt-row acceptance" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Section + Additional Insight review</b><small>17–24 Aug · Product + Energy</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="90%" title="17–24 Aug · Acceptance pending" style="--left:14.14%;--width:8.08%;--progress:90%"></span></div></div>
+            <div class="gantt-row acceptance" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Multi-account + Admin AI Ops</b><small>17 Aug–1 Sep · QA + Admin</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="70%" title="17 Aug–1 Sep · Acceptance pending" style="--left:14.14%;--width:16.16%;--progress:70%"></span></div></div>
+            <div class="gantt-row acceptance" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Pilot runbook + rollback evidence</b><small>20 Aug–1 Sep · Operations</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="55%" title="20 Aug–1 Sep · In progress" style="--left:17.17%;--width:13.13%;--progress:55%"></span></div></div>
+
+            <div class="gantt-row cross-project group-start" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Ngee Ann Layer 1–3 Adapter</b><small>15 Aug–1 Sep · AI Platform</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="85%" title="15 Aug–1 Sep · In progress" style="--left:12.12%;--width:18.18%;--progress:85%"></span></div></div>
+            <div class="gantt-row cross-project" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Ngee Ann Snapshot A→B</b><small>31 Aug–11 Sep · Product + AI</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="15%" title="31 Aug–11 Sep · Planned" style="--left:28.28%;--width:12.12%;--progress:15%"></span></div></div>
+            <div class="gantt-row cross-project" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Common Adapter boundary</b><small>7–18 Sep · Architecture</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="20%" title="7–18 Sep · Planned" style="--left:35.35%;--width:12.12%;--progress:20%"></span></div></div>
+
+            <div class="gantt-row learning group-start" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Usefulness + Explore events</b><small>21 Sep–2 Oct · Product Analytics</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="10%" title="21 Sep–2 Oct · Planned" style="--left:49.49%;--width:12.12%;--progress:10%"></span></div></div>
+            <div class="gantt-row learning" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Insight-to-Method proposal flow</b><small>28 Sep–9 Oct · Energy + Admin</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="10%" title="28 Sep–9 Oct · Planned" style="--left:56.57%;--width:12.12%;--progress:10%"></span></div></div>
+            <div class="gantt-row learning" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Governed Harness policy</b><small>28 Sep–9 Oct · AI Platform</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="10%" title="28 Sep–9 Oct · Planned" style="--left:56.57%;--width:12.12%;--progress:10%"></span></div></div>
+
+            <div class="gantt-row scale group-start" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>AI Template Proposal + Preview</b><small>12–23 Oct · Admin Product</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="20%" title="12–23 Oct · Planned" style="--left:70.71%;--width:12.12%;--progress:20%"></span></div></div>
+            <div class="gantt-row scale" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Controlled visual Insight Canvas</b><small>19–30 Oct · Frontend + AI</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="10%" title="19–30 Oct · Planned" style="--left:77.78%;--width:12.12%;--progress:10%"></span></div></div>
+            <div class="gantt-row scale" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Coding Agent architecture spike</b><small>19 Oct–6 Nov · Architecture</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="5%" title="19 Oct–6 Nov · Discovery" style="--left:77.78%;--width:19.19%;--progress:5%"></span></div></div>
+            <div class="gantt-row scale" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Customer handover + pilot review</b><small>2–6 Nov · Product + Sales</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="10%" title="2–6 Nov · Planned" style="--left:91.92%;--width:5.05%;--progress:10%"></span></div></div>
+
+            <div class="gantt-row gantt-milestone-row group-start" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b>Release gates</b><small>客户承诺前必须通过</small></span></div><div class="gantt-track" role="cell"><span class="gantt-milestone" style="--left:14.14%" title="G0 · Foundation verified"><b>G0</b></span><span class="gantt-milestone" style="--left:26.26%" title="G1 · Named-user acceptance"><b>G1</b></span><span class="gantt-milestone" style="--left:46.46%" title="G2 · Repeatability"><b>G2</b></span><span class="gantt-milestone" style="--left:67.68%" title="G3 · One approved Method"><b>G3</b></span><span class="gantt-milestone" style="--left:95.96%" title="G4 · Next release decision"><b>G4</b></span></div></div>
+          </div>
+        </div>
+        <div class="gantt-source"><span><b>读取方式：</b>实色代表当前完成度，浅色代表剩余计划；横向滚动可查看完整 15 周。</span><span>Source · PMO Delivery Plan / Gantt · 17 Aug 2026 · indicative until owner confirmation</span></div>
+      </article>
+    </section>
+
+    <!-- === TECHNICAL ARCHITECTURE === -->
+    <section class="section-shell" id="architecture">
+      <div class="section-head reveal">
+        <div><div class="section-kicker">07 · Technical architecture</div><h2>从原始数据到可信决策的完整链路</h2></div>
+        <p class="section-intro">项目拥有自己的业务语义和分析表达；平台统一数据身份、Evidence、AI Harness、权限、恢复和审计，使每次输出都可以解释、复跑和治理。</p>
+      </div>
+      <article class="card architecture-board reveal" aria-label="EnergyIQ 分层技术架构图">
+        <div class="architecture-audience">
+          <div class="architecture-person">Decision leaders<small>优先级、变化和决策</small></div>
+          <div class="architecture-person">Energy / FM teams<small>Evidence、诊断和行动</small></div>
+          <div class="architecture-person">Project admins<small>项目、账户和发布</small></div>
+          <div class="architecture-person">AI operators<small>Model、Skill、Method 和 Run</small></div>
+        </div>
+        <div class="architecture-arrow" aria-hidden="true">↕</div>
+        <div class="architecture-body">
+          <aside class="architecture-side" aria-label="项目输入">
+            <h4>Project inputs</h4>
+            <div class="architecture-side-item">Meter / API / Files</div>
+            <div class="architecture-side-item">Hierarchy + metadata</div>
+            <div class="architecture-side-item">Calendar + tariff</div>
+            <div class="architecture-side-item">Expert SOP / Method</div>
+          </aside>
+          <div class="architecture-core">
+            <div class="architecture-tier experience"><div class="architecture-tier-head"><b>Experience layer</b><span>what users see</span></div><div class="architecture-components"><div class="architecture-component">Decision Overview</div><div class="architecture-component">AI Analyst</div><div class="architecture-component">Saved / Reports</div><div class="architecture-component">Admin Studio</div></div></div>
+            <div class="architecture-tier project"><div class="architecture-tier-head"><b>Project intelligence</b><span>project-specific meaning</span></div><div class="architecture-components"><div class="architecture-component">Renderer + Recipe</div><div class="architecture-component">Section Packs</div><div class="architecture-component highlight">Layer 1–3 AI</div><div class="architecture-component">A→B Change Summary</div></div></div>
+            <div class="architecture-tier ai"><div class="architecture-tier-head"><b>Governed AI Harness</b><span>controlled model execution</span></div><div class="architecture-components"><div class="architecture-component">Model Profile</div><div class="architecture-component">Skills + Methods</div><div class="architecture-component">Tools + Context</div><div class="architecture-component">Run Finalizer</div></div></div>
+            <div class="architecture-tier contract"><div class="architecture-tier-head"><b>Trust contracts</b><span>why the result can be trusted</span></div><div class="architecture-components"><div class="architecture-component">Snapshot identity</div><div class="architecture-component">Evidence Catalog</div><div class="architecture-component">Artifact identity</div><div class="architecture-component">Saved restore</div></div></div>
+            <div class="architecture-tier data"><div class="architecture-tier-head"><b>Data foundation</b><span>versioned analytical truth</span></div><div class="architecture-components"><div class="architecture-component">Import + validation</div><div class="architecture-component">Metrics + rules</div><div class="architecture-component">Metadata store</div><div class="architecture-component">Run / Event trace</div></div></div>
+          </div>
+          <aside class="architecture-side" aria-label="跨层控制面">
+            <h4>Control plane</h4>
+            <div class="architecture-side-item">Tenant isolation</div>
+            <div class="architecture-side-item">Human approval</div>
+            <div class="architecture-side-item">Readiness + policy</div>
+            <div class="architecture-side-item">Backup + rollback</div>
+          </aside>
+        </div>
+        <div class="architecture-platform"><div><b>Shared platform</b>身份、存储、运行和治理只实现一次</div><div><b>Project adapters</b>每个项目保留自己的 Pack、Renderer 和分析问题</div><div><b>Exact reruns</b>新 Snapshot 生成新 Artifact，旧结果只做历史恢复</div></div>
+        <p class="architecture-caption">Diagram approach · Layered HTML architecture inspired by <a href="https://github.com/markdown-viewer/skills/tree/main/architecture">markdown-viewer/skills</a> · direct rendering, no external runtime dependency.</p>
+      </article>
+    </section>
+
+    <!-- === PRODUCT EVOLUTION === -->
+    <section class="section-shell" id="evolution">
+      <div class="section-head reveal">
+        <div><div class="section-kicker">08 · Product evolution</div><h2>从一次分析，演进为持续学习的能源智能平台</h2></div>
+        <p class="section-intro">演进顺序不是堆功能：先建立可信事实，再让 AI 在约束内产生价值，然后把用户认可的洞察沉淀为方法，最后开放受治理的配置与扩展能力。</p>
+      </div>
+      <div class="evolution-track">
+        <article class="card evolution-stage reveal"><div class="evolution-code evolution-now">NOW · PROVE</div><h3>Decision Product</h3><p>把复杂能耗数据转换成可以核查、可以行动的项目 Overview。</p><div class="evolution-list"><span>Deterministic Sections</span><span>Project-specific Renderer</span><span>Evidence + Saved Analysis</span></div><span class="evolution-proof">证明：用户能更快找到重点</span></article>
+        <article class="card evolution-stage reveal"><div class="evolution-code evolution-next">NEXT · REPEAT</div><h3>Governed AI</h3><p>Layer 1–3 从 Section 到跨 Section 提供总结、角度和 Additional Insights。</p><div class="evolution-list"><span>Key Findings + Interpretation</span><span>Snapshot A→B</span><span>Exact Artifact restore</span></div><span class="evolution-proof">证明：数据更新后仍持续有价值</span></article>
+        <article class="card evolution-stage reveal"><div class="evolution-code evolution-scale">SCALE · LEARN</div><h3>Method Library</h3><p>记录 usefulness 和 Explore 行为，把用户认可的 Insight 转成可审核 Method。</p><div class="evolution-list"><span>Feedback contract</span><span>Insight → Method Proposal</span><span>Skill / SOP governance</span></div><span class="evolution-proof">证明：专家经验可以复用</span></article>
+        <article class="card evolution-stage reveal"><div class="evolution-code evolution-platform">PLATFORM · EXTEND</div><h3>Configurable Intelligence</h3><p>Admin 可理解和配置 Harness；AI 可以提出模板、可视化和软件变更建议。</p><div class="evolution-list"><span>Admin Harness Studio</span><span>Template + Visual Proposal</span><span>Coding Agent review loop</span></div><span class="evolution-proof">证明：新增项目无需平台分叉</span></article>
+      </div>
+    </section>
+
+    <!-- === COMMERCIAL ROUTE === -->
+    <section class="section-shell" id="business">
+      <div class="section-head reveal">
+        <div><div class="section-kicker">09 · Business model</div><h2>先卖结果，再卖持续能力和组织复用</h2></div>
+        <p class="section-intro" data-editable>商业化不是一次性卖出一套看板，而是从单项目诊断开始，证明数据更新后仍持续产生价值，再把项目经验和专家方法规模化。</p>
+      </div>
+      <div class="commercial-route">
+        <article class="card commercial-step reveal"><div class="commercial-stage">01 · PROOF</div><h3>Diagnostic Demo</h3><p>使用客户真实数据完成单项目诊断和价值展示。</p><span class="commercial-proof">证明：客户认可结论值得深挖</span></article>
+        <article class="card commercial-step reveal"><div class="commercial-stage">02 · PILOT</div><h3>Paid Pilot</h3><p>交付 Overview、AI Analysis 和至少一次真实 A→B。</p><span class="commercial-proof">证明：数据更新后持续产生价值</span></article>
+        <article class="card commercial-step reveal"><div class="commercial-stage">03 · EXPAND</div><h3>Multi-project</h3><p>共享平台机制，同时保持每个项目的专属 Pack 与表达。</p><span class="commercial-proof">证明：新增项目无需平台分叉</span></article>
+        <article class="card commercial-step reveal"><div class="commercial-stage">04 · INTELLIGENCE</div><h3>Expert Methods</h3><p>把高价值 Insight 固化成可审核、可复跑的 Method / SOP。</p><span class="commercial-proof">证明：专家经验可跨项目复用</span></article>
+        <article class="card commercial-step reveal"><div class="commercial-stage">05 · SCALE</div><h3>Enterprise Control</h3><p>提供 Harness、Trace、Policy、API、权限与运营控制面。</p><span class="commercial-proof">证明：治理和规模化要求通过</span></article>
+      </div>
+      <div class="business-model">
+        <article class="card business-offer reveal"><div class="offer-code">LAND · PAID PILOT</div><h3>先交付一个可信结果</h3><p>用客户真实数据完成一个项目的 Overview、AI Analysis、A→B 和验收报告。</p><ul><li>数据接入与项目配置</li><li>单项目诊断与 Named-user acceptance</li><li>明确的价值指标与下一阶段建议</li></ul><span class="revenue">收入假设 · 一次性 onboarding + 固定 Pilot 费用</span></article>
+        <article class="card business-offer reveal"><div class="offer-code">EXPAND · SUBSCRIPTION</div><h3>扩成持续运营能力</h3><p>从单项目扩展到多个项目、更多账户和持续更新的 AI 决策支持。</p><ul><li>按项目 / 站点 / Portfolio 的平台订阅</li><li>AI Run 容量与高级分析包</li><li>多账户、Admin、支持与 SLA</li></ul><span class="revenue">收入假设 · 年度平台订阅 + AI 容量</span></article>
+        <article class="card business-offer reveal"><div class="offer-code">COMPOUND · INTELLIGENCE</div><h3>把经验变成增值资产</h3><p>把专家和用户认可的分析角度沉淀为可治理、可复跑的 Method / SOP。</p><ul><li>行业方法包与专家服务</li><li>企业级 Harness / Policy / Trace</li><li>模板、API 和受控扩展能力</li></ul><span class="revenue">收入假设 · 方法包 + 企业治理与服务</span></article>
+      </div>
+      <div class="business-buyer-strip reveal"><div><b>Economic buyer</b><span>资产、能源或运营负责人</span></div><div><b>Daily users</b><span>Energy / FM / Sustainability 团队</span></div><div><b>Land motion</b><span>真实项目 Paid Pilot</span></div><div><b>Expansion trigger</b><span>A→B 复跑价值和跨项目复用</span></div></div>
+      <div class="commercial-hypothesis reveal"><b>商业边界：</b>包装、计费单位和价格尚需通过真实 Pilot 的付费意愿、使用频率和支持成本验证；本图表达可测试的商业路径，不构成已经确认的价格承诺。</div>
+    </section>
+
+    <!-- === RISK AND VALUE METRICS === -->
+    <section class="section-shell" id="risk">
+      <div class="section-head reveal">
+        <div><div class="section-kicker">10 · Trust & value</div><h2>风险和价值必须一起管理</h2></div>
+        <p class="section-intro">真正的风险不是功能少，而是工程结果没有转化为客户价值、AI 输出缺乏新意、跨项目复制带来维护分叉。</p>
+      </div>
+      <div class="risk-grid">
+        <article class="card risk-list reveal">
+          <h3>当前四个主要风险</h3>
+          <div class="risk-row"><span class="risk-level">HIGH</span><div><b>客户验收晚于工程交付</b><span>Mitigation：使用 named-user 脚本、内容评分和多账户 UAT，形成签字证据。</span></div></div>
+          <div class="risk-row"><span class="risk-level">HIGH</span><div><b>AI 正确但平庸，或发散但没有诚实标注</b><span>Mitigation：区分 Observation / Inference / Hypothesis，保留创造性但明确不确定性。</span></div></div>
+          <div class="risk-row"><span class="risk-level">MED</span><div><b>Ngee 变成 Preschool 的复制品</b><span>Mitigation：只复用运行与治理合同，Section Pack 和管理问题保持项目专属。</span></div></div>
+          <div class="risk-row"><span class="risk-level">MED</span><div><b>功能增长早于运营能力</b><span>Mitigation：先完成 Admin readiness、Run trace、备份与回滚，再扩大 Agent 自主性。</span></div></div>
+        </article>
+        <aside class="card metric-panel reveal">
+          <h3>用这些指标证明价值</h3>
+          <div class="metric-list">
+            <div class="metric"><b>Time to First Priority</b><span>用户首次找到值得处理事项的时间。</span></div>
+            <div class="metric"><b>Explore with AI conversion</b><span>有多少 Insight 促使用户进入深入分析。</span></div>
+            <div class="metric"><b>A→B conclusion movement</b><span>新数据带来多少 retained / updated / new / removed。</span></div>
+            <div class="metric"><b>Insight usefulness</b><span>新颖性、清晰度、决策价值和复述率。</span></div>
+            <div class="metric"><b>Method reuse</b><span>被批准的方法在多少 Snapshot / Project 复用。</span></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- === DECISIONS AND DOWNLOADS === -->
+    <section class="action-section" id="actions">
+      <div class="action-panel reveal">
+        <div>
+          <div class="section-kicker" style="color:#6fe0c9">11 · What comes next</div>
+          <h2 data-editable>下一步不是继续堆功能，而是把能力变成客户可验证的价值</h2>
+          <p data-editable>未来两周应以验收证据为中心：谁使用、看到什么、是否产生决策、数据更新后是否仍然有价值。</p>
+          <div class="next-list">
+            <div class="next-item"><span class="next-no">1</span><span>关闭 Preschool 内容与视觉人工验收。</span></div>
+            <div class="next-item"><span class="next-no">2</span><span>完成 Charles / Ngee 多账户客户旅程。</span></div>
+            <div class="next-item"><span class="next-no">3</span><span>运行 Ngee 真实 Snapshot B 与 A→B 价值审查。</span></div>
+            <div class="next-item"><span class="next-no">4</span><span>记录 Insight usefulness，并批准至少一个 Method / SOP。</span></div>
+            <div class="next-item"><span class="next-no">5</span><span>发布 Runbook、Evidence、风险与回滚清单。</span></div>
+          </div>
+        </div>
+        <aside class="download-box">
+          <h3>原始交付附件</h3>
+          <p>HTML 用于发布、分享和持续更新；PPT 和 Excel 保留用于会议、PMO 跟踪和深度核查。</p>
+          <a class="download-link" href="./EnergyIQ_Product_Strategy_Delivery_Roadmap_2026-08-17.pptx" download><span><b>产品路线图 PPT</b><small>12 页原始演示稿</small></span><i>↓</i></a>
+          <a class="download-link" href="./EnergyIQ_PMO_Product_Roadmap_2026-08-17.xlsx" download><span><b>PMO Roadmap</b><small>能力、计划、风险与证据</small></span><i>↓</i></a>
+          <a class="download-link" href="./EnergyIQ_PMO_Product_Roadmap_2026-08-17_with_Gantt.xlsx" download><span><b>PMO Roadmap + Gantt</b><small>含时间视图的工作簿</small></span><i>↓</i></a>
+          <div class="source-note">状态来源：<a href="https://github.com/Zion74/energyiq-datafoundry/issues/47">#47</a> · <a href="https://github.com/Zion74/energyiq-datafoundry/issues/55">#55</a> · <a href="https://github.com/Zion74/energyiq-datafoundry/issues/56">#56</a> · <a href="https://github.com/Zion74/energyiq-datafoundry/issues/57">#57</a> · <a href="https://github.com/Zion74/energyiq-datafoundry/issues/65">#65</a><br>报告基线：main · 18 Aug 2026</div>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    /* === SCROLL REVEAL === */
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const revealNodes = document.querySelectorAll('.reveal');
+    if (reduceMotion || !('IntersectionObserver' in window)) {
+      revealNodes.forEach(node => node.classList.add('visible'));
+    } else {
+      const observer = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('visible');
+            observer.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.12 });
+      revealNodes.forEach(node => observer.observe(node));
+    }
+
+    /* === INLINE EDITING === */
+    const editButton = document.getElementById('editButton');
+    const saveButton = document.getElementById('saveButton');
+    const editableNodes = [...document.querySelectorAll('[data-editable]')];
+    let editing = false;
+
+    function setEditing(next) {
+      editing = next;
+      document.body.dataset.editing = String(editing);
+      editableNodes.forEach(node => node.setAttribute('contenteditable', String(editing)));
+      editButton.innerHTML = editing ? '✓ <span>完成编辑</span>' : '✎ <span>编辑内容</span>';
+      if (editing) editableNodes[0]?.focus();
+    }
+
+    function downloadCurrentHtml() {
+      const clone = document.documentElement.cloneNode(true);
+      clone.querySelector('body')?.removeAttribute('data-editing');
+      clone.querySelectorAll('[contenteditable]').forEach(node => node.removeAttribute('contenteditable'));
+      clone.querySelectorAll('.reveal').forEach(node => node.classList.remove('visible'));
+      const blob = new Blob(['<!doctype html>\n' + clone.outerHTML], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'EnergyIQ_Product_Launch_Roadmap_2026-08-18.html';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    editButton.addEventListener('click', () => setEditing(!editing));
+    saveButton.addEventListener('click', downloadCurrentHtml);
+    document.addEventListener('keydown', event => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        downloadCurrentHtml();
+      }
+      if (event.key === 'Escape' && editing) setEditing(false);
+    });
+  </script>
+</body>
+</html>

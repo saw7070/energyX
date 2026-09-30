@@ -1,0 +1,195 @@
+{
+  "schemaVersion": 1,
+  "projectId": "tuya-office",
+  "provenance": {
+    "file": "Tuya_Office_Energy_Report_17Aug-5Sep_1.html",
+    "sha256": "9d576043bc9b30e910909a4797157603770ad09a712a2d61c60066d3927a0857",
+    "section": "1. Property profile & circuit map",
+    "status": "reference-derived; not survey-confirmed"
+  },
+  "property": {
+    "address": "6 Battery Road, Singapore",
+    "level": 27,
+    "occupancyExtent": "half floor",
+    "approximateAreaM2": 700,
+    "areaStatus": "reference only; not approved for EUI"
+  },
+  "layout": {
+    "kind": "illustrative schematic",
+    "notToScale": true,
+    "northOrientation": null,
+    "viewBox": [
+      0,
+      0,
+      860,
+      508
+    ],
+    "entrance": {
+      "label": "Main entrance gate",
+      "referenceBoard": "DB1",
+      "position": [
+        430,
+        420
+      ]
+    },
+    "zones": [
+      {
+        "id": "A",
+        "referenceBoard": "DB1",
+        "directionFromEntrance": "right",
+        "rooms": [
+          "Open office",
+          "Big meeting room",
+          "Director room"
+        ],
+        "rect": [
+          470,
+          20,
+          366,
+          396
+        ]
+      },
+      {
+        "id": "B",
+        "referenceBoard": "DB2",
+        "directionFromEntrance": "left",
+        "rooms": [
+          "Showroom",
+          "Pantry",
+          "Meeting Room 2",
+          "Small meeting room 1",
+          "Small meeting room 2",
+          "Small meeting room 3"
+        ],
+        "rect": [
+          24,
+          20,
+          366,
+          396
+        ]
+      },
+      {
+        "id": "C",
+        "referenceBoard": "DB3",
+        "kind": "LED reporting subgroup",
+        "physicalParentRoom": "Showroom",
+        "independentSpace": false,
+        "equipment": "Three large LED panels"
+      }
+    ],
+    "rooms": [
+      {
+        "name": "Showroom",
+        "zone": "B",
+        "rect": [
+          32,
+          70,
+          210,
+          150
+        ]
+      },
+      {
+        "name": "Pantry",
+        "zone": "B",
+        "rect": [
+          250,
+          70,
+          132,
+          70
+        ]
+      },
+      {
+        "name": "Meeting Room 2",
+        "zone": "B",
+        "rect": [
+          250,
+          148,
+          132,
+          72
+        ]
+      },
+      {
+        "name": "Small meeting room 1",
+        "zone": "B",
+        "rect": [
+          32,
+          304,
+          108,
+          100
+        ]
+      },
+      {
+        "name": "Small meeting room 2",
+        "zone": "B",
+        "rect": [
+          148,
+          304,
+          108,
+          100
+        ]
+      },
+      {
+        "name": "Small meeting room 3",
+        "zone": "B",
+        "rect": [
+          264,
+          304,
+          108,
+          100
+        ]
+      },
+      {
+        "name": "Open office",
+        "zone": "A",
+        "rect": [
+          478,
+          70,
+          166,
+          240
+        ]
+      },
+      {
+        "name": "Big meeting room",
+        "zone": "A",
+        "rect": [
+          652,
+          70,
+          176,
+          140
+        ]
+      },
+      {
+        "name": "Director room",
+        "zone": "A",
+        "rect": [
+          652,
+          218,
+          176,
+          92
+        ]
+      }
+    ],
+    "boardMarkers": {
+      "DB1": [
+        478,
+        330
+      ],
+      "DB2": [
+        86,
+        238
+      ],
+      "DB3": [
+        32,
+        238
+      ]
+    }
+  },
+  "usageRules": [
+    "Coordinates are SVG drawing units, never real-world dimensions or GPS.",
+    "Read current published project-configuration.json for meter IDs, official aggregation and equipment relationships; this reference cannot override them.",
+    "No room-level measured energy allocation without an explicit verified meter-to-room mapping.",
+    "Recompute all energy/cost labels for the selected period; do not copy source numeric labels.",
+    "A and B are physical reporting areas; C is an LED subgroup located inside the showroom, not another floor space.",
+    "Source report does not prove original drawings were supplied. Keep conflicting PPT mapping separate until resolved."
+  ]
+}

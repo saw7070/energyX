@@ -1,0 +1,145 @@
+.page{max-width:1080px;margin:0 auto;padding:40px 32px 72px;color:#203d34}.header{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:28px;gap:16px}.header h1{font-size:31px;margin:0 0 6px;letter-spacing:-.9px;font-weight:650;color:#17291f}.header p{margin:0;color:#64756d;font-size:15px}.header a{display:inline-flex;align-items:center;gap:6px;min-height:38px;padding:0 14px;border:1px solid #d7e1da;border-radius:10px;background:#fff;color:#245747;font-weight:600;font-size:14px;white-space:nowrap;transition:background 120ms,border-color 120ms}.header a:hover{background:#f1f6f2;border-color:#bccfc2}.hero{position:relative;background:linear-gradient(158deg,#1a5c47 0%,#123c30 100%);color:#fff;border-radius:18px;padding:34px 36px;box-shadow:inset 0 1px 0 #ffffff1f,0 18px 40px -28px #0d3226b8}.hero h2{font-size:34px;line-height:1.18;letter-spacing:-.8px;margin:14px 0 16px;max-width:30ch}.hero p{margin:0;color:#cfe3d8;font-size:16px;line-height:1.6;max-width:68ch}.period{font-size:14px;color:#5b6d63;margin:16px 0}.empty{padding:26px 28px;background:#fff;border:1px solid #e3eae5;border-radius:14px;box-shadow:0 1px 2px #14281f0a}
+/* Safety has its own quiet amber card so it reads as a caveat, not a finding. */
+.page a:focus-visible,.page button:focus-visible,.page summary:focus-visible{outline:3px solid #b58531;outline-offset:4px}@media(max-width:600px){.page{padding:24px 16px 56px}.header{align-items:flex-start;flex-direction:column}.hero{padding:26px 22px;border-radius:16px}.hero h2{font-size:26px;letter-spacing:-.5px}.header h1{font-size:27px}.fullReport>header{padding:18px}}
+@media(prefers-reduced-motion:reduce){.header a,.hero a,.reportActions a,.reportActions button{transition:none}}
+.question{margin-top:20px;padding-top:18px;border-top:1px solid #e0e8e2}.question label{display:block;font-size:17px;font-weight:600;line-height:1.5;margin-bottom:12px;color:#294f3f}.question form{display:flex;align-items:flex-end;gap:12px}.question textarea{flex:1;min-width:0;border:1px solid #cbd9d0;border-radius:8px;padding:12px 14px;font:inherit;font-size:16px;line-height:1.5;background:#fbfdfb;resize:vertical;color:#243e33}.question textarea:focus{outline:2px solid #648a75;outline-offset:2px}.question button{border:0;border-radius:7px;background:#185540;color:white;padding:12px 18px;font:inherit;font-weight:600;white-space:nowrap;cursor:pointer}.question button:disabled{opacity:.5;cursor:default}.question .note{font-size:13px;color:#617068;margin:10px 0 0}.saved{background:#f1f6f2;padding:12px 16px;margin:10px 0 14px;border-radius:8px;line-height:1.5}.saved p{margin:6px 0;white-space:pre-wrap;overflow-wrap:anywhere}.saved span{font-size:13px;color:#637368}@media(max-width:600px){.question form{align-items:stretch;flex-direction:column}}
+
+/* Match the reference PDF typography without changing other product screens. */
+.page{font-family:Helvetica,Arial,sans-serif}.page button,.page textarea{font-family:inherit}.questionHeading{font-size:14px;font-weight:600;color:#617068;margin:0 0 6px}.questionText{font-size:18px;line-height:1.45;font-weight:600;color:#294f3f;margin:0 0 12px;max-width:65ch}.answer summary{display:inline-block;cursor:pointer;color:#185540;font-weight:600;border-bottom:1px solid #9bb6a7;padding-bottom:3px}.answer>p{font-size:14px;line-height:1.5;color:#617068}.answer label{font-size:14px}.hero h2{max-width:42ch;font-weight:600}
+/* The key phrase of the headline finding, in the report's soft brand orange. */
+.hero h2 span{color:#ffb59b}
+/* Safety note under the heading. */
+.empty h2{margin:0 0 8px;font-size:17px;font-weight:650;letter-spacing:-.2px;color:#1c2c24}
+.empty p{margin:4px 0 0;color:#52645b;line-height:1.5}
+.hero a{display:inline-flex;align-items:center;gap:6px;color:#fff;font-weight:600;text-decoration:none;border-bottom:1px solid #ffffff59;padding-bottom:2px;white-space:nowrap;transition:border-color 120ms}.hero a:hover{border-bottom-color:#fff}
+/* The project name above the headline reads as a label, not a sentence. */
+.heroEyebrow{font-size:12px;font-weight:650;letter-spacing:.14em;text-transform:uppercase;color:#a9cdb9}
+.hero .heroLinks{display:flex;flex-wrap:wrap;gap:8px 24px;margin-top:20px}
+.hero .heroForecast{margin-top:12px;font-size:14px;color:#c6ddd0}
+.hero .heroForecast a{font-weight:600}
+
+/* Which report the Overview comes from, and a note when newer readings exist. */
+.source{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px;margin:20px 0;padding:12px 16px;border:1px solid #dde6e0;border-radius:12px;background:#f6faf7;color:#43554b;font-size:14px;line-height:1.5}
+.source svg{width:16px;height:16px;flex-shrink:0;color:#2f7a5b}
+.source>svg{box-sizing:content-box;padding:6px;border-radius:50%;background:#e6f1ea}
+.source p{margin:0;flex:1;min-width:220px}
+.source strong{color:#1c2c24;font-weight:600}
+.source a{color:#245747;font-weight:600;text-underline-offset:4px;white-space:nowrap}
+/* When the next automatic report lands, so nobody wonders whether the page is stale. */
+
+/* When the next automatic report lands, so nobody wonders whether the page is stale. */
+
+.newer{margin:-6px 0 16px;padding:8px 14px;border-radius:10px;background:#fbf3e3;color:#6f4b12;font-size:13.5px;line-height:1.5}
+.newer a{color:#6f4b12;font-weight:600;text-decoration:underline;text-underline-offset:3px}
+
+/* The full report under the heading: a document on the page, not a dashboard panel. */
+.fullReport{margin-top:28px;border:1px solid #dde6e0;border-radius:16px;background:#fff;overflow:hidden;box-shadow:0 1px 2px #14281f0a,0 20px 40px -32px #14281f5c}
+.fullReport>header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:20px 24px;border-bottom:1px solid #e6ece7;background:#f6faf7}
+.fullReport>header h2{margin:0;font-size:19px;font-weight:650;letter-spacing:-.4px;color:#1c2c24}
+.fullReport>header p{margin:4px 0 0;color:#5b6d63;font-size:14px}
+/* Where this document lives: the saved report kept in Reports, or one built here because none has been saved. */
+.fullReport>header .reportNotSaved{margin:6px 0 0;color:#6b7d72;font-size:13px;max-width:78ch}
+.reportActions{display:flex;gap:8px}
+.reportActions a,.reportActions button{display:inline-flex;align-items:center;min-height:40px;padding:0 16px;border:1px solid #cfdad2;border-radius:10px;background:#fff;color:#245747;font-size:14px;font-weight:600;text-decoration:none;transition:background 120ms,border-color 120ms}
+.reportActions a:hover,.reportActions button:hover{background:#eef4ef;border-color:#b9cdc0}
+.reportActions button:disabled{opacity:.5}
+.reportMessage{margin:0;padding:28px 22px;color:#5b6d63}
+/* A failure explains itself: what is wrong, then the steps to put it right. */
+.reportProblem{margin:0;padding:24px 22px;color:#43554b}
+.reportProblem h3{margin:0 0 8px;font-size:17px;font-weight:650;color:#7a3b12}
+.reportProblem ol{margin:0;padding-left:20px;display:grid;gap:6px;font-size:14.5px;line-height:1.5}
+.reportProblem>p{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:14px 0 0}
+.reportProblem a{color:#245747;font-weight:600;text-underline-offset:4px}
+.reportProblem button{min-height:36px;padding:0 14px;border:1px solid #cfdad2;border-radius:9px;background:#fff;color:#245747;font-size:14px;font-weight:600}
+
+/* Circuits that stopped sending. Reads like the "newer readings" note, because
+   it is the same kind of fact: the figures above do not cover everything. */
+.stopped{margin:-6px 0 16px;padding:8px 14px;border-radius:10px;background:#fbf3e3;color:#6f4b12;font-size:13.5px;line-height:1.5}
+.schedule { margin:2px 0 4px; }
+
+
+/* Overview frame: a header that lines up, one clear action on the headline card, quiet supporting notes. */
+.header{align-items:center;margin-bottom:24px}
+.header h1{font-size:32px}
+.header a{min-height:40px;padding:0 16px;border-radius:10px;font-size:14px}
+/* The headline card keeps its evergreen gradient in both themes, so its own tones are held in variables:
+   the dark-theme generator rewrites literal colours, and these must not be flipped against the fixed card. */
+.hero{--hero-ink:#fff;--hero-body:#d4e7dc;--hero-quiet:#c3dacd;--hero-rule:#ffffff26;--hero-underline:#ffffff59;--hero-cta:#fff;--hero-cta-ink:#123c30;--hero-cta-hover:#e8f2ec;padding:38px 40px;margin-bottom:20px}
+.hero h2{font-size:35px;margin:16px 0 18px}
+.hero>p{color:var(--hero-body)}
+.hero a{border-bottom-color:var(--hero-underline)}
+.hero a:hover{border-bottom-color:var(--hero-ink)}
+/* The forecast sits below a hairline: next month's expectation, not part of the finding above it. */
+.hero .heroForecast{max-width:none;margin-top:20px;padding-top:16px;border-top:1px solid var(--hero-rule);color:var(--hero-quiet);font-size:14.5px}
+.hero .heroLinks{margin-top:22px}
+.hero .heroLinks a{padding:11px 18px;border:0;border-radius:10px;background:var(--hero-cta);color:var(--hero-cta-ink);font-size:14.5px;font-weight:650;transition:background 140ms}
+.hero .heroLinks a:hover{border:0;background:var(--hero-cta-hover)}
+/* The three notes under the card share one rhythm so they read as a footer, not a pile of banners. */
+.source{margin:0 0 12px;background:#fff;border-color:#dfe8e2}
+.source a{margin-left:auto}
+.newer{margin:0 0 12px;padding:11px 15px;border:1px solid #efdfc0;border-left:3px solid #c98f2e;border-radius:10px;background:#fdf7ed;font-size:13.5px}
+.page .schedule{margin:0}
+
+/* energyiq-dark-theme:start — generated by scripts/energyiq-dark-theme.mjs; do not edit by hand */
+:global(:where(html[data-energyiq-theme="dark"])) .page { color:#accdc1; }
+:global(:where(html[data-energyiq-theme="dark"])) .header h1 { color:#bfd5c7; }
+:global(:where(html[data-energyiq-theme="dark"])) .header p { color:#99aba2; }
+:global(:where(html[data-energyiq-theme="dark"])) .header a { border:1px solid #313933; border-radius:10px; background:#191919; color:#91c5b2; }
+:global(:where(html[data-energyiq-theme="dark"])) .header a:hover { background:#1b1f1c; border-color:#314136; }
+:global(:where(html[data-energyiq-theme="dark"])) .hero { background:linear-gradient(158deg,#1a5c47 0%,#123c30 100%); color:#fff; border-radius:18px; box-shadow:inset 0 1px 0 #0606061f,0 18px 40px -28px #0d3226; }
+:global(:where(html[data-energyiq-theme="dark"])) .hero p { color:#cfe3d8; }
+:global(:where(html[data-energyiq-theme="dark"])) .period { color:#9cb0a5; }
+:global(:where(html[data-energyiq-theme="dark"])) .empty { background:#191919; border:1px solid #303632; border-radius:14px; box-shadow:0 1px 2px #14281f10; }
+:global(:where(html[data-energyiq-theme="dark"])) .page a:focus-visible, :global(:where(html[data-energyiq-theme="dark"])) .page button:focus-visible, :global(:where(html[data-energyiq-theme="dark"])) .page summary:focus-visible { outline:3px solid #b58531; }
+@media(max-width:600px) {
+  :global(:where(html[data-energyiq-theme="dark"])) .hero { border-radius:16px; }
+}
+:global(:where(html[data-energyiq-theme="dark"])) .question { border-top:1px solid #303632; }
+:global(:where(html[data-energyiq-theme="dark"])) .question label { color:#9dc6b3; }
+:global(:where(html[data-energyiq-theme="dark"])) .question textarea { border:1px solid #313c35; border-radius:8px; background:#191b19; color:#adccbd; }
+:global(:where(html[data-energyiq-theme="dark"])) .question textarea:focus { outline:2px solid #648a75; }
+:global(:where(html[data-energyiq-theme="dark"])) .question button { border:0; border-radius:7px; background:#185540; color:white; }
+:global(:where(html[data-energyiq-theme="dark"])) .question .note { color:#9dada4; }
+:global(:where(html[data-energyiq-theme="dark"])) .saved { background:#1b1f1c; border-radius:8px; }
+:global(:where(html[data-energyiq-theme="dark"])) .saved span { color:#9baca0; }
+:global(:where(html[data-energyiq-theme="dark"])) .questionHeading { color:#9dada4; }
+:global(:where(html[data-energyiq-theme="dark"])) .questionText { color:#9dc6b3; }
+:global(:where(html[data-energyiq-theme="dark"])) .answer summary { color:#8dc9b0; border-bottom:1px solid #334a3e; }
+:global(:where(html[data-energyiq-theme="dark"])) .answer>p { color:#9dada4; }
+:global(:where(html[data-energyiq-theme="dark"])) .hero h2 span { color:#ffb59b; }
+:global(:where(html[data-energyiq-theme="dark"])) .empty h2 { color:#bed2c7; }
+:global(:where(html[data-energyiq-theme="dark"])) .empty p { color:#a0b4aa; }
+:global(:where(html[data-energyiq-theme="dark"])) .hero a { color:#fff; text-decoration:none; border-bottom:1px solid #2e2e2e59; }
+:global(:where(html[data-energyiq-theme="dark"])) .hero a:hover { border-bottom-color:#2e2e2e; }
+:global(:where(html[data-energyiq-theme="dark"])) .heroEyebrow { color:#a9cdb9; }
+:global(:where(html[data-energyiq-theme="dark"])) .hero .heroForecast { color:#c6ddd0; }
+:global(:where(html[data-energyiq-theme="dark"])) .source { border:1px solid #303733; border-radius:12px; background:#1a1d1b; color:#a8bcb0; }
+:global(:where(html[data-energyiq-theme="dark"])) .source svg { color:#72bb99; }
+:global(:where(html[data-energyiq-theme="dark"])) .source>svg { border-radius:50%; background:#1a221d; }
+:global(:where(html[data-energyiq-theme="dark"])) .source strong { color:#bed2c7; }
+:global(:where(html[data-energyiq-theme="dark"])) .source a { color:#91c5b2; }
+:global(:where(html[data-energyiq-theme="dark"])) .newer { border-radius:10px; background:#231d11; color:#d5ad77; }
+:global(:where(html[data-energyiq-theme="dark"])) .newer a { color:#d5ad77; text-decoration:underline; }
+:global(:where(html[data-energyiq-theme="dark"])) .fullReport { border:1px solid #303733; border-radius:16px; background:#191919; box-shadow:0 1px 2px #14281f10,0 20px 40px -32px #14281f93; }
+:global(:where(html[data-energyiq-theme="dark"])) .fullReport>header { border-bottom:1px solid #303531; background:#1a1d1b; }
+:global(:where(html[data-energyiq-theme="dark"])) .fullReport>header h2 { color:#bed2c7; }
+:global(:where(html[data-energyiq-theme="dark"])) .fullReport>header p { color:#9cb0a5; }
+:global(:where(html[data-energyiq-theme="dark"])) .fullReport>header .reportNotSaved { color:#95a89c; }
+:global(:where(html[data-energyiq-theme="dark"])) .reportActions a, :global(:where(html[data-energyiq-theme="dark"])) .reportActions button { border:1px solid #323b35; border-radius:10px; background:#191919; color:#91c5b2; text-decoration:none; }
+:global(:where(html[data-energyiq-theme="dark"])) .reportActions a:hover, :global(:where(html[data-energyiq-theme="dark"])) .reportActions button:hover { background:#1b201c; border-color:#314237; }
+:global(:where(html[data-energyiq-theme="dark"])) .reportMessage { color:#9cb0a5; }
+:global(:where(html[data-energyiq-theme="dark"])) .reportProblem { color:#a8bcb0; }
+:global(:where(html[data-energyiq-theme="dark"])) .reportProblem h3 { color:#eca37c; }
+:global(:where(html[data-energyiq-theme="dark"])) .reportProblem a { color:#91c5b2; }
+:global(:where(html[data-energyiq-theme="dark"])) .reportProblem button { border:1px solid #323b35; border-radius:9px; background:#191919; color:#91c5b2; }
+:global(:where(html[data-energyiq-theme="dark"])) .stopped { border-radius:10px; background:#231d11; color:#d5ad77; }
+:global(:where(html[data-energyiq-theme="dark"])) .header a { border-radius:10px; }
+:global(:where(html[data-energyiq-theme="dark"])) .hero>p { color:var(--hero-body); }
+:global(:where(html[data-energyiq-theme="dark"])) .hero a { border-bottom-color:var(--hero-underline); }
+:global(:where(html[data-energyiq-theme="dark"])) .hero a:hover { border-bottom-color:var(--hero-ink); }
+:global(:where(html[data-energyiq-theme="dark"])) .hero .heroForecast { border-top:1px solid var(--hero-rule); color:var(--hero-quiet); }
+:global(:where(html[data-energyiq-theme="dark"])) .hero .heroLinks a { border:0; border-radius:10px; background:var(--hero-cta); color:var(--hero-cta-ink); }
+:global(:where(html[data-energyiq-theme="dark"])) .hero .heroLinks a:hover { border:0; background:var(--hero-cta-hover); }
+:global(:where(html[data-energyiq-theme="dark"])) .source { background:#191919; border-color:#303732; }
+:global(:where(html[data-energyiq-theme="dark"])) .newer { border:1px solid #41341a; border-left:3px solid #c98f2e; border-radius:10px; background:#201c14; }
+/* energyiq-dark-theme:end */

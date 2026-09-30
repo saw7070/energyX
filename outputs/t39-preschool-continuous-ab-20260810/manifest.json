@@ -1,0 +1,182 @@
+{
+  "schemaVersion": 1,
+  "generatorRevision": "preschool-june-ab-v1",
+  "seed": 20260810,
+  "projectTimezone": "Asia/Singapore",
+  "createdFor": "Preschool continuous-data A/B acceptance; not a forecast",
+  "inputs": {
+    "mayWide": {
+      "path": ".scratch/Preschool_Database_30centres_May2026.xlsx",
+      "byteLength": 1141976,
+      "sha256": "74d1d038eafb2af4a182fa5018a22ef021efc1e50b4c5d660319d2c48fdeb1d4"
+    },
+    "mayCumulative": {
+      "path": ".scratch/Preschool_Database_30centres_May2026.normalized-cumulative.xlsx",
+      "byteLength": 3339202,
+      "sha256": "b3ed379a29dad93c89084525b70c890f6ac7ee29293e171a0dcc820527975a6a"
+    }
+  },
+  "baseline": {
+    "strategy": "fixed-weekday-28-day-cycle",
+    "sourceMayDays": "May 4-31",
+    "mapping": "sourceMayDay = 4 + ((juneDay - 1) mod 28)"
+  },
+  "scenarios": [
+    {
+      "id": "portfolio-aircon1-weekday-improvement",
+      "from": "2026-06-03",
+      "to": "2026-06-23",
+      "centres": "all",
+      "meter": "Aircon 1",
+      "hours": "08:00-18:00",
+      "weekdaysOnly": true,
+      "transform": "base * 0.90"
+    },
+    {
+      "id": "centre-l-closed-hour-lighting-rise",
+      "from": "2026-06-24",
+      "to": "2026-06-29",
+      "centres": [
+        "L"
+      ],
+      "meter": "Other Lighting3",
+      "hours": "00:00-06:00",
+      "weekdaysOnly": false,
+      "transform": "base + 1.2 kWh"
+    },
+    {
+      "id": "centre-g-latest-day-kitchen-spike",
+      "from": "2026-06-30",
+      "to": "2026-06-30",
+      "centres": [
+        "G"
+      ],
+      "meter": "Kitchen Plug Load",
+      "hours": "09:00-17:00",
+      "weekdaysOnly": false,
+      "transform": "max(base * 2.5, 0.35 kWh)"
+    }
+  ],
+  "scenarioStats": [
+    {
+      "id": "portfolio-aircon1-weekday-improvement",
+      "matchedIntervalCount": 4500,
+      "changedIntervalCount": 4500,
+      "deltaKwh": -54.462
+    },
+    {
+      "id": "centre-l-closed-hour-lighting-rise",
+      "matchedIntervalCount": 36,
+      "changedIntervalCount": 36,
+      "deltaKwh": 43.2
+    },
+    {
+      "id": "centre-g-latest-day-kitchen-spike",
+      "matchedIntervalCount": 8,
+      "changedIntervalCount": 8,
+      "deltaKwh": 3.7965
+    }
+  ],
+  "expectedProductWindows": [
+    "latest-complete-day",
+    "latest-complete-7d",
+    "current-overview-28d"
+  ],
+  "publishingCheckpoints": [
+    "Day1",
+    "Day7",
+    "Day30"
+  ],
+  "outputs": [
+    {
+      "stageId": "day1",
+      "days": 1,
+      "filename": "Preschool_June_2026_Day01.incremental-cumulative.xlsx",
+      "path": "outputs/t39-preschool-continuous-ab-20260810/Preschool_June_2026_Day01.incremental-cumulative.xlsx",
+      "byteLength": 111233,
+      "sha256": "e015a06ebd047abb37fd792f0854db59451ea070736ea29adbd379b076a4da42",
+      "canonicalContentSha256": "432cd2bde71fead430146e8d117c257be850ad34c624ded51d09af9d21da364c",
+      "validation": {
+        "expectedSeriesCount": 270,
+        "seriesCount": 270,
+        "expectedIntervals": 6480,
+        "intervalCount": 6480,
+        "expectedReadings": 6750,
+        "readingCount": 6750,
+        "coverageFrom": "2026-06-01T00:00:00.000Z",
+        "coverageTo": "2026-06-02T00:00:00.000Z",
+        "expectedCoverageFrom": "2026-06-01T00:00:00.000Z",
+        "expectedCoverageTo": "2026-06-02T00:00:00.000Z",
+        "duplicateKeyCount": 0,
+        "monotonicityViolationCount": 0,
+        "negativeDeltaCount": 0,
+        "gapCount": 0,
+        "boundaryDuplicateCountWhenAppendedToMay": 270,
+        "boundaryConflictCount": 0,
+        "perSeriesCountViolationCount": 0,
+        "orphanCount": 0,
+        "unmappedCount": 0
+      }
+    },
+    {
+      "stageId": "day7",
+      "days": 7,
+      "filename": "Preschool_June_2026_Day07.incremental-cumulative.xlsx",
+      "path": "outputs/t39-preschool-continuous-ab-20260810/Preschool_June_2026_Day07.incremental-cumulative.xlsx",
+      "byteLength": 820732,
+      "sha256": "9b9d7578b21c6e9826cbebd1d5725af428df69e3a6e840c0d236a719b4bf3be7",
+      "canonicalContentSha256": "4263238f49987178b0236deecf182d41c49fe334f405136d94b821ec65ee1c8c",
+      "validation": {
+        "expectedSeriesCount": 270,
+        "seriesCount": 270,
+        "expectedIntervals": 45360,
+        "intervalCount": 45360,
+        "expectedReadings": 45630,
+        "readingCount": 45630,
+        "coverageFrom": "2026-06-01T00:00:00.000Z",
+        "coverageTo": "2026-06-08T00:00:00.000Z",
+        "expectedCoverageFrom": "2026-06-01T00:00:00.000Z",
+        "expectedCoverageTo": "2026-06-08T00:00:00.000Z",
+        "duplicateKeyCount": 0,
+        "monotonicityViolationCount": 0,
+        "negativeDeltaCount": 0,
+        "gapCount": 0,
+        "boundaryDuplicateCountWhenAppendedToMay": 270,
+        "boundaryConflictCount": 0,
+        "perSeriesCountViolationCount": 0,
+        "orphanCount": 0,
+        "unmappedCount": 0
+      }
+    },
+    {
+      "stageId": "day30",
+      "days": 30,
+      "filename": "Preschool_June_2026_Day30.incremental-cumulative.xlsx",
+      "path": "outputs/t39-preschool-continuous-ab-20260810/Preschool_June_2026_Day30.incremental-cumulative.xlsx",
+      "byteLength": 3449021,
+      "sha256": "c50183898a00ea7dc76660960e496af58ef8434ab8e1d0ad1e9b1dfe4a50c199",
+      "canonicalContentSha256": "94756f4d7271c9edd1fd9b1f5f7587a9992c0888bf96f749c8e9c2b2c78cf26f",
+      "validation": {
+        "expectedSeriesCount": 270,
+        "seriesCount": 270,
+        "expectedIntervals": 194400,
+        "intervalCount": 194400,
+        "expectedReadings": 194670,
+        "readingCount": 194670,
+        "coverageFrom": "2026-06-01T00:00:00.000Z",
+        "coverageTo": "2026-07-01T00:00:00.000Z",
+        "expectedCoverageFrom": "2026-06-01T00:00:00.000Z",
+        "expectedCoverageTo": "2026-07-01T00:00:00.000Z",
+        "duplicateKeyCount": 0,
+        "monotonicityViolationCount": 0,
+        "negativeDeltaCount": 0,
+        "gapCount": 0,
+        "boundaryDuplicateCountWhenAppendedToMay": 270,
+        "boundaryConflictCount": 0,
+        "perSeriesCountViolationCount": 0,
+        "orphanCount": 0,
+        "unmappedCount": 0
+      }
+    }
+  ]
+}

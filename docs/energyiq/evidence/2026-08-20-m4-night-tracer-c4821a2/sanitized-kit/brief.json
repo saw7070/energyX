@@ -1,0 +1,6 @@
+{
+  "audience": "Energy and facilities managers",
+  "goal": "Create one inspectable portfolio consumption section from trusted inputs.",
+  "timezone": "Asia/Singapore",
+  "evidenceBoundary": "Reference values and executable code are not runtime truth."
+}

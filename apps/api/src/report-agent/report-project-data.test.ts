@@ -1,0 +1,20 @@
+import { beforeEach, expect, it, vi } from "vitest";
+import type { MetadataStore } from "@datafoundry/metadata";
+const mocks = vi.hoisted(() => ({ authorize: vi.fn(), coverage: vi.fn(), route: vi.fn() }));
+vi.mock("./report-access.js", () => ({ authorizeReportConversation: mocks.authorize }));
+vi.mock("@datafoundry/data-gateway", () => ({ readEnergyAnalysisEligibleCoverage: mocks.coverage }));
+vi.mock("../energy/energy-query-context.js", () => ({ resolveEnergyPublishedMeterRoute: mocks.route }));
+import { readReportProjectData } from "./report-project-data.js";
+let snapshot: { id: string } | undefined;
+let project: { data_snapshot_id: string; hierarchy_revision_id: string; root_scope_id: string };
+const metadata = { energyIq: { getProject: () => ({ ...project }), findCurrentDataSnapshot: () => snapshot } } as unknown as MetadataStore;
+beforeEach(() => { vi.resetAllMocks(); snapshot = { id: "snapshot" }; project = { data_snapshot_id: "snapshot", hierarchy_revision_id: "hierarchy", root_scope_id: "root" }; mocks.route.mockReturnValue({ attachments: [{ meterPointId: "main" }] }); mocks.coverage.mockResolvedValue({ from: "2026-08-16T08:45:00Z", to: "2026-09-05T15:45:00Z", intervalCount: 32511 }); });
+it("reports the actual authorized snapshot cutoff without consulting files or settings", async () => {
+  expect(await readReportProjectData(metadata, "u", "w", "p")).toEqual({ status: "connected", actualLastIntervalEnd: "2026-09-05T15:45:00.000Z", reason: null });
+  expect(mocks.authorize).toHaveBeenCalledWith(metadata, "u", "w", "p");
+  expect(mocks.coverage).toHaveBeenCalledWith(expect.objectContaining({ dataSnapshotId: "snapshot", meterAttachments: [{ meterPointId: "main" }] }));
+});
+it("does not infer a binding when no snapshot is published", async () => { snapshot = undefined; expect(await readReportProjectData(metadata, "u", "w", "p")).toMatchObject({ status: "not_configured", actualLastIntervalEnd: null }); expect(mocks.coverage).not.toHaveBeenCalled(); });
+it("does not hide authorization failures as an unavailable binding", async () => { mocks.authorize.mockImplementation(() => { throw Error("REPORT_PROJECT_FORBIDDEN"); }); await expect(readReportProjectData(metadata, "u", "w", "p")).rejects.toThrow("REPORT_PROJECT_FORBIDDEN"); expect(mocks.coverage).not.toHaveBeenCalled(); });
+it.each([null, { intervalCount: 0, to: "2026-09-05T15:45:00Z" }, { intervalCount: 1, to: "invalid" }])("rejects missing or unusable interval coverage", async (coverage) => { mocks.coverage.mockResolvedValue(coverage); expect(await readReportProjectData(metadata, "u", "w", "p")).toMatchObject({ status: "unavailable", actualLastIntervalEnd: null }); });
+it("reports unreadable facts and stale snapshots as unavailable", async () => { mocks.coverage.mockRejectedValue(Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE")); expect(await readReportProjectData(metadata, "u", "w", "p")).toMatchObject({ status: "unavailable" }); mocks.coverage.mockImplementation(async () => { project.data_snapshot_id = "new"; return { intervalCount: 1, to: "2026-09-05T15:45:00Z" }; }); expect(await readReportProjectData(metadata, "u", "w", "p")).toMatchObject({ status: "unavailable", actualLastIntervalEnd: null }); });

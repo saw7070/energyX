@@ -1,0 +1,17 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "rootDir": "../../..",
+    "baseUrl": "../../..",
+    "paths": {
+      "@datafoundry/*": [
+        "packages/*/src/index.ts"
+      ]
+    }
+  },
+  "include": [
+    "../../../apps/api/src/report-agent/**/*.ts"
+  ]
+}

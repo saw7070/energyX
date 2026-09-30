@@ -1,0 +1,26 @@
+{
+  "contractRevision": "energyiq-overview-definition-change@1",
+  "title": "Add portfolio consumption summary",
+  "rationale": "Lead with trusted consumption before deeper diagnosis.",
+  "desiredDefinition": {
+    "contractRevision": "energyiq-overview-definition@1",
+    "timePolicyRevisionId": "m4-clean-room-report-time@1",
+    "sections": [
+      {
+        "key": "portfolio-consumption",
+        "title": "Portfolio consumption",
+        "managementQuestion": "How much electricity did the portfolio use, and where should management look first?",
+        "primaryWindowId": "current-overview",
+        "supportingWindowIds": [],
+        "blocks": [
+          {
+            "key": "portfolio-consumption-summary",
+            "capabilityRevisionId": "overview.consumption@1",
+            "windowId": "current-overview",
+            "emphasis": "primary"
+          }
+        ]
+      }
+    ]
+  }
+}

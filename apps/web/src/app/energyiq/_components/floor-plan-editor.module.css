@@ -1,0 +1,127 @@
+.card { margin-bottom:20px; border:1px solid #d0dbd2; border-radius:14px; padding:18px 20px; background:white; }
+.cardHeader { display:flex; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:12px; }
+.cardHeader h4 { font-size:16px; font-weight:650; color:#1f2d25; }
+.cardHeader p { margin-top:2px; max-width:80ch; font-size:13px; color:#6a786f; }
+.actions { display:flex; gap:8px; }
+.primary, .secondary { display:inline-flex; align-items:center; gap:6px; min-height:36px; padding:7px 14px; border-radius:8px; font-size:14px; font-weight:600; }
+.primary { background:#1d513a; color:white; }
+.primary:hover { background:#246c4b; }
+.secondary { border:1px solid #d0dbd2; background:white; color:#1d513a; }
+.secondary:hover { background:#eef3ed; }
+.primary:disabled, .secondary:disabled, .tool:disabled { opacity:.5; cursor:not-allowed; }
+.primary svg { width:16px; height:16px; }
+.viewBody { display:grid; grid-template-columns:minmax(0,1fr) minmax(240px,320px); gap:18px; margin-top:14px; align-items:start; }
+.viewBody aside h5, .side h5 { margin-bottom:8px; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:#58645d; }
+.mapFrame { padding:14px; border:1px solid #e6ebe6; border-radius:12px; background:#fbfcfb; }
+.empty { display:flex; align-items:center; gap:14px; margin-top:14px; padding:22px; border:1px dashed #c9d6cd; border-radius:12px; color:#3c4a42; font-size:14px; }
+.empty svg { width:28px; height:28px; flex-shrink:0; color:#528168; }
+
+.editing { border-color:#9cbfa9; box-shadow:0 0 0 3px #e4efe7; }
+.embedded { margin:-4px 0 22px; padding-bottom:20px; border-bottom:1px solid #edf0f3; }
+.embeddedHeader { display:flex; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:10px; margin-bottom:12px; }
+.embeddedHeader h4 { font-size:14px; font-weight:650; color:#1f2d25; }
+.embeddedHeader p { margin-top:2px; font-size:13px; color:#6a786f; }
+.secondary svg { width:15px; height:15px; }
+.toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:14px; padding:8px; border:1px solid #e1e7e1; border-radius:10px; background:#f8faf7; }
+.tool { min-height:32px; padding:5px 12px; border:1px solid #d0dbd2; border-radius:7px; background:white; color:#1d513a; font-size:13px; font-weight:600; }
+.tool:hover:not(:disabled) { background:#eef3ed; }
+.toolSelect { display:inline-flex; align-items:center; gap:6px; padding:0 4px 0 10px; border:1px solid #d0dbd2; border-radius:7px; background:white; color:#1d513a; font-size:13px; font-weight:600; }
+.toolSelect select { min-height:30px; border:0; background:transparent; color:#1f2d25; font-size:13px; }
+.toolGap { flex:1; }
+.placing { margin-top:10px; padding:8px 12px; border-radius:8px; background:#e4efe7; color:#1d513a; font-size:13px; }
+.placing button { margin-left:8px; font-weight:600; text-decoration:underline; }
+.error { margin-top:10px; padding:8px 12px; border-radius:8px; background:#fdecec; color:#a4262c; font-size:13px; }
+
+.editorBody { display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:16px; margin-top:12px; align-items:start; }
+.canvasFrame { padding:10px 14px 14px 8px; border:1px solid #e1e7e1; border-radius:12px; background:#fbfcfb; overflow:auto; }
+.stage { position:relative; min-width:100%; }
+.stage > svg { display:block; width:100%; }
+/* Edges of the drawing space: a thin grip to pull; the whole strip is the target. */
+.edge { position:absolute; padding:0; border:0; background:transparent; z-index:1; }
+.edge span { position:absolute; border-radius:3px; background:#9cbfa9; transition:background .15s; }
+.edge:hover span, .edge:focus-visible span { background:#1d513a; }
+.edge:focus-visible { outline:2px solid #b58531; outline-offset:1px; border-radius:4px; }
+.edge-e { top:0; right:-12px; width:12px; height:100%; cursor:ew-resize; }
+.edge-e span { left:4px; top:calc(50% - 24px); width:4px; height:48px; }
+.edge-s { left:0; bottom:-12px; height:12px; width:100%; cursor:ns-resize; }
+.edge-s span { top:4px; left:calc(50% - 24px); height:4px; width:48px; }
+.edge-se { right:-14px; bottom:-14px; width:16px; height:16px; cursor:nwse-resize; }
+.edge-se span { right:2px; bottom:2px; width:10px; height:10px; border-radius:2px 2px 6px 2px; }
+.canvas { touch-action:none; user-select:none; }
+.placingCursor { cursor:crosshair; }
+.gridLine { fill:none; stroke:#e8ede9; stroke-width:1; }
+.item { cursor:move; }
+.orphan { stroke:#c0392b !important; stroke-dasharray:6 4; }
+.selectBox { fill:none; stroke:#1d513a; stroke-width:2; stroke-dasharray:6 4; pointer-events:none; }
+.selectRing { fill:none; stroke:#1d513a; stroke-width:2; stroke-dasharray:4 3; }
+.handle { fill:white; stroke:#1d513a; stroke-width:2; }
+.nw, .se { cursor:nwse-resize; }
+.ne, .sw { cursor:nesw-resize; }
+
+.side { display:grid; gap:12px; max-height:720px; overflow:auto; }
+.panel { display:grid; gap:10px; padding:12px 14px; border:1px solid #e1e7e1; border-radius:12px; background:#f8faf7; }
+.panel label { display:grid; gap:4px; font-size:12px; font-weight:600; color:#4f5f55; }
+.panel input, .panel select { min-height:34px; padding:5px 9px; border:1px solid #d0dbd2; border-radius:7px; background:white; color:#1f2d25; font-size:14px; font-weight:400; }
+.panel p { font-size:13px; color:#1f2d25; }
+.panel small { color:#6a786f; }
+.colourField { display:grid; gap:6px; margin:0; padding:0; border:0; }
+.colourField legend { margin-bottom:4px; font-size:12px; font-weight:600; color:#4f5f55; }
+.swatches { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.swatchButton { width:24px; height:24px; padding:0; border:2px solid #ffffff; border-radius:6px; box-shadow:0 0 0 1px #d0dbd2; cursor:pointer; }
+.swatchButton[aria-pressed="true"] { box-shadow:0 0 0 2px #1f2d25; }
+.autoColour { min-height:26px; padding:2px 9px; border:1px solid #d0dbd2; border-radius:6px; background:#ffffff; color:#1d513a; font-size:12px; }
+.autoColour[aria-pressed="true"] { border-color:#1d513a; font-weight:600; }
+.danger { justify-self:start; padding:5px 10px; border-radius:7px; color:#a4262c; font-size:13px; font-weight:600; }
+.danger:hover { background:#fdecec; }
+.paletteHead { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+.paletteHead h5 { margin-bottom:0 !important; }
+.paletteHead span { font-size:12px; color:#6a786f; }
+.hint { font-size:12px !important; color:#6a786f !important; }
+.paletteGroup > p { display:flex; align-items:center; gap:6px; margin-bottom:4px; font-size:12px; font-weight:650; color:#3c4a42; }
+.swatch { width:10px; height:10px; border-radius:3px; }
+.paletteGroup ul { display:grid; gap:4px; }
+.paletteGroup li { display:grid; grid-template-columns:14px minmax(0,1fr) auto; align-items:center; gap:8px; padding:6px 8px; border:1px solid #e1e7e1; border-radius:8px; background:white; cursor:grab; }
+.paletteGroup li:active { cursor:grabbing; }
+.paletteGroup li.onPlan { background:transparent; border-style:dashed; cursor:default; }
+.grip { color:#9aa8a0; font-size:11px; letter-spacing:-2px; }
+.deviceName { min-width:0; }
+.deviceName strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; font-weight:600; color:#1f2d25; }
+.deviceName small { font-size:11px; color:#6a786f; }
+.paletteGroup li button { padding:3px 8px; border-radius:6px; color:#1d513a; font-size:12px; font-weight:600; }
+.paletteGroup li button:hover, .paletteGroup li button[aria-pressed=true] { background:#e4efe7; }
+.onPlan button { color:#6a786f !important; }
+
+@media (max-width: 1100px) {
+  .viewBody, .editorBody { grid-template-columns:1fr; }
+  .side { max-height:none; }
+}
+
+:global(:where(html[data-energyiq-theme="dark"])) .card { background:#191919; border-color:#32363b; }
+:global(:where(html[data-energyiq-theme="dark"])) .editing { border-color:#3b6b52; box-shadow:0 0 0 3px #1c2a22; }
+:global(:where(html[data-energyiq-theme="dark"])) .embedded { border-color:#2c3033; }
+:global(:where(html[data-energyiq-theme="dark"])) .embeddedHeader h4, :global(:where(html[data-energyiq-theme="dark"])) .cardHeader h4, :global(:where(html[data-energyiq-theme="dark"])) .panel p, :global(:where(html[data-energyiq-theme="dark"])) .deviceName strong { color:#e6ede9; }
+:global(:where(html[data-energyiq-theme="dark"])) .embeddedHeader p, :global(:where(html[data-energyiq-theme="dark"])) .cardHeader p, :global(:where(html[data-energyiq-theme="dark"])) .viewBody aside h5, :global(:where(html[data-energyiq-theme="dark"])) .side h5, :global(:where(html[data-energyiq-theme="dark"])) .panel small, :global(:where(html[data-energyiq-theme="dark"])) .deviceName small, :global(:where(html[data-energyiq-theme="dark"])) .paletteHead span, :global(:where(html[data-energyiq-theme="dark"])) .hint { color:#9aa8a0 !important; }
+:global(:where(html[data-energyiq-theme="dark"])) .secondary, :global(:where(html[data-energyiq-theme="dark"])) .tool, :global(:where(html[data-energyiq-theme="dark"])) .toolSelect { background:#1d2022; border-color:#32363b; color:#8bc3b9; }
+:global(:where(html[data-energyiq-theme="dark"])) .toolSelect select { color:#e6ede9; }
+:global(:where(html[data-energyiq-theme="dark"])) .secondary:hover, :global(:where(html[data-energyiq-theme="dark"])) .tool:hover:not(:disabled) { background:#232826; }
+:global(:where(html[data-energyiq-theme="dark"])) .mapFrame, :global(:where(html[data-energyiq-theme="dark"])) .canvasFrame { background:#161718; border-color:#2c3033; }
+:global(:where(html[data-energyiq-theme="dark"])) .toolbar, :global(:where(html[data-energyiq-theme="dark"])) .panel { background:#1d2022; border-color:#32363b; }
+:global(:where(html[data-energyiq-theme="dark"])) .panel label, :global(:where(html[data-energyiq-theme="dark"])) .paletteGroup > p { color:#b9c5be; }
+:global(:where(html[data-energyiq-theme="dark"])) .panel input, :global(:where(html[data-energyiq-theme="dark"])) .panel select, :global(:where(html[data-energyiq-theme="dark"])) .paletteGroup li { background:#191919; border-color:#32363b; color:#e6ede9; }
+:global(:where(html[data-energyiq-theme="dark"])) .paletteGroup li.onPlan { background:transparent; }
+:global(:where(html[data-energyiq-theme="dark"])) .paletteGroup li button, :global(:where(html[data-energyiq-theme="dark"])) .placing { color:#8bc3b9; }
+:global(:where(html[data-energyiq-theme="dark"])) .paletteGroup li button:hover, :global(:where(html[data-energyiq-theme="dark"])) .paletteGroup li button[aria-pressed=true], :global(:where(html[data-energyiq-theme="dark"])) .placing { background:#1c2a22; }
+:global(:where(html[data-energyiq-theme="dark"])) .gridLine { stroke:#23282a; }
+:global(:where(html[data-energyiq-theme="dark"])) .selectBox, :global(:where(html[data-energyiq-theme="dark"])) .selectRing { stroke:#8bc3b9; }
+:global(:where(html[data-energyiq-theme="dark"])) .handle { fill:#191919; stroke:#8bc3b9; }
+:global(:where(html[data-energyiq-theme="dark"])) .empty { border-color:#32363b; color:#c8d2cc; }
+:global(:where(html[data-energyiq-theme="dark"])) .error { background:#271c1c; color:#f3908b; }
+:global(:where(html[data-energyiq-theme="dark"])) .danger { color:#f3908b; }
+:global(:where(html[data-energyiq-theme="dark"])) .danger:hover { background:#271c1c; }
+:global(:where(html[data-energyiq-theme="dark"])) .edge span { background:#3b6b52; }
+:global(:where(html[data-energyiq-theme="dark"])) .edge:hover span, :global(:where(html[data-energyiq-theme="dark"])) .edge:focus-visible span { background:#8bc3b9; }
+:global(:where(html[data-energyiq-theme="dark"])) .colourField legend { color:#a4aea8; }
+:global(:where(html[data-energyiq-theme="dark"])) .swatchButton { border-color:#1d2022; box-shadow:0 0 0 1px #32363b; }
+:global(:where(html[data-energyiq-theme="dark"])) .swatchButton[aria-pressed="true"] { box-shadow:0 0 0 2px #e6ede9; }
+:global(:where(html[data-energyiq-theme="dark"])) .autoColour { background:#1d2022; border-color:#32363b; color:#8bc3b9; }
+:global(:where(html[data-energyiq-theme="dark"])) .autoColour[aria-pressed="true"] { border-color:#8bc3b9; }

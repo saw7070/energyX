@@ -1,0 +1,3 @@
+*.sh text eol=lf
+scripts/energyiq/test-fixtures/bin/* text eol=lf
+deploy/systemd/* text eol=lf

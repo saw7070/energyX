@@ -1,0 +1,97 @@
+.view { display:grid; gap:18px; }
+
+.statusRow { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+.badge { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; font-size:12px; font-weight:650; border:1px solid transparent; }
+.dot { width:7px; height:7px; border-radius:50%; background:currentColor; }
+.published { color:#1d6b47; background:#e7f4ec; border-color:#c6e3d1; }
+.draft { color:#8a5a0f; background:#fdf3de; border-color:#f3dcaa; }
+.saved { color:#58645d; background:#f1f4f1; border-color:#dde3de; }
+.hint { font-size:13px; color:#6a786f; margin-right:auto; }
+
+.entry { display:grid; gap:14px; }
+.tiles { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+.tile { display:grid; gap:2px; padding:14px 16px; border:1px solid #e1e7e1; border-radius:12px; background:#f8faf7; min-width:0; }
+.tile span { font-size:12px; font-weight:600; color:#58645d; text-transform:uppercase; letter-spacing:.04em; }
+.tile strong { font-size:20px; font-weight:650; color:#1f2d25; letter-spacing:-.01em; }
+.tile small { font-size:12px; color:#6a786f; }
+
+.week { border:1px solid #e1e7e1; border-radius:12px; padding:10px 16px 6px; background:white; }
+.axis, .day { display:grid; grid-template-columns:110px minmax(0,1fr) 170px; gap:16px; align-items:center; }
+.axis { height:22px; }
+.axisTrack { position:relative; height:100%; }
+.axisTrack span { position:absolute; top:4px; transform:translateX(-50%); font-size:11px; color:#8a968e; font-variant-numeric:tabular-nums; }
+.axisTrack span:first-child { transform:none; }
+.axisTrack span:last-child { transform:translateX(-100%); }
+.day { min-height:46px; border-top:1px solid #eef1ee; }
+.dayName { font-size:14px; font-weight:600; color:#24352b; }
+.track { position:relative; height:14px; border-radius:7px; background:repeating-linear-gradient(90deg,#eef1ee 0,#eef1ee calc(25% - 1px),#dfe5e0 calc(25% - 1px),#dfe5e0 25%); }
+.open { position:absolute; top:0; bottom:0; border-radius:7px; background:#176b59; }
+.times { display:flex; align-items:baseline; justify-content:flex-end; gap:8px; font-variant-numeric:tabular-nums; }
+.times strong { font-size:14px; font-weight:600; color:#1f2d25; }
+.times small { font-size:12px; color:#6a786f; min-width:34px; text-align:right; }
+.closed .dayName { color:#8a968e; font-weight:500; }
+.closed .track { opacity:.7; }
+.closedText { color:#8a968e !important; font-weight:500 !important; }
+
+.special { border:1px solid #e1e7e1; border-radius:12px; padding:14px 16px; background:white; }
+.special header { display:flex; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:10px; }
+.special h4 { font-size:15px; font-weight:650; color:#24352b; }
+.special header p { font-size:12px; color:#6a786f; margin-top:2px; }
+.link { display:inline-flex; align-items:center; gap:4px; font-size:13px; font-weight:600; color:#1d513a; padding:4px 8px; border-radius:6px; }
+.link:hover { background:#eef3ed; }
+.link svg { width:14px; height:14px; }
+.special ul { display:grid; margin-top:10px; }
+.special li { display:grid; grid-template-columns:190px minmax(0,1fr); gap:16px; align-items:center; padding:10px 0; border-top:1px solid #eef1ee; }
+.when { font-size:13px; font-weight:600; color:#24352b; font-variant-numeric:tabular-nums; }
+.what strong { display:block; font-size:14px; font-weight:600; color:#1f2d25; }
+.what small { display:block; font-size:12px; color:#6a786f; margin-top:1px; }
+.current { background:#f4f8f5; border-radius:8px; padding-left:8px !important; padding-right:8px !important; }
+.none { margin-top:10px; font-size:13px; color:#6a786f; }
+
+@media (max-width: 767px) {
+  .tiles { grid-template-columns:1fr; }
+  .axis, .day { grid-template-columns:84px minmax(0,1fr); }
+  .axis > span:last-child { display:none; }
+  .times { grid-column:2; justify-content:flex-start; padding-bottom:8px; }
+  .day { row-gap:4px; padding-top:8px; }
+  .special li { grid-template-columns:1fr; gap:2px; }
+}
+
+/* Dark theme */
+:global(:where(html[data-energyiq-theme="dark"])) .published { color:#6cc59a; background:#15261d; border-color:#24452f; }
+:global(:where(html[data-energyiq-theme="dark"])) .draft { color:#d3a96b; background:#281d02; border-color:#4a3a14; }
+:global(:where(html[data-energyiq-theme="dark"])) .saved { color:#a3b0bd; background:#1f2123; border-color:#32363b; }
+:global(:where(html[data-energyiq-theme="dark"])) .hint, :global(:where(html[data-energyiq-theme="dark"])) .tile small, :global(:where(html[data-energyiq-theme="dark"])) .special header p, :global(:where(html[data-energyiq-theme="dark"])) .what small, :global(:where(html[data-energyiq-theme="dark"])) .times small, :global(:where(html[data-energyiq-theme="dark"])) .none { color:#8f9c95; }
+:global(:where(html[data-energyiq-theme="dark"])) .tile { background:#1d2022; border-color:#32363b; }
+:global(:where(html[data-energyiq-theme="dark"])) .tile span { color:#9aa8a0; }
+:global(:where(html[data-energyiq-theme="dark"])) .tile strong, :global(:where(html[data-energyiq-theme="dark"])) .times strong, :global(:where(html[data-energyiq-theme="dark"])) .what strong, :global(:where(html[data-energyiq-theme="dark"])) .dayName, :global(:where(html[data-energyiq-theme="dark"])) .when, :global(:where(html[data-energyiq-theme="dark"])) .special h4 { color:#e6ede9; }
+:global(:where(html[data-energyiq-theme="dark"])) .week, :global(:where(html[data-energyiq-theme="dark"])) .special { background:#191919; border-color:#32363b; }
+:global(:where(html[data-energyiq-theme="dark"])) .day, :global(:where(html[data-energyiq-theme="dark"])) .special li { border-color:#2c3033; }
+:global(:where(html[data-energyiq-theme="dark"])) .track { background:repeating-linear-gradient(90deg,#24282a 0,#24282a calc(25% - 1px),#30353a calc(25% - 1px),#30353a 25%); }
+:global(:where(html[data-energyiq-theme="dark"])) .open { background:#4fae92; }
+:global(:where(html[data-energyiq-theme="dark"])) .axisTrack span { color:#7d8a83; }
+:global(:where(html[data-energyiq-theme="dark"])) .closed .dayName, :global(:where(html[data-energyiq-theme="dark"])) .closedText { color:#6f7b75 !important; }
+:global(:where(html[data-energyiq-theme="dark"])) .link { color:#8bc3b9; }
+:global(:where(html[data-energyiq-theme="dark"])) .link:hover { background:#1f2624; }
+:global(:where(html[data-energyiq-theme="dark"])) .current { background:#1b2522; }
+
+/* Electricity rate */
+.rateHero { display:grid; gap:4px; padding:20px 22px; border:1px solid #cfe3d7; border-radius:14px; background:linear-gradient(180deg,#f3f9f5,#ffffff); }
+.rateHero > span { font-size:12px; font-weight:600; color:#3c7457; text-transform:uppercase; letter-spacing:.05em; }
+.rateHero strong { font-size:34px; font-weight:700; color:#16372a; letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
+.rateHero strong small { font-size:16px; font-weight:500; color:#58645d; letter-spacing:0; }
+.rateHero p { font-size:13px; color:#4f5f55; }
+.alert { display:flex; gap:10px; align-items:flex-start; padding:12px 14px; border:1px solid #f3dcaa; border-radius:12px; background:#fdf6e6; color:#6b4a0c; font-size:13px; }
+.alert svg { width:18px; height:18px; flex-shrink:0; margin-top:1px; color:#b7791f; }
+.alert strong { color:#5a3d06; }
+.alert p { flex:1; }
+.alertAction { flex-shrink:0; align-self:center; padding:6px 12px; border:1px solid #d9b25f; border-radius:8px; background:white; color:#5a3d06; font-size:13px; font-weight:600; }
+.alertAction:hover { background:#fbeccb; }
+:global(:where(html[data-energyiq-theme="dark"])) .rateHero { background:linear-gradient(180deg,#1a2621,#191919); border-color:#2b4538; }
+:global(:where(html[data-energyiq-theme="dark"])) .rateHero > span { color:#6cc59a; }
+:global(:where(html[data-energyiq-theme="dark"])) .rateHero strong { color:#e6ede9; }
+:global(:where(html[data-energyiq-theme="dark"])) .rateHero strong small, :global(:where(html[data-energyiq-theme="dark"])) .rateHero p { color:#9aa8a0; }
+:global(:where(html[data-energyiq-theme="dark"])) .alert { background:#281d02; border-color:#4a3a14; color:#d3a96b; }
+:global(:where(html[data-energyiq-theme="dark"])) .alert strong { color:#e7c48f; }
+:global(:where(html[data-energyiq-theme="dark"])) .alertAction { background:#1d1a12; border-color:#6b5320; color:#e7c48f; }
+:global(:where(html[data-energyiq-theme="dark"])) .alertAction:hover { background:#33280f; }

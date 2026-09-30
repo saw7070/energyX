@@ -1,0 +1,4 @@
+import { afterEach, it, expect, vi } from "vitest";
+import { configApi, setConfigApiWorkspaceId, setConfigApiIdentity } from "../client";
+afterEach(()=>{setConfigApiIdentity(null);vi.unstubAllGlobals();});
+it("reads another authorised customer without changing subsequent request context",async()=>{const fetchMock=vi.fn(async(_url: string | URL | Request, _init?: RequestInit)=>new Response(JSON.stringify({success:true,data:{}}),{status:200}));vi.stubGlobal("fetch",fetchMock);setConfigApiIdentity({userId:"test",displayName:"Test",devToken:"fixture-token"});setConfigApiWorkspaceId("current");const controller=new AbortController();await configApi.getEnergyAccessContext({workspaceId:"candidate",signal:controller.signal});await configApi.getEnergyAccessContext();expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({headers:{"X-Workspace-Id":"candidate"},signal:controller.signal});expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({headers:{"X-Workspace-Id":"current"}});});

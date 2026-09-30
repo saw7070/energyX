@@ -1,0 +1,21 @@
+{
+  "audience": "Energy and facilities managers",
+  "managementQuestion": "How much electricity did the portfolio use, and where should management look first?",
+  "sectionIntent": "Summarise total portfolio consumption before deeper diagnostic sections.",
+  "visualHierarchy": [
+    "Lead with the consumption summary",
+    "Keep evidence inspectable"
+  ],
+  "interactionIntent": [
+    "Allow evidence inspection"
+  ],
+  "sourceRefs": [
+    "reference.html#s1"
+  ],
+  "assumptions": [
+    "The reference expresses presentation intent only."
+  ],
+  "unresolvedQuestions": [
+    "Confirm the official aggregation route."
+  ]
+}

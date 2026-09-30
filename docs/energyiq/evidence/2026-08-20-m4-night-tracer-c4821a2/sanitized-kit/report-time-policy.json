@@ -1,0 +1,15 @@
+{
+  "policyId": "m4-clean-room-report-time",
+  "revision": "1",
+  "windows": [
+    {
+      "windowId": "current-overview",
+      "role": "recent_operations",
+      "label": "Recent complete days",
+      "strategy": {
+        "kind": "rolling_complete_days",
+        "days": 28
+      }
+    }
+  ]
+}
