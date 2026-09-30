@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <style>.x{fill:#2d6a50}@media (prefers-color-scheme: dark){.x{fill:#a4dfc0}}</style>
+  <mask id="gap" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24">
+    <rect width="24" height="24" fill="#fff"/>
+    <path d="M3 3.5h5.6L21 20.5h-5.6Z" fill="#000" stroke="#000" stroke-width="2.6" stroke-linejoin="round"/>
+  </mask>
+  <path class="x" d="M15.4 3.5H21L8.6 20.5H3Z" mask="url(#gap)"/>
+  <path class="x" d="M3 3.5h5.6L21 20.5h-5.6Z"/>
+</svg>

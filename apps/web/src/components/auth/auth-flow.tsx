@@ -3,6 +3,7 @@
 import { useCallback, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { configApi } from "../../lib/config-api/client";
+import { EnergyXMark } from "../brand/energyx-mark";
 
 export type AuthMode = "login" | "invite" | "forgot" | "verify" | "reset";
 
@@ -281,8 +282,8 @@ export function PasswordAuthShell({
     <main className="flex min-h-screen items-center justify-center bg-surface-subtle p-6 text-foreground">
       <section className="auth-card-in w-full max-w-sm">
         <div className="mb-6 flex items-center gap-2.5">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-xs font-bold tracking-tight text-white">
-            EX
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#262d2b]">
+            <EnergyXMark className="h-5 w-5 text-[#a4dfc0]" />
           </span>
           <span className="text-sm font-semibold text-foreground">EnergyX</span>
         </div>

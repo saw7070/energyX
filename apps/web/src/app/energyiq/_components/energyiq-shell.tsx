@@ -16,6 +16,7 @@ import { EnergyIqLanguageSwitch } from "./energyiq-language-switch";
 import { useEnergyIqLocale } from "./energyiq-locale";
 import type { EnergyIqMessageKey } from "./energyiq-messages";
 import topBar from "./energyiq-top-bar.module.css";
+import { EnergyXMark } from "../../../components/brand/energyx-mark";
 
 const CreateProjectDialog = dynamic(() => import("./create-project-dialog").then(module => module.CreateProjectDialog));
 
@@ -249,7 +250,7 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
       <div className={`${collapsed ? "w-16" : "w-16 md:w-64"} shrink-0 print:hidden`}>
         <aside data-energyiq-sidebar aria-label={t("shell.sidebar")} className={`absolute inset-y-0 left-0 z-40 flex ${collapsed ? "w-16" : "w-64"} flex-col border-r border-border bg-surface md:relative md:h-full`}>
           <div className="flex h-16 shrink-0 items-center gap-2 px-3">
-            {!collapsed ? <Link href={projectHref("/energyiq/library")} className="flex min-w-0 flex-1 items-center gap-2 font-semibold"><EnergyIcon name="bolt" className="h-5 w-5 text-primary" />EnergyX</Link> : null}
+            {!collapsed ? <Link href={projectHref("/energyiq/key-points")} className="flex min-w-0 flex-1 items-center gap-2 font-semibold"><EnergyXMark className="h-5 w-5 shrink-0 text-primary" />EnergyX</Link> : null}
             <button aria-label={t(collapsed ? "shell.expandSidebar" : "shell.collapseSidebar")} aria-expanded={!collapsed} aria-controls="energyiq-sidebar-content" className="rounded-lg p-2 text-muted hover:bg-surface-subtle focus-visible:ring-2 focus-visible:ring-primary/20" onClick={() => updateCollapsed(!collapsed)}><EnergyIcon name="sidebar" className="h-4 w-4" /></button>
           </div>
           <div id="energyiq-sidebar-content" className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-3">
