@@ -44,10 +44,87 @@ export const inspectEnergyExcelWorkbook = async (
   content: Buffer,
 ): Promise<EnergyExcelImportInspection> => (await readEnergyExcelWorkbook(content)).inspection;
 
+type EnergySheet = { sheet: string; data: (CellValue | null)[][] };
+
+/** Reads an uploaded readings file. `.xlsx` is a zip (starts "PK"); anything else is read as CSV text. */
 export const readEnergyExcelWorkbook = async (
   content: Buffer,
-): Promise<EnergyExcelWorkbook> => {
-  const sheets = await readExcelFile(content);
+): Promise<EnergyExcelWorkbook> => readEnergySheets(isZip(content) ? await readExcelFile(content) : readCsvSheets(content));
+
+const isZip = (content: Buffer): boolean => content.length >= 4 && content[0] === 0x50 && content[1] === 0x4b && content[2] === 0x03 && content[3] === 0x04;
+
+/** Headers whose cells are wall-clock timestamps; CSV text is converted the way Excel dates arrive. */
+const CSV_TIME_HEADERS = new Set(["time", "date"]);
+
+const readCsvSheets = (content: Buffer): EnergySheet[] => {
+  const text = content.toString("utf8").replace(/^\uFEFF/u, "");
+  const rows = parseCsv(text);
+  if (rows.length === 0) throw new Error("ENERGYIQ_EXCEL_EMPTY");
+  const timeColumns = new Set(rows[0]!.map((header, index) => CSV_TIME_HEADERS.has(normaliseHeader(header)) ? index : -1).filter((index) => index >= 0));
+  const data: EnergySheet["data"] = rows.map((row, rowIndex) => row.map((cell, columnIndex) => {
+    if (rowIndex === 0 || !timeColumns.has(columnIndex)) return cell;
+    // read-excel-file types Date cells as `typeof Date`, but at runtime (and here) they are Date instances.
+    return (parseWallClock(cell) as unknown as CellValue | undefined) ?? cell;
+  }));
+  return [{ sheet: "CSV", data }];
+};
+
+/** RFC 4180 CSV with comma, semicolon or tab delimiters (detected from the header line). */
+export const parseCsv = (text: string): string[][] => {
+  const firstLine = text.slice(0, text.search(/\r?\n/u) === -1 ? text.length : text.search(/\r?\n/u));
+  const delimiter = [",", ";", "\t"].map((candidate) => ({ candidate, count: firstLine.split(candidate).length }))
+    .sort((a, b) => b.count - a.count)[0]!.candidate;
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]!;
+    if (quoted) {
+      if (char === '"' && text[index + 1] === '"') { cell += '"'; index += 1; }
+      else if (char === '"') quoted = false;
+      else cell += char;
+    } else if (char === '"' && cell === "") quoted = true;
+    else if (char === delimiter) { row.push(cell); cell = ""; }
+    else if (char === "\n" || char === "\r") {
+      if (char === "\r" && text[index + 1] === "\n") index += 1;
+      row.push(cell); cell = "";
+      if (row.some((value) => value.trim() !== "")) rows.push(row);
+      row = [];
+    } else cell += char;
+  }
+  row.push(cell);
+  if (row.some((value) => value.trim() !== "")) rows.push(row);
+  return rows.map((values) => values.map((value) => value.trim()));
+};
+
+/**
+ * Parses a site wall-clock timestamp into a Date whose UTC fields hold the wall-clock values,
+ * matching how Excel dates are read. Accepts ISO (2026-09-01 00:15[:00]) and day-first
+ * (01/09/2026 00:15) forms; an explicit offset or Z is honoured as an absolute instant.
+ */
+export const parseWallClock = (value: string): Date | undefined => {
+  const text = value.trim();
+  if (!text) return undefined;
+  if (/(?:z|[+-]\d{2}:?\d{2})$/iu.test(text)) {
+    const absolute = new Date(text);
+    return Number.isFinite(absolute.getTime()) ? absolute : undefined;
+  }
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/u.exec(text);
+  const dayFirst = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/u.exec(text);
+  const parts = iso
+    ? [iso[1], iso[2], iso[3], iso[4], iso[5], iso[6]]
+    : dayFirst
+      ? [dayFirst[3], dayFirst[2], dayFirst[1], dayFirst[4], dayFirst[5], dayFirst[6]]
+      : undefined;
+  if (!parts) return undefined;
+  const [year, month, day, hour, minute, second] = parts.map((part) => Number(part ?? 0)) as [number, number, number, number, number, number];
+  if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59) return undefined;
+  const date = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  return date.getUTCDate() === day ? date : undefined;
+};
+
+const readEnergySheets = (sheets: EnergySheet[]): EnergyExcelWorkbook => {
   const cumulativeSheet = sheets.find((candidate) => hasColumns(candidate.data[0], REQUIRED_COLUMNS));
   const intervalMatrixSheet = sheets.find((candidate) => hasColumns(candidate.data[0], INTERVAL_MATRIX_REQUIRED_COLUMNS));
   if (!cumulativeSheet && intervalMatrixSheet) return readIntervalMatrixSheet(intervalMatrixSheet);
@@ -334,6 +411,6 @@ const snapNearMinute = (timestamp: number): number => {
 const numberValue = (value: CellValue | null | undefined): number | undefined => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value !== "string" || !value.trim()) return undefined;
-  const parsed = Number(value);
+  const parsed = Number(value.trim().replace(/,(?=\d{3}(?:\D|$))/gu, ""));
   return Number.isFinite(parsed) ? parsed : undefined;
 };

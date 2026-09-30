@@ -27,6 +27,86 @@
 .menu footer small { margin-left:auto; max-width:45%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#59695e; font-size:11px; }
 .menu button:focus-visible,.trigger:focus-visible { outline:2px solid #789c83; outline-offset:2px; }
 .menu button:disabled,.trigger:disabled { opacity:.55; cursor:wait; }
+/* Admin drag-to-move between customers. */
+.groups button[draggable=true] { cursor:grab; }
+.groups button[draggable=true]:active { cursor:grabbing; }
+.dragSource { opacity:.45; }
+.groups section { border-radius:10px; transition:background 140ms, box-shadow 140ms; }
+.dropTarget { background:#f1f6f0; box-shadow:inset 0 0 0 2px #557661; }
+.groups h3 { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.dropLabel { font-size:11px; font-weight:600; color:#176b59; }
+.dropZone { display:flex; align-items:center; gap:10px; margin:10px 0 2px; padding:14px 12px; border:1.5px dashed #9fb3a5; border-radius:10px; color:#476052; font-size:13px; transition:background 140ms, border-color 140ms; }
+.dropZoneActive { background:#f1f6f0; border-color:#176b59; color:#176b59; }
+.hint { padding:6px 20px 10px; font-size:11.5px; color:#7a8a80; }
+@media (prefers-reduced-motion:reduce) { .groups section,.dropZone { transition:none; } }
+/* Move confirmation modal, stacked over the picker. */
+.moveModal { width:min(440px,calc(100vw - 32px)); margin:auto; padding:0; border:1px solid #d8dfd8; border-radius:16px; background:#fff; color:#24352b; box-shadow:0 24px 64px -16px rgba(23,37,29,.35); }
+.moveModal::backdrop { background:#17251d4d; }
+.moveModal form { padding:20px 22px 18px; }
+.moveModal header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0; }
+.moveModal h2 { font-size:17px; font-weight:600; letter-spacing:-.01em; overflow-wrap:anywhere; }
+.moveModal header button { padding:6px; border-radius:8px; color:#59695e; }
+.moveModal header button:hover { background:#eef3ed; }
+.moveRoute { display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); align-items:center; gap:10px; margin-top:18px; }
+.moveRoute > div { min-width:0; padding:10px 12px; border:1px solid #e1e6e0; border-radius:10px; background:#f7f9f6; }
+.moveRoute small { display:block; font-size:11px; color:#6a7a70; }
+.moveRoute strong { display:block; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; font-weight:600; }
+.moveRoute .moveDestination { border-color:#b8d0c1; background:#eef6f0; }
+.moveModal .moveArrow { width:14px; height:14px; color:#7a8a80; }
+.moveField { display:block; margin-top:16px; }
+.moveField span { display:block; margin-bottom:6px; font-size:12px; font-weight:500; }
+.moveField input { width:100%; height:40px; padding:0 12px; border:1px solid #c9d4cc; border-radius:8px; font-size:14px; outline:none; }
+.moveField input:focus { border-color:#176b59; box-shadow:0 0 0 3px rgba(23,107,89,.15); }
+.moveBody { margin-top:14px; font-size:13px; line-height:1.5; color:#59695e; }
+.moveError { margin-top:12px; padding:8px 10px; border:1px solid #f3c7c7; border-radius:8px; background:#fdf2f2; font-size:12.5px; color:#9b2c2c; }
+.moveModal footer { display:flex; justify-content:flex-end; gap:8px; margin-top:20px; padding:0; border:0; }
+.moveModal footer .moveSecondary,.moveModal footer .movePrimary { display:inline-flex; align-items:center; width:auto; min-height:0; height:38px; padding:0 14px; border-radius:8px; font-size:13px; font-weight:600; transition:background 140ms; }
+.moveModal footer .moveSecondary { border:1px solid #d8dfd8; background:#fff; }
+.moveModal footer .moveSecondary:hover { background:#f3f6f2; }
+.moveModal footer .movePrimary { background:#176b59; color:#fff; }
+.moveModal footer .movePrimary:hover { background:#115444; }
+.moveModal button:focus-visible { outline:2px solid #789c83; outline-offset:2px; }
+.moveModal button:disabled,.moveModal input:disabled { opacity:.6; cursor:wait; }
+@media (prefers-reduced-motion:reduce) { .moveSecondary,.movePrimary { transition:none; } }
+/* Admin row actions. */
+.projectRow { position:relative; display:flex; align-items:center; gap:2px; }
+.projectRow > button[data-project] { flex:1; min-width:0; }
+.groupName { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rowMenu { position:relative; flex-shrink:0; }
+.groups .kebab { display:grid; place-items:center; width:32px; min-height:32px; height:32px; padding:0; border-radius:8px; color:#6a7a70; opacity:0; transition:opacity 120ms, background 120ms; }
+.projectRow:hover .kebab,.groups h3:hover .kebab,.groups .kebab:focus-visible,.groups .kebab[aria-expanded=true] { opacity:1; }
+.groups .kebab:hover,.groups .kebab[aria-expanded=true] { background:#eef3ed; color:#24352b; }
+.groups h3 .kebab { width:26px; min-height:26px; height:26px; margin-right:-4px; }
+.menu .kebab svg { width:16px; height:16px; }
+.rowMenuList { position:absolute; right:0; top:calc(100% + 4px); z-index:5; min-width:220px; padding:5px; border:1px solid #d8dfd8; border-radius:10px; background:#fff; box-shadow:0 16px 32px -12px rgba(23,37,29,.3); }
+.groups .rowMenuList button { min-height:36px; padding:8px 10px; border-radius:6px; font-size:13px; font-weight:500; color:#24352b; }
+.groups .rowMenuList button:hover,.groups .rowMenuList button:focus-visible { background:#eef3ed; outline:none; }
+.groups .rowMenuList .rowMenuDanger { color:#b42318; }
+.groups .rowMenuList .rowMenuDanger:hover,.groups .rowMenuList .rowMenuDanger:focus-visible { background:#fdf0ef; }
+.menu .footerActions { display:flex; gap:4px; }
+.menu .footerActions button { flex:1; min-width:0; }
+.menu .footerActions button + button { flex:0 0 auto; width:auto; }
+.dangerNote { margin-top:14px; padding:10px 12px; border:1px solid #f3c7c7; border-radius:8px; background:#fdf2f2; font-size:13px; line-height:1.5; color:#8a2a22; }
+.moveField select { width:100%; height:40px; padding:0 10px; border:1px solid #c9d4cc; border-radius:8px; background:#fff; font-size:14px; outline:none; }
+.moveField select:focus { border-color:#176b59; box-shadow:0 0 0 3px rgba(23,107,89,.15); }
+.moveModal footer .moveDanger { display:inline-flex; align-items:center; width:auto; min-height:0; height:38px; padding:0 14px; border-radius:8px; font-size:13px; font-weight:600; background:#c4321f; color:#fff; }
+.moveModal footer .moveDanger:hover { background:#a32818; }
+@media (hover:none) { .groups .kebab { opacity:1; } }
+@media (prefers-reduced-motion:reduce) { .groups .kebab { transition:none; } }
+/* Clients contain projects: a distinct client header with its projects indented beneath. */
+.pickerHelp { margin:-4px 18px 10px; font-size:12px; line-height:1.45; color:#6a7a70; }
+.groups .client { margin-top:6px; padding:4px 0 6px; }
+.groups .client + .client { border-top:1px solid #edf1ec; }
+.groups .clientHeader { display:flex; align-items:center; gap:10px; margin:8px 6px 4px; font-size:14px; font-weight:600; color:#24352b; }
+.clientIcon { display:grid; place-items:center; width:30px; height:30px; flex-shrink:0; border-radius:8px; background:#e4ede6; color:#2f5a45; }
+.menu .clientIcon svg { width:16px; height:16px; }
+.clientText { display:flex; flex:1; min-width:0; flex-direction:column; }
+.clientText small { margin-top:1px; font-size:11px; font-weight:400; color:#6a7a70; }
+.clientTag { font-weight:600; text-transform:uppercase; letter-spacing:.06em; font-size:10px; color:#2f5a45; }
+.clientProjects { margin-left:21px; padding-left:10px; border-left:1.5px solid #e1e8e2; }
+.groups .clientProjects > p { padding:8px 10px; }
+.footerLabel { display:flex; flex:1; min-width:0; flex-direction:column; }
+.menu .footerLabel small { margin-left:0; max-width:none; font-size:11px; }
 /* Top bar variant: one compact line on graphite. */
 .topTrigger { display:flex; align-items:center; gap:10px; max-width:100%; height:40px; padding:0 10px 0 5px; border:1px solid transparent; border-radius:10px; color:#f1f5f2; text-align:left; transition:background 120ms,border-color 120ms; }
 .topTrigger:hover,.topTrigger[aria-expanded=true] { background:#323b37; border-color:#46534b; }
@@ -62,6 +142,50 @@
 :global(:where(html[data-energyiq-theme="dark"])) .menu footer { border-top:1px solid #323632; }
 :global(:where(html[data-energyiq-theme="dark"])) .menu footer small { color:#a0b1a5; }
 :global(:where(html[data-energyiq-theme="dark"])) .menu button:focus-visible, :global(:where(html[data-energyiq-theme="dark"])) .trigger:focus-visible { outline:2px solid #789c83; }
+:global(:where(html[data-energyiq-theme="dark"])) .groups section { border-radius:10px; }
+:global(:where(html[data-energyiq-theme="dark"])) .dropTarget { background:#1b1f1a; box-shadow:inset 0 0 0 2px #557661; }
+:global(:where(html[data-energyiq-theme="dark"])) .dropLabel { color:#75c1ac; }
+:global(:where(html[data-energyiq-theme="dark"])) .dropZone { border:1.5px dashed #384a3e; border-radius:10px; color:#9eb9a9; }
+:global(:where(html[data-energyiq-theme="dark"])) .dropZoneActive { background:#1b1f1a; border-color:#176b59; color:#75c1ac; }
+:global(:where(html[data-energyiq-theme="dark"])) .hint { color:#90a196; }
+:global(:where(html[data-energyiq-theme="dark"])) .moveModal { border:1px solid #333933; border-radius:16px; background:#191919; color:#b9cdc0; box-shadow:0 24px 64px -16px #17251d8f; }
+:global(:where(html[data-energyiq-theme="dark"])) .moveModal::backdrop { background:#2332294d; }
+:global(:where(html[data-energyiq-theme="dark"])) .moveModal header button { border-radius:8px; color:#a0b1a5; }
+:global(:where(html[data-energyiq-theme="dark"])) .moveModal header button:hover { background:#1c201c; }
+:global(:where(html[data-energyiq-theme="dark"])) .moveRoute > div { border:1px solid #323632; border-radius:10px; background:#1b1c1a; }
+:global(:where(html[data-energyiq-theme="dark"])) .moveRoute small { color:#98a89e; }
+:global(:where(html[data-energyiq-theme="dark"])) .moveRoute .moveDestination { border-color:#2e4236; background:#1a201b; }
+:global(:where(html[data-energyiq-theme="dark"])) .moveModal .moveArrow { color:#90a196; }
+:global(:where(html[data-energyiq-theme="dark"])) .moveField input { border:1px solid #343d37; border-radius:8px; outline:none; }
+:global(:where(html[data-energyiq-theme="dark"])) .moveField input:focus { border-color:#176b59; box-shadow:0 0 0 3px #176b593d; }
+:global(:where(html[data-energyiq-theme="dark"])) .moveBody { color:#a0b1a5; }
+:global(:where(html[data-energyiq-theme="dark"])) .moveError { border:1px solid #512f30; border-radius:8px; background:#231b1b; color:#f4928a; }
+:global(:where(html[data-energyiq-theme="dark"])) .moveModal footer { border:0; }
+:global(:where(html[data-energyiq-theme="dark"])) .moveModal footer .moveSecondary, :global(:where(html[data-energyiq-theme="dark"])) .moveModal footer .movePrimary { border-radius:8px; }
+:global(:where(html[data-energyiq-theme="dark"])) .moveModal footer .moveSecondary { border:1px solid #333933; background:#191919; }
+:global(:where(html[data-energyiq-theme="dark"])) .moveModal footer .moveSecondary:hover { background:#1c1e1b; }
+:global(:where(html[data-energyiq-theme="dark"])) .moveModal footer .movePrimary { background:#176b59; color:#fff; }
+:global(:where(html[data-energyiq-theme="dark"])) .moveModal footer .movePrimary:hover { background:#115444; }
+:global(:where(html[data-energyiq-theme="dark"])) .moveModal button:focus-visible { outline:2px solid #789c83; }
+:global(:where(html[data-energyiq-theme="dark"])) .groups .kebab { border-radius:8px; color:#98a89e; }
+:global(:where(html[data-energyiq-theme="dark"])) .groups .kebab:hover, :global(:where(html[data-energyiq-theme="dark"])) .groups .kebab[aria-expanded=true] { background:#1c201c; color:#b9cdc0; }
+:global(:where(html[data-energyiq-theme="dark"])) .rowMenuList { border:1px solid #333933; border-radius:10px; background:#191919; box-shadow:0 16px 32px -12px #17251d7a; }
+:global(:where(html[data-energyiq-theme="dark"])) .groups .rowMenuList button { border-radius:6px; color:#b9cdc0; }
+:global(:where(html[data-energyiq-theme="dark"])) .groups .rowMenuList button:hover, :global(:where(html[data-energyiq-theme="dark"])) .groups .rowMenuList button:focus-visible { background:#1c201c; outline:none; }
+:global(:where(html[data-energyiq-theme="dark"])) .groups .rowMenuList .rowMenuDanger { color:#ee8e7f; }
+:global(:where(html[data-energyiq-theme="dark"])) .groups .rowMenuList .rowMenuDanger:hover, :global(:where(html[data-energyiq-theme="dark"])) .groups .rowMenuList .rowMenuDanger:focus-visible { background:#241b1b; }
+:global(:where(html[data-energyiq-theme="dark"])) .dangerNote { border:1px solid #512f30; border-radius:8px; background:#231b1b; color:#f9988a; }
+:global(:where(html[data-energyiq-theme="dark"])) .moveField select { border:1px solid #343d37; border-radius:8px; background:#191919; outline:none; }
+:global(:where(html[data-energyiq-theme="dark"])) .moveField select:focus { border-color:#176b59; box-shadow:0 0 0 3px #176b593d; }
+:global(:where(html[data-energyiq-theme="dark"])) .moveModal footer .moveDanger { border-radius:8px; background:#c4321f; color:#fff; }
+:global(:where(html[data-energyiq-theme="dark"])) .moveModal footer .moveDanger:hover { background:#a32818; }
+:global(:where(html[data-energyiq-theme="dark"])) .pickerHelp { color:#98a89e; }
+:global(:where(html[data-energyiq-theme="dark"])) .groups .client + .client { border-top:1px solid #30332f; }
+:global(:where(html[data-energyiq-theme="dark"])) .groups .clientHeader { color:#b9cdc0; }
+:global(:where(html[data-energyiq-theme="dark"])) .clientIcon { border-radius:8px; background:#1d231e; color:#95c3aa; }
+:global(:where(html[data-energyiq-theme="dark"])) .clientText small { color:#98a89e; }
+:global(:where(html[data-energyiq-theme="dark"])) .clientTag { color:#95c3aa; }
+:global(:where(html[data-energyiq-theme="dark"])) .clientProjects { border-left:1.5px solid #313632; }
 :global(:where(html[data-energyiq-theme="dark"])) .topTrigger { border:1px solid transparent; border-radius:10px; color:#f1f5f2; }
 :global(:where(html[data-energyiq-theme="dark"])) .topTrigger:hover, :global(:where(html[data-energyiq-theme="dark"])) .topTrigger[aria-expanded=true] { background:#323b37; border-color:#46534b; }
 :global(:where(html[data-energyiq-theme="dark"])) .topTrigger:focus-visible { outline:2px solid #789c83; }

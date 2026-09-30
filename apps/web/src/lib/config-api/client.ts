@@ -314,7 +314,7 @@ export const configApi = {
     });
   },
 
-  login(body: { email: string; password: string }): Promise<MeResponseDto> {
+  login(body: { email: string; password: string; rememberMe?: boolean }): Promise<MeResponseDto> {
     return requestEnvelope<MeResponseDto>("/api/v1/auth/login", {
       method: "POST",
       body: JSON.stringify(body),
@@ -409,6 +409,38 @@ export const configApi = {
       method: "PATCH",
       body: JSON.stringify(body),
     });
+  },
+
+  /** Moves a project, with its readings and history, into another customer Organisation. */
+  moveEnergyAdminProject(
+    projectId: string,
+    body: { organisationId: string },
+  ): Promise<{ organisations: EnergyAdminOrganisationDto[] }> {
+    return requestEnvelope(`/api/v1/energy/admin/projects/${encodeURIComponent(projectId)}/move`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Archives a project (hidden from customers, data kept) or restores it. */
+  setEnergyAdminProjectArchived(projectId: string, archived: boolean): Promise<{ organisations: EnergyAdminOrganisationDto[] }> {
+    return requestEnvelope(`/api/v1/energy/admin/projects/${encodeURIComponent(projectId)}/archive`, {
+      method: "POST",
+      body: JSON.stringify({ archived }),
+    });
+  },
+
+  /** Permanently deletes a project and all of its data. `confirmName` must equal the project name. */
+  deleteEnergyAdminProject(projectId: string, confirmName: string): Promise<{ organisations: EnergyAdminOrganisationDto[] }> {
+    return requestEnvelope(`/api/v1/energy/admin/projects/${encodeURIComponent(projectId)}/delete`, {
+      method: "POST",
+      body: JSON.stringify({ confirmName }),
+    });
+  },
+
+  /** Permanently deletes an Organisation that has no projects and no users. */
+  deleteEnergyAdminOrganisation(id: string): Promise<{ organisations: EnergyAdminOrganisationDto[] }> {
+    return requestEnvelope(`/api/v1/energy/admin/organisations/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 
   listEnergyAdminUsers(): Promise<{ users: EnergyAdminUserDto[] }> {
@@ -1052,6 +1084,13 @@ export const configApi = {
     return requestEnvelope(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/imports`,
     );
+  },
+
+  /** Reads a device list (code → equipment) from a photo or screenshot of a table. */
+  extractEnergyDeviceListFromImage(file: File): Promise<{ devices: Array<{ code: string; description: string }> }> {
+    const form = new FormData();
+    form.append("file", file);
+    return requestEnvelope("/api/v1/energy/admin/device-list/extract", { method: "POST", body: form });
   },
 
   uploadEnergyExcelImport(

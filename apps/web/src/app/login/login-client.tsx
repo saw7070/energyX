@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AUTH_BUTTON_CLASS, AuthFlow, PasswordAuthShell, type AuthMode } from "../../components/auth/auth-flow";
+import { AUTH_BUTTON_CLASS, AuthFlow, AuthLoadingScreen, PasswordAuthShell, type AuthMode } from "../../components/auth/auth-flow";
 import { configApi, isLocalDevAdminAvailable, isPasswordAuthMode } from "../../lib/config-api/client";
 
 export function LoginClient() {
@@ -55,7 +55,7 @@ export function LoginClient() {
   }, [redirectAfterAuthentication, router]);
 
   if (checking) {
-    return <PasswordAuthShell title="Loading account..." />;
+    return <AuthLoadingScreen label="Checking your session…" />;
   }
 
   if (!isPasswordAuthMode()) {

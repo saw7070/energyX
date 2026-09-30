@@ -89,6 +89,7 @@ import {
   queueCurrentProjectOverviewAiArtifact,
 } from "./overview-ai-artifact.js";
 import { EnergyAdminAccessService } from "./energy-admin-access.js";
+import { extractDeviceListFromImage } from "./energy-device-list-vision.js";
 import {
   materializeCurrentProjectOverviewProjection,
   prewarmProjectAnalysisContextPackage,
@@ -170,6 +171,7 @@ type EnergyApiDependencies = {
   readCurrentOverviewProjection?: typeof readCurrentProjectOverviewProjection;
   syncTuyaEnergyReadings?: (input: TuyaEnergySyncInput) => Promise<TuyaReportLogArtifact>;
   resolveTuyaProjectConnector?: typeof resolveEnergyTuyaProjectConnector;
+  extractDeviceListFromImage?: typeof extractDeviceListFromImage;
 };
 
 const DEFAULT_ENERGY_API_DEPENDENCIES: EnergyApiDependencies = {
@@ -389,6 +391,62 @@ export const handleEnergyApiRequest = async (
             id: decodeURIComponent(segments[2]),
             name: requireNonEmptyString(body.name, "ENERGYIQ_ORGANISATION_NAME_REQUIRED"),
             disabled: body.disabled === true
+          }))
+        };
+      }
+      if (segments[1] === "projects" && segments[2] && segments[3] === "move"
+        && segments.length === 4 && request.method === "POST") {
+        const body = requireRecord(await readJsonBody(request));
+        return {
+          status: 200,
+          body: createSuccessResult(await service.moveProject({
+            actorUserId: user.id,
+            projectId: decodeURIComponent(segments[2]),
+            organisationId: requireNonEmptyString(body.organisationId, "ENERGYIQ_ORGANISATION_REQUIRED")
+          }))
+        };
+      }
+      if (segments[1] === "device-list" && segments[2] === "extract" && segments.length === 3 && request.method === "POST") {
+        if (!request.headers["content-type"]?.includes("multipart/form-data")) {
+          throw new Error("ENERGYIQ_DEVICE_LIST_IMAGE_REQUIRED");
+        }
+        const { file } = await readMultipartUpload(request);
+        const devices = await (dependencies.extractDeviceListFromImage ?? extractDeviceListFromImage)({
+          content: file.content,
+          mimeType: file.mimeType,
+        });
+        return { status: 200, body: createSuccessResult({ devices }) };
+      }
+      if (segments[1] === "projects" && segments[2] && segments[3] === "archive"
+        && segments.length === 4 && request.method === "POST") {
+        const body = requireRecord(await readJsonBody(request));
+        return {
+          status: 200,
+          body: createSuccessResult(service.setProjectArchived({
+            actorUserId: user.id,
+            projectId: decodeURIComponent(segments[2]),
+            archived: body.archived !== false
+          }))
+        };
+      }
+      if (segments[1] === "projects" && segments[2] && segments[3] === "delete"
+        && segments.length === 4 && request.method === "POST") {
+        const body = requireRecord(await readJsonBody(request));
+        return {
+          status: 200,
+          body: createSuccessResult(await service.deleteProject({
+            actorUserId: user.id,
+            projectId: decodeURIComponent(segments[2]),
+            confirmName: requireNonEmptyString(body.confirmName, "ENERGYIQ_PROJECT_NAME_CONFIRMATION_REQUIRED")
+          }))
+        };
+      }
+      if (segments[1] === "organisations" && segments[2] && segments.length === 3 && request.method === "DELETE") {
+        return {
+          status: 200,
+          body: createSuccessResult(service.deleteOrganisation({
+            actorUserId: user.id,
+            id: decodeURIComponent(segments[2])
           }))
         };
       }
@@ -1354,7 +1412,8 @@ export const handleEnergyApiRequest = async (
           throw new Error("ENERGYIQ_EXCEL_MULTIPART_REQUIRED");
         }
         const { file } = await readMultipartUpload(request);
-        if (!file.filename.toLowerCase().endsWith(".xlsx")) {
+        // Readings files: an Excel workbook or the same columns as CSV; the reader detects which.
+        if (!/\.(xlsx|csv)$/u.test(file.filename.toLowerCase())) {
           throw new Error("ENERGYIQ_EXCEL_FILE_INVALID");
         }
         const sourceSha256 = createHash("sha256").update(file.content).digest("hex");

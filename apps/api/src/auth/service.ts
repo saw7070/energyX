@@ -11,6 +11,8 @@ import { AuthMailer } from "./mailer.js";
 import { createSecretToken, hashPassword, hashToken, verifyPassword } from "./crypto.js";
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
+/** Sign-ins without "Remember me" end when the browser closes, or after this at the latest. */
+const SHORT_SESSION_TTL_SECONDS = 60 * 60 * 12;
 const ACCOUNT_INVITATION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const PASSWORD_RESET_TTL_MS = 1000 * 60 * 30;
 
@@ -182,10 +184,12 @@ export class AuthService {
     email: string;
     ipAddress?: string | undefined;
     password: string;
+    rememberMe?: boolean | undefined;
     userAgent?: string | undefined;
   }): Promise<{
     csrfToken: string;
     maxAgeSeconds: number;
+    persistent: boolean;
     sessionToken: string;
     user: AuthUserDto;
     workspace: AuthWorkspaceDto;
@@ -225,6 +229,7 @@ export class AuthService {
     });
     return this.createAuthenticatedSession({
       user,
+      persistent: input.rememberMe !== false,
       ...(input.ipAddress ? { ipAddress: input.ipAddress } : {}),
       ...(input.userAgent ? { userAgent: input.userAgent } : {})
     });
@@ -410,15 +415,19 @@ export class AuthService {
 
   private createAuthenticatedSession(input: {
     user: UserRecord;
+    persistent?: boolean;
     ipAddress?: string;
     userAgent?: string;
   }): {
     csrfToken: string;
     maxAgeSeconds: number;
+    persistent: boolean;
     sessionToken: string;
     user: AuthUserDto;
     workspace: AuthWorkspaceDto;
   } {
+    const persistent = input.persistent !== false;
+    const ttlSeconds = persistent ? SESSION_TTL_SECONDS : SHORT_SESSION_TTL_SECONDS;
     const sessionToken = createSecretToken();
     const csrfToken = createSecretToken();
     const session = this.metadataStore.authSessions.create({
@@ -426,19 +435,20 @@ export class AuthService {
       user_id: input.user.id,
       token_hash: hashToken(sessionToken, this.config.sessionSecret),
       csrf_token_hash: hashToken(csrfToken, this.config.sessionSecret),
-      expires_at: new Date(Date.now() + SESSION_TTL_SECONDS * 1000).toISOString(),
+      expires_at: new Date(Date.now() + ttlSeconds * 1000).toISOString(),
       ...(input.ipAddress ? { ip_address: input.ipAddress } : {}),
       ...(input.userAgent ? { user_agent: input.userAgent } : {})
     });
     const workspace = this.ensurePersonalWorkspace(input.user);
     this.audit("auth.session_created", {
       email: input.user.email,
-      metadata: { sessionId: session.id },
+      metadata: { sessionId: session.id, persistent },
       userId: input.user.id
     });
     return {
       csrfToken,
-      maxAgeSeconds: SESSION_TTL_SECONDS,
+      maxAgeSeconds: ttlSeconds,
+      persistent,
       sessionToken,
       user: userDto(input.user),
       workspace: workspaceDto(workspace)

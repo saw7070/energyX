@@ -21,7 +21,7 @@ import {
   type ConfigApiIdentity,
 } from "../../lib/config-api/client";
 import type { DevIdentityUser } from "../../lib/config-api";
-import { AUTH_BUTTON_CLASS, PasswordAuthShell } from "../../components/auth/auth-flow";
+import { AUTH_BUTTON_CLASS, AuthLoadingScreen, PasswordAuthShell } from "../../components/auth/auth-flow";
 
 const IDENTITY_STORAGE_KEY = "data-tasks:identity:v1";
 const DEV_SIGNED_OUT_STORAGE_KEY = "data-tasks:identity:signed-out:v1";
@@ -422,10 +422,10 @@ function PasswordIdentityProvider({ children }: { children: ReactNode }) {
   }, [loading, currentUser, value, router]);
 
   if (loading) {
-    return <PasswordAuthShell title="Loading account..." />;
+    return <AuthLoadingScreen label="Loading your workspace…" />;
   }
   if (!currentUser || !value) {
-    return <PasswordAuthShell title="Redirecting to sign in..." />;
+    return <AuthLoadingScreen label="Redirecting to sign in…" />;
   }
   return (
     <DataTaskIdentityContext.Provider value={value}>

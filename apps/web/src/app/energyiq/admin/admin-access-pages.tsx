@@ -23,6 +23,9 @@ export function AdminAccessPages({ initialView }: AdminAccessPagesProps) {
   const [dialog, setDialog] = useState<
     | { kind: "organisation"; organisation?: EnergyAdminOrganisationDto }
     | { kind: "user"; user?: EnergyAdminUserDto }
+    | { kind: "move"; project: MovableProject }
+    | { kind: "deleteProject"; project: MovableProject }
+    | { kind: "deleteOrganisation"; organisation: EnergyAdminOrganisationDto }
     | null
   >(null);
   const [invitationUrl, setInvitationUrl] = useState<string | null>(null);
@@ -75,6 +78,20 @@ export function AdminAccessPages({ initialView }: AdminAccessPagesProps) {
           organisations={organisations}
           onCreate={() => setDialog({ kind: "organisation" })}
           onEdit={(organisation) => setDialog({ kind: "organisation", organisation })}
+          onMoveProject={(project) => setDialog({ kind: "move", project })}
+          onDeleteProject={(project) => setDialog({ kind: "deleteProject", project })}
+          onDeleteOrganisation={(organisation) => setDialog({ kind: "deleteOrganisation", organisation })}
+          onArchiveProject={async (project, archived) => {
+            setError(null);
+            try {
+              await configApi.setEnergyAdminProjectArchived(project.id, archived);
+              await finishMutation(archived
+                ? `${project.name} was archived. Customers no longer see it; its data is kept.`
+                : `${project.name} was restored.`);
+            } catch (reason) {
+              setError(messageFrom(reason, archived ? "Failed to archive project" : "Failed to restore project"));
+            }
+          }}
         />
       ) : (
         <UsersView
@@ -105,6 +122,28 @@ export function AdminAccessPages({ initialView }: AdminAccessPagesProps) {
           )}
         />
       ) : null}
+      {dialog?.kind === "move" ? (
+        <MoveProjectDialog
+          project={dialog.project}
+          organisations={organisations}
+          onClose={() => setDialog(null)}
+          onMoved={async (target) => finishMutation(`${dialog.project.name} now belongs to ${target.name}.`)}
+        />
+      ) : null}
+      {dialog?.kind === "deleteProject" ? (
+        <DeleteProjectDialog
+          project={dialog.project}
+          onClose={() => setDialog(null)}
+          onDeleted={async () => finishMutation(`${dialog.project.name} was permanently deleted.`)}
+        />
+      ) : null}
+      {dialog?.kind === "deleteOrganisation" ? (
+        <DeleteOrganisationDialog
+          organisation={dialog.organisation}
+          onClose={() => setDialog(null)}
+          onDeleted={async () => finishMutation(`${dialog.organisation.name} was deleted.`)}
+        />
+      ) : null}
       {dialog?.kind === "user" ? (
         <UserDialog
           user={dialog.user}
@@ -122,14 +161,24 @@ export function AdminAccessPages({ initialView }: AdminAccessPagesProps) {
   );
 }
 
+type MovableProject = { id: string; name: string; organisationId: string };
+
 function OrganisationsView({
   organisations,
   onCreate,
   onEdit,
+  onMoveProject,
+  onArchiveProject,
+  onDeleteProject,
+  onDeleteOrganisation,
 }: {
   organisations: EnergyAdminOrganisationDto[];
   onCreate: () => void;
   onEdit: (organisation: EnergyAdminOrganisationDto) => void;
+  onMoveProject: (project: MovableProject) => void;
+  onArchiveProject: (project: MovableProject, archived: boolean) => Promise<void>;
+  onDeleteProject: (project: MovableProject) => void;
+  onDeleteOrganisation: (organisation: EnergyAdminOrganisationDto) => void;
 }) {
   return (
     <section className="overflow-hidden rounded-xl border border-border bg-surface">
@@ -144,7 +193,7 @@ function OrganisationsView({
       ) : (
         <div className="divide-y divide-border">
           {organisations.map((organisation) => (
-            <article key={organisation.id} className="grid gap-4 px-5 py-4 md:grid-cols-[minmax(0,1fr)_auto_auto_auto] md:items-center">
+            <article key={organisation.id} className="grid gap-4 px-5 py-4 md:grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] md:items-center">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <h3 className="truncate text-sm font-semibold">{organisation.name}</h3>
@@ -155,6 +204,52 @@ function OrganisationsView({
               <Stat label="Users" value={organisation.userCount} />
               <Stat label="Projects" value={organisation.projectCount} />
               <button type="button" onClick={() => onEdit(organisation)} className={secondaryButton}>Edit</button>
+              <button
+                type="button"
+                onClick={() => onDeleteOrganisation(organisation)}
+                disabled={organisation.projectCount > 0 || organisation.userCount > 0}
+                title={organisation.projectCount > 0 || organisation.userCount > 0
+                  ? "Move or delete its projects and remove its users first"
+                  : "Delete this organisation"}
+                className={dangerButton}
+              >
+                Delete
+              </button>
+              {organisation.projects.length > 0 ? (
+                <ul className="space-y-1.5 md:col-span-5" aria-label={`${organisation.name} projects`}>
+                  {organisation.projects.map((project) => (
+                    <li key={project.id} className="flex items-center justify-between gap-3 rounded-lg bg-surface-subtle/60 px-3 py-2">
+                      <span className="min-w-0 truncate text-xs">
+                        <span className="font-medium">{project.name}</span>
+                        <span className="ml-2 capitalize text-muted-light">{project.status}</span>
+                      </span>
+                      <div className="flex shrink-0 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onMoveProject({ id: project.id, name: project.name, organisationId: organisation.id })}
+                          className={secondaryButton}
+                        >
+                          Move to…
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void onArchiveProject({ id: project.id, name: project.name, organisationId: organisation.id }, project.status !== "archived")}
+                          className={secondaryButton}
+                        >
+                          {project.status === "archived" ? "Restore" : "Archive"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onDeleteProject({ id: project.id, name: project.name, organisationId: organisation.id })}
+                          className={dangerButton}
+                        >
+                          Delete…
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </article>
           ))}
         </div>
@@ -282,6 +377,151 @@ function OrganisationDialog({
         {organisation ? <Toggle label="Disable this Organisation" checked={disabled} onChange={setDisabled} hint="Customer users immediately lose access; admins retain repair access." /> : null}
         {error ? <AccessBanner tone="error">{error}</AccessBanner> : null}
         <DialogActions onClose={onClose} saving={saving} submitLabel={organisation ? "Save changes" : "Create organisation"} />
+      </form>
+    </AccessDialog>
+  );
+}
+
+function MoveProjectDialog({
+  project,
+  organisations,
+  onClose,
+  onMoved,
+}: {
+  project: MovableProject;
+  organisations: EnergyAdminOrganisationDto[];
+  onClose: () => void;
+  onMoved: (target: EnergyAdminOrganisationDto) => Promise<void>;
+}) {
+  const targets = organisations.filter((organisation) => organisation.id !== project.organisationId && organisation.status === "active");
+  const current = organisations.find((organisation) => organisation.id === project.organisationId);
+  const [organisationId, setOrganisationId] = useState(targets[0]?.id ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const target = targets.find((organisation) => organisation.id === organisationId);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!target) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await configApi.moveEnergyAdminProject(project.id, { organisationId: target.id });
+      await onMoved(target);
+    } catch (reason) {
+      setError(messageFrom(reason, "Failed to move project"));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <AccessDialog title={`Move ${project.name}`} onClose={onClose}>
+      <form onSubmit={(event) => void submit(event)} className="space-y-4">
+        <p className="text-xs text-muted">
+          Readings, reports and actions move with the project. Only members of the new Organisation will see it; users of {current?.name ?? "the current Organisation"} lose access.
+        </p>
+        {targets.length === 0 ? (
+          <AccessBanner tone="error">Create the destination Organisation first.</AccessBanner>
+        ) : (
+          <Field label="Move to organisation">
+            <EnergySelect
+              ariaLabel="Destination organisation"
+              value={organisationId}
+              options={targets.map((organisation) => ({ value: organisation.id, label: organisation.name }))}
+              onValueChange={setOrganisationId}
+              className="w-full"
+            />
+          </Field>
+        )}
+        {error ? <AccessBanner tone="error">{error}</AccessBanner> : null}
+        <DialogActions onClose={onClose} saving={saving} submitLabel="Move project" />
+      </form>
+    </AccessDialog>
+  );
+}
+
+function DeleteProjectDialog({
+  project,
+  onClose,
+  onDeleted,
+}: {
+  project: MovableProject;
+  onClose: () => void;
+  onDeleted: () => Promise<void>;
+}) {
+  const [typed, setTyped] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const matches = typed.trim() === project.name.trim();
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!matches) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await configApi.deleteEnergyAdminProject(project.id, typed.trim());
+      await onDeleted();
+    } catch (reason) {
+      setError(messageFrom(reason, "Failed to delete project"));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <AccessDialog title={`Delete ${project.name}`} onClose={onClose}>
+      <form onSubmit={(event) => void submit(event)} className="space-y-4">
+        <AccessBanner tone="error">
+          This permanently deletes the project with all of its readings, reports, actions and history. It cannot be undone.
+          To keep the data but hide the project, use Archive instead.
+        </AccessBanner>
+        <Field label={`Type "${project.name}" to confirm`}>
+          <input autoFocus value={typed} onChange={(event) => setTyped(event.target.value)} className={inputClass} autoComplete="off" />
+        </Field>
+        {error ? <AccessBanner tone="error">{error}</AccessBanner> : null}
+        <div className="flex justify-end gap-2 border-t border-border pt-4">
+          <button type="button" onClick={onClose} className={secondaryButton}>Cancel</button>
+          <button type="submit" disabled={!matches || saving} className={dangerSolidButton}>{saving ? "Deleting…" : "Delete permanently"}</button>
+        </div>
+      </form>
+    </AccessDialog>
+  );
+}
+
+function DeleteOrganisationDialog({
+  organisation,
+  onClose,
+  onDeleted,
+}: {
+  organisation: EnergyAdminOrganisationDto;
+  onClose: () => void;
+  onDeleted: () => Promise<void>;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      await configApi.deleteEnergyAdminOrganisation(organisation.id);
+      await onDeleted();
+    } catch (reason) {
+      setError(messageFrom(reason, "Failed to delete organisation"));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <AccessDialog title={`Delete ${organisation.name}`} onClose={onClose}>
+      <form onSubmit={(event) => void submit(event)} className="space-y-4">
+        <p className="text-sm text-muted">
+          {organisation.name} has no projects and no users. Deleting it removes the customer permanently.
+        </p>
+        {error ? <AccessBanner tone="error">{error}</AccessBanner> : null}
+        <div className="flex justify-end gap-2 border-t border-border pt-4">
+          <button type="button" onClick={onClose} className={secondaryButton}>Cancel</button>
+          <button type="submit" disabled={saving} className={dangerSolidButton}>{saving ? "Deleting…" : "Delete organisation"}</button>
+        </div>
       </form>
     </AccessDialog>
   );
@@ -451,4 +691,6 @@ const messageFrom = (reason: unknown, fallback: string): string => reason instan
 
 const inputClass = "h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:bg-surface-subtle disabled:text-muted";
 const primaryButton = "inline-flex h-9 items-center justify-center rounded-lg bg-primary px-3 text-xs font-semibold text-white transition-colors hover:bg-primary-light disabled:cursor-not-allowed disabled:opacity-50";
+const dangerButton = "inline-flex h-9 items-center justify-center rounded-lg border border-rose-200 bg-surface px-3 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40";
+const dangerSolidButton = "inline-flex h-9 items-center justify-center rounded-lg bg-rose-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50";
 const secondaryButton = "inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs font-semibold transition-colors hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-50";

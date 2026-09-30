@@ -14,6 +14,7 @@ import {
   type SetStateAction,
 } from "react";
 
+import { buildSmartSetup, parseDeviceList, savedDeviceList } from "./smart-setup";
 import {
   configApi,
   type EnergyComponentRevisionDto,
@@ -260,6 +261,28 @@ export function EnergyIqAdminWorkbench({
     return result.draft;
   }, [dirty, document, refresh, selectedProjectId, setup]);
 
+  const setupMatchesSelection = Boolean(setup && setup.draft.project_id === selectedProjectId);
+
+  /** Saves an explicit document (not the possibly-stale state), for multi-step flows like Import & apply. */
+  const persistDocument = useCallback(async (next: EnergyProjectSetupDocumentDto) => {
+    if (!setup) throw new Error("Project setup is not loaded");
+    const result = await configApi.saveEnergyProjectSetupDraft(selectedProjectId, {
+      expectedRevision: setup.draft.revision,
+      document: next,
+    });
+    setSetup((current) => current ? { ...current, draft: result.draft, validation: result.validation } : current);
+    setDocument(result.draft.document);
+    setValidation(result.validation);
+    setDirty(false);
+    await refresh();
+    return result.draft.document;
+  }, [refresh, selectedProjectId, setup]);
+
+  const applyLive = useCallback(async () => {
+    await configApi.applyEnergyProjectChanges(selectedProjectId);
+    await refreshSelectedProjectState();
+  }, [refreshSelectedProjectState, selectedProjectId]);
+
   const saveDraft = useCallback(async () => {
     setSaving(true);
     setError(null);
@@ -428,8 +451,9 @@ export function EnergyIqAdminWorkbench({
           {section === "organisations" || section === "users" ? (
             <AdminAccessPages initialView={section} />
           ) : null}
-          {section !== "task-history" && section !== "models" && section !== "organisations" && section !== "users" && loading ? <LoadingPanel /> : null}
-          {section !== "task-history" && section !== "models" && section !== "organisations" && section !== "users" && !loading && document && setup ? renderAdminSection({
+          {section !== "task-history" && section !== "models" && section !== "organisations" && section !== "users" && loading && !setupMatchesSelection ? <LoadingPanel /> : null}
+          {/* Background refreshes keep the section mounted so in-progress results (e.g. an import summary) survive. */}
+          {section !== "task-history" && section !== "models" && section !== "organisations" && section !== "users" && setupMatchesSelection && document && setup ? renderAdminSection({
             section,
             projects,
             selectedProject,
@@ -450,6 +474,8 @@ export function EnergyIqAdminWorkbench({
             publishing: saving,
             publishProjectRevision,
             onPoliciesChanged: refreshSelectedProjectState,
+            persistDocument,
+            applyLive,
           }) : null}
         </div>
       </div>
@@ -491,6 +517,8 @@ function renderAdminSection({
   publishing,
   publishProjectRevision,
   onPoliciesChanged,
+  persistDocument,
+  applyLive,
 }: {
   section: AdminSection;
   projects: EnergyProjectDto[];
@@ -512,6 +540,8 @@ function renderAdminSection({
   publishing: boolean;
   publishProjectRevision: (review: ProjectPublicationReview) => Promise<void>;
   onPoliciesChanged: () => Promise<void>;
+  persistDocument: (next: EnergyProjectSetupDocumentDto) => Promise<EnergyProjectSetupDocumentDto>;
+  applyLive: () => Promise<void>;
 }) {
   if (section === "overview") {
     return <AdminOverview projects={projects} selectedProject={selectedProject} chooseAdminProject={chooseAdminProject} setSection={setSection} />;
@@ -569,6 +599,8 @@ function renderAdminSection({
         savedDocument={setup.draft.document}
         changeDocument={changeDocument}
         setSection={setSection}
+        persistDocument={persistDocument}
+        applyLive={applyLive}
       />
     );
   }
@@ -2036,18 +2068,229 @@ function ReviewGate({ label, ready, detail }: { label: string; ready: boolean; d
   );
 }
 
+type ImportSummary = { from?: string; to?: string; readings: number; devices: string[] };
+
+const summariseImport = (batches: EnergyImportBatchDto[]): ImportSummary => {
+  const froms = batches.map((batch) => batch.inspection.coverageFrom).filter((value): value is string => Boolean(value)).sort();
+  const tos = batches.map((batch) => batch.inspection.coverageTo).filter((value): value is string => Boolean(value)).sort();
+  return {
+    ...(froms[0] ? { from: froms[0] } : {}),
+    ...(tos.at(-1) ? { to: tos.at(-1)! } : {}),
+    readings: batches.reduce((sum, batch) => sum + batch.inspection.validRowCount, 0),
+    devices: sourceLabelsAcrossImportBatches(batches),
+  };
+};
+
+const shortDate = (value?: string): string => value
+  ? new Date(value).toLocaleDateString("en-SG", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })
+  : "—";
+
+function ImportChangeSummary({ change, onDismiss }: { change: { before: ImportSummary; after: ImportSummary }; onDismiss: () => void }) {
+  const { before, after } = change;
+  const newDevices = after.devices.filter((device) => !before.devices.includes(device));
+  const addedReadings = Math.max(0, after.readings - before.readings);
+  const stats = [
+    { label: "Data now covers", value: `${shortDate(after.from)} – ${shortDate(after.to)}`, note: before.to ? `was up to ${shortDate(before.to)}` : "first import" },
+    { label: "Readings added", value: addedReadings.toLocaleString("en-SG"), note: `${after.readings.toLocaleString("en-SG")} in total` },
+    { label: "Devices", value: String(after.devices.length), note: newDevices.length ? `${newDevices.length} new: ${newDevices.slice(0, 4).join(", ")}${newDevices.length > 4 ? "…" : ""}` : "no new devices" },
+  ];
+  return (
+    <section className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-5" aria-label="What changed">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold text-emerald-900">What changed</h3>
+          <p className="mt-1 text-xs text-emerald-800">The new readings are live. Overview, Analysis and reports now use the updated data.</p>
+        </div>
+        <button type="button" onClick={onDismiss} className={secondaryButton}>Dismiss</button>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        {stats.map((stat) => (
+          <div key={stat.label} className="rounded-lg border border-emerald-200 bg-white px-4 py-3">
+            <p className="text-[11px] font-medium text-muted">{stat.label}</p>
+            <p className="mt-1 text-lg font-semibold tabular-nums">{stat.value}</p>
+            <p className="mt-1 text-[11px] text-muted">{stat.note}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function SmartSetupCard({
+  projectId,
+  document,
+  batches,
+  deviceListText,
+  setDeviceListText,
+  busy,
+  applyStep,
+  onRun,
+  onOpenMapping,
+}: {
+  projectId: string;
+  document: EnergyProjectSetupDocumentDto;
+  batches: EnergyImportBatchDto[];
+  deviceListText: string;
+  setDeviceListText: (value: string) => void;
+  busy: boolean;
+  applyStep: string | null;
+  onRun: (prepared: EnergyProjectSetupDocumentDto) => void;
+  onOpenMapping: () => void;
+}) {
+  const devices = useMemo(() => parseDeviceList(deviceListText), [deviceListText]);
+  const saved = useMemo(() => savedDeviceList(document, projectId), [document, projectId]);
+  const [reading, setReading] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  const readPhoto = async (file: File) => {
+    setReading(true);
+    setPhotoError(null);
+    try {
+      const result = await configApi.extractEnergyDeviceListFromImage(file);
+      if (result.devices.length === 0) {
+        setPhotoError("No device table was found in that image. Try a clearer photo, or paste the table instead.");
+        return;
+      }
+      setDeviceListText(["Code\tItems", ...result.devices.map((device) => `${device.code}\t${device.description}`)].join("\n"));
+    } catch (reason) {
+      const message = messageFrom(reason, "Could not read the photo");
+      setPhotoError(
+        message.includes("VISION_UNAVAILABLE") ? "Reading photos needs the AI connection, which isn't set up on this server (LLM_API_KEY). Paste the table from Excel instead."
+          : message.includes("IMAGE_TYPE_UNSUPPORTED") ? "Use a PNG, JPEG or WebP image."
+            : message.includes("IMAGE_SIZE_INVALID") ? "That image is too large (10 MB maximum)."
+              : message.includes("VISION_UNREADABLE") || message.includes("VISION_FAILED") ? "The photo couldn't be read. Try a clearer, straight-on photo, or paste the table instead."
+                : message,
+      );
+    } finally {
+      setReading(false);
+    }
+  };
+  const plan = useMemo(() => buildSmartSetup({ document, projectId, labels: sourceLabelsAcrossImportBatches(batches), devices }), [batches, devices, document, projectId]);
+  const pendingFiles = batches.filter((batch) => batch.status !== "materialized").length;
+  const isNew = plan.mode === "new";
+  const nothingToDo = !isNew && !plan.upgraded && devices.length === 0 && plan.newLabels.length === 0 && pendingFiles === 0 && document.meter_mapping?.confirmed;
+  return (
+    <section className="rounded-xl border border-primary/30 bg-surface p-5" aria-label="Smart setup">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="max-w-2xl">
+          <h3 className="text-base font-semibold">Smart setup</h3>
+          <p className="mt-1 text-xs leading-5 text-muted">
+            {isNew
+              ? `Creates a distribution board, one location for each of the ${plan.rows.length} devices in your files and names the meters, then imports the readings and makes them live.`
+              : plan.newLabels.length
+                ? `Adds ${plan.newLabels.length} new device(s) and ${pendingFiles} new file(s), then shows what changed.`
+                : pendingFiles
+                  ? `Adds ${pendingFiles} new file(s) to the existing devices, then shows what changed.`
+                  : plan.upgraded
+                    ? "Updates this project so reports list every circuit alongside the site total."
+                    : devices.length
+                      ? "Applies the device names below to this project."
+                    : "Everything uploaded is already imported. Upload newer files to extend the data."}
+          </p>
+          {isNew && plan.totalLabel ? (
+            <p className="mt-1 text-xs text-muted"><strong>{plan.totalLabel}</strong> looks like the incoming supply, so it becomes the site total and the other devices show the breakdown.</p>
+          ) : isNew ? (
+            <p className="mt-1 text-xs text-muted">No incoming or main meter was found, so the site total is the sum of all devices.</p>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          className={primaryButton}
+          disabled={busy || Boolean(nothingToDo) || plan.unplacedLabels.length > 0}
+          onClick={() => onRun(plan.document)}
+        >
+          {applyStep ?? (isNew ? "Set up & import" : "Import new data")}
+        </button>
+      </div>
+
+      <details className="mt-4 rounded-lg border border-border bg-surface-subtle/40 px-4 py-3" open={isNew && devices.length === 0}>
+        <summary className="cursor-pointer select-none text-xs font-semibold">
+          Device names {devices.length ? `(${devices.length} from your list)` : saved.length ? `(${saved.length} saved with this project)` : "(optional)"}
+        </summary>
+        <p className="mt-2 text-[11px] leading-5 text-muted">
+          Paste your device list straight from Excel (two columns: code, then what it powers), load it as CSV, or read it from a photo or screenshot of the table. Devices not on the list keep their code as the name.
+          {saved.length ? " The list is saved with the project, so devices added later are named automatically." : ""}
+        </p>
+        <textarea
+          value={deviceListText}
+          onChange={(event) => setDeviceListText(event.target.value)}
+          rows={4}
+          placeholder={"A18P\tCoffee machine x1, Warmer machine x1\nB2R\tBalcony light x1, Toilet light x3"}
+          aria-label="Device list"
+          className="mt-2 w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-xs outline-none focus:border-primary"
+        />
+        <label className={`mr-4 mt-2 inline-flex text-[11px] font-semibold text-primary ${reading ? "cursor-wait opacity-60" : "cursor-pointer hover:underline"}`}>
+          {reading ? "Reading photo…" : "Read from photo"}
+          <input type="file" accept="image/png,image/jpeg,image/webp" disabled={reading} className="sr-only" onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) void readPhoto(file);
+          }} />
+        </label>
+        <label className="mt-2 inline-flex cursor-pointer text-[11px] font-semibold text-primary hover:underline">
+          Load device list from CSV
+          <input type="file" accept=".csv,.txt,text/csv,text/plain" className="sr-only" onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) void file.text().then(setDeviceListText);
+          }} />
+        </label>
+        {photoError ? <p className="mt-2 text-[11px] text-step-warning">{photoError}</p> : null}
+        {reading ? null : devices.length > 0 && deviceListText.startsWith("Code\t") ? <p className="mt-1 text-[11px] text-muted">Check the rows read from the photo before continuing; edit any mistakes directly above.</p> : null}
+      </details>
+
+      <div className="mt-4 overflow-hidden rounded-lg border border-border">
+        <table className="w-full text-left text-xs">
+          <thead className="bg-surface-subtle/60 text-[11px] text-muted">
+            <tr><th className="px-3 py-2 font-medium">Device in file</th><th className="px-3 py-2 font-medium">Name in the app</th><th className="px-3 py-2 font-medium">Location</th><th className="px-3 py-2 font-medium">Role</th></tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {plan.rows.map((row) => (
+              <tr key={row.sourceLabel} className={row.status === "needs_placement" ? "bg-amber-50" : undefined}>
+                <td className="px-3 py-2 font-mono">{row.sourceLabel}{row.status === "new" && !isNew ? <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 font-sans text-[10px] font-semibold text-emerald-800">New</span> : null}</td>
+                <td className="px-3 py-2">{row.displayName}</td>
+                <td className="px-3 py-2">{row.location}</td>
+                <td className="px-3 py-2">{row.role === "total" ? "Site total" : "Breakdown"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {plan.unplacedLabels.length > 0 ? (
+        <p className="mt-3 text-xs text-step-warning">
+          {plan.unplacedLabels.join(", ")} {plan.unplacedLabels.length === 1 ? "is" : "are"} new and this project's layout was built by hand, so
+          {" "}<button type="button" className="font-semibold underline" onClick={onOpenMapping}>place {plan.unplacedLabels.length === 1 ? "it" : "them"} in Meter Mapping</button> first.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+const IMPORT_BLOCKER_TEXT: Record<string, string> = {
+  IMPORT_BATCH_REQUIRED: "Upload a readings file first.",
+  METER_MAPPING_NOT_CONFIRMED: "Confirm Meter Mapping.",
+  SOURCE_LABEL_UNMAPPED: "Some devices in the file are not mapped yet; open Meter Mapping.",
+  MAPPING_SOURCE_INACTIVE: "Meter Mapping lists devices that are not in the uploaded files; remove them or re-run Use all detected labels.",
+  SOURCE_LABEL_DUPLICATE: "Two devices in Meter Mapping have the same name.",
+  PROJECT_TIMEZONE_UNSAVED: "Save the project's timezone change first.",
+};
+const explainImportBlocker = (reason: string): string => IMPORT_BLOCKER_TEXT[reason] ?? reason;
+
 function DataSourcesPage({
   projectId,
   document,
   savedDocument,
   changeDocument,
   setSection,
+  persistDocument,
+  applyLive,
 }: {
   projectId: string;
   document: EnergyProjectSetupDocumentDto;
   savedDocument: EnergyProjectSetupDocumentDto;
   changeDocument: (updater: (current: EnergyProjectSetupDocumentDto) => EnergyProjectSetupDocumentDto) => void;
   setSection: Dispatch<SetStateAction<AdminSection>>;
+  persistDocument: (next: EnergyProjectSetupDocumentDto) => Promise<EnergyProjectSetupDocumentDto>;
+  applyLive: () => Promise<void>;
 }) {
   const [batches, setBatches] = useState<EnergyImportBatchDto[]>([]);
   const [dataReadiness, setDataReadiness] = useState<EnergyProjectDataReadinessDto | null>(null);
@@ -2055,6 +2298,27 @@ function DataSourcesPage({
   const [uploading, setUploading] = useState(false);
   const [pinning, setPinning] = useState(false);
   const [materializing, setMaterializing] = useState(false);
+  const [applyStep, setApplyStep] = useState<string | null>(null);
+  // Kept in session storage: finishing an import republishes the project, which can remount this page.
+  const changeKey = `energyiq:import-change:${projectId}`;
+  const [importChange, setImportChangeState] = useState<{ before: ImportSummary; after: ImportSummary } | null>(() => {
+    try {
+      const saved = window.sessionStorage.getItem(changeKey);
+      return saved ? JSON.parse(saved) as { before: ImportSummary; after: ImportSummary } : null;
+    } catch {
+      return null;
+    }
+  });
+  const setImportChange = (value: { before: ImportSummary; after: ImportSummary } | null) => {
+    setImportChangeState(value);
+    try {
+      if (value) window.sessionStorage.setItem(changeKey, JSON.stringify(value));
+      else window.sessionStorage.removeItem(changeKey);
+    } catch {
+      // Storage can be unavailable (private mode); the summary then lasts until the page remounts.
+    }
+  };
+  const [deviceListText, setDeviceListText] = useState("");
   const [importError, setImportError] = useState<string | null>(null);
   const [importNotice, setImportNotice] = useState<string | null>(null);
 
@@ -2076,18 +2340,23 @@ function DataSourcesPage({
     void loadBatches();
   }, [loadBatches]);
 
-  const uploadWorkbook = async (file: File) => {
+  const uploadWorkbooks = async (files: File[]) => {
     setUploading(true);
     setImportError(null);
     setImportNotice(null);
+    let added = 0;
+    let duplicates = 0;
     try {
-      const result = await configApi.uploadEnergyExcelImport(projectId, file);
+      for (const file of files) {
+        const result = await configApi.uploadEnergyExcelImport(projectId, file);
+        if (result.duplicate) duplicates += 1;
+        else added += 1;
+      }
       await loadBatches();
-      setImportNotice(result.duplicate
-        ? "This exact workbook was already inspected. The existing Import Batch was reused."
-        : "Workbook preserved and inspected. Review the detected labels before opening Meter Mapping.");
+      setImportNotice(`${added} file(s) checked and added${duplicates ? `; ${duplicates} already uploaded before` : ""}. Use Smart setup below to set up and import them.`);
     } catch (reason) {
-      setImportError(messageFrom(reason, "Excel inspection failed"));
+      await loadBatches();
+      setImportError(messageFrom(reason, "File check failed"));
     } finally {
       setUploading(false);
     }
@@ -2125,22 +2394,60 @@ function DataSourcesPage({
     setImportNotice(`${mapping.rows.length} source labels were prepared as a Mapping draft. Unmatched labels still require an admin Scope selection.`);
   };
 
+  const buildFacts = async (): Promise<{ built: number; reused: number }> => {
+    let built = 0;
+    let reused = 0;
+    for (const batch of [...batches].reverse()) {
+      const result = await configApi.materializeEnergyImportBatch(projectId, batch.id);
+      if (result.duplicate) reused += 1;
+      else built += 1;
+      setBatches((current) => current.map((candidate) => candidate.id === result.batch.id ? result.batch : candidate));
+      setDataReadiness(result.readiness);
+    }
+    await loadBatches();
+    return { built, reused };
+  };
+
+  /** One click after mapping: pin the uploaded files, save, build the readings and make them live. */
+  const importAndApply = async (prepared?: EnergyProjectSetupDocumentDto) => {
+    if (batches.length === 0 || applyStep) return;
+    const base = prepared ?? document;
+    const before = summariseImport(batches.filter((batch) => batch.status === "materialized"));
+    if (!base.meter_mapping?.confirmed) {
+      setImportError("Finish Meter Mapping first: give each device a name and location, then click Mark Mapping Confirmed.");
+      return;
+    }
+    setImportError(null);
+    setImportNotice(null);
+    try {
+      setApplyStep("Saving your uploaded files (1 of 3)…");
+      const sourceManifest = await pinEnergySourceManifest(batches);
+      const saved = await persistDocument({ ...base, source_manifest: sourceManifest });
+      const guard = evaluateEnergyImportMaterializationGuard({ document: saved, savedDocument: saved, batches });
+      if (!guard.ready) {
+        setImportError(`Can't import yet: ${guard.reasons.map(explainImportBlocker).join(" ")}`);
+        return;
+      }
+      setApplyStep("Building readings (2 of 3)…");
+      await buildFacts();
+      setApplyStep("Making it live (3 of 3)…");
+      await applyLive();
+      setImportChange({ before, after: summariseImport(batches) });
+      setImportNotice("Readings imported and live. Check Project status & publishing if the project still needs its first publish.");
+    } catch (reason) {
+      setImportError(messageFrom(reason, "Import & apply failed"));
+    } finally {
+      setApplyStep(null);
+    }
+  };
+
   const materializeAll = async () => {
     if (batches.length === 0) return;
     setMaterializing(true);
     setImportError(null);
     setImportNotice(null);
     try {
-      let built = 0;
-      let reused = 0;
-      for (const batch of [...batches].reverse()) {
-        const result = await configApi.materializeEnergyImportBatch(projectId, batch.id);
-        if (result.duplicate) reused += 1;
-        else built += 1;
-        setBatches((current) => current.map((candidate) => candidate.id === result.batch.id ? result.batch : candidate));
-        setDataReadiness(result.readiness);
-      }
-      await loadBatches();
+      const { built, reused } = await buildFacts();
       setImportNotice(`${built} Import Batch(es) materialized; ${reused} current batch(es) reused. Composite Snapshot readiness was refreshed.`);
     } catch (reason) {
       setImportError(messageFrom(reason, "Fact materialization failed"));
@@ -2156,29 +2463,30 @@ function DataSourcesPage({
       <section className="rounded-xl border border-border bg-surface p-5">
         <h3 className="text-base font-semibold">Connect project data</h3>
         <p className="mt-1 max-w-3xl text-xs leading-5 text-muted">
-          Excel is the current onboarding path. Tuya will use the same Import Batch and Raw Reading contract when its API is available.
+          Upload meter readings from a file when the site has no live connection. Tuya will use the same Import Batch and Raw Reading contract when its API is available.
         </p>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           <div className="rounded-xl border border-primary/30 bg-primary-light/5 p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h4 className="text-sm font-semibold">Excel workbook</h4>
+                <h4 className="text-sm font-semibold">Readings file (Excel or CSV)</h4>
                 <p className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-primary">Current onboarding format</p>
               </div>
               <EnergyIcon name="check" className="h-4 w-4 text-primary" />
             </div>
-            <p className="mt-3 text-xs leading-5 text-muted">Upload one `.xlsx`, inspect the fixed cumulative-reading contract and preserve the original bytes by SHA.</p>
+            <p className="mt-3 text-xs leading-5 text-muted">Upload one or more <code>.xlsx</code> or <code>.csv</code> files with the columns <strong>Device Name</strong>, <strong>Time</strong> and <strong>Active Energy</strong> (the meter's running kWh total). Each device name becomes a meter you name and place in Meter Mapping.</p>
             <label className={`${primaryButton} mt-4 inline-flex cursor-pointer`}>
-              {uploading ? "Inspecting workbook..." : "Upload Excel"}
+              {uploading ? "Checking files..." : "Upload readings files"}
               <input
                 type="file"
-                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                multiple
                 disabled={uploading}
                 className="sr-only"
                 onChange={(event) => {
-                  const file = event.target.files?.[0];
+                  const files = [...(event.target.files ?? [])];
                   event.target.value = "";
-                  if (file) void uploadWorkbook(file);
+                  if (files.length) void uploadWorkbooks(files);
                 }}
               />
             </label>
@@ -2187,6 +2495,20 @@ function DataSourcesPage({
         </div>
       </section>
 
+      {importChange ? <ImportChangeSummary change={importChange} onDismiss={() => setImportChange(null)} /> : null}
+      {batches.length > 0 ? (
+        <SmartSetupCard
+          projectId={projectId}
+          document={document}
+          batches={batches}
+          deviceListText={deviceListText}
+          setDeviceListText={setDeviceListText}
+          busy={applyStep !== null || uploading}
+          applyStep={applyStep}
+          onRun={(prepared) => void importAndApply(prepared)}
+          onOpenMapping={() => setSection("meter-mapping")}
+        />
+      ) : null}
       <section className="rounded-xl border border-border bg-surface p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -2243,24 +2565,43 @@ function DataSourcesPage({
                 ) : null}
               </div>
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={() => void pinCurrentBatches()} disabled={batches.length === 0 || pinning} className={secondaryButton}>
-                  {pinning ? "Pinning batches..." : "Pin current batches"}
-                </button>
-                <button type="button" onClick={useDetectedLabels} disabled={batches.length === 0} className={secondaryButton}>Use all detected labels</button>
-                <button type="button" onClick={() => void materializeAll()} disabled={!materializationGuard.ready || materializing} className={primaryButton}>
-                  {materializing ? "Building facts..." : "Build all interval facts"}
+                <button type="button" onClick={useDetectedLabels} disabled={batches.length === 0 || applyStep !== null} className={secondaryButton}>Use all detected labels</button>
+                <button
+                  type="button"
+                  onClick={() => void importAndApply()}
+                  disabled={batches.length === 0 || applyStep !== null}
+                  title={document.meter_mapping?.confirmed ? "Pin the files, build the readings and make them live" : "Confirm Meter Mapping first"}
+                  className={primaryButton}
+                >
+                  {applyStep ?? "Import & apply"}
                 </button>
               </div>
             </div>
-            {!materializationGuard.ready ? (
-              <p className="text-[10px] text-step-warning">
-                Build blocked: {materializationGuard.reasons.join(" · ")}. Pin current batches, complete Mapping and Save Draft.
-              </p>
-            ) : null}
+            <p className="text-[11px] text-muted">
+              {document.meter_mapping?.confirmed
+                ? "Mapping confirmed. Import & apply saves the files, builds the readings and makes them live in one step."
+                : <>Next: <button type="button" className="font-semibold text-primary underline-offset-2 hover:underline" onClick={() => setSection("meter-mapping")}>name and place each device in Meter Mapping</button>, then come back and click Import & apply.</>}
+            </p>
+            <details className="text-[11px] text-muted">
+              <summary className="cursor-pointer select-none">Advanced: run the steps one at a time</summary>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button type="button" onClick={() => void pinCurrentBatches()} disabled={batches.length === 0 || pinning} className={secondaryButton}>
+                  {pinning ? "Pinning batches..." : "Pin current batches"}
+                </button>
+                <button type="button" onClick={() => void materializeAll()} disabled={!materializationGuard.ready || materializing} className={secondaryButton}>
+                  {materializing ? "Building facts..." : "Build all interval facts"}
+                </button>
+              </div>
+              {!materializationGuard.ready ? (
+                <p className="mt-2 text-[10px] text-step-warning">
+                  Build blocked: {materializationGuard.reasons.join(" · ")}. Pin current batches, complete Mapping and Save Draft.
+                </p>
+              ) : null}
+            </details>
           </div>
         ) : (
           <div className="mt-5 rounded-lg border border-dashed border-border px-5 py-8 text-center">
-            <p className="text-sm font-semibold">No Excel Import Batch yet</p>
+            <p className="text-sm font-semibold">No readings uploaded yet</p>
             <p className="mt-1 text-xs text-muted">Upload the first workbook above. Mapping stays unavailable until labels are inspected.</p>
           </div>
         )}

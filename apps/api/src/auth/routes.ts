@@ -39,11 +39,13 @@ export async function handleAuthApiRequest(
       const result = await context.authService.login({
         email: requiredString(body.email, "email"),
         password: requiredString(body.password, "password"),
+        rememberMe: body.rememberMe !== false,
         ...requestMeta(request)
       });
       appendAuthCookies(response, {
         csrfToken: result.csrfToken,
         maxAgeSeconds: result.maxAgeSeconds,
+        persistent: result.persistent,
         sessionToken: result.sessionToken
       });
       sendJson(response, 200, createSuccessResult({

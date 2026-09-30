@@ -27,6 +27,18 @@ export const NGEE_ANN_DAILY_ANOMALY_RULE_REVISION_ID =
   "comparison.daily_usage_above_baseline@1" as const;
 export const NGEE_ANN_WORKSPACE_ID = "default";
 export const PRESCHOOL_WORKSPACE_ID = "preschool-demo-org";
+/** Customer Workspaces re-created on every startup, so deleting them would not stick. */
+export const BOOTSTRAP_WORKSPACE_IDS: ReadonlySet<string> = new Set([
+  NGEE_ANN_WORKSPACE_ID,
+  PRESCHOOL_WORKSPACE_ID,
+  TUYA_OFFICE_WORKSPACE_ID,
+]);
+/** Projects whose Workspace is re-asserted on every startup, so they cannot be moved. */
+export const BOOTSTRAP_PINNED_PROJECT_IDS: ReadonlySet<string> = new Set([
+  NGEE_ANN_PROJECT_ID,
+  PRESCHOOL_PROJECT_ID,
+  TUYA_OFFICE_PROJECT_ID,
+]);
 
 export const ensureEnergyIqBootstrap = (metadataStore: MetadataStore): void => {
   metadataStore.energyIq.upsertUserRole({ user_id: "dev-user", role: "admin" });

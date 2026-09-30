@@ -628,6 +628,102 @@ const readProjectAudit = async (
   };
 };
 
+/** Every fact table that stores project rows stamped with their owning workspace. */
+const ENERGY_FACT_PROJECT_TABLES = [
+  "raw_meter_readings",
+  "normalized_meter_readings",
+  "energy_source_normalized_readings",
+  "energy_interval_facts",
+  "energy_quality_events",
+  "energy_source_quality_events",
+  "energy_source_interval_facts",
+  "energy_project_fact_state",
+] as const;
+
+export type EnergyFactProjectRowCounts = Record<(typeof ENERGY_FACT_PROJECT_TABLES)[number], number>;
+
+/**
+ * Copies one project's facts into another workspace's store, restamped with the target workspace.
+ * The source store is left untouched; callers purge it only after the metadata move commits.
+ */
+export const copyEnergyFactProjectToWorkspace = async (input: {
+  sourceDatabasePath: string;
+  targetDatabasePath: string;
+  projectId: string;
+  targetWorkspaceId: string;
+}): Promise<EnergyFactProjectRowCounts> => {
+  const sourcePath = resolve(input.sourceDatabasePath);
+  const targetPath = resolve(input.targetDatabasePath);
+  if (sourcePath === targetPath) throw new Error("ENERGYIQ_FACT_STORE_MOVE_SAME_PATH");
+  const counts = Object.fromEntries(ENERGY_FACT_PROJECT_TABLES.map((table) => [table, 0])) as EnergyFactProjectRowCounts;
+  if (!existsSync(sourcePath)) return counts;
+  const stagingDirectory = mkdtempSync(join(tmpdir(), "energyiq-project-move-"));
+  const source = (await getDuckDbDatabase(sourcePath)).connect();
+  try {
+    await ensureFactSchema(source);
+    for (const table of ENERGY_FACT_PROJECT_TABLES) {
+      const row = await duckDbGet(source, `SELECT COUNT(*) AS n FROM ${table} WHERE project_id = ?`, [input.projectId]);
+      counts[table] = Number(row.n ?? 0);
+      if (counts[table] === 0) continue;
+      const stagingFile = join(stagingDirectory, `${table}.parquet`).replaceAll("'", "''");
+      await duckDbRun(
+        source,
+        `COPY (SELECT * REPLACE (CAST(? AS VARCHAR) AS workspace_id) FROM ${table} WHERE project_id = ?) TO '${stagingFile}' (FORMAT PARQUET)`,
+        [input.targetWorkspaceId, input.projectId],
+      );
+    }
+  } finally {
+    await duckDbClose(source).catch(ignoreAlreadyClosed);
+  }
+  mkdirSync(dirname(targetPath), { recursive: true });
+  const target = (await getDuckDbDatabase(targetPath)).connect();
+  try {
+    await ensureFactSchema(target);
+    await duckDbRun(target, "BEGIN TRANSACTION");
+    for (const table of ENERGY_FACT_PROJECT_TABLES) {
+      await duckDbRun(target, `DELETE FROM ${table} WHERE project_id = ?`, [input.projectId]);
+      if (counts[table] === 0) continue;
+      const stagingFile = join(stagingDirectory, `${table}.parquet`).replaceAll("'", "''");
+      await duckDbRun(target, `INSERT INTO ${table} BY NAME SELECT * FROM read_parquet('${stagingFile}')`);
+      const copied = await duckDbGet(target, `SELECT COUNT(*) AS n FROM ${table} WHERE project_id = ? AND workspace_id = ?`, [input.projectId, input.targetWorkspaceId]);
+      if (Number(copied.n ?? 0) !== counts[table]) throw new Error(`ENERGYIQ_FACT_STORE_MOVE_COUNT_MISMATCH:${table}`);
+    }
+    await duckDbRun(target, "COMMIT");
+    await duckDbRun(target, "CHECKPOINT");
+  } catch (error) {
+    await duckDbRun(target, "ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    await duckDbClose(target).catch(ignoreAlreadyClosed);
+    rmSync(stagingDirectory, { recursive: true, force: true });
+  }
+  return counts;
+};
+
+/** Removes one project's facts from a workspace store, e.g. the old store after a move or a rolled-back copy. */
+export const purgeEnergyFactProject = async (input: {
+  databasePath: string;
+  projectId: string;
+}): Promise<void> => {
+  const databasePath = resolve(input.databasePath);
+  if (!existsSync(databasePath)) return;
+  const connection = (await getDuckDbDatabase(databasePath)).connect();
+  try {
+    await ensureFactSchema(connection);
+    await duckDbRun(connection, "BEGIN TRANSACTION");
+    for (const table of ENERGY_FACT_PROJECT_TABLES) {
+      await duckDbRun(connection, `DELETE FROM ${table} WHERE project_id = ?`, [input.projectId]);
+    }
+    await duckDbRun(connection, "COMMIT");
+    await duckDbRun(connection, "CHECKPOINT");
+  } catch (error) {
+    await duckDbRun(connection, "ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    await duckDbClose(connection).catch(ignoreAlreadyClosed);
+  }
+};
+
 const ensureFactSchema = async (connection: DuckDbModule.Connection): Promise<void> => {
   await duckDbRun(connection, `
     CREATE TABLE IF NOT EXISTS raw_meter_readings (

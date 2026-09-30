@@ -32,6 +32,7 @@ export type EnergyIconName =
   | "info"
   | "send"
   | "plus"
+  | "more"
   | "settings"
   | "sidebar"
   | "user";
@@ -224,6 +225,14 @@ export function EnergyIcon({
       return (
         <svg {...common}>
           <path d="m22 2-7 20-4-9-9-4zM11 13 22 2" />
+        </svg>
+      );
+    case "more":
+      return (
+        <svg {...common}>
+          <circle cx="5.5" cy="12" r="1.3" fill="currentColor" stroke="none" />
+          <circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none" />
+          <circle cx="18.5" cy="12" r="1.3" fill="currentColor" stroke="none" />
         </svg>
       );
     case "plus":

@@ -2,6 +2,13 @@ import type { EnergyIqRole, MetadataStore, UserRecord, WorkspaceRecord } from "@
 import { randomUUID } from "node:crypto";
 
 import { AuthError, type AuthService } from "../auth/service.js";
+import { BOOTSTRAP_WORKSPACE_IDS } from "./energy-bootstrap.js";
+import { deleteEnergyProject, setEnergyProjectArchived } from "./energy-project-lifecycle.js";
+import {
+  moveEnergyProjectToWorkspace,
+  type EnergyProjectMoveFactStore,
+  type EnergyProjectMoveResult
+} from "./energy-project-move.js";
 
 export type EnergyAdminOrganisationDto = {
   id: string;
@@ -29,7 +36,8 @@ export type EnergyAdminUserDto = {
 export class EnergyAdminAccessService {
   constructor(
     private readonly metadataStore: MetadataStore,
-    private readonly authService: AuthService
+    private readonly authService: AuthService,
+    private readonly factStore?: EnergyProjectMoveFactStore
   ) {}
 
   listOrganisations(): EnergyAdminOrganisationDto[] {
@@ -71,6 +79,68 @@ export class EnergyAdminAccessService {
       name: updated.name
     });
     return this.organisationDto(updated);
+  }
+
+  async moveProject(input: {
+    actorUserId: string;
+    projectId: string;
+    organisationId: string;
+  }): Promise<{ result: EnergyProjectMoveResult; organisations: EnergyAdminOrganisationDto[] }> {
+    const result = await moveEnergyProjectToWorkspace({
+      metadataStore: this.metadataStore,
+      projectId: input.projectId,
+      targetWorkspaceId: input.organisationId,
+      ...(this.factStore ? { factStore: this.factStore } : {})
+    });
+    this.audit("energyiq.project_moved", input.actorUserId, result);
+    return { result, organisations: this.listOrganisations() };
+  }
+
+  /** Permanently deletes an empty customer Organisation: no projects (including archived) and no members. */
+  deleteOrganisation(input: { actorUserId: string; id: string }): { organisations: EnergyAdminOrganisationDto[] } {
+    const organisation = this.requireCustomerWorkspace(input.id);
+    if (BOOTSTRAP_WORKSPACE_IDS.has(organisation.id)) {
+      throw new AuthError(409, "CONFLICT", "This built-in Organisation is re-created on every startup and cannot be deleted.");
+    }
+    if (this.metadataStore.energyIq.listProjectsByWorkspace(organisation.id).length > 0) {
+      throw new AuthError(409, "CONFLICT", "Move, or delete, this Organisation's projects first.");
+    }
+    if (this.metadataStore.workspaceMemberships.listByWorkspace({ workspace_id: organisation.id }).length > 0) {
+      throw new AuthError(409, "CONFLICT", "Remove this Organisation's users first.");
+    }
+    const db = this.metadataStore.db;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      // Workspace-scoped settings created alongside the Organisation go with it.
+      for (const table of ["config_resources", "encrypted_secrets", "workspace_default_model_profiles"]) {
+        const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+        if (exists) db.prepare(`DELETE FROM "${table}" WHERE workspace_id = ?`).run(organisation.id);
+      }
+      db.prepare("DELETE FROM workspaces WHERE id = ?").run(organisation.id);
+      db.exec("COMMIT");
+    } catch {
+      db.exec("ROLLBACK");
+      throw new AuthError(409, "CONFLICT", "This Organisation still holds files or history and cannot be deleted. Disable it instead.");
+    }
+    this.audit("energyiq.organisation_deleted", input.actorUserId, { organisationId: organisation.id, name: organisation.name });
+    return { organisations: this.listOrganisations() };
+  }
+
+  setProjectArchived(input: { actorUserId: string; projectId: string; archived: boolean }): { organisations: EnergyAdminOrganisationDto[] } {
+    const result = setEnergyProjectArchived({ metadataStore: this.metadataStore, projectId: input.projectId, archived: input.archived });
+    this.audit(input.archived ? "energyiq.project_archived" : "energyiq.project_restored", input.actorUserId, result);
+    return { organisations: this.listOrganisations() };
+  }
+
+  async deleteProject(input: { actorUserId: string; projectId: string; confirmName: string }): Promise<{ organisations: EnergyAdminOrganisationDto[] }> {
+    const result = await deleteEnergyProject({
+      metadataStore: this.metadataStore,
+      projectId: input.projectId,
+      confirmName: input.confirmName,
+      ...(this.factStore ? { purgeFacts: this.factStore.purge, resolveFactStorePath: this.factStore.resolvePath } : {})
+    });
+    this.audit("energyiq.project_deleted", input.actorUserId, result);
+    return { organisations: this.listOrganisations() };
   }
 
   listUsers(): EnergyAdminUserDto[] {

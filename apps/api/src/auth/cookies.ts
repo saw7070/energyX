@@ -19,15 +19,18 @@ export function parseCookies(request: IncomingMessage): Record<string, string> {
 export function appendAuthCookies(response: ServerResponse, input: {
   csrfToken: string;
   maxAgeSeconds: number;
+  /** false issues browser-session cookies that are dropped when the browser closes. */
+  persistent?: boolean;
   sessionToken: string;
 }): void {
+  const maxAgeSeconds = input.persistent === false ? undefined : input.maxAgeSeconds;
   appendSetCookie(response, serializeCookie(SESSION_COOKIE, input.sessionToken, {
     httpOnly: true,
-    maxAgeSeconds: input.maxAgeSeconds
+    maxAgeSeconds
   }));
   appendSetCookie(response, serializeCookie(CSRF_COOKIE, input.csrfToken, {
     httpOnly: false,
-    maxAgeSeconds: input.maxAgeSeconds
+    maxAgeSeconds
   }));
 }
 
@@ -46,12 +49,12 @@ function appendSetCookie(response: ServerResponse, cookie: string): void {
   response.setHeader("Set-Cookie", cookies);
 }
 
-function serializeCookie(name: string, value: string, input: { httpOnly: boolean; maxAgeSeconds: number }): string {
+function serializeCookie(name: string, value: string, input: { httpOnly: boolean; maxAgeSeconds: number | undefined }): string {
   const secure = process.env.NODE_ENV === "production";
   return [
     `${name}=${encodeURIComponent(value)}`,
     "Path=/",
-    `Max-Age=${input.maxAgeSeconds}`,
+    ...(input.maxAgeSeconds === undefined ? [] : [`Max-Age=${input.maxAgeSeconds}`]),
     "SameSite=Lax",
     ...(secure ? ["Secure"] : []),
     ...(input.httpOnly ? ["HttpOnly"] : [])
