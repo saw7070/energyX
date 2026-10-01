@@ -23,7 +23,7 @@ export type LiveConnectionDto = {
 
 export type LiveDeviceDto = { ref: string; name: string; productName?: string; category?: string; online: boolean; matchedTo?: string };
 
-type CheckDto = { ok: boolean; message?: string; meters: Array<{ meterPointId: string; ok: boolean; reason?: string }> };
+type CheckDto = { ok: boolean; message?: string; deviceCount?: number; meters: Array<{ meterPointId: string; ok: boolean; reason?: string }> };
 type LiveKey = keyof (typeof liveConnectionMessages)["en"] & string;
 type T = Translate<LiveKey>;
 
@@ -89,7 +89,7 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
   const [loadFailed, setLoadFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"account" | "devices" | "save" | "check" | "schedule" | "sync" | "disconnect" | null>(null);
+  const [busy, setBusy] = useState<"account" | "devices" | "save" | "test" | "check" | "schedule" | "sync" | "disconnect" | null>(null);
   const [editingAccount, setEditingAccount] = useState(false);
   const [accessId, setAccessId] = useState("");
   const [accessSecret, setAccessSecret] = useState("");
@@ -97,6 +97,8 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
   const [devices, setDevices] = useState<LiveDeviceDto[] | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [check, setCheck] = useState<CheckDto | null>(null);
+  // Test connection (any time) and Check devices (once every meter is matched) share one endpoint.
+  const [checkFrom, setCheckFrom] = useState<"test" | "check">("check");
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
 
   const when = useCallback((iso: string) => new Intl.DateTimeFormat(intlLocale(locale), { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Singapore" }).format(new Date(iso)), [locale]);
@@ -196,7 +198,8 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
     setNotice(t("saved"));
   });
 
-  const runCheck = () => void act("check", async () => {
+  const runCheck = (from: "test" | "check") => void act(from, async () => {
+    setCheckFrom(from);
     const result = await configApi.liveConnectionRequest<{ check: CheckDto; connection: LiveConnectionDto }>(projectId, "check", { method: "POST", body: "{}" });
     setConnection(result.connection);
     setCheck(result.check);
@@ -293,10 +296,20 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
     </table>
   </div>;
 
-  const checkLine = check ? check.ok
+  const failedDevices = (result: CheckDto) => result.meters.filter((meter) => !meter.ok)
+    .map((meter) => `${connection.meters.find((row) => row.meterPointId === meter.meterPointId)?.name ?? meter.meterPointId} (${t(checkReasonKey(meter.reason))})`).join(", ");
+  const lastCheckedLine = connection.lastCheck ? <p className="text-xs text-muted">{t("lastChecked", { when: when(connection.lastCheck.at) })}</p> : null;
+  const testLine = check && checkFrom === "test" ? check.deviceCount === undefined ? null : <div className="space-y-1 text-sm">
+    <p className="font-medium text-emerald-800">{t("testOk", { count: check.deviceCount })}</p>
+    {check.meters.length === 0 ? <p className="text-xs text-muted">{t("testNoMatches")}</p>
+      : check.ok ? <p className="text-xs text-emerald-800">{t("testMatchedOk", { count: check.meters.length })}</p>
+      : <p className="text-xs text-amber-900">{t("checkFailed")} {failedDevices(check)}</p>}
+  </div> : lastCheckedLine;
+
+  const checkLine = check && checkFrom === "test" ? null : check ? check.ok
     ? <p className="text-sm text-emerald-800">{t("checkOk", { count: check.meters.length })}</p>
-    : check.meters.length > 0 ? <p className="text-sm text-amber-900">{t("checkFailed")} {check.meters.filter((meter) => !meter.ok).map((meter) => `${connection.meters.find((row) => row.meterPointId === meter.meterPointId)?.name ?? meter.meterPointId} (${t(checkReasonKey(meter.reason))})`).join(", ")}</p> : null
-    : connection.lastCheck ? <p className="text-xs text-muted">{t("lastChecked", { when: when(connection.lastCheck.at) })}</p> : null;
+    : check.meters.length > 0 ? <p className="text-sm text-amber-900">{t("checkFailed")} {failedDevices(check)}</p> : null
+    : null;
 
   if (connection.managedByServer) {
     return <div className="space-y-4">
@@ -313,11 +326,11 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
           <p className="text-sm font-semibold">{t("matchedCount", { matched: connection.matchedCount, total: connection.meters.length })}</p>
           <div className="flex flex-wrap gap-2">
             <button type="button" className={secondaryButton} disabled={busy !== null} onClick={() => void loadDevices()}>{t("refreshDevices")}</button>
-            <button type="button" className={secondaryButton} disabled={!connection.ready || busy !== null} onClick={runCheck}>{busy === "check" ? t("checking") : t("check")}</button>
+            <button type="button" className={secondaryButton} disabled={busy !== null} onClick={() => runCheck("test")}>{busy === "test" ? t("testing") : t("testConnection")}</button>
           </div>
         </div>
         {meterTable("view")}
-        <div className="mt-3 space-y-2">{checkLine}<SyncSummary connection={connection} when={when} day={day} t={t} /></div>
+        <div className="mt-3 space-y-2">{testLine}<SyncSummary connection={connection} when={when} day={day} t={t} /></div>
       </Card>
     </div>;
   }
@@ -347,9 +360,15 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
           <button type="submit" disabled={busy !== null || !accessId.trim() || !accessSecret.trim()} className={primaryButton}>{busy === "account" ? t("connecting") : t("connect")}</button>
           {editingAccount ? <button type="button" className={secondaryButton} onClick={() => setEditingAccount(false)}>{t("cancel")}</button> : null}
         </div>
-      </form> : <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-surface-subtle px-4 py-3">
-        <p className="text-sm font-medium">{t("connectedAs", { hint: connection.accountHint ?? "" })}</p>
-        <button type="button" className={secondaryButton} onClick={() => setEditingAccount(true)}>{t("change")}</button>
+      </form> : <div className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-surface-subtle px-4 py-3">
+          <p className="text-sm font-medium">{t("connectedAs", { hint: connection.accountHint ?? "" })}</p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className={secondaryButton} disabled={busy !== null} onClick={() => runCheck("test")}>{busy === "test" ? t("testing") : t("testConnection")}</button>
+            <button type="button" className={secondaryButton} disabled={busy !== null} onClick={() => setEditingAccount(true)}>{t("change")}</button>
+          </div>
+        </div>
+        {testLine}
       </div>}
     </Card>
 
@@ -384,7 +403,7 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
       {!connection.ready ? <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">{t("needAllMatched")}</p> : null}
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-3">
-          <button type="button" className={secondaryButton} disabled={!connection.ready || dirty || busy !== null} onClick={runCheck}>{busy === "check" ? t("checking") : t("check")}</button>
+          <button type="button" className={secondaryButton} disabled={!connection.ready || dirty || busy !== null} onClick={() => runCheck("check")}>{busy === "check" ? t("checking") : t("check")}</button>
           {checkLine}
         </div>
         <div className="flex flex-wrap items-center gap-3 rounded-xl bg-surface-subtle px-4 py-3">

@@ -36,6 +36,10 @@ describe("Live connection", () => {
       const sealed = JSON.stringify(metadata.db.prepare("SELECT * FROM encrypted_secrets").all());
       expect(sealed).not.toContain(ACCESS_SECRET);
 
+      // Testing works as soon as the account is saved, before any meter is matched.
+      const early = await call("POST", ["check"]);
+      expect(early.body.data.check).toEqual({ ok: true, deviceCount: devices.length, meters: [] });
+
       const listed = await call("GET", ["devices"]);
       const listedText = JSON.stringify(listed.body);
       for (const device of devices) expect(listedText).not.toContain(device.id);

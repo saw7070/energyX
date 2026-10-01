@@ -79,6 +79,7 @@ describe("LiveConnectionPanel", () => {
         return { connection: connection({ connected: true, accountHint: "abcd…ijkl" }), deviceCount: 3 };
       }
       if (action === "devices") return { devices };
+      if (action === "check") return { check: { ok: true, deviceCount: 3, meters: [] }, connection: connection({ connected: true, accountHint: "abcd…ijkl" }) };
       if (action === "matches") {
         expect(JSON.parse(String(init?.body))).toEqual({ matches: { "m-incoming": "ref-incoming", "m-a18p": "ref-a18p" } });
         return { connection: connection({
@@ -101,6 +102,12 @@ describe("LiveConnectionPanel", () => {
     expect(container.textContent).toContain("Connected · Access ID abcd…ijkl");
     expect(container.textContent).toContain("3 devices found");
 
+    // Test connection works before any meter is matched.
+    await act(async () => { button("Test connection").click(); });
+    await flush();
+    expect(container.textContent).toContain("Connection works. 3 devices found in this account.");
+    expect(container.textContent).toContain("No meters matched yet");
+
     await act(async () => { button("Match by name").click(); });
     expect(container.textContent).toContain("2 of 2 meters matched");
     await act(async () => { button("Save matches").click(); });
@@ -121,7 +128,7 @@ describe("LiveConnectionPanel", () => {
   it("shows a server-managed site's devices and checks them, without edit controls", async () => {
     api.liveConnectionRequest.mockImplementation(async (_projectId: string, action = "") => {
       if (action === "devices") return { devices };
-      if (action === "check") return { check: { ok: true, meters: meters.map((meter) => ({ meterPointId: meter.meterPointId, ok: true })) }, connection: serverConnection };
+      if (action === "check") return { check: { ok: true, deviceCount: 3, meters: meters.map((meter) => ({ meterPointId: meter.meterPointId, ok: true })) }, connection: serverConnection };
       return { connection: serverConnection };
     });
     const serverConnection = connection({
@@ -138,8 +145,9 @@ describe("LiveConnectionPanel", () => {
     expect(container.textContent).toContain("A18P · offline");
     expect(container.querySelector("input")).toBeNull();
     expect(container.querySelector("select")).toBeNull();
-    await act(async () => { button("Check devices").click(); });
+    await act(async () => { button("Test connection").click(); });
     await flush();
-    expect(container.textContent).toContain("All 2 devices send energy readings.");
+    expect(container.textContent).toContain("Connection works. 3 devices found in this account.");
+    expect(container.textContent).toContain("All 2 matched devices send energy readings.");
   });
 });

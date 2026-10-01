@@ -75,6 +75,8 @@ export type LiveConnectionDevice = {
 export type LiveConnectionCheck = {
   ok: boolean;
   message?: string;
+  /** Devices the account can see, when sign-in worked. */
+  deviceCount?: number;
   meters: Array<{ meterPointId: string; ok: boolean; reason?: string }>;
 };
 
@@ -293,7 +295,7 @@ export const checkLiveConnection = async (
     const client = connection
       ? dependencies.createClient(readLiveConnectionCredentials(metadataStore, connection))
       : environmentClient(dependencies);
-    await client.listDevices();
+    const deviceCount = (await client.listDevices()).length;
     const meters: LiveConnectionCheck["meters"] = [];
     for (const [meterPointId, deviceId] of bindings) {
       const check = await client.checkEnergyDevice(deviceId);
@@ -301,8 +303,8 @@ export const checkLiveConnection = async (
     }
     const failed = meters.filter((meter) => !meter.ok).length;
     result = failed === 0
-      ? { ok: true, meters }
-      : { ok: false, message: "ENERGYIQ_LIVE_DEVICES_UNSUITABLE", meters };
+      ? { ok: true, deviceCount, meters }
+      : { ok: false, message: "ENERGYIQ_LIVE_DEVICES_UNSUITABLE", deviceCount, meters };
   } catch (error) {
     result = { ok: false, message: providerErrorCode(error), meters: [] };
   }
