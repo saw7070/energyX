@@ -3,7 +3,7 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const api = vi.hoisted(() => ({ liveConnectionRequest: vi.fn() }));
+const api = vi.hoisted(() => ({ liveConnectionRequest: vi.fn(), getEnergyProjectMeterHealth: vi.fn() }));
 vi.mock("../../../lib/config-api", () => ({ configApi: api }));
 import { checkReasonKey, LiveConnectionPanel, liveErrorKey, suggestMatches, type LiveConnectionDto } from "./live-connection-panel";
 
@@ -40,6 +40,8 @@ beforeEach(() => {
   document.body.append(container);
   root = createRoot(container);
   api.liveConnectionRequest.mockReset();
+  api.getEnergyProjectMeterHealth.mockReset();
+  api.getEnergyProjectMeterHealth.mockResolvedValue({ meters: [], summary: { total: 0, usable: 0, insufficientHistory: 0, noReadings: 0 } });
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -141,13 +143,72 @@ describe("LiveConnectionPanel", () => {
     await act(async () => root.render(<LiveConnectionPanel projectId="p" />));
     await flush();
     expect(container.textContent).toContain("Connected through the server settings");
-    expect(container.textContent).toContain("Smart meter · online");
-    expect(container.textContent).toContain("A18P · offline");
+    const rows = [...container.querySelectorAll("tbody tr")];
+    expect(rows[0]!.textContent).toContain("Incoming 3Phase · Smart meter");
+    expect(rows[1]!.textContent).toContain("Device offline");
     expect(container.querySelector("input")).toBeNull();
     expect(container.querySelector("select")).toBeNull();
     await act(async () => { button("Test connection").click(); });
     await flush();
     expect(container.textContent).toContain("Connection works. 3 devices found in this account.");
     expect(container.textContent).toContain("All 2 matched devices send energy readings.");
+  });
+
+  it("shows whether each meter is live, and edits or removes one meter at a time", async () => {
+    const matched = (refs: Record<string, string | undefined>) => connection({
+      connected: true,
+      accountHint: "abcd…ijkl",
+      matchedCount: Object.values(refs).filter(Boolean).length,
+      ready: Object.values(refs).filter(Boolean).length === meters.length,
+      schedule: { enabled: true, localHour: 2, timezone: "Asia/Singapore" },
+      sync: { running: false, lastSuccessAt: new Date().toISOString(), dataUntil: new Date().toISOString() },
+      meters: meters.map((meter) => refs[meter.meterPointId]
+        ? { ...meter, device: { ref: refs[meter.meterPointId]!, name: devices.find((device) => device.ref === refs[meter.meterPointId])!.name } }
+        : meter),
+    });
+    const saves: unknown[] = [];
+    let current = matched({ "m-incoming": "ref-incoming", "m-a18p": "ref-a18p" });
+    api.getEnergyProjectMeterHealth.mockResolvedValue({
+      meters: [{ meterPointId: "m-incoming", name: "Incoming 3Phase", sourceLabel: "Incoming 3Phase", status: "usable", lastReadingAt: new Date(Date.now() - 3_600_000).toISOString() }],
+      summary: { total: 2, usable: 1, insufficientHistory: 0, noReadings: 1 },
+    });
+    api.liveConnectionRequest.mockImplementation(async (_projectId: string, action = "", init?: RequestInit) => {
+      if (action === "devices") return { devices };
+      if (action === "matches") {
+        const { matches } = JSON.parse(String(init?.body)) as { matches: Record<string, string> };
+        saves.push(matches);
+        current = matched(matches);
+        return { connection: current };
+      }
+      return { connection: current };
+    });
+    await act(async () => root.render(<LiveConnectionPanel projectId="p" />));
+    await flush();
+
+    expect(container.querySelector("[aria-label='Live']")?.textContent).toContain("Updates every day at 02:00");
+    const rows = [...container.querySelectorAll("tbody tr")];
+    expect(rows[0]!.textContent).toContain("Live");
+    expect(rows[0]!.textContent).toContain("Last reading");
+    expect(rows[1]!.textContent).toContain("Device offline");
+    expect(container.querySelector("tbody select")).toBeNull();
+
+    // Edit one meter: only its row gets a drop-down.
+    await act(async () => { (rows[0]!.querySelector("button") as HTMLButtonElement).click(); });
+    expect(container.querySelectorAll("tbody select")).toHaveLength(1);
+    await act(async () => { setValue(container.querySelector("tbody select") as HTMLSelectElement, "ref-spare"); });
+    await act(async () => { button("Save").click(); });
+    await flush();
+    expect(saves.at(-1)).toEqual({ "m-incoming": "ref-spare", "m-a18p": "ref-a18p" });
+    expect(container.textContent).toContain("Incoming 3Phase saved.");
+
+    // Remove needs a second click to confirm.
+    const remove = () => [...container.querySelectorAll("tbody tr")][1]!.querySelectorAll("button")[1] as HTMLButtonElement;
+    await act(async () => { remove().click(); });
+    expect(remove().textContent).toBe("Click to confirm");
+    await act(async () => { remove().click(); });
+    await flush();
+    expect(saves.at(-1)).toEqual({ "m-incoming": "ref-spare" });
+    expect(container.textContent).toContain("Not live yet");
+    expect([...container.querySelectorAll("tbody tr")][1]!.textContent).toContain("Not connected");
   });
 });

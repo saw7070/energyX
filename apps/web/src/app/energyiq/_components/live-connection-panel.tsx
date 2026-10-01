@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { configApi } from "../../../lib/config-api";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { intlLocale } from "./energyiq-messages";
@@ -100,6 +100,11 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
   // Test connection (any time) and Check devices (once every meter is matched) share one endpoint.
   const [checkFrom, setCheckFrom] = useState<"test" | "check">("check");
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  // "all": every meter shows a drop-down (first setup); a meter id: only that row is being changed.
+  const [editing, setEditing] = useState<"all" | string | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [lastReadings, setLastReadings] = useState<Map<string, string>>(new Map());
+  const accessIdInput = useRef<HTMLInputElement>(null);
 
   const when = useCallback((iso: string) => new Intl.DateTimeFormat(intlLocale(locale), { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Singapore" }).format(new Date(iso)), [locale]);
   // The watermark sits two hours into the next day; the readings run to the end of the day before it.
@@ -108,7 +113,18 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
   const adopt = useCallback((next: LiveConnectionDto) => {
     setConnection(next);
     setDraft(Object.fromEntries(next.meters.map((meter) => [meter.meterPointId, meter.device?.ref ?? ""])));
+    setEditing(next.connected && !next.managedByServer && next.matchedCount === 0 ? "all" : null);
+    setConfirmRemove(null);
   }, []);
+
+  // When each meter last sent a reading, from uploads or live updates alike: what "Live" is judged on.
+  const loadReadings = useCallback(() => {
+    void Promise.resolve()
+      .then(() => configApi.getEnergyProjectMeterHealth(projectId))
+      .then((health) => setLastReadings(new Map(health.meters.flatMap((meter) => meter.lastReadingAt ? [[meter.meterPointId, meter.lastReadingAt] as const] : []))))
+      .catch(() => undefined);
+  }, [projectId]);
+  useEffect(() => { loadReadings(); }, [loadReadings]);
 
   const load = useCallback(async () => {
     try {
@@ -155,11 +171,11 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
       void load().then((next) => {
         if (!next) return;
         setConnection(next);
-        if (!next.sync.running) onChanged?.();
+        if (!next.sync.running) { loadReadings(); onChanged?.(); }
       });
     }, 5_000);
     return () => clearInterval(timer);
-  }, [running, load, onChanged]);
+  }, [running, load, onChanged, loadReadings]);
 
   const act = async (kind: NonNullable<typeof busy>, work: () => Promise<void>) => {
     setBusy(kind);
@@ -190,13 +206,13 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
     });
   };
 
-  const saveMatches = () => void act("save", async () => {
-    const matches = Object.fromEntries(Object.entries(draft).filter(([, ref]) => ref));
+  const putMatches = (matches: Record<string, string>, done: string) => void act("save", async () => {
     const result = await configApi.liveConnectionRequest<{ connection: LiveConnectionDto }>(projectId, "matches", { method: "PUT", body: JSON.stringify({ matches }) });
     adopt(result.connection);
     setCheck(null);
-    setNotice(t("saved"));
+    setNotice(done);
   });
+  const saveMatches = () => putMatches(Object.fromEntries(Object.entries(draft).filter(([, ref]) => ref)), t("saved"));
 
   const runCheck = (from: "test" | "check") => void act(from, async () => {
     setCheckFrom(from);
@@ -249,6 +265,55 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
   const failedChecks = new Map((check?.meters ?? []).filter((meter) => !meter.ok).map((meter) => [meter.meterPointId, meter.reason]));
   const accountForm = !connection.connected || editingAccount;
   const deviceByRef = new Map((devices ?? []).map((device) => [device.ref, device]));
+  const hour = `${String(connection.schedule.localHour).padStart(2, "0")}:00`;
+  type Meter = LiveConnectionDto["meters"][number];
+
+  const savedMatches = (): Record<string, string> => Object.fromEntries(connection.meters
+    .flatMap((meter) => meter.device ? [[meter.meterPointId, meter.device.ref] as const] : []));
+  const resetDraft = () => setDraft(Object.fromEntries(connection.meters.map((meter) => [meter.meterPointId, meter.device?.ref ?? ""])));
+  const saveRow = (meter: Meter) => {
+    const next = savedMatches();
+    const ref = draft[meter.meterPointId];
+    if (ref) next[meter.meterPointId] = ref;
+    else delete next[meter.meterPointId];
+    putMatches(next, t("rowSaved", { meter: meter.name }));
+  };
+  const removeRow = (meter: Meter) => {
+    if (confirmRemove !== meter.meterPointId) { setConfirmRemove(meter.meterPointId); return; }
+    const next = savedMatches();
+    delete next[meter.meterPointId];
+    putMatches(next, t("rowRemoved", { meter: meter.name }));
+  };
+
+  /** Whether a meter is sending readings: judged on its last reading, then on what Tuya says about its device. */
+  const statusOf = (meter: Meter): { tone: Tone; label: string; detail?: string } => {
+    const last = lastReadings.get(meter.meterPointId);
+    const detail = last ? t("status.lastReading", { when: when(last) }) : undefined;
+    const withDetail = (tone: Tone, label: string) => ({ tone, label, ...(detail ? { detail } : {}) });
+    if (!meter.device) return withDetail("grey", t("status.notConnected"));
+    const device = deviceByRef.get(meter.device.ref);
+    if (device && !device.online) return withDetail("red", t("status.offline"));
+    if (last && Date.now() - Date.parse(last) <= 3 * 86_400_000) return withDetail("green", t("status.live"));
+    if (last) return withDetail("amber", t("status.stale"));
+    return withDetail("amber", t("status.waiting"));
+  };
+
+  const failedLast = Boolean(connection.sync.lastFailureAt && (!connection.sync.lastSuccessAt || connection.sync.lastFailureAt > connection.sync.lastSuccessAt));
+  const overall: { tone: Tone; title: string; body: string } = !connection.connected
+    ? { tone: "grey", title: t("overall.offTitle"), body: t("overall.noAccountBody") }
+    : !connection.ready
+      ? { tone: "amber", title: t("overall.partialTitle"), body: t("overall.partialBody", { matched: connection.matchedCount, total: connection.meters.length }) }
+      : !connection.schedule.enabled
+        ? { tone: "amber", title: t("overall.switchedOffTitle"), body: t("overall.switchedOffBody") }
+        : failedLast
+          ? { tone: "red", title: t("overall.failedTitle"), body: t("overall.failedBody", { code: connection.sync.lastErrorCode ?? "?", hour }) }
+          : connection.sync.lastSuccessAt
+            ? { tone: "green", title: t("overall.liveTitle"), body: t("overall.liveBody", { hour, date: connection.sync.dataUntil ? day(connection.sync.dataUntil) : "—" }) }
+            : { tone: "amber", title: t("overall.waitingTitle"), body: t("overall.waitingBody", { hour }) };
+  const overallCard = <div role="status" aria-label={overall.title} className={`flex items-start gap-3 rounded-2xl border px-5 py-4 ${TONE_BOX[overall.tone]}`}>
+    <Dot tone={overall.tone} />
+    <div><p className="text-sm font-semibold">{overall.title}</p><p className="mt-0.5 text-sm leading-6 opacity-90">{overall.body}</p></div>
+  </div>;
 
   const banners = <>
     {error ? <div role="alert" className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
@@ -259,37 +324,66 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
     {notice ? <p role="status" className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-900">{notice}</p> : null}
   </>;
 
-  /** Every meter with its device: a drop-down while matching, the device's name and status otherwise. */
-  const meterTable = (mode: "edit" | "view" | "preview") => <div className="overflow-x-auto rounded-xl border border-border">
-    <table className="w-full min-w-[520px] text-left text-sm">
-      <thead className="bg-surface-subtle text-xs text-muted"><tr><th className="px-4 py-2 font-medium">{t("columnMeter")}</th><th className="px-4 py-2 font-medium">{t("columnDevice")}</th></tr></thead>
+  const deviceSelect = (meter: Meter) => <select aria-label={`${t("columnDevice")}: ${meter.name}`} value={draft[meter.meterPointId] ?? ""} onChange={(event) => setDraft({ ...draft, [meter.meterPointId]: event.target.value })} className={`${inputClass} mt-0`}>
+    <option value="">{t("notConnected")}</option>
+    {(devices ?? []).map((candidate) => {
+      const owner = takenBy.get(candidate.ref);
+      const elsewhere = owner !== undefined && owner !== meter.meterPointId;
+      return <option key={candidate.ref} value={candidate.ref} disabled={elsewhere}>
+        {candidate.name}{candidate.productName ? ` · ${candidate.productName}` : ""} · {t(candidate.online ? "online" : "offline")}{elsewhere ? ` ${t("usedElsewhere")}` : ""}
+      </option>;
+    })}
+  </select>;
+
+  const deviceLabel = (meter: Meter) => {
+    if (!meter.device) return <span className="text-muted">—</span>;
+    const device = deviceByRef.get(meter.device.ref);
+    if (!device) return <span className="text-muted">{devices === null ? t("loadingDevices") : meter.device.name || t("deviceMissing")}</span>;
+    return <span>{device.name}{device.productName ? <span className="text-muted"> · {device.productName}</span> : null}</span>;
+  };
+
+  /** Every meter with its device, whether it is sending readings, and what can be done to it. */
+  const meterTable = (kind: "app" | "server" | "preview") => <div className="overflow-x-auto rounded-xl border border-border">
+    <table className="w-full min-w-[680px] text-left text-sm">
+      <thead className="bg-surface-subtle text-xs text-muted"><tr>
+        <th className="px-4 py-2 font-medium">{t("columnMeter")}</th>
+        <th className="px-4 py-2 font-medium">{t("columnDevice")}</th>
+        <th className="px-4 py-2 font-medium">{t("columnStatus")}</th>
+        {kind === "server" ? null : <th className="px-4 py-2 text-right font-medium"><span className="sr-only">{t("columnActions")}</span></th>}
+      </tr></thead>
       <tbody className="divide-y divide-border">
         {connection.meters.map((meter) => {
           const reason = failedChecks.get(meter.meterPointId);
-          const ref = mode === "edit" ? draft[meter.meterPointId] ?? "" : meter.device?.ref ?? "";
-          const device = ref ? deviceByRef.get(ref) : undefined;
-          return <tr key={meter.meterPointId} className={reason ? "bg-amber-50" : undefined}>
+          const status = statusOf(meter);
+          const rowEditing = kind === "app" && (editing === "all" || editing === meter.meterPointId);
+          const locked = busy !== null || (editing !== null && editing !== meter.meterPointId);
+          return <tr key={meter.meterPointId} className={reason ? "bg-amber-50" : rowEditing && editing !== "all" ? "bg-primary/5" : undefined}>
             <td className="px-4 py-2 align-top">
               <span className="font-medium">{meter.name}</span>
               {meter.sourceLabel !== meter.name ? <span className="ml-2 font-mono text-[11px] text-muted">{meter.sourceLabel}</span> : null}
               {reason ? <p className="mt-1 text-xs text-amber-900">{t(checkReasonKey(reason))}</p> : null}
             </td>
-            <td className="px-4 py-2">
-              {mode === "edit" ? <select aria-label={`${t("columnDevice")}: ${meter.name}`} value={ref} onChange={(event) => setDraft({ ...draft, [meter.meterPointId]: event.target.value })} className={`${inputClass} mt-0`}>
-                <option value="">{t("notConnected")}</option>
-                {(devices ?? []).map((candidate) => {
-                  const owner = takenBy.get(candidate.ref);
-                  const elsewhere = owner !== undefined && owner !== meter.meterPointId;
-                  return <option key={candidate.ref} value={candidate.ref} disabled={elsewhere}>
-                    {candidate.name}{candidate.productName ? ` · ${candidate.productName}` : ""} · {t(candidate.online ? "online" : "offline")}{elsewhere ? ` ${t("usedElsewhere")}` : ""}
-                  </option>;
-                })}
-              </select>
-                : mode === "preview" ? <span className="text-muted">—</span>
-                : device ? <span className="flex items-center gap-2"><Dot tone={device.online ? "green" : "grey"} /><span>{device.name}{device.productName ? <span className="text-muted"> · {device.productName}</span> : null}<span className="text-muted"> · {t(device.online ? "online" : "offline")}</span></span></span>
-                : ref ? <span className="text-muted">{devices === null ? t("loadingDevices") : t("deviceMissing")}</span>
-                : <span className="text-muted">{t("notConnected")}</span>}
+            <td className="px-4 py-2 align-top">{rowEditing ? deviceSelect(meter) : deviceLabel(meter)}</td>
+            <td className="px-4 py-2 align-top">
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold ${TONE_PILL[status.tone]}`}><Dot tone={status.tone} small />{status.label}</span>
+              {status.detail ? <p className="mt-1 text-[11px] text-muted">{status.detail}</p> : null}
             </td>
+            {kind === "server" ? null : <td className="whitespace-nowrap px-4 py-2 text-right align-top">
+              {kind === "preview"
+                ? <button type="button" className={rowButton} onClick={() => { accessIdInput.current?.focus(); setNotice(t("connectFirstShort")); }}>{t("match")}</button>
+                : editing === meter.meterPointId
+                  ? <>
+                    <button type="button" className={rowButton} disabled={busy !== null} onClick={() => saveRow(meter)}>{busy === "save" ? t("saving") : t("saveRow")}</button>
+                    <button type="button" className={rowButtonMuted} disabled={busy !== null} onClick={() => { resetDraft(); setEditing(null); }}>{t("cancel")}</button>
+                  </>
+                  : editing === "all" ? null
+                  : meter.device
+                    ? <>
+                      <button type="button" className={rowButton} disabled={locked || !devices?.length} onClick={() => { setConfirmRemove(null); setEditing(meter.meterPointId); }}>{t("edit")}</button>
+                      <button type="button" className={rowButtonDanger} disabled={locked} onBlur={() => setConfirmRemove(null)} onClick={() => removeRow(meter)}>{confirmRemove === meter.meterPointId ? t("removeConfirm") : t("remove")}</button>
+                    </>
+                    : <button type="button" className={rowButton} disabled={locked || !devices?.length} onClick={() => { setConfirmRemove(null); setEditing(meter.meterPointId); }}>{t("match")}</button>}
+            </td>}
           </tr>;
         })}
       </tbody>
@@ -311,16 +405,18 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
     : check.meters.length > 0 ? <p className="text-sm text-amber-900">{t("checkFailed")} {failedDevices(check)}</p> : null
     : null;
 
+  const devicesNote = devices === null || busy === "devices"
+    ? <p role="status" className="mb-3 text-xs text-muted">{t("loadingDevices")}</p>
+    : devices.length === 0 ? <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">{t("noDevices")}</p> : null;
+
   if (connection.managedByServer) {
     return <div className="space-y-4">
       {banners}
+      {overallCard}
       <Card>
-        <div className="mb-4 flex items-start gap-3">
-          <Dot tone="green" />
-          <div>
-            <h3 className="text-sm font-semibold">{t("serverTitle")}</h3>
-            <p className="mt-1 text-sm leading-6 text-muted">{t("serverBody")}</p>
-          </div>
+        <div className="mb-4">
+          <h3 className="text-sm font-semibold">{t("serverTitle")}</h3>
+          <p className="mt-1 text-sm leading-6 text-muted">{t("serverBody")}</p>
         </div>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm font-semibold">{t("matchedCount", { matched: connection.matchedCount, total: connection.meters.length })}</p>
@@ -329,7 +425,8 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
             <button type="button" className={secondaryButton} disabled={busy !== null} onClick={() => runCheck("test")}>{busy === "test" ? t("testing") : t("testConnection")}</button>
           </div>
         </div>
-        {meterTable("view")}
+        {devicesNote}
+        {meterTable("server")}
         <div className="mt-3 space-y-2">{testLine}<SyncSummary connection={connection} when={when} day={day} t={t} /></div>
       </Card>
     </div>;
@@ -337,13 +434,14 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
 
   return <div className="space-y-4">
     {banners}
+    {overallCard}
 
     <Card>
       <Step number={1} title={t("step.account")} hint={t("step.accountHint")} done={connection.connected && !editingAccount} />
       {accountForm ? <form onSubmit={saveAccount} className="space-y-3">
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="block text-xs font-semibold text-muted">{t("accessId")}
-            <input value={accessId} onChange={(event) => setAccessId(event.target.value)} autoComplete="off" spellCheck={false} required className={inputClass} />
+            <input ref={accessIdInput} value={accessId} onChange={(event) => setAccessId(event.target.value)} autoComplete="off" spellCheck={false} required className={inputClass} />
           </label>
           <label className="block text-xs font-semibold text-muted">{t("accessSecret")}
             <span className="relative mt-1 block">
@@ -373,25 +471,26 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
     </Card>
 
     {connection.connected ? <Card>
-      <Step number={2} title={t("step.match")} hint={t("step.matchHint")} done={connection.ready && !dirty} />
+      <Step number={2} title={t("step.match")} hint={t("step.matchHint")} done={connection.ready && editing === null} />
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm"><span className="font-semibold">{t("matchedCount", { matched: draftCount, total: connection.meters.length })}</span>{dirty ? <span className="text-amber-800"> · {t("unsaved")}</span> : null}</p>
+        <p className="text-sm"><span className="font-semibold">{t("matchedCount", { matched: editing === "all" ? draftCount : connection.matchedCount, total: connection.meters.length })}</span>{editing === "all" && dirty ? <span className="text-amber-800"> · {t("unsaved")}</span> : null}</p>
         <div className="flex flex-wrap gap-2">
-          <button type="button" className={secondaryButton} disabled={!devices?.length || busy !== null} onClick={() => {
+          {editing === "all" ? <button type="button" className={secondaryButton} disabled={!devices?.length || busy !== null} onClick={() => {
             const next = suggestMatches(connection.meters, devices ?? [], draft);
             const added = Object.values(next).filter(Boolean).length - draftCount;
             setDraft(next);
             setNotice(added > 0 ? t("matchByNameDone", { count: added }) : t("matchByNameNone"));
           }}>{t("matchByName")}</button>
+            : <button type="button" className={secondaryButton} disabled={!devices?.length || busy !== null || editing !== null} onClick={() => { setConfirmRemove(null); setEditing("all"); }}>{t("editAll")}</button>}
           <button type="button" className={secondaryButton} disabled={busy !== null} onClick={() => void loadDevices()}>{t("refreshDevices")}</button>
         </div>
       </div>
-      {devices === null || busy === "devices" ? <p role="status" className="py-4 text-sm text-muted">{t("loadingDevices")}</p>
-        : devices.length === 0 ? <p className="py-4 text-sm text-muted">{t("noDevices")}</p>
-        : meterTable("edit")}
-      <div className="mt-3 flex justify-end">
+      {devicesNote}
+      {meterTable("app")}
+      {editing === "all" ? <div className="mt-3 flex justify-end gap-2">
+        {connection.matchedCount > 0 ? <button type="button" className={secondaryButton} disabled={busy !== null} onClick={() => { resetDraft(); setEditing(null); }}>{t("cancel")}</button> : null}
         <button type="button" className={primaryButton} disabled={!dirty || busy !== null} onClick={saveMatches}>{busy === "save" ? t("saving") : t("save")}</button>
-      </div>
+      </div> : null}
     </Card> : <Card>
       <Step number={2} title={t("step.match")} hint={t("step.matchHint")} done={false} />
       <p className="mb-3 rounded-lg bg-surface-subtle px-3 py-2 text-xs text-muted">{t("connectFirst", { count: connection.meters.length })}</p>
@@ -455,10 +554,18 @@ function Step({ number, title, hint, done }: { number: number; title: string; hi
   </div>;
 }
 
-function Dot({ tone }: { tone: "green" | "grey" }) {
-  return <span aria-hidden="true" className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${tone === "green" ? "bg-emerald-500" : "bg-slate-300"}`} />;
+type Tone = "green" | "amber" | "red" | "grey";
+const TONE_DOT: Record<Tone, string> = { green: "bg-emerald-500", amber: "bg-amber-500", red: "bg-rose-500", grey: "bg-slate-300" };
+const TONE_PILL: Record<Tone, string> = { green: "bg-emerald-50 text-emerald-800", amber: "bg-amber-50 text-amber-900", red: "bg-rose-50 text-rose-800", grey: "bg-surface-subtle text-muted" };
+const TONE_BOX: Record<Tone, string> = { green: "border-emerald-200 bg-emerald-50 text-emerald-900", amber: "border-amber-200 bg-amber-50 text-amber-900", red: "border-rose-200 bg-rose-50 text-rose-900", grey: "border-border bg-surface text-foreground" };
+
+function Dot({ tone, small = false }: { tone: Tone; small?: boolean }) {
+  return <span aria-hidden="true" className={`${small ? "h-1.5 w-1.5" : "mt-1.5 h-2.5 w-2.5"} shrink-0 rounded-full ${TONE_DOT[tone]}`} />;
 }
 
 const inputClass = "mt-1 block w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15";
 const primaryButton = "inline-flex h-10 items-center justify-center rounded-lg bg-primary px-5 text-sm font-semibold text-white hover:bg-primary-light disabled:cursor-not-allowed disabled:opacity-40";
+const rowButton = "rounded-md px-2 py-1 text-xs font-semibold text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-40";
+const rowButtonMuted = "rounded-md px-2 py-1 text-xs font-semibold text-muted hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-40";
+const rowButtonDanger = "rounded-md px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40";
 const secondaryButton = "rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-50";
