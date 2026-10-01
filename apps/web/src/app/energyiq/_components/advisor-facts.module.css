@@ -2,7 +2,7 @@
 .card header h4 { font-size:16px; font-weight:650; color:#1f2d25; }
 .card header p { margin-top:4px; max-width:80ch; font-size:13px; line-height:1.55; color:#4f5f55; }
 .list { display:grid; gap:8px; margin-top:14px; }
-.list li { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:12px; padding:10px 12px; border:1px solid #e1e7e1; border-radius:10px; background:white; }
+.list > li { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:12px; padding:10px 12px; border:1px solid #e1e7e1; border-radius:10px; background:white; }
 .list p { font-size:14px; color:#1f2d25; }
 .list small { margin-left:8px; font-size:12px; color:#7a867e; }
 .kind { padding:3px 9px; border-radius:999px; font-size:11px; font-weight:650; white-space:nowrap; background:#eef1ee; color:#4f5f55; }
@@ -31,10 +31,33 @@
 .muted { margin-top:12px; font-size:13px; color:#6a786f; }
 .tip { margin-top:10px; font-size:12px; color:#6a786f; }
 
+.list > li { align-items:start; }
+.list > li > .kind { margin-top:2px; }
+.actions { display:flex; gap:2px; }
+.edit { padding:4px 10px; border-radius:7px; color:#1d513a; font-size:12px; font-weight:600; }
+.edit:hover { background:#eef5f0; }
+.edit:disabled, .remove:disabled { opacity:.45; cursor:not-allowed; }
+.body { display:grid; gap:8px; min-width:0; }
+.intro { font-size:14px; font-weight:600; color:#1f2d25; }
+.table { width:100%; border-collapse:collapse; font-size:13px; }
+.table th, .table td { padding:6px 10px; border-top:1px solid #edf1ed; text-align:left; vertical-align:top; }
+.table thead th { border-top:0; padding-top:0; font-size:11px; font-weight:600; letter-spacing:.02em; text-transform:uppercase; color:#7a867e; }
+.table tbody th { width:1%; white-space:nowrap; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-weight:600; color:#1d513a; }
+.table td { color:#2c3a31; }
+.bullets { display:grid; gap:4px; padding-left:18px; list-style:disc; font-size:14px; color:#1f2d25; }
+.editing { display:block !important; }
+.editForm { display:grid; gap:10px; }
+.editForm textarea { width:100%; padding:10px 12px; border:1px solid #d0dbd2; border-radius:9px; background:white; color:#1f2d25; font-size:14px; line-height:1.55; resize:vertical; }
+.editForm textarea:focus { outline:2px solid #2f7d5a; outline-offset:1px; }
+.hint { font-size:12px; color:#6a786f; }
+.editActions { display:flex; justify-content:flex-end; gap:8px; }
+.cancel { min-height:40px; padding:0 16px; border:1px solid #d0dbd2; border-radius:9px; background:white; color:#2c3a31; font-size:14px; font-weight:600; }
+.cancel:hover { background:#f3f7f3; }
+
 :global(:where(html[data-energyiq-theme="dark"])) .card { border-color:#25503c; background:linear-gradient(135deg,#15201a 0%,#191919 70%); }
 :global(:where(html[data-energyiq-theme="dark"])) .card header h4, :global(:where(html[data-energyiq-theme="dark"])) .list p, :global(:where(html[data-energyiq-theme="dark"])) .row input { color:#e6ede9; }
 :global(:where(html[data-energyiq-theme="dark"])) .card header p, :global(:where(html[data-energyiq-theme="dark"])) .examples, :global(:where(html[data-energyiq-theme="dark"])) .examples button { color:#c8d2cc; }
-:global(:where(html[data-energyiq-theme="dark"])) .list li, :global(:where(html[data-energyiq-theme="dark"])) .examples button, :global(:where(html[data-energyiq-theme="dark"])) .kinds button, :global(:where(html[data-energyiq-theme="dark"])) .row input { background:#191919; border-color:#32363b; }
+:global(:where(html[data-energyiq-theme="dark"])) .list > li, :global(:where(html[data-energyiq-theme="dark"])) .examples button, :global(:where(html[data-energyiq-theme="dark"])) .kinds button, :global(:where(html[data-energyiq-theme="dark"])) .row input { background:#191919; border-color:#32363b; }
 :global(:where(html[data-energyiq-theme="dark"])) .kinds button { color:#b9c5be; }
 :global(:where(html[data-energyiq-theme="dark"])) .kinds button[aria-pressed=true] { background:#2f6b4c; border-color:#2f6b4c; color:white; }
 :global(:where(html[data-energyiq-theme="dark"])) .examples b, :global(:where(html[data-energyiq-theme="dark"])) .status { color:#8bc3b9; }

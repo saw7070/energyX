@@ -53,6 +53,45 @@ export function removeFact(notes: string, fact: SiteFact): string {
   return lines.join("\n");
 }
 
+/** Replaces one fact's type and wording in place, keeping its date and position. */
+export function updateFact(notes: string, fact: SiteFact, kind: FactKind, text: string): string {
+  const lines = notes.split("\n");
+  const found = section(lines);
+  if (!found) return notes;
+  const index = lines.findIndex((line, position) => position > found.start && position < found.end && line === fact.line);
+  if (index < 0) return notes;
+  const indent = /^\s*/.exec(fact.line)?.[0] ?? "";
+  const body = text.trim().replace(/\s+/g, " ");
+  lines[index] = fact.date ? `${indent}- ${fact.date} · ${FACT_KIND_LABELS[kind]}: ${body}` : `${indent}- ${body}`;
+  return lines.join("\n");
+}
+
+/** How a fact reads best: a code-to-equipment table, a bullet list, or plain text. */
+export type FactLayout =
+  | { kind: "table"; intro: string; rows: Array<{ code: string; items: string }> }
+  | { kind: "list"; intro: string; items: string[] }
+  | { kind: "plain"; text: string };
+
+/**
+ * Splits a long fact such as "Equipment list: A18P — Coffee machine x1; B2R — Balcony light x1" into rows, so a
+ * list written on one line (as the advisor stores it) is easy to scan. Short or single-part facts stay as text.
+ */
+export function factLayout(text: string): FactLayout {
+  const colon = text.indexOf(":");
+  const hasIntro = colon > 0 && colon < 120 && text.slice(colon + 1).includes(";");
+  const intro = hasIntro ? text.slice(0, colon).trim() : "";
+  const parts = (hasIntro ? text.slice(colon + 1) : text).split(/\s*;\s*/).map(part => part.trim().replace(/[.;]$/, "")).filter(Boolean);
+  if (parts.length < 2) return { kind: "plain", text };
+  const pairs = parts.map(part => /^(\S{1,24})\s+[—–-]\s+(.+)$/.exec(part));
+  if (pairs.every(Boolean)) return { kind: "table", intro, rows: pairs.map(match => ({ code: match![1]!, items: match![2]!.replace(/\s+x(\d+)\b/gi, " ×$1") })) };
+  return parts.length >= 3 ? { kind: "list", intro, items: parts } : { kind: "plain", text };
+}
+
+/** A fact's wording for editing: list items one per line, so a mistake in a long list is easy to find. */
+export const factEditText = (text: string): string => text.replace(/;\s*/g, ";\n");
+/** Back from the editing form to one stored line. */
+export const factFromEditText = (text: string): string => text.split("\n").map(line => line.trim()).filter(Boolean).join(" ");
+
 /**
  * Saves new Project notes through the shared report settings, refusing when someone else changed them since the page
  * loaded. Project notes apply straight away: the advisor, the map and this page read the same text.
