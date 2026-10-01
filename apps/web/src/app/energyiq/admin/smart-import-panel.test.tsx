@@ -13,7 +13,7 @@ const api = vi.hoisted(() => ({
   extractEnergyDeviceListFromImage: vi.fn(),
 }));
 vi.mock("../../../lib/config-api", () => ({ configApi: api }));
-import { friendlyImportError, SmartImportPanel } from "./smart-import-panel";
+import { describeFileCoverage, friendlyImportError, SmartImportPanel } from "./smart-import-panel";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -82,3 +82,22 @@ describe("friendly errors", () => {
     expect(friendlyImportError("ENERGYIQ_EXCEL_FILE_INVALID")).toBe("Only .csv and .xlsx files can be uploaded.");
   });
 });
+
+describe("what a new file adds", () => {
+  const file = (from: string, to: string, labels = ["A18P"]) => {
+    const value = batch("x", "excel", "inspected", labels);
+    return { ...value, inspection: { ...value.inspection, coverageFrom: from, coverageTo: to } } as never;
+  };
+  it("separates new dates from dates already loaded", () => {
+    const result = describeFileCoverage(file("2026-09-01T10:30:00Z", "2026-10-01T02:15:00Z"), "2026-09-11T23:45:00Z", ["A18P"]);
+    expect(result.text).toBe("New data: 12 Sept 2026 – 1 Oct 2026");
+    expect(result.detail).toContain("already loaded");
+  });
+  it("warns when a file adds nothing", () => {
+    expect(describeFileCoverage(file("2026-09-01T00:00:00Z", "2026-09-05T00:00:00Z"), "2026-09-11T00:00:00Z", ["A18P"]).tone).toBe("warning");
+  });
+  it("treats a first upload as all new", () => {
+    expect(describeFileCoverage(file("2026-09-01T00:00:00Z", "2026-09-05T00:00:00Z"), undefined, []).text).toBe("New data: 1 Sept 2026 – 5 Sept 2026");
+  });
+});
+

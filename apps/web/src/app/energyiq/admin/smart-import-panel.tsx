@@ -218,10 +218,7 @@ export function SmartImportPanel({ projectId, onChanged, onOpenMapping }: {
         {waiting.length ? (
           <ul className="mt-3 space-y-2" aria-label="Files ready to publish">
             {waiting.map((batch) => (
-              <li key={batch.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-surface-subtle px-3 py-2 text-xs">
-                <span className="min-w-0 truncate font-medium">{batch.filename}</span>
-                <span className="text-muted">{shortDate(batch.inspection.coverageFrom)} – {shortDate(batch.inspection.coverageTo)} · {batch.inspection.sourceLabels.length} devices</span>
-              </li>
+              <WaitingFile key={batch.id} batch={batch} publishedTo={summariseImport(published).to} knownDevices={summariseImport(published).devices} />
             ))}
           </ul>
         ) : null}
@@ -242,6 +239,46 @@ export function SmartImportPanel({ projectId, onChanged, onOpenMapping }: {
 
       {plan ? <PublishBar plan={plan} waiting={waiting} devicesTyped={devices.length} step={step} busy={busy} onPublish={() => void publish(plan.document)} /> : null}
     </div>
+  );
+}
+
+/** One uploaded file: what it contains, and what it adds beyond the data already published. */
+export const describeFileCoverage = (batch: EnergyImportBatchDto, publishedTo: string | undefined, knownDevices: string[]) => {
+  const from = batch.inspection.coverageFrom;
+  const to = batch.inspection.coverageTo;
+  const devices = batch.inspection.sourceLabels.map((label) => label.label);
+  const newDevices = devices.filter((device) => !knownDevices.includes(device));
+  if (!from || !to) return { tone: "warning" as const, text: "No readable dates were found in this file." };
+  if (!publishedTo || from > publishedTo) {
+    return { tone: "new" as const, text: `New data: ${shortDate(from)} – ${shortDate(to)}`, detail: `${devices.length} devices${newDevices.length ? `, ${newDevices.length} new` : ""}` };
+  }
+  if (to <= publishedTo) {
+    return newDevices.length
+      ? { tone: "new" as const, text: `Adds ${newDevices.length} new device${newDevices.length === 1 ? "" : "s"}`, detail: `dates ${shortDate(from)} – ${shortDate(to)} are already loaded for the others` }
+      : { tone: "warning" as const, text: "Nothing new: every date in this file is already loaded", detail: `${shortDate(from)} – ${shortDate(to)}` };
+  }
+  // New readings start one interval after the last published one (a last reading at 23:45 means the next day).
+  const newFrom = new Date(Date.parse(publishedTo) + (batch.inspection.typicalIntervalMinutes ?? 15) * 60_000).toISOString();
+  return {
+    tone: "new" as const,
+    text: `New data: ${shortDate(newFrom)} – ${shortDate(to)}`,
+    detail: `${shortDate(from)} – ${shortDate(publishedTo)} is already loaded and won't be counted twice`,
+  };
+};
+
+function WaitingFile({ batch, publishedTo, knownDevices }: { batch: EnergyImportBatchDto; publishedTo?: string; knownDevices: string[] }) {
+  const coverage = describeFileCoverage(batch, publishedTo, knownDevices);
+  return (
+    <li className={`rounded-lg px-3 py-2 text-xs ${coverage.tone === "warning" ? "bg-amber-50 text-amber-900" : "bg-surface-subtle"}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="min-w-0 truncate font-medium">{batch.filename}</span>
+        <span className="text-muted">File covers {shortDate(batch.inspection.coverageFrom)} – {shortDate(batch.inspection.coverageTo)}</span>
+      </div>
+      <p className="mt-1">
+        <span className={`font-semibold ${coverage.tone === "new" ? "text-emerald-800" : ""}`}>{coverage.text}</span>
+        {coverage.detail ? <span className="text-muted"> · {coverage.detail}</span> : null}
+      </p>
+    </li>
   );
 }
 
