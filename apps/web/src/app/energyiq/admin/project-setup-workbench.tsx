@@ -2116,6 +2116,8 @@ function DataSourcesPage({
     void loadBatches();
   }, [loadBatches]);
 
+  // Live-connector projects (e.g. Tuya) publish through their sync; one-click import is for uploaded files only.
+  const liveConnected = batches.some((batch) => batch.sourceKind !== "excel");
   const latest = batches[0];
   const mappingConfirmed = savedDocument.meter_mapping?.confirmed === true;
   const materializationGuard = evaluateEnergyImportMaterializationGuard({
@@ -2275,7 +2277,7 @@ function DataSourcesPage({
               </div>
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={useDetectedLabels} disabled={batches.length === 0 || applyStep !== null} className={secondaryButton}>Use all detected labels</button>
-                <button
+                {liveConnected ? null : <button
                   type="button"
                   onClick={() => void importAndApply()}
                   disabled={batches.length === 0 || applyStep !== null}
@@ -2283,14 +2285,14 @@ function DataSourcesPage({
                   className={primaryButton}
                 >
                   {applyStep ?? "Import & apply"}
-                </button>
+                </button>}
               </div>
             </div>
-            <p className="text-[11px] text-muted">
+            {liveConnected ? null : <p className="text-[11px] text-muted">
               {document.meter_mapping?.confirmed
                 ? "Mapping confirmed. Import & apply saves the files, builds the readings and makes them live in one step."
                 : <>Next: <button type="button" className="font-semibold text-primary underline-offset-2 hover:underline" onClick={() => setSection("meter-mapping")}>name and place each device in Meter Mapping</button>, then come back and click Import & apply.</>}
-            </p>
+            </p>}
             <details className="text-[11px] text-muted">
               <summary className="cursor-pointer select-none">Advanced: run the steps one at a time</summary>
               <div className="mt-2 flex flex-wrap gap-2">
