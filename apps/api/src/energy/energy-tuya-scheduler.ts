@@ -60,6 +60,8 @@ export const createEnergyTuyaDailyScheduler = (input: {
   catchUpOverlapMs?: number;
   maxCatchUpRuns?: number;
   runDeadlineMs?: number;
+  /** How far back a Project that has never synced starts; the start of the Singapore month otherwise. */
+  initialLookbackMs?: number;
 }): EnergyTuyaScheduler => {
   const now = input.now ?? Date.now;
   let timer: NodeJS.Timeout | undefined;
@@ -90,7 +92,9 @@ export const createEnergyTuyaDailyScheduler = (input: {
             project_id: connector.projectId,
             source_kind: "tuya",
           });
-          const watermark = state?.watermark_ms === undefined ? {} : { watermarkMs: state.watermark_ms };
+          const watermark = state?.watermark_ms === undefined
+            ? input.initialLookbackMs === undefined ? {} : { initialLookbackMs: input.initialLookbackMs }
+            : { watermarkMs: state.watermark_ms };
           // A night that is up to date keeps the daily overlap: the same window shape that has always worked.
           // Only a backlog switches to the narrower catch-up pass, which is what has to fit in memory.
           const nightly = resolveScheduledTuyaSyncWindow({ nowMs: now(), ...watermark });

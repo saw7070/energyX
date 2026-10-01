@@ -394,6 +394,61 @@ describe("Tuya OpenAPI Source Adapter", () => {
     })).rejects.toThrow("ENERGYIQ_TUYA_REQUEST_TIMEOUT");
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
+
+  it("lists the project's devices page by page and keeps their LAN keys on the server", async () => {
+    const page = (from: number, count: number) => Array.from({ length: count }, (_, index) => ({
+      id: `listdevice${String(from + index).padStart(4, "0")}`,
+      name: `Device ${from + index}`,
+      customName: index === 0 ? `Panel ${from + index}` : "",
+      productName: "Energy meter",
+      category: "zndb",
+      isOnline: index % 2 === 0,
+      localKey: "never-leaves-the-server",
+    }));
+    const requested: string[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/token")) return json({ success: true, result: { access_token: "token-1", expire_time: 7_200 } });
+      requested.push(url);
+      return json({ success: true, result: url.includes("last_id=listdevice0019") ? page(20, 3) : page(0, 20) });
+    }) as unknown as typeof fetch;
+    const client = createTuyaOpenApiClient({ accessId: "client-id", accessSecret: "secret", fetch: fetchMock, sleep: async () => undefined });
+
+    const devices = await client.listDevices();
+
+    expect(devices).toHaveLength(23);
+    expect(devices[0]).toEqual({ id: "listdevice0000", name: "Panel 0", productName: "Energy meter", category: "zndb", online: true });
+    expect(devices[1]).toMatchObject({ name: "Device 1", online: false });
+    expect(JSON.stringify(devices)).not.toContain("never-leaves-the-server");
+    expect(requested).toHaveLength(2);
+    expect(requested[0]).toContain("/v2.0/cloud/thing/device?page_size=20");
+  });
+
+  it("falls back to the linked app account's devices when the project list is refused", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/token")) return json({ success: true, result: { access_token: "token-1", expire_time: 7_200 } });
+      if (url.includes("/v2.0/cloud/thing/device")) return json({ success: false, code: "28841105", msg: "No permissions" });
+      return json({ success: true, result: { devices: [{ id: "appdevice0001", name: "Incoming", product_name: "Meter", online: true }], has_more: false } });
+    }) as unknown as typeof fetch;
+    const client = createTuyaOpenApiClient({ accessId: "client-id", accessSecret: "secret", fetch: fetchMock, sleep: async () => undefined });
+
+    expect(await client.listDevices()).toEqual([{ id: "appdevice0001", name: "Incoming", productName: "Meter", online: true }]);
+  });
+
+  it("says when a device does not report cumulative energy", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/token")) return json({ success: true, result: { access_token: "token-1", expire_time: 7_200 } });
+      return json({ success: true, result: { model: JSON.stringify({ properties: [{ code: "switch_1" }] }) } });
+    }) as unknown as typeof fetch;
+    const client = createTuyaOpenApiClient({ accessId: "client-id", accessSecret: "secret", fetch: fetchMock, sleep: async () => undefined });
+
+    expect(await client.checkEnergyDevice("plainswitch001")).toEqual({
+      ok: false,
+      reason: "ENERGYIQ_TUYA_PROPERTY_REQUIRED:total_forward_energy",
+    });
+  });
 });
 
 const json = (value: unknown, status = 200): Response => new Response(JSON.stringify(value), {

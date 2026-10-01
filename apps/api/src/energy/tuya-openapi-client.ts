@@ -49,15 +49,38 @@ export type TuyaReportLogArtifact = {
   }>;
 };
 
+export type TuyaCredentials = {
+  accessId: string;
+  accessSecret: string;
+};
+
 export type TuyaEnergySyncInput = {
   startTime: number;
   endTime: number;
   devices: TuyaDeviceBinding[];
+  /** The Project's own account when it was connected in the app; the server environment account otherwise. */
+  credentials?: TuyaCredentials;
   signal?: AbortSignal;
 };
 
+export type TuyaDeviceSummary = {
+  id: string;
+  name: string;
+  productName?: string;
+  category?: string;
+  online: boolean;
+};
+
+export type TuyaEnergyDeviceCheck =
+  | { ok: true }
+  | { ok: false; reason: string };
+
 export type TuyaOpenApiClient = {
   syncEnergyReadings(input: TuyaEnergySyncInput): Promise<TuyaReportLogArtifact>;
+  /** Every device the cloud project can see, so an administrator can pick one per meter. */
+  listDevices(input?: { signal?: AbortSignal }): Promise<TuyaDeviceSummary[]>;
+  /** Whether a device reports the cumulative energy and power readings a sync needs. */
+  checkEnergyDevice(deviceId: string, signal?: AbortSignal): Promise<TuyaEnergyDeviceCheck>;
 };
 
 type TuyaClientOptions = {
@@ -91,6 +114,10 @@ class TuyaOpenApiError extends Error {
     super(message);
   }
 }
+
+/** The client for a sync: the Project's own account when it has one, the server environment account otherwise. */
+export const createTuyaOpenApiClientFor = (credentials?: TuyaCredentials): TuyaOpenApiClient =>
+  credentials ? createTuyaOpenApiClient(credentials) : createTuyaOpenApiClientFromEnv();
 
 export const createTuyaOpenApiClientFromEnv = (
   env: NodeJS.ProcessEnv = process.env,
@@ -288,7 +315,75 @@ export const createTuyaOpenApiClient = (options: TuyaClientOptions): TuyaOpenApi
     throw new Error("ENERGYIQ_TUYA_PAGINATION_LIMIT");
   };
 
+  const listProjectDevices = async (signal?: AbortSignal): Promise<TuyaDeviceSummary[]> => {
+    const devices: TuyaDeviceSummary[] = [];
+    let lastId: string | undefined;
+    for (let page = 0; page < TUYA_DEVICE_LIST_MAX_PAGES; page += 1) {
+      const result = await businessGet("/v2.0/cloud/thing/device", {
+        ...(lastId ? { last_id: lastId } : {}),
+        page_size: String(TUYA_DEVICE_LIST_PAGE_SIZE),
+      }, signal);
+      const rows = Array.isArray(result) ? result : [];
+      for (const row of rows) {
+        const device = parseDeviceSummary(row);
+        if (device) devices.push(device);
+      }
+      const last: unknown = rows.at(-1);
+      const nextId = isRecord(last) ? last.id : undefined;
+      if (rows.length < TUYA_DEVICE_LIST_PAGE_SIZE || typeof nextId !== "string" || nextId === lastId) return devices;
+      lastId = nextId;
+    }
+    return devices;
+  };
+
+  const listLinkedAppDevices = async (signal?: AbortSignal): Promise<TuyaDeviceSummary[]> => {
+    const devices: TuyaDeviceSummary[] = [];
+    let lastRowKey: string | undefined;
+    for (let page = 0; page < TUYA_DEVICE_LIST_MAX_PAGES; page += 1) {
+      const result = requireRecord(await businessGet("/v1.0/iot-01/associated-users/devices", {
+        ...(lastRowKey ? { last_row_key: lastRowKey } : {}),
+        size: "100",
+      }, signal), "ENERGYIQ_TUYA_DEVICE_LIST_INVALID");
+      for (const row of Array.isArray(result.devices) ? result.devices : []) {
+        const device = parseDeviceSummary(row);
+        if (device) devices.push(device);
+      }
+      if (result.has_more !== true || typeof result.last_row_key !== "string" || result.last_row_key === lastRowKey) {
+        return devices;
+      }
+      lastRowKey = result.last_row_key;
+    }
+    return devices;
+  };
+
   return {
+    async listDevices(input) {
+      // Cloud projects list their devices through IoT Core; projects that only link a Smart Life app account
+      // answer the associated-users list instead. Try the first, and fall back only when Tuya refuses it.
+      try {
+        return uniqueDevices(await listProjectDevices(input?.signal));
+      } catch (error) {
+        if (!(error instanceof TuyaOpenApiError) || isTokenError(error)) throw error;
+        try {
+          return uniqueDevices(await listLinkedAppDevices(input?.signal));
+        } catch {
+          throw error;
+        }
+      }
+    },
+    async checkEnergyDevice(deviceId, signal) {
+      if (!/^[A-Za-z0-9]{8,64}$/u.test(deviceId)) return { ok: false, reason: "ENERGYIQ_TUYA_DEVICE_ID_INVALID" };
+      try {
+        await readPropertyEvidence(deviceId, signal);
+        return { ok: true };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        if (message.startsWith("ENERGYIQ_TUYA_PROPERTY_") || message === "ENERGYIQ_TUYA_MODEL_INVALID") {
+          return { ok: false, reason: message };
+        }
+        throw error;
+      }
+    },
     async syncEnergyReadings(input) {
       validateSyncInput(input);
       const controller = new AbortController();
@@ -332,6 +427,33 @@ export const createTuyaOpenApiClient = (options: TuyaClientOptions): TuyaOpenApi
       };
     },
   };
+};
+
+const TUYA_DEVICE_LIST_PAGE_SIZE = 20;
+/** 50 pages of 20 is a thousand devices: far beyond one site, small enough to answer within a request. */
+const TUYA_DEVICE_LIST_MAX_PAGES = 50;
+
+/** Only the fields an administrator needs to recognise a device; Tuya also returns its LAN key, which stays here. */
+const parseDeviceSummary = (value: unknown): TuyaDeviceSummary | undefined => {
+  if (!isRecord(value) || typeof value.id !== "string" || !/^[A-Za-z0-9]{8,64}$/u.test(value.id)) return undefined;
+  const text = (candidate: unknown): string | undefined =>
+    typeof candidate === "string" && candidate.trim() ? candidate.trim().slice(0, 120) : undefined;
+  const name = text(value.customName) ?? text(value.name) ?? value.id;
+  const productName = text(value.productName) ?? text(value.product_name);
+  const category = text(value.category);
+  const online = value.isOnline ?? value.online ?? value.is_online;
+  return {
+    id: value.id,
+    name,
+    ...(productName ? { productName } : {}),
+    ...(category ? { category } : {}),
+    online: online === true,
+  };
+};
+
+const uniqueDevices = (devices: TuyaDeviceSummary[]): TuyaDeviceSummary[] => {
+  const seen = new Set<string>();
+  return devices.filter((device) => !seen.has(device.id) && Boolean(seen.add(device.id)));
 };
 
 export const canonicalTuyaUrl = (path: string, query: Record<string, string>): string => {

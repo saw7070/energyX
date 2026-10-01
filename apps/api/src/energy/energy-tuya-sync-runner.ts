@@ -14,6 +14,7 @@ import {
   type EnergyProjectManifestMaterialization,
 } from "./energy-project-materialization.js";
 import type { ProjectOverviewPointerPublication } from "./project-analysis-result-cache.js";
+import { resolveProjectOverviewProfile } from "./project-analysis-resolver.js";
 import {
   type TuyaEnergySyncInput,
   type TuyaReportLogArtifact,
@@ -144,6 +145,7 @@ export const createEnergyTuyaSyncRunner = (dependencies: EnergyTuyaSyncRunnerDep
         startTime: input.window.startTime,
         endTime: input.window.endTime,
         devices: [...input.connector.devices],
+        ...(input.connector.credentials ? { credentials: input.connector.credentials } : {}),
         ...(input.signal ? { signal: input.signal } : {}),
       });
       assertArtifactWindow(artifact, input.window);
@@ -169,6 +171,11 @@ export const createEnergyTuyaSyncRunner = (dependencies: EnergyTuyaSyncRunnerDep
       } as const;
       const materialized = await publishEnergyProjectManifestAtomically({
         materialization,
+        // A site connected in the app without an Overview profile publishes readings only, as an uploaded file does.
+        ...(input.connector.managedBy === "app"
+          && !resolveProjectOverviewProfile(dependencies.context.metadataStore, project.id)
+          ? { readingsOnly: true }
+          : {}),
         publishProjection: async (candidate, beforePublish) => {
           const publication = await dependencies.afterMaterialization?.(candidate, beforePublish);
           if (!publication?.projectionRef?.trim()) {

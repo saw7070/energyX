@@ -98,6 +98,10 @@ const deleteProjectMetadata = (db: DatabaseSync, scope: { projectId: string; wor
       run(`DELETE FROM config_resources
         WHERE workspace_id = ? AND json_valid(payload_json) AND json_extract(payload_json, '$.reportProjectId') = ?`, workspaceId, projectId);
     }
+    if (has("energyiq_live_connectors") && has("encrypted_secrets")) {
+      // A live connection's sealed account is keyed by its own reference, not the project, so remove it by hand.
+      run("DELETE FROM encrypted_secrets WHERE ref IN (SELECT secret_ref FROM energyiq_live_connectors WHERE project_id = ?)", projectId);
+    }
     if (has("sessions")) {
       db.prepare("UPDATE sessions SET project_id = NULL WHERE project_id = ?").run(projectId);
     }

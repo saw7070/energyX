@@ -85,6 +85,21 @@ import {
 } from "./energy-tuya-sync-runner.js";
 import { resolveNextSingaporeLocalHour } from "./energy-tuya-scheduler.js";
 import {
+  registeredEnergyLiveConnectionScheduler,
+  type EnergyLiveConnectionScheduler,
+} from "./energy-live-connection-scheduler.js";
+import {
+  checkLiveConnection,
+  disconnectLiveConnection,
+  listLiveConnectionDevices,
+  readLiveConnection,
+  requireSyncable,
+  saveLiveConnectionAccount,
+  saveLiveConnectionMatches,
+  saveLiveConnectionSchedule,
+  type LiveConnectionDependencies,
+} from "./energy-live-connection.js";
+import {
   createOverviewAiArtifactIdentity,
   queueCurrentProjectOverviewAiArtifact,
 } from "./overview-ai-artifact.js";
@@ -147,7 +162,10 @@ import {
 } from "./project-overview-release-readiness.js";
 import type { PreschoolOverviewAiRetryTarget } from "./preschool-overview-ai-page-workflow.js";
 import {
-  createTuyaOpenApiClientFromEnv,
+  createTuyaOpenApiClient,
+  createTuyaOpenApiClientFor,
+  type TuyaCredentials,
+  type TuyaOpenApiClient,
   type TuyaEnergySyncInput,
   type TuyaReportLogArtifact,
 } from "./tuya-openapi-client.js";
@@ -191,6 +209,8 @@ type EnergyApiDependencies = {
   syncTuyaEnergyReadings?: (input: TuyaEnergySyncInput) => Promise<TuyaReportLogArtifact>;
   resolveTuyaProjectConnector?: typeof resolveEnergyTuyaProjectConnector;
   extractDeviceListFromImage?: typeof extractDeviceListFromImage;
+  createTuyaClient?: (credentials: TuyaCredentials) => TuyaOpenApiClient;
+  liveConnectionScheduler?: () => Pick<EnergyLiveConnectionScheduler, "requestSync" | "isRunning"> | undefined;
 };
 
 const DEFAULT_ENERGY_API_DEPENDENCIES: EnergyApiDependencies = {
@@ -202,8 +222,10 @@ const DEFAULT_ENERGY_API_DEPENDENCIES: EnergyApiDependencies = {
   prewarmPublishedOverviewProjections: prewarmPublishedProjectOverviewProjections,
   readCurrentOverviewLifecycle: readCurrentProjectOverviewLifecycle,
   readCurrentOverviewProjection: readCurrentProjectOverviewProjection,
-  syncTuyaEnergyReadings: (input) => createTuyaOpenApiClientFromEnv().syncEnergyReadings(input),
+  syncTuyaEnergyReadings: (input) => createTuyaOpenApiClientFor(input.credentials).syncEnergyReadings(input),
   resolveTuyaProjectConnector: resolveEnergyTuyaProjectConnector,
+  createTuyaClient: (credentials) => createTuyaOpenApiClient(credentials),
+  liveConnectionScheduler: registeredEnergyLiveConnectionScheduler,
 };
 
 const materializeConfiguredCurrentOverview = async (input: {
@@ -1226,6 +1248,67 @@ export const handleEnergyApiRequest = async (
         status: 201,
         body: createSuccessResult({ project, draft })
       };
+    }
+    if (segments[0] === "projects" && segments[2] === "live-connection") {
+      const projectId = decodeURIComponent(segments[1] ?? "");
+      requireEnergyAdminProject(context, user, projectId);
+      const scheduler = (dependencies.liveConnectionScheduler
+        ?? DEFAULT_ENERGY_API_DEPENDENCIES.liveConnectionScheduler!)();
+      const live: LiveConnectionDependencies = {
+        metadataStore: context.metadataStore,
+        createClient: dependencies.createTuyaClient ?? DEFAULT_ENERGY_API_DEPENDENCIES.createTuyaClient!,
+        isSyncRunning: (candidate) => scheduler?.isRunning(candidate) ?? false,
+      };
+      const respond = (body: unknown, status = 200): ConfigApiResponse => ({
+        status,
+        headers: { "Cache-Control": "private, no-store" },
+        body: createSuccessResult(body),
+      });
+      const action = segments[3];
+      if (segments.length === 3 && request.method === "GET") {
+        return respond({ connection: readLiveConnection(live, projectId) });
+      }
+      if (segments.length === 3 && request.method === "DELETE") {
+        return respond({ connection: disconnectLiveConnection(live, projectId) });
+      }
+      if (segments.length === 4 && action === "account" && request.method === "PUT") {
+        const body = requireRecord(await readJsonBody(request));
+        return respond(await saveLiveConnectionAccount(live, {
+          projectId,
+          user,
+          accessId: body.accessId,
+          accessSecret: body.accessSecret,
+        }));
+      }
+      if (segments.length === 4 && action === "devices" && request.method === "GET") {
+        return respond({ devices: await listLiveConnectionDevices(live, projectId) });
+      }
+      if (segments.length === 4 && action === "matches" && request.method === "PUT") {
+        const body = requireRecord(await readJsonBody(request));
+        return respond({ connection: await saveLiveConnectionMatches(live, { projectId, user, matches: body.matches }) });
+      }
+      if (segments.length === 4 && action === "check" && request.method === "POST") {
+        const check = await checkLiveConnection(live, projectId);
+        return respond({ check, connection: readLiveConnection(live, projectId) });
+      }
+      if (segments.length === 4 && action === "schedule" && request.method === "PUT") {
+        const body = requireRecord(await readJsonBody(request));
+        return respond({
+          connection: saveLiveConnectionSchedule(live, {
+            projectId,
+            user,
+            enabled: body.enabled,
+            localHour: body.localHour,
+          }),
+        });
+      }
+      if (segments.length === 4 && action === "sync" && request.method === "POST") {
+        requireSyncable(live, projectId);
+        if (!scheduler) throw new Error("ENERGYIQ_LIVE_SYNC_UNAVAILABLE");
+        const queued = scheduler.requestSync(projectId);
+        return respond({ sync: queued, connection: readLiveConnection(live, projectId) }, 202);
+      }
+      throw new Error("ENERGYIQ_LIVE_CONNECTION_ROUTE_NOT_FOUND");
     }
     if (segments[0] === "projects" && segments[2] === "imports") {
       const projectId = decodeURIComponent(segments[1] ?? "");
@@ -2749,6 +2832,7 @@ export const toEnergyApiErrorResponse = (error: unknown): ConfigApiResponse => {
     || message === "ENERGYIQ_AI_SLOT_PRESENTATION_UNSUPPORTED"
     || message === "ENERGYIQ_TUYA_DEVICE_BINDINGS_SERVER_MANAGED"
     || message === "ENERGYIQ_TUYA_CONNECTOR_NOT_CONFIGURED"
+    || message.startsWith("ENERGYIQ_LIVE_")
     || message.startsWith("ENERGYIQ_TARIFF_")
     || message.startsWith("ENERGYIQ_OPERATING_")
     || message === "ENERGYIQ_METRIC_REVISION_NOT_FOUND"
@@ -2959,7 +3043,7 @@ const createTuyaSyncStatus = async (
     limit: 10,
   });
   const latestCompleteDayEnd = resolveLatestCompleteSingaporeDayEnd(Date.now());
-  const localHour = parseTuyaSyncLocalHour(process.env.ENERGYIQ_TUYA_SYNC_LOCAL_HOUR);
+  const localHour = connector.schedule?.localHour ?? parseTuyaSyncLocalHour(process.env.ENERGYIQ_TUYA_SYNC_LOCAL_HOUR);
   const snapshot = context.metadataStore.energyIq.findCurrentDataSnapshot(projectId);
   const project = context.metadataStore.energyIq.getProject(projectId);
   const meterDataHealth = snapshot
@@ -3003,13 +3087,14 @@ const createTuyaSyncStatus = async (
     projectId,
     sourceKind: "tuya" as const,
     scheduler: {
-      enabled: process.env.ENERGYIQ_TUYA_SYNC_ENABLED?.trim().toLocaleLowerCase() === "true",
+      enabled: connector.schedule?.enabled
+        ?? process.env.ENERGYIQ_TUYA_SYNC_ENABLED?.trim().toLocaleLowerCase() === "true",
       cadence: "daily" as const,
       timezone: "Asia/Singapore" as const,
       localHour,
       nextRunAt: new Date(resolveNextSingaporeLocalHour(Date.now(), localHour)).toISOString(),
     },
-    credentialsConfigured: Boolean(
+    credentialsConfigured: Boolean(connector.credentials) || Boolean(
       process.env.ENERGYIQ_TUYA_ACCESS_ID?.trim() && process.env.ENERGYIQ_TUYA_ACCESS_SECRET?.trim(),
     ),
     connectivityStatus: "unknown" as const,

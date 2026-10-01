@@ -300,6 +300,9 @@ export const configApi = {
   reportTaskHistoryRequest<T>(query = "", init?: RequestInit): Promise<T> {
     return requestEnvelope<T>(`/api/v1/energy/admin/task-history${query}`, init);
   },
+  liveConnectionRequest<T>(projectId: string, action = "", init?: RequestInit): Promise<T> {
+    return requestEnvelope<T>(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/live-connection${action ? `/${action}` : ""}`, init);
+  },
   reportAgentRequest<T>(projectId: string, action = "", init?: RequestInit): Promise<T> {
     return requestEnvelope<T>(`/api/v1/energy/admin/report-agent/${encodeURIComponent(projectId)}${action ? `/${action}` : ""}`, init);
   },

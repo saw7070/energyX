@@ -210,7 +210,11 @@ import type {
 } from "./energy/preschool-additional-ai-insight-runtime.js";
 import { createEnergyIqTemplateChangeWorkflow } from "./energy/energy-template-change-workflow.js";
 import { createEnergyTuyaDailyScheduler } from "./energy/energy-tuya-scheduler.js";
-import { createTuyaOpenApiClientFromEnv } from "./energy/tuya-openapi-client.js";
+import {
+  createEnergyLiveConnectionScheduler,
+  registerEnergyLiveConnectionScheduler,
+} from "./energy/energy-live-connection-scheduler.js";
+import { createTuyaOpenApiClientFor, createTuyaOpenApiClientFromEnv } from "./energy/tuya-openapi-client.js";
 import { resolveEnergyTuyaProjectConnector } from "./energy/energy-tuya-connector.js";
 import type { ConfigApiContext } from "./routes/types.js";
 import { resolveOverviewAiStageStructuredOutput } from "./energy/preschool-overview-ai-structured-output.js";
@@ -1393,6 +1397,23 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
       });
     },
   });
+  // Sites an administrator connected in the app (Facility → Live connection) update on their own daily hour.
+  const liveConnectionScheduler = createEnergyLiveConnectionScheduler({
+    context: energyProjectContext,
+    syncTuyaEnergyReadings: (syncInput) => createTuyaOpenApiClientFor(syncInput.credentials).syncEnergyReadings(syncInput),
+    afterMaterialization: (projectId, workspaceId, actorUserId) => async (_materialized, beforePublish) => {
+      const projection = await materializeCurrentProjectOverviewProjectionIfReady({
+        metadataStore,
+        dataGateway,
+        user: metadataStore.users.getById({ user_id: actorUserId }),
+        workspaceId,
+        projectId,
+        beforePublish,
+      });
+      return projection ? { projectionRef: projection.contextPackage.projectionRef } : undefined;
+    },
+  });
+  registerEnergyLiveConnectionScheduler(liveConnectionScheduler);
   // A release that restarts the API mid-publication leaves that journal open, and every read for the project then
   // refuses until a materialization rolls it back. Recover at boot so a deploy cannot strand a site until the next
   // sync — which never arrives when the source sync is switched off or failing. Startup does not wait on it.
@@ -1410,12 +1431,15 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
     console.error(`[energy-publication] recovery-failed code=${error instanceof Error ? error.message : "unknown"}`);
   });
   tuyaScheduler.start();
+  liveConnectionScheduler.start();
   reportService?.start();
 
   gracefulServerClosers.set(server, bindGracefulServerLifecycle({
     server,
     closeResources: async () => {
       await tuyaScheduler.stop();
+      await liveConnectionScheduler.stop();
+      registerEnergyLiveConnectionScheduler(undefined);
       await reportService?.stop();
       metadataStore.close();
       if (ownsTaskStateRuntime) {

@@ -52,6 +52,7 @@ import {
 } from "./energyiq-overview-definition-store.js";
 import { initializeEnergyIqReportTimePolicySchema } from "./energyiq-report-time-policy-store.js";
 import { initializeEnergyIqSourceSyncSchema } from "./energyiq-source-sync-store.js";
+import { initializeEnergyIqLiveConnectorSchema } from "./energyiq-live-connector-store.js";
 import { recordSchemaMigration, runSchemaMigration } from "./schema-migration.js";
 
 export * from "./config-store.js";
@@ -72,6 +73,7 @@ export * from "./energyiq-overview-definition.js";
 export * from "./energyiq-overview-definition-store.js";
 export * from "./energyiq-report-time-policy-store.js";
 export * from "./energyiq-source-sync-store.js";
+export * from "./energyiq-live-connector-store.js";
 export * from "./workspace-model-profile-store.js";
 
 export type UserRecord = {
@@ -4582,6 +4584,15 @@ const runMigrations = (db: DatabaseSync): void => {
     "Backfill EnergyIQ built-in rule revisions",
     () => {
       ensureEnergyIqBuiltInRuleRevisions(db);
+    },
+    { atomic: true },
+  );
+  runSchemaMigration(
+    db,
+    "0046_energyiq_live_connectors",
+    "Persist administrator-configured live meter connections",
+    () => {
+      initializeEnergyIqLiveConnectorSchema(db);
     },
     { atomic: true },
   );
