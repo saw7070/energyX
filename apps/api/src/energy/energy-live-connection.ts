@@ -44,8 +44,10 @@ export type LiveConnectionMeter = {
 export type LiveConnectionReadModel = {
   projectId: string;
   provider: "tuya";
-  /** The server's own settings connect this Project; the app shows it but does not change it. */
+  /** The server's own settings connect this Project; the app shows it and can take it over, but does not edit it. */
   managedByServer: boolean;
+  /** The server settings name this Project, whether or not an administrator has taken it over in the app. */
+  environmentProject: boolean;
   connected: boolean;
   accountHint?: string;
   publishedSetup: boolean;
@@ -93,8 +95,9 @@ export const readLiveConnection = (
   const env = dependencies.env ?? process.env;
   const { metadataStore } = dependencies;
   metadataStore.energyIq.getProject(projectId);
-  const managedByServer = isEnvironmentTuyaProject(projectId, env);
-  const connection = managedByServer ? undefined : metadataStore.energyIq.liveConnectors.find(projectId);
+  const environmentProject = isEnvironmentTuyaProject(projectId, env);
+  const connection = metadataStore.energyIq.liveConnectors.find(projectId);
+  const managedByServer = environmentProject && !connection;
   const rows = publishedMeterRows(metadataStore, projectId);
   const serverBindings = managedByServer ? environmentBindings(dependencies, projectId) : new Map<string, string>();
   const meters: LiveConnectionMeter[] = (rows ?? []).map((row) => {
@@ -111,11 +114,12 @@ export const readLiveConnection = (
   });
   const matchedCount = meters.filter((meter) => meter.device).length;
   const state = metadataStore.energyIq.sourceSync.findState({ project_id: projectId, source_kind: "tuya" });
-  const envLocalHour = Number(env.ENERGYIQ_TUYA_SYNC_LOCAL_HOUR ?? 2);
+  const environmentSchedule = serverSchedule(env);
   return {
     projectId,
     provider: "tuya",
     managedByServer,
+    environmentProject,
     connected: managedByServer || Boolean(connection),
     ...(connection ? { accountHint: connection.access_id_hint } : {}),
     publishedSetup: rows !== undefined,
@@ -124,11 +128,7 @@ export const readLiveConnection = (
     ready: meters.length > 0 && matchedCount === meters.length
       && (managedByServer || Object.keys(connection?.bindings ?? {}).length === meters.length),
     schedule: managedByServer
-      ? {
-        enabled: env.ENERGYIQ_TUYA_SYNC_ENABLED?.trim().toLocaleLowerCase() === "true",
-        localHour: Number.isInteger(envLocalHour) && envLocalHour >= 0 && envLocalHour <= 23 ? envLocalHour : 2,
-        timezone: "Asia/Singapore",
-      }
+      ? { ...environmentSchedule, timezone: "Asia/Singapore" }
       : {
         enabled: connection?.sync_enabled ?? false,
         localHour: connection?.sync_local_hour ?? 2,
@@ -154,20 +154,30 @@ export const readLiveConnection = (
 /** Check the account can sign in and see devices, then keep it sealed for this Project. */
 export const saveLiveConnectionAccount = async (
   dependencies: LiveConnectionDependencies,
-  input: { projectId: string; user: UserRecord; accessId: unknown; accessSecret: unknown },
+  input: { projectId: string; user: UserRecord; accessId: unknown; accessSecret: unknown; takeOver?: unknown },
 ): Promise<{ connection: LiveConnectionReadModel; deviceCount: number }> => {
   const { metadataStore } = dependencies;
   const project = metadataStore.energyIq.getProject(input.projectId);
-  requireAppManaged(dependencies, input.projectId);
+  const takingOver = serverOwned(dependencies, input.projectId);
+  if (takingOver && input.takeOver !== true) throw new Error("ENERGYIQ_LIVE_CONNECTION_SERVER_MANAGED");
+  // Taking over keeps every meter on the device the server settings chose, so the daily update carries on unchanged.
+  const inherited = takingOver ? environmentBindings(dependencies, input.projectId) : new Map<string, string>();
+  if (takingOver && inherited.size === 0) throw new Error("ENERGYIQ_LIVE_TAKEOVER_UNAVAILABLE");
   const accessId = typeof input.accessId === "string" ? input.accessId.trim() : "";
   const accessSecret = typeof input.accessSecret === "string" ? input.accessSecret.trim() : "";
   if (!CREDENTIAL_PATTERN.test(accessId)) throw new Error("ENERGYIQ_LIVE_ACCESS_ID_INVALID");
   if (!CREDENTIAL_PATTERN.test(accessSecret)) throw new Error("ENERGYIQ_LIVE_ACCESS_SECRET_INVALID");
   const credentials = { accessId, accessSecret };
   const devices = await listWith(dependencies, credentials);
+  const visible = new Map(devices.map((device) => [device.id, device]));
+  const missing = [...inherited.values()].filter((deviceId) => !visible.has(deviceId)).length;
+  // Another account cannot read these devices, and the next daily update would fail for the whole site.
+  if (missing > 0) throw new Error(`ENERGYIQ_LIVE_TAKEOVER_DEVICES_MISSING:${missing}`);
   const existing = metadataStore.energyIq.liveConnectors.find(input.projectId);
   const secretUserId = existing?.secret_user_id ?? input.user.id;
+  const checkedAt = nowIso(dependencies);
   let secretRef: string;
+  metadataStore.db.exec("BEGIN IMMEDIATE");
   try {
     secretRef = metadataStore.secrets.put({
       workspace_id: SECRET_SCOPE_WORKSPACE_ID,
@@ -177,25 +187,50 @@ export const saveLiveConnectionAccount = async (
       value: credentials,
       ...(existing ? { secret_ref: existing.secret_ref } : {}),
     });
+    const hint = accessIdHint(accessId);
+    metadataStore.energyIq.liveConnectors.saveAccount({
+      project_id: input.projectId,
+      workspace_id: project.workspace_id,
+      secret_ref: secretRef,
+      secret_workspace_id: SECRET_SCOPE_WORKSPACE_ID,
+      secret_user_id: secretUserId,
+      access_id_hint: hint,
+      actor_user_id: input.user.id,
+      checked_at: checkedAt,
+      // Another account sees other devices, so the earlier matches no longer point anywhere.
+      reset_bindings: Boolean(existing && existing.access_id_hint !== hint),
+    });
+    if (takingOver) {
+      metadataStore.energyIq.liveConnectors.saveBindings({
+        project_id: input.projectId,
+        bindings: Object.fromEntries([...inherited].map(([meterPointId, deviceId]) => {
+          const device = visible.get(deviceId)!;
+          return [meterPointId, {
+            device_id: deviceId,
+            device_name: device.name,
+            ...(device.productName ? { product_name: device.productName } : {}),
+          }];
+        })),
+        actor_user_id: input.user.id,
+        updated_at: checkedAt,
+      });
+      const schedule = serverSchedule(dependencies.env ?? process.env);
+      metadataStore.energyIq.liveConnectors.saveSchedule({
+        project_id: input.projectId,
+        sync_enabled: schedule.enabled,
+        sync_local_hour: schedule.localHour,
+        actor_user_id: input.user.id,
+        updated_at: checkedAt,
+      });
+    }
+    metadataStore.db.exec("COMMIT");
   } catch (error) {
+    metadataStore.db.exec("ROLLBACK");
     if (error instanceof Error && error.message === "SECRET_MASTER_KEY_REQUIRED") {
       throw new Error("ENERGYIQ_LIVE_SERVER_KEY_REQUIRED");
     }
     throw error;
   }
-  const hint = accessIdHint(accessId);
-  metadataStore.energyIq.liveConnectors.saveAccount({
-    project_id: input.projectId,
-    workspace_id: project.workspace_id,
-    secret_ref: secretRef,
-    secret_workspace_id: SECRET_SCOPE_WORKSPACE_ID,
-    secret_user_id: secretUserId,
-    access_id_hint: hint,
-    actor_user_id: input.user.id,
-    checked_at: nowIso(dependencies),
-    // Another account sees other devices, so the earlier matches no longer point anywhere.
-    reset_bindings: Boolean(existing && existing.access_id_hint !== hint),
-  });
   return { connection: readLiveConnection(dependencies, input.projectId), deviceCount: devices.length };
 };
 
@@ -205,7 +240,7 @@ export const listLiveConnectionDevices = async (
 ): Promise<LiveConnectionDevice[]> => {
   let devices: TuyaDeviceSummary[];
   let matchedBy: Map<string, string>;
-  if (isEnvironmentTuyaProject(projectId, dependencies.env ?? process.env)) {
+  if (serverOwned(dependencies, projectId)) {
     dependencies.metadataStore.energyIq.getProject(projectId);
     devices = await listWithClient(() => environmentClient(dependencies));
     matchedBy = new Map([...environmentBindings(dependencies, projectId)].map(([meterPointId, deviceId]) => [deviceId, meterPointId]));
@@ -284,8 +319,7 @@ export const checkLiveConnection = async (
   projectId: string,
 ): Promise<LiveConnectionCheck> => {
   const { metadataStore } = dependencies;
-  const managedByServer = isEnvironmentTuyaProject(projectId, dependencies.env ?? process.env);
-  const connection = managedByServer ? undefined : requireConnection(dependencies, projectId);
+  const connection = serverOwned(dependencies, projectId) ? undefined : requireConnection(dependencies, projectId);
   const bindings = connection
     ? Object.entries(connection.bindings).map(([meterPointId, binding]) => [meterPointId, binding.device_id] as const)
     : [...environmentBindings(dependencies, projectId)];
@@ -415,6 +449,7 @@ const environmentBindings = (dependencies: LiveConnectionDependencies, projectId
     const connector = resolveEnergyTuyaProjectConnector({
       metadataStore: dependencies.metadataStore,
       projectId,
+      source: "environment",
       ...(dependencies.env ? { env: dependencies.env } : {}),
     });
     return new Map(connector.meterPoints.map((meterPoint, index) => [meterPoint.meterPointId, connector.devices[index]!.deviceId]));
@@ -423,8 +458,21 @@ const environmentBindings = (dependencies: LiveConnectionDependencies, projectId
   }
 };
 
+/** The server settings connect this Project and nobody has taken it over in the app. */
+const serverOwned = (dependencies: LiveConnectionDependencies, projectId: string): boolean =>
+  isEnvironmentTuyaProject(projectId, dependencies.env ?? process.env)
+  && !dependencies.metadataStore.energyIq.liveConnectors.find(projectId);
+
+const serverSchedule = (env: NodeJS.ProcessEnv): { enabled: boolean; localHour: number } => {
+  const localHour = Number(env.ENERGYIQ_TUYA_SYNC_LOCAL_HOUR?.trim() || 2);
+  return {
+    enabled: env.ENERGYIQ_TUYA_SYNC_ENABLED?.trim().toLocaleLowerCase() === "true",
+    localHour: Number.isInteger(localHour) && localHour >= 0 && localHour <= 23 ? localHour : 2,
+  };
+};
+
 const requireAppManaged = (dependencies: LiveConnectionDependencies, projectId: string): void => {
-  if (isEnvironmentTuyaProject(projectId, dependencies.env ?? process.env)) {
+  if (serverOwned(dependencies, projectId)) {
     throw new Error("ENERGYIQ_LIVE_CONNECTION_SERVER_MANAGED");
   }
 };

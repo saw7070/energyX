@@ -10,6 +10,7 @@ export type LiveConnectionDto = {
   projectId: string;
   provider: "tuya";
   managedByServer: boolean;
+  environmentProject?: boolean;
   connected: boolean;
   accountHint?: string;
   publishedSetup: boolean;
@@ -62,6 +63,8 @@ export function liveErrorKey(message: string): LiveKey {
     if (/TIMEOUT|UNREACHABLE|HTTP_ERROR|REQUEST_FAILED|fetch/iu.test(message)) return "error.unreachable";
     return "error.signIn";
   }
+  if (message.includes("ENERGYIQ_LIVE_TAKEOVER_DEVICES_MISSING")) return "error.takeOverMissing";
+  if (message.includes("ENERGYIQ_LIVE_TAKEOVER_UNAVAILABLE")) return "error.takeOverUnavailable";
   if (message.includes("ENERGYIQ_LIVE_SERVER_KEY_REQUIRED")) return "error.serverKey";
   if (message.includes("ENERGYIQ_LIVE_CREDENTIALS_UNREADABLE")) return "error.unreadable";
   if (message.includes("ENERGYIQ_LIVE_METERS_NOT_MATCHED")) return "error.notMatched";
@@ -190,19 +193,20 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
     }
   };
 
-  const saveAccount = (event: FormEvent) => {
+  const saveAccount = (event: FormEvent, takeOver = false) => {
     event.preventDefault();
     void act("account", async () => {
       const result = await configApi.liveConnectionRequest<{ connection: LiveConnectionDto; deviceCount: number }>(projectId, "account", {
         method: "PUT",
-        body: JSON.stringify({ accessId: accessId.trim(), accessSecret: accessSecret.trim() }),
+        body: JSON.stringify({ accessId: accessId.trim(), accessSecret: accessSecret.trim(), ...(takeOver ? { takeOver: true } : {}) }),
       });
       adopt(result.connection);
       setAccessId("");
       setAccessSecret("");
       setEditingAccount(false);
       setDevices(null);
-      setNotice(t("devicesFound", { count: result.deviceCount }));
+      setCheck(null);
+      setNotice(takeOver ? t("takenOver") : t("devicesFound", { count: result.deviceCount }));
     });
   };
 
@@ -239,10 +243,11 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
     setConfirmDisconnect(false);
     void act("disconnect", async () => {
       const result = await configApi.liveConnectionRequest<{ connection: LiveConnectionDto }>(projectId, "", { method: "DELETE" });
+      const handedBack = result.connection.managedByServer;
       adopt(result.connection);
       setDevices(null);
       setCheck(null);
-      setNotice(t("disconnected"));
+      setNotice(t(handedBack ? "handedBack" : "disconnected"));
     });
   };
 
@@ -322,6 +327,24 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
       <button type="button" onClick={() => setError(null)} className="text-xs font-semibold underline">{t("dismiss")}</button>
     </div> : null}
     {notice ? <p role="status" className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-900">{notice}</p> : null}
+  </>;
+
+  const accountFields = <>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block text-xs font-semibold text-muted">{t("accessId")}
+            <input ref={accessIdInput} value={accessId} onChange={(event) => setAccessId(event.target.value)} autoComplete="off" spellCheck={false} required className={inputClass} />
+          </label>
+          <label className="block text-xs font-semibold text-muted">{t("accessSecret")}
+            <span className="relative mt-1 block">
+              <input type={showSecret ? "text" : "password"} value={accessSecret} onChange={(event) => setAccessSecret(event.target.value)} autoComplete="new-password" spellCheck={false} required className={`${inputClass} mt-0 pr-16`} />
+              <button type="button" onClick={() => setShowSecret((value) => !value)} className="absolute inset-y-0 right-2 my-auto h-7 rounded-md px-2 text-[11px] font-semibold text-primary hover:bg-primary/10" aria-label={t(showSecret ? "hideSecret" : "showSecret")}>{t(showSecret ? "hide" : "show")}</button>
+            </span>
+          </label>
+        </div>
+        <details className="text-xs text-muted">
+          <summary className="cursor-pointer select-none font-semibold">{t("whereToFind")}</summary>
+          <p className="mt-2 leading-5">{t("whereToFindBody")}</p>
+        </details>
   </>;
 
   const deviceSelect = (meter: Meter) => <select aria-label={`${t("columnDevice")}: ${meter.name}`} value={draft[meter.meterPointId] ?? ""} onChange={(event) => setDraft({ ...draft, [meter.meterPointId]: event.target.value })} className={`${inputClass} mt-0`}>
@@ -429,6 +452,14 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
         {meterTable("server")}
         <div className="mt-3 space-y-2">{testLine}<SyncSummary connection={connection} when={when} day={day} t={t} /></div>
       </Card>
+      <Card>
+        <h3 className="text-sm font-semibold">{t("takeOverTitle")}</h3>
+        <p className="mb-4 mt-1 text-sm leading-6 text-muted">{t("takeOverBody")}</p>
+        <form onSubmit={(event) => saveAccount(event, true)} className="space-y-3">
+          {accountFields}
+          <button type="submit" disabled={busy !== null || !accessId.trim() || !accessSecret.trim()} className={primaryButton}>{busy === "account" ? t("takingOver") : t("takeOver")}</button>
+        </form>
+      </Card>
     </div>;
   }
 
@@ -439,28 +470,17 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
     <Card>
       <Step number={1} title={t("step.account")} hint={t("step.accountHint")} done={connection.connected && !editingAccount} />
       {accountForm ? <form onSubmit={saveAccount} className="space-y-3">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="block text-xs font-semibold text-muted">{t("accessId")}
-            <input ref={accessIdInput} value={accessId} onChange={(event) => setAccessId(event.target.value)} autoComplete="off" spellCheck={false} required className={inputClass} />
-          </label>
-          <label className="block text-xs font-semibold text-muted">{t("accessSecret")}
-            <span className="relative mt-1 block">
-              <input type={showSecret ? "text" : "password"} value={accessSecret} onChange={(event) => setAccessSecret(event.target.value)} autoComplete="new-password" spellCheck={false} required className={`${inputClass} mt-0 pr-16`} />
-              <button type="button" onClick={() => setShowSecret((value) => !value)} className="absolute inset-y-0 right-2 my-auto h-7 rounded-md px-2 text-[11px] font-semibold text-primary hover:bg-primary/10" aria-label={t(showSecret ? "hideSecret" : "showSecret")}>{t(showSecret ? "hide" : "show")}</button>
-            </span>
-          </label>
-        </div>
-        <details className="text-xs text-muted">
-          <summary className="cursor-pointer select-none font-semibold">{t("whereToFind")}</summary>
-          <p className="mt-2 leading-5">{t("whereToFindBody")}</p>
-        </details>
+        {accountFields}
         <div className="flex flex-wrap gap-2">
           <button type="submit" disabled={busy !== null || !accessId.trim() || !accessSecret.trim()} className={primaryButton}>{busy === "account" ? t("connecting") : t("connect")}</button>
           {editingAccount ? <button type="button" className={secondaryButton} onClick={() => setEditingAccount(false)}>{t("cancel")}</button> : null}
         </div>
       </form> : <div className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-surface-subtle px-4 py-3">
-          <p className="text-sm font-medium">{t("connectedAs", { hint: connection.accountHint ?? "" })}</p>
+          <div>
+            <p className="text-sm font-medium">{t("connectedAs", { hint: connection.accountHint ?? "" })}</p>
+            {connection.environmentProject ? <p className="mt-0.5 text-xs text-muted">{t("takenOverNote")}</p> : null}
+          </div>
           <div className="flex flex-wrap gap-2">
             <button type="button" className={secondaryButton} disabled={busy !== null} onClick={() => runCheck("test")}>{busy === "test" ? t("testing") : t("testConnection")}</button>
             <button type="button" className={secondaryButton} disabled={busy !== null} onClick={() => setEditingAccount(true)}>{t("change")}</button>
@@ -524,7 +544,9 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
     </Card> : null}
 
     {connection.connected ? <div className="flex justify-end">
-      <button type="button" disabled={busy !== null} onClick={disconnect} onBlur={() => setConfirmDisconnect(false)} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50">{confirmDisconnect ? t("disconnectConfirm") : t("disconnect")}</button>
+      <button type="button" disabled={busy !== null} onClick={disconnect} onBlur={() => setConfirmDisconnect(false)} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50">{connection.environmentProject
+        ? confirmDisconnect ? t("handBackConfirm") : t("handBack")
+        : confirmDisconnect ? t("disconnectConfirm") : t("disconnect")}</button>
     </div> : null}
   </div>;
 }

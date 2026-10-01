@@ -1280,6 +1280,7 @@ export const handleEnergyApiRequest = async (
           user,
           accessId: body.accessId,
           accessSecret: body.accessSecret,
+          takeOver: body.takeOver,
         }));
       }
       if (segments.length === 4 && action === "devices" && request.method === "GET") {

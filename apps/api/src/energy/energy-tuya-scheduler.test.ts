@@ -45,6 +45,25 @@ describe("Tuya daily scheduler", () => {
     expect(sync).not.toHaveBeenCalled();
   });
 
+  it("steps aside while an administrator has taken the Project over in the app", async () => {
+    const sync = vi.fn();
+    const resolveConnector = vi.fn();
+    const scheduler = createEnergyTuyaDailyScheduler({
+      enabled: true,
+      localHour: 1,
+      actorUserId: "dev-user",
+      context: {} as Required<ConfigApiContext>,
+      resolveConnector,
+      syncTuyaEnergyReadings: sync,
+      skip: () => true,
+      now: () => Date.parse("2026-08-21T18:00:00.000Z"),
+    });
+
+    await expect(scheduler.runIfDue()).resolves.toBe("disabled");
+    expect(resolveConnector).not.toHaveBeenCalled();
+    expect(sync).not.toHaveBeenCalled();
+  });
+
   it("aborts and drains an in-flight sync before shutdown completes", async () => {
     const root = mkdtempSync(join(tmpdir(), "energy-tuya-scheduler-stop-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });

@@ -146,8 +146,8 @@ describe("LiveConnectionPanel", () => {
     const rows = [...container.querySelectorAll("tbody tr")];
     expect(rows[0]!.textContent).toContain("Incoming 3Phase · Smart meter");
     expect(rows[1]!.textContent).toContain("Device offline");
-    expect(container.querySelector("input")).toBeNull();
-    expect(container.querySelector("select")).toBeNull();
+    expect(container.querySelector("tbody select")).toBeNull();
+    expect(container.querySelector("tbody button")).toBeNull();
     await act(async () => { button("Test connection").click(); });
     await flush();
     expect(container.textContent).toContain("Connection works. 3 devices found in this account.");
@@ -210,5 +210,39 @@ describe("LiveConnectionPanel", () => {
     expect(saves.at(-1)).toEqual({ "m-incoming": "ref-spare" });
     expect(container.textContent).toContain("Not live yet");
     expect([...container.querySelectorAll("tbody tr")][1]!.textContent).toContain("Not connected");
+  });
+
+  it("takes over a server-managed site, then offers to hand it back", async () => {
+    const takenOver = connection({
+      environmentProject: true,
+      connected: true,
+      accountHint: "abcd…ijkl",
+      ready: true,
+      matchedCount: 2,
+      meters: meters.map((meter, index) => ({ ...meter, device: { ref: devices[index]!.ref, name: devices[index]!.name } })),
+    });
+    let current = connection({ managedByServer: true, environmentProject: true, connected: true, ready: true, matchedCount: 2 });
+    const bodies: unknown[] = [];
+    api.liveConnectionRequest.mockImplementation(async (_projectId: string, action = "", init?: RequestInit) => {
+      if (action === "devices") return { devices };
+      if (action === "account") {
+        bodies.push(JSON.parse(String(init?.body)));
+        current = takenOver;
+        return { connection: current, deviceCount: 3 };
+      }
+      return { connection: current };
+    });
+    await act(async () => root.render(<LiveConnectionPanel projectId="p" />));
+    await flush();
+    expect(container.textContent).toContain("Manage this site here instead");
+    const inputs = container.querySelectorAll("input");
+    await act(async () => { setValue(inputs[0]!, "abcd1234efgh5678ijkl"); setValue(inputs[1]!, "secretsecret1234"); });
+    await act(async () => { button("Take over").click(); });
+    await flush();
+    expect(bodies).toEqual([{ accessId: "abcd1234efgh5678ijkl", accessSecret: "secretsecret1234", takeOver: true }]);
+    expect(container.textContent).toContain("This site is now managed here.");
+    expect(container.textContent).toContain("Taken over from the server settings");
+    expect(button("Hand back to server settings")).toBeTruthy();
+    expect([...container.querySelectorAll("tbody tr")][0]!.textContent).toContain("Edit");
   });
 });

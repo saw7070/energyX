@@ -1337,11 +1337,11 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
   }
   const tuyaSyncActorUserId = configuredTuyaSyncActorUserId || DEV_USER.id;
   if (tuyaSyncEnabled) metadataStore.users.getById({ user_id: tuyaSyncActorUserId });
+  const tuyaConnectorProjectId = process.env.ENERGYIQ_TUYA_CONNECTOR_PROJECT_ID?.trim() ?? "";
+  // The server settings are checked as written, even when an administrator has since taken the Project over in the
+  // app: an unfinished app connection must not stop the server from starting.
   const tuyaConnector = tuyaSyncEnabled
-    ? resolveEnergyTuyaProjectConnector({
-      metadataStore,
-      projectId: process.env.ENERGYIQ_TUYA_CONNECTOR_PROJECT_ID?.trim() ?? "",
-    })
+    ? resolveEnergyTuyaProjectConnector({ metadataStore, projectId: tuyaConnectorProjectId, source: "environment" })
     : undefined;
   const energyProjectContext = {
       authService,
@@ -1366,9 +1366,12 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
     ...(tuyaConnector ? {
       resolveConnector: () => resolveEnergyTuyaProjectConnector({
         metadataStore,
-        projectId: process.env.ENERGYIQ_TUYA_CONNECTOR_PROJECT_ID?.trim() ?? "",
+        projectId: tuyaConnectorProjectId,
+        source: "environment",
       }),
     } : {}),
+    // Once an administrator takes the Project over in the app, the app's own daily update runs it instead.
+    skip: () => Boolean(metadataStore.energyIq.liveConnectors.find(tuyaConnectorProjectId)),
     context: energyProjectContext,
     syncTuyaEnergyReadings: (syncInput) => createTuyaOpenApiClientFromEnv().syncEnergyReadings(syncInput),
     afterMaterialization: async (_materialized, beforePublish) => {

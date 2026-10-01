@@ -26,13 +26,22 @@ export const resolveEnergyTuyaProjectConnector = (input: {
   metadataStore: MetadataStore;
   projectId: string;
   env?: NodeJS.ProcessEnv;
+  /**
+   * "auto" (default): an app connection when the Project has one, the server settings otherwise. An administrator
+   * can take over the server-configured Project in the app, and from then on the app connection is the one in use.
+   * "environment": the server settings only, for the server's own start-up checks and scheduler.
+   */
+  source?: "auto" | "environment";
 }): EnergyTuyaProjectConnector => {
   const env = input.env ?? process.env;
   const configuredProjectId = env.ENERGYIQ_TUYA_CONNECTOR_PROJECT_ID?.trim();
   const configuredWorkspaceId = env.ENERGYIQ_TUYA_CONNECTOR_WORKSPACE_ID?.trim();
   const encodedBindings = env.ENERGYIQ_TUYA_DEVICE_BINDINGS_JSON?.trim();
   const environmentConfigured = Boolean(configuredProjectId && configuredWorkspaceId && encodedBindings);
-  if (environmentConfigured && input.projectId === configuredProjectId) {
+  const connection = input.source === "environment"
+    ? undefined
+    : input.metadataStore.energyIq.liveConnectors.find(input.projectId);
+  if (!connection && environmentConfigured && input.projectId === configuredProjectId) {
     const project = input.metadataStore.energyIq.getProject(input.projectId);
     if (project.workspace_id !== configuredWorkspaceId) {
       throw new Error("ENERGYIQ_TUYA_WORKSPACE_MISMATCH");
@@ -48,7 +57,6 @@ export const resolveEnergyTuyaProjectConnector = (input: {
       managedBy: "environment",
     };
   }
-  const connection = input.metadataStore.energyIq.liveConnectors.find(input.projectId);
   if (connection) {
     const project = input.metadataStore.energyIq.getProject(input.projectId);
     if (project.workspace_id !== connection.workspace_id) {

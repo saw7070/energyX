@@ -62,6 +62,8 @@ export const createEnergyTuyaDailyScheduler = (input: {
   runDeadlineMs?: number;
   /** How far back a Project that has never synced starts; the start of the Singapore month otherwise. */
   initialLookbackMs?: number;
+  /** Step aside while something else owns the Project's sync, e.g. an administrator took it over in the app. */
+  skip?: () => boolean;
 }): EnergyTuyaScheduler => {
   const now = input.now ?? Date.now;
   let timer: NodeJS.Timeout | undefined;
@@ -72,6 +74,7 @@ export const createEnergyTuyaDailyScheduler = (input: {
   const runIfDue = async (): Promise<"disabled" | "current" | "succeeded" | "failed"> => {
     if (!input.enabled) return "disabled";
     if (inFlight) return inFlight;
+    if (input.skip?.()) return "disabled";
     const controller = new AbortController();
     inFlightController = controller;
     const maxWindowMs = input.maxWindowMs ?? DEFAULT_MAX_WINDOW_MS;

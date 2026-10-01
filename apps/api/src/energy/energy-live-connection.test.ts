@@ -142,6 +142,66 @@ describe("Live connection", () => {
     });
   });
 
+  it("lets an administrator take over the server-configured Project, keeping every device, and hand it back", async () => {
+    await withLiveApi(async ({ metadata, call, devices }) => {
+      const rows = (JSON.parse(metadata.energyIq.projectSetup.listHierarchyRevisions(TUYA_OFFICE_PROJECT_ID)
+        .find((revision) => revision.id === metadata.energyIq.getProject(TUYA_OFFICE_PROJECT_ID).hierarchy_revision_id)!
+        .snapshot_json) as { meter_mapping: { rows: Array<{ id: string }> } }).meter_mapping.rows;
+      const keys = ["ENERGYIQ_TUYA_CONNECTOR_PROJECT_ID", "ENERGYIQ_TUYA_CONNECTOR_WORKSPACE_ID", "ENERGYIQ_TUYA_DEVICE_BINDINGS_JSON", "ENERGYIQ_TUYA_SYNC_ENABLED", "ENERGYIQ_TUYA_SYNC_LOCAL_HOUR"] as const;
+      const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+      Object.assign(process.env, {
+        ENERGYIQ_TUYA_CONNECTOR_PROJECT_ID: TUYA_OFFICE_PROJECT_ID,
+        ENERGYIQ_TUYA_CONNECTOR_WORKSPACE_ID: TUYA_OFFICE_WORKSPACE_ID,
+        ENERGYIQ_TUYA_DEVICE_BINDINGS_JSON: JSON.stringify(Object.fromEntries(rows.map((row, index) => [row.id, devices[index]!.id]))),
+        ENERGYIQ_TUYA_SYNC_ENABLED: "true",
+        ENERGYIQ_TUYA_SYNC_LOCAL_HOUR: "1",
+      });
+      try {
+        // Without asking to take over, the account form still refuses.
+        expect((await call("PUT", ["account"], { accessId: ACCESS_ID, accessSecret: ACCESS_SECRET })).body.error.message)
+          .toBe("ENERGYIQ_LIVE_CONNECTION_SERVER_MANAGED");
+
+        // An account that cannot see the site's devices is refused, and nothing changes.
+        const visible = devices.splice(0, devices.length);
+        devices.push(...visible.slice(2));
+        expect((await call("PUT", ["account"], { accessId: ACCESS_ID, accessSecret: ACCESS_SECRET, takeOver: true })).body.error.message)
+          .toBe("ENERGYIQ_LIVE_TAKEOVER_DEVICES_MISSING:2");
+        expect(metadata.energyIq.liveConnectors.find(TUYA_OFFICE_PROJECT_ID)).toBeUndefined();
+        devices.splice(0, devices.length, ...visible);
+
+        const taken = await call("PUT", ["account"], { accessId: ACCESS_ID, accessSecret: ACCESS_SECRET, takeOver: true });
+        expect(taken.status).toBe(200);
+        expect(taken.body.data.connection).toMatchObject({
+          managedByServer: false,
+          environmentProject: true,
+          connected: true,
+          ready: true,
+          matchedCount: rows.length,
+          schedule: { enabled: true, localHour: 1 },
+        });
+        const connector = resolveEnergyTuyaProjectConnector({ metadataStore: metadata, projectId: TUYA_OFFICE_PROJECT_ID });
+        expect(connector).toMatchObject({ managedBy: "app", credentials: { accessId: ACCESS_ID } });
+        expect(connector.devices.map((device) => device.deviceId)).toEqual(rows.map((_, index) => devices[index]!.id));
+        expect(resolveEnergyTuyaProjectConnector({ metadataStore: metadata, projectId: TUYA_OFFICE_PROJECT_ID, source: "environment" }).managedBy)
+          .toBe("environment");
+
+        // Now it is edited like any other connection: one meter can be unlinked.
+        const refs = (await call("GET", ["devices"])).body.data.devices as Array<{ ref: string; matchedTo?: string }>;
+        const keep = Object.fromEntries(refs.filter((device) => device.matchedTo && device.matchedTo !== rows[0]!.id).map((device) => [device.matchedTo!, device.ref]));
+        expect((await call("PUT", ["matches"], { matches: keep })).body.data.connection).toMatchObject({ matchedCount: rows.length - 1 });
+
+        const handedBack = await call("DELETE", []);
+        expect(handedBack.body.data.connection).toMatchObject({ managedByServer: true, environmentProject: true, matchedCount: rows.length });
+        expect(resolveEnergyTuyaProjectConnector({ metadataStore: metadata, projectId: TUYA_OFFICE_PROJECT_ID }).managedBy).toBe("environment");
+      } finally {
+        for (const key of keys) {
+          if (saved[key] === undefined) delete process.env[key];
+          else process.env[key] = saved[key];
+        }
+      }
+    });
+  });
+
   it("removes the sealed account when its Project is deleted", async () => {
     await withLiveApi(async ({ metadata }) => {
       metadata.energyIq.upsertProject({ id: "live-delete", workspace_id: TUYA_OFFICE_WORKSPACE_ID, name: "Live delete", status: "draft" });
