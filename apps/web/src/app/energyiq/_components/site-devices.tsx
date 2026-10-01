@@ -113,18 +113,33 @@ export type EnergyShare = { id: string; name: string; kwh: number; unmetered: bo
 /**
  * Splits site energy into pieces that do not overlap: individual devices, plus the part of each
  * board total that no individual meter explains. The pieces add up to the board totals.
+ *
+ * A total for one kind of use (lighting, sockets) covers the devices of that kind on its own board. An
+ * "overall" total, such as an incoming supply, covers every device on its board and on every location
+ * beneath it (`boardParents` maps a location to the one above it), so it is never listed as a device.
  */
-export function energyBreakdown(rows: DeviceRow[], boardNames: Map<string, string>, locale: EnergyIqLocale = "en"): EnergyShare[] {
+export function energyBreakdown(rows: DeviceRow[], boardNames: Map<string, string>, locale: EnergyIqLocale = "en", boardParents: Map<string, string> = new Map()): EnergyShare[] {
   const t = translatorFor(deviceMessages, locale);
   const shares: EnergyShare[] = [];
+  const within = (boardId: string, ancestorId: string) => {
+    const seen = new Set<string>();
+    for (let current: string | undefined = boardId; current && !seen.has(current); current = boardParents.get(current)) {
+      if (current === ancestorId) return true;
+      seen.add(current);
+    }
+    return false;
+  };
   for (const boardId of new Set(rows.map(row => row.boardId))) {
     const measured = rows.filter(row => row.boardId === boardId && row.usageKwh !== null);
     const devices = measured.filter(row => !row.isBoardTotal);
     for (const total of measured.filter(row => row.isBoardTotal)) {
-      const parts = devices.filter(device => device.category === total.category);
+      const parts = total.category === "overall"
+        ? rows.filter(row => !row.isBoardTotal && row.usageKwh !== null && within(row.boardId, boardId))
+        : devices.filter(device => device.category === total.category);
       if (!parts.length) { shares.push({ id: total.id, name: total.name, kwh: total.usageKwh!, unmetered: false, boardId, type: total.type }); continue; }
       const rest = total.usageKwh! - parts.reduce((sum, part) => sum + part.usageKwh!, 0);
-      if (rest > 0.05) shares.push({ id: `${total.id}:rest`, name: t("unmetered.name", { board: boardNames.get(boardId) ?? boardId, type: measurementLabel(total.category, locale).toLowerCase() }), kwh: rest, unmetered: true, boardId, type: total.type });
+      const boardName = boardNames.get(boardId) ?? boardId;
+      if (rest > 0.05) shares.push({ id: `${total.id}:rest`, name: total.category === "overall" ? t("unmetered.overall", { board: boardName }) : t("unmetered.name", { board: boardName, type: measurementLabel(total.category, locale).toLowerCase() }), kwh: rest, unmetered: true, boardId, type: total.type });
     }
     devices.forEach(device => shares.push({ id: device.id, name: device.name, kwh: device.usageKwh!, unmetered: false, boardId, type: device.type }));
   }
@@ -351,7 +366,7 @@ function DevicePicker({ rows, boardName, value, onPick }: { rows: DeviceRow[]; b
   </div>;
 }
 
-export function SiteDevices({ projectId, boardNames }: { projectId: string; boardNames: Map<string, string> }) {
+export function SiteDevices({ projectId, boardNames, boardParents }: { projectId: string; boardNames: Map<string, string>; boardParents?: Map<string, string> }) {
   const t = useMessages(deviceMessages);
   const tChart = useMessages(chartMessages);
   const { locale } = useEnergyIqLocale();
@@ -471,7 +486,7 @@ export function SiteDevices({ projectId, boardNames }: { projectId: string; boar
     const label = isSite ? t("label.wholeSite") : boardName(boardId);
     const scopeName = isSite ? t("scope.site") : label;
     const scopeKwh = analysis.summary.usageKwh;
-    const shares = energyBreakdown(rows, boardNames, locale);
+    const shares = energyBreakdown(rows, boardNames, locale, boardParents);
     const findings = siteFindings({ rows, stats, shares, siteKwh: scopeKwh, rate, openingHours, board: isSite ? null : boardName(boardId), locale, timezone: summary.timezone });
     const dailyAverage = analysis.summary.averageDailyUsageKwh;
     const offHours = analysis.offHours.status === "available" ? analysis.offHours : null;

@@ -266,6 +266,7 @@ export const deviceMessages = defineMessages({
   "boardTotal.power": "Total power for this board, including the power devices listed here",
   "boardTotal.other": "Total for this board",
   "unmetered.name": "Other {board} {type} circuits",
+  "unmetered.overall": "Not sub-metered ({board})",
 
   "finding.biggest.title": "{name} is the biggest single user",
   "finding.biggest.site": "{pct} of all energy on site: {kwh}{money} in these 28 days.",
@@ -462,6 +463,7 @@ export const deviceMessages = defineMessages({
     "boardTotal.power": "此配电箱的插座用电总量，包括此处列出的插座用电设备",
     "boardTotal.other": "此配电箱的总量",
     "unmetered.name": "{board} 其他{type}回路",
+    "unmetered.overall": "未分表计量（{board}）",
 
     "finding.biggest.title": "{name} 是用电最多的单一设备",
     "finding.biggest.site": "占整个场地用电的 {pct}：这 28 天共 {kwh}{money}。",
@@ -658,6 +660,7 @@ export const deviceMessages = defineMessages({
     "boardTotal.power": "Jumlah kuasa untuk papan agihan ini, termasuk peranti kuasa yang disenaraikan di sini",
     "boardTotal.other": "Jumlah untuk papan agihan ini",
     "unmetered.name": "Litar {type} lain di {board}",
+    "unmetered.overall": "Tidak bermeter kecil ({board})",
 
     "finding.biggest.title": "{name} ialah pengguna tunggal terbesar",
     "finding.biggest.site": "{pct} daripada semua tenaga di premis: {kwh}{money} dalam 28 hari ini.",
