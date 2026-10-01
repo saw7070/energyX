@@ -8,37 +8,42 @@ import {
   type EnergyProjectSetupDocumentDto,
   type EnergyProjectSetupDto,
 } from "../../../lib/config-api";
+import { useEnergyIqLocale, useMessages } from "../_components/energyiq-locale";
+import { translatorFor, type Translate } from "../_components/energyiq-messages";
+import { resetMeterHealthRequests } from "../_components/meter-health-notice";
+import { loadAnalysis } from "../_components/analysis-data";
 import {
   evaluateEnergyImportMaterializationGuard,
   pinEnergySourceManifest,
   sourceLabelsAcrossImportBatches,
 } from "./project-setup-model";
-import { resetMeterHealthRequests } from "../_components/meter-health-notice";
-import { loadAnalysis } from "../_components/analysis-data";
+import { importDateLocale, smartImportMessages } from "./smart-import-messages";
 import { buildSmartSetup, parseDeviceList, savedDeviceList, type SmartSetupPlan } from "./smart-setup";
 
 /**
  * Add readings files and a device list, check the result, then publish in one step.
  * Self-contained (loads and saves its own project setup) so it can sit on the Admin Data Sources page or in
  * the Facility page's Upload data dialog. Only hand-uploaded files are handled here; projects fed by a live
- * connector are left alone.
+ * connector are left alone. All wording follows the reader's language (smart-import-messages.ts).
  */
 
-const messageFrom = (reason: unknown, fallback: string): string => reason instanceof Error ? reason.message : fallback;
+type T = Translate<keyof typeof smartImportMessages.en>;
+const english: T = translatorFor(smartImportMessages, "en");
+const messageFrom = (reason: unknown): string => reason instanceof Error ? reason.message : String(reason ?? "");
 
-/** Plain-English versions of the server's error codes. */
-export const friendlyImportError = (message: string): string => {
+/** The server's error codes in the reader's language. */
+export const friendlyImportError = (message: string, t: T = english): string => {
   const column = /ENERGYIQ_EXCEL_COLUMN_REQUIRED:(.+)$/u.exec(message)?.[1];
-  if (column) return `A file is missing the "${column}" column. Each file needs Device Name, Time and Active Energy columns.`;
-  if (message.includes("FILE_ASSET_REF_NOT_FOUND")) return "One of the uploaded files can no longer be found on the server. Upload it again, then publish.";
-  if (message.includes("ENERGYIQ_EXCEL_FILE_INVALID")) return "Only .csv and .xlsx files can be uploaded.";
-  if (message.includes("ENERGYIQ_EXCEL_EMPTY")) return "That file has no rows of readings.";
-  if (/REVISION|CONFLICT/u.test(message)) return "This project's setup was changed somewhere else just now. Close and reopen this window, then try again.";
-  if (message.includes("VISION_UNAVAILABLE")) return "Reading photos needs the AI connection, which isn't set up on this server. Paste the table from Excel instead.";
-  if (message.includes("IMAGE_TYPE_UNSUPPORTED")) return "Use a PNG, JPEG or WebP image.";
-  if (message.includes("IMAGE_SIZE_INVALID")) return "That image is too large (10 MB maximum).";
-  if (message.includes("VISION_UNREADABLE") || message.includes("VISION_FAILED")) return "The photo couldn't be read. Try a clearer, straight-on photo, or paste the table instead.";
-  return `Something went wrong: ${message}`;
+  if (column) return t("errColumn", { column });
+  if (message.includes("FILE_ASSET_REF_NOT_FOUND")) return t("errFileGone");
+  if (message.includes("ENERGYIQ_EXCEL_FILE_INVALID")) return t("errFileType");
+  if (message.includes("ENERGYIQ_EXCEL_EMPTY")) return t("errEmpty");
+  if (/REVISION|CONFLICT/u.test(message)) return t("errConflict");
+  if (message.includes("VISION_UNAVAILABLE")) return t("errVisionUnavailable");
+  if (message.includes("IMAGE_TYPE_UNSUPPORTED")) return t("errImageType");
+  if (message.includes("IMAGE_SIZE_INVALID")) return t("errImageSize");
+  if (message.includes("VISION_UNREADABLE") || message.includes("VISION_FAILED")) return t("errPhoto");
+  return t("errGeneric", { message });
 };
 
 export type ImportSummary = { from?: string; to?: string; readings: number; devices: string[] };
@@ -54,22 +59,26 @@ export const summariseImport = (batches: EnergyImportBatchDto[]): ImportSummary 
   };
 };
 
-const shortDate = (value?: string): string => value
-  ? new Date(value).toLocaleDateString("en-SG", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })
+const dateIn = (dateLocale: string) => (value?: string): string => value
+  ? new Date(value).toLocaleDateString(dateLocale, { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })
   : "—";
+const numberIn = (dateLocale: string) => (value: number) => value.toLocaleString(dateLocale);
 
-const IMPORT_BLOCKER_TEXT: Record<string, string> = {
-  IMPORT_BATCH_REQUIRED: "Upload a readings file first.",
-  METER_MAPPING_NOT_CONFIRMED: "Confirm Meter Mapping.",
-  SOURCE_LABEL_UNMAPPED: "Some devices in the files are not placed yet; open Meter Mapping.",
-  MAPPING_SOURCE_INACTIVE: "Meter Mapping lists devices that are not in the uploaded files.",
-  SOURCE_LABEL_DUPLICATE: "Two devices have the same name.",
-  PROJECT_TIMEZONE_UNSAVED: "Save the project's timezone change first.",
+const BLOCKER_KEYS: Record<string, Parameters<T>[0]> = {
+  IMPORT_BATCH_REQUIRED: "blockerImport",
+  METER_MAPPING_NOT_CONFIRMED: "blockerMapping",
+  SOURCE_LABEL_UNMAPPED: "blockerUnmapped",
+  MAPPING_SOURCE_INACTIVE: "blockerInactive",
+  SOURCE_LABEL_DUPLICATE: "blockerDuplicate",
+  PROJECT_TIMEZONE_UNSAVED: "blockerTimezone",
 };
-export const explainImportBlocker = (reason: string): string => IMPORT_BLOCKER_TEXT[reason] ?? reason;
+/** Why an import cannot be built yet, in plain words (English unless a translator is given). */
+export const explainImportBlocker = (reason: string, t: T = english): string => {
+  const key = BLOCKER_KEYS[reason];
+  return key ? t(key) : reason;
+};
 
 type ImportChange = { before: ImportSummary; after: ImportSummary };
-const STEPS = ["Saving files", "Reading the data", "Publishing"] as const;
 
 export function SmartImportPanel({ projectId, onChanged, onOpenMapping }: {
   projectId: string;
@@ -78,6 +87,9 @@ export function SmartImportPanel({ projectId, onChanged, onOpenMapping }: {
   /** Where to send the admin when a new device must be placed by hand; omitted where Meter Mapping is not available. */
   onOpenMapping?: () => void;
 }) {
+  const t = useMessages(smartImportMessages);
+  const { locale } = useEnergyIqLocale();
+  const dateLocale = importDateLocale(locale);
   const [setup, setSetup] = useState<EnergyProjectSetupDto | null>(null);
   const [batches, setBatches] = useState<EnergyImportBatchDto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,11 +128,13 @@ export function SmartImportPanel({ projectId, onChanged, onOpenMapping }: {
       setBatches(imports.batches);
       return imports.batches;
     } catch (reason) {
-      setError(friendlyImportError(messageFrom(reason, "the project could not be loaded")));
+      setError(friendlyImportError(messageFrom(reason), t));
       return null;
     } finally {
       setLoading(false);
     }
+  // The translator only changes the wording of an error already shown; it must not reload the project.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   useEffect(() => { void load(); }, [load]);
@@ -135,6 +149,7 @@ export function SmartImportPanel({ projectId, onChanged, onOpenMapping }: {
     ? buildSmartSetup({ document: setup.draft.document, projectId, labels: sourceLabelsAcrossImportBatches(uploads), devices })
     : null, [devices, projectId, setup, uploads]);
   const busy = uploadingCount > 0 || step !== null;
+  const publishedSummary = summariseImport(published);
 
   const upload = async (files: File[]) => {
     setUploadingCount(files.length);
@@ -142,7 +157,7 @@ export function SmartImportPanel({ projectId, onChanged, onOpenMapping }: {
     try {
       for (const file of files) await configApi.uploadEnergyExcelImport(projectId, file);
     } catch (reason) {
-      setError(friendlyImportError(messageFrom(reason, "the file could not be checked")));
+      setError(friendlyImportError(messageFrom(reason), t));
     } finally {
       await load();
       setUploadingCount(0);
@@ -163,7 +178,7 @@ export function SmartImportPanel({ projectId, onChanged, onOpenMapping }: {
       });
       const guard = evaluateEnergyImportMaterializationGuard({ document: saved.draft.document, savedDocument: saved.draft.document, batches: uploads });
       if (!guard.ready) {
-        setError(`Can't publish yet: ${guard.reasons.map(explainImportBlocker).join(" ")}`);
+        setError(t("cantPublish", { reasons: guard.reasons.map((reason) => explainImportBlocker(reason, t)).join(" ") }));
         await load();
         return;
       }
@@ -179,14 +194,14 @@ export function SmartImportPanel({ projectId, onChanged, onOpenMapping }: {
       setDeviceListText("");
       onChanged?.();
     } catch (reason) {
-      setError(friendlyImportError(messageFrom(reason, "publishing failed")));
+      setError(friendlyImportError(messageFrom(reason), t));
       await load();
     } finally {
       setStep(null);
     }
   };
 
-  if (loading && !setup) return <p role="status" className="py-10 text-center text-sm text-muted">Loading…</p>;
+  if (loading && !setup) return <p role="status" className="py-10 text-center text-sm text-muted">{t("loading")}</p>;
 
   if (liveConnected) {
     return (
@@ -194,10 +209,8 @@ export function SmartImportPanel({ projectId, onChanged, onOpenMapping }: {
         <div className="flex items-start gap-3">
           <StatusDot tone="green" />
           <div>
-            <h3 className="text-sm font-semibold">This project updates automatically</h3>
-            <p className="mt-1 text-sm leading-6 text-muted">
-              Its readings come from the live meter connection, so there is nothing to upload. New data appears on its own.
-            </p>
+            <h3 className="text-sm font-semibold">{t("liveTitle")}</h3>
+            <p className="mt-1 text-sm leading-6 text-muted">{t("liveBody")}</p>
           </div>
         </div>
       </Card>
@@ -210,20 +223,20 @@ export function SmartImportPanel({ projectId, onChanged, onOpenMapping }: {
         <div role="alert" className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
           <span aria-hidden="true" className="mt-0.5 font-bold">!</span>
           <p className="flex-1">{error}</p>
-          <button type="button" onClick={() => setError(null)} className="text-xs font-semibold underline">Dismiss</button>
+          <button type="button" onClick={() => setError(null)} className="text-xs font-semibold underline">{t("dismiss")}</button>
         </div>
       ) : null}
       {change ? <ImportChangeSummary change={change} onDismiss={() => setChange(null)} /> : null}
 
-      <CurrentData published={published} />
+      <CurrentData published={published} t={t} dateLocale={dateLocale} />
 
       <Card>
-        <SectionTitle number={1} title="Add data files" hint="CSV or Excel exports from your meters, e.g. from the Tuya app." />
-        <DropZone uploadingCount={uploadingCount} disabled={busy} onFiles={(files) => void upload(files)} />
+        <SectionTitle number={1} title={t("addFilesTitle")} hint={t("addFilesHint")} />
+        <DropZone uploadingCount={uploadingCount} disabled={busy} onFiles={(files) => void upload(files)} t={t} />
         {waiting.length ? (
-          <ul className="mt-3 space-y-2" aria-label="Files ready to publish">
+          <ul className="mt-3 space-y-2" aria-label={t("filesReady")}>
             {waiting.map((batch) => (
-              <WaitingFile key={batch.id} batch={batch} publishedTo={summariseImport(published).to} knownDevices={summariseImport(published).devices} />
+              <WaitingFile key={batch.id} batch={batch} publishedTo={publishedSummary.to} knownDevices={publishedSummary.devices} t={t} dateLocale={dateLocale} />
             ))}
           </ul>
         ) : null}
@@ -231,53 +244,65 @@ export function SmartImportPanel({ projectId, onChanged, onOpenMapping }: {
 
       {plan ? (
         <Card>
-          <SectionTitle number={2} title="Check device names" hint="Optional. Names make charts and reports easier to read." />
-          <DeviceNames plan={plan} saved={setup ? savedDeviceList(setup.draft.document, projectId).length : 0} deviceListText={deviceListText} setDeviceListText={setDeviceListText} onError={setError} />
+          <SectionTitle number={2} title={t("namesTitle")} hint={t("namesHint")} />
+          <DeviceNames plan={plan} saved={setup ? savedDeviceList(setup.draft.document, projectId).length : 0} deviceListText={deviceListText} setDeviceListText={setDeviceListText} onError={setError} t={t} />
           {plan.unplacedLabels.length > 0 ? (
             <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
-              {plan.unplacedLabels.join(", ")} {plan.unplacedLabels.length === 1 ? "is a new device" : "are new devices"} that can't be placed automatically in this project's layout.
-              {onOpenMapping ? <> <button type="button" className="font-semibold underline" onClick={onOpenMapping}>Place {plan.unplacedLabels.length === 1 ? "it" : "them"} in Meter Mapping</button> first.</> : " Ask an administrator to place them in Admin console › Meter Mapping first."}
+              {t("unplaced", { devices: plan.unplacedLabels.join(", ") })}{" "}
+              {onOpenMapping ? <button type="button" className="font-semibold underline" onClick={onOpenMapping}>{t("placeInMapping")}</button> : t("askAdminToPlace")}
             </p>
           ) : null}
         </Card>
       ) : null}
 
-      {plan ? <PublishBar plan={plan} waiting={waiting} devicesTyped={devices.length} step={step} busy={busy} onPublish={() => void publish(plan.document)} /> : null}
+      {plan ? <PublishBar plan={plan} waiting={waiting} devicesTyped={devices.length} step={step} busy={busy} onPublish={() => void publish(plan.document)} t={t} dateLocale={dateLocale} /> : null}
     </div>
   );
 }
 
 /** One uploaded file: what it contains, and what it adds beyond the data already published. */
-export const describeFileCoverage = (batch: EnergyImportBatchDto, publishedTo: string | undefined, knownDevices: string[]) => {
+export const describeFileCoverage = (
+  batch: EnergyImportBatchDto,
+  publishedTo: string | undefined,
+  knownDevices: string[],
+  t: T = english,
+  dateLocale = "en-SG",
+): { tone: "new" | "warning"; text: string; detail?: string } => {
+  const date = dateIn(dateLocale);
   const from = batch.inspection.coverageFrom;
   const to = batch.inspection.coverageTo;
   const devices = batch.inspection.sourceLabels.map((label) => label.label);
   const newDevices = devices.filter((device) => !knownDevices.includes(device));
-  if (!from || !to) return { tone: "warning" as const, text: "No readable dates were found in this file." };
+  if (!from || !to) return { tone: "warning", text: t("coverageNoDates") };
   if (!publishedTo || from > publishedTo) {
-    return { tone: "new" as const, text: `New data: ${shortDate(from)} – ${shortDate(to)}`, detail: `${devices.length} devices${newDevices.length ? `, ${newDevices.length} new` : ""}` };
+    return {
+      tone: "new",
+      text: t("coverageNew", { from: date(from), to: date(to) }),
+      detail: newDevices.length ? t("coverageDevicesNew", { count: devices.length, new: newDevices.length }) : t("coverageDevices", { count: devices.length }),
+    };
   }
   if (to <= publishedTo) {
     return newDevices.length
-      ? { tone: "new" as const, text: `Adds ${newDevices.length} new device${newDevices.length === 1 ? "" : "s"}`, detail: `dates ${shortDate(from)} – ${shortDate(to)} are already loaded for the others` }
-      : { tone: "warning" as const, text: "Nothing new: every date in this file is already loaded", detail: `${shortDate(from)} – ${shortDate(to)}` };
+      ? { tone: "new", text: newDevices.length === 1 ? t("coverageAddsDevicesOne") : t("coverageAddsDevicesMany", { count: newDevices.length }), detail: t("coverageOthersLoaded", { from: date(from), to: date(to) }) }
+      : { tone: "warning", text: t("coverageNothingNew"), detail: `${date(from)} – ${date(to)}` };
   }
   // New readings start one interval after the last published one (a last reading at 23:45 means the next day).
   const newFrom = new Date(Date.parse(publishedTo) + (batch.inspection.typicalIntervalMinutes ?? 15) * 60_000).toISOString();
   return {
-    tone: "new" as const,
-    text: `New data: ${shortDate(newFrom)} – ${shortDate(to)}`,
-    detail: `${shortDate(from)} – ${shortDate(publishedTo)} is already loaded and won't be counted twice`,
+    tone: "new",
+    text: t("coverageNew", { from: date(newFrom), to: date(to) }),
+    detail: t("coverageOverlap", { from: date(from), to: date(publishedTo) }),
   };
 };
 
-function WaitingFile({ batch, publishedTo, knownDevices }: { batch: EnergyImportBatchDto; publishedTo?: string; knownDevices: string[] }) {
-  const coverage = describeFileCoverage(batch, publishedTo, knownDevices);
+function WaitingFile({ batch, publishedTo, knownDevices, t, dateLocale }: { batch: EnergyImportBatchDto; publishedTo?: string; knownDevices: string[]; t: T; dateLocale: string }) {
+  const coverage = describeFileCoverage(batch, publishedTo, knownDevices, t, dateLocale);
+  const date = dateIn(dateLocale);
   return (
     <li className={`rounded-lg px-3 py-2 text-xs ${coverage.tone === "warning" ? "bg-amber-50 text-amber-900" : "bg-surface-subtle"}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="min-w-0 truncate font-medium">{batch.filename}</span>
-        <span className="text-muted">File covers {shortDate(batch.inspection.coverageFrom)} – {shortDate(batch.inspection.coverageTo)}</span>
+        <span className="text-muted">{t("fileCovers", { from: date(batch.inspection.coverageFrom), to: date(batch.inspection.coverageTo) })}</span>
       </div>
       <p className="mt-1">
         <span className={`font-semibold ${coverage.tone === "new" ? "text-emerald-800" : ""}`}>{coverage.text}</span>
@@ -307,24 +332,25 @@ function StatusDot({ tone }: { tone: "green" | "grey" }) {
   return <span aria-hidden="true" className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${tone === "green" ? "bg-emerald-500" : "bg-slate-300"}`} />;
 }
 
-function CurrentData({ published }: { published: EnergyImportBatchDto[] }) {
+function CurrentData({ published, t, dateLocale }: { published: EnergyImportBatchDto[]; t: T; dateLocale: string }) {
   const summary = summariseImport(published);
+  const date = dateIn(dateLocale);
   return (
     <div className="flex items-center gap-3 rounded-2xl border border-border bg-surface px-5 py-4">
       <StatusDot tone={published.length ? "green" : "grey"} />
       {published.length ? (
         <p className="text-sm">
-          <span className="font-semibold">Live data: {shortDate(summary.from)} – {shortDate(summary.to)}</span>
-          <span className="text-muted"> · {summary.devices.length} devices · {summary.readings.toLocaleString("en-SG")} readings</span>
+          <span className="font-semibold">{t("liveData", { from: date(summary.from), to: date(summary.to) })}</span>
+          <span className="text-muted"> · {t("liveDetail", { devices: summary.devices.length, readings: numberIn(dateLocale)(summary.readings) })}</span>
         </p>
       ) : (
-        <p className="text-sm"><span className="font-semibold">No data yet.</span><span className="text-muted"> Add your first files below.</span></p>
+        <p className="text-sm"><span className="font-semibold">{t("noData")}</span><span className="text-muted"> {t("noDataHint")}</span></p>
       )}
     </div>
   );
 }
 
-function DropZone({ uploadingCount, disabled, onFiles }: { uploadingCount: number; disabled: boolean; onFiles: (files: File[]) => void }) {
+function DropZone({ uploadingCount, disabled, onFiles, t }: { uploadingCount: number; disabled: boolean; onFiles: (files: File[]) => void; t: T }) {
   const [over, setOver] = useState(false);
   const accept = (list: FileList | null | undefined) => {
     const files = [...(list ?? [])].filter((file) => /\.(csv|xlsx)$/iu.test(file.name));
@@ -345,11 +371,11 @@ function DropZone({ uploadingCount, disabled, onFiles }: { uploadingCount: numbe
           <path d="M12 16V4m0 0-4 4m4-4 4 4M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
         </svg>
         {uploadingCount ? (
-          <p className="text-sm font-semibold">Checking {uploadingCount} file{uploadingCount === 1 ? "" : "s"}…</p>
+          <p className="text-sm font-semibold">{uploadingCount === 1 ? t("checkingOne") : t("checkingMany", { count: uploadingCount })}</p>
         ) : (
           <>
-            <p className="text-sm font-semibold">Drag files here, or <span className="text-primary underline underline-offset-2">choose files</span></p>
-            <p className="text-xs text-muted">.csv or .xlsx · you can select several at once · overlapping dates are fine</p>
+            <p className="text-sm font-semibold">{t("dropTitle")} <span className="text-primary underline underline-offset-2">{t("chooseFiles")}</span></p>
+            <p className="text-xs text-muted">{t("dropHint")}</p>
           </>
         )}
         <input
@@ -362,20 +388,21 @@ function DropZone({ uploadingCount, disabled, onFiles }: { uploadingCount: numbe
         />
       </label>
       <details className="mt-2 text-xs text-muted">
-        <summary className="cursor-pointer select-none">What should the files look like?</summary>
-        <p className="mt-2">Each file needs three columns: <strong>Device Name</strong>, <strong>Time</strong> and <strong>Active Energy</strong> (the meter's running kWh total). Other columns are ignored. Tuya exports already have these.</p>
+        <summary className="cursor-pointer select-none">{t("formatQuestion")}</summary>
+        <p className="mt-2">{t("formatAnswer")}</p>
         <pre className="mt-2 overflow-x-auto rounded-lg bg-surface-subtle px-3 py-2 font-mono text-[11px]">{"Device Name,Time,Active Energy\nMain DB,2026-09-01 00:00,10234.5\nMain DB,2026-09-01 00:15,10235.0"}</pre>
       </details>
     </div>
   );
 }
 
-function DeviceNames({ plan, saved, deviceListText, setDeviceListText, onError }: {
+function DeviceNames({ plan, saved, deviceListText, setDeviceListText, onError, t }: {
   plan: SmartSetupPlan;
   saved: number;
   deviceListText: string;
   setDeviceListText: (value: string) => void;
   onError: (message: string) => void;
+  t: T;
 }) {
   const [editing, setEditing] = useState(false);
   const [showAll, setShowAll] = useState(plan.mode === "new");
@@ -386,42 +413,47 @@ function DeviceNames({ plan, saved, deviceListText, setDeviceListText, onError }
     setReading(true);
     try {
       const result = await configApi.extractEnergyDeviceListFromImage(file);
-      if (result.devices.length === 0) onError("No device table was found in that image. Try a clearer photo, or paste the table instead.");
+      if (result.devices.length === 0) onError(t("noTableInPhoto"));
       else setDeviceListText(["Code\tItems", ...result.devices.map((device) => `${device.code}\t${device.description}`)].join("\n"));
     } catch (reason) {
-      onError(friendlyImportError(messageFrom(reason, "the photo could not be read")));
+      onError(friendlyImportError(messageFrom(reason), t));
     } finally {
       setReading(false);
     }
   };
   const rows = showAll ? plan.rows : plan.rows.filter((row) => row.status !== "existing");
+  const summary = [
+    t("namedCount", { count: named }),
+    saved ? t("listSaved") : "",
+    total ? t("isSiteTotal", { name: total.sourceLabel }) : "",
+  ].filter(Boolean).join(" · ");
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-surface-subtle px-4 py-3">
         <p className="text-sm">
-          <span className="font-semibold">{plan.rows.length} devices</span>
-          <span className="text-muted"> · {named} named{saved ? ` · name list saved with this project` : ""}{total ? ` · ${total.sourceLabel} is the site total` : ""}</span>
+          <span className="font-semibold">{t("devicesCount", { count: plan.rows.length })}</span>
+          <span className="text-muted"> · {summary}</span>
         </p>
         <button type="button" onClick={() => setEditing((value) => !value)} className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold hover:bg-surface-subtle">
-          {editing ? "Done" : "Add or change names"}
+          {editing ? t("doneNames") : t("editNames")}
         </button>
       </div>
 
       {editing ? (
         <div className="rounded-xl border border-border p-4">
-          <p className="text-xs text-muted">Copy your device table from Excel (code, then what it powers) and paste it below, or use one of the buttons.</p>
+          <p className="text-xs text-muted">{t("pasteHelp")}</p>
           <textarea
             autoFocus
             value={deviceListText}
             onChange={(event) => setDeviceListText(event.target.value)}
             rows={5}
             placeholder={"A18P\tCoffee machine x1, Warmer machine x1\nB2R\tBalcony light x1, Toilet light x3"}
-            aria-label="Device list"
+            aria-label={t("deviceList")}
             className="mt-2 w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-xs outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
           />
           <div className="mt-2 flex flex-wrap gap-2">
-            <FileButton label={reading ? "Reading photo…" : "Read from a photo"} accept="image/png,image/jpeg,image/webp" disabled={reading} onFile={(file) => void readPhoto(file)} />
-            <FileButton label="Load a CSV" accept=".csv,.txt,text/csv,text/plain" onFile={(file) => void file.text().then(setDeviceListText)} />
+            <FileButton label={reading ? t("readingPhoto") : t("readPhoto")} accept="image/png,image/jpeg,image/webp" disabled={reading} onFile={(file) => void readPhoto(file)} />
+            <FileButton label={t("loadCsv")} accept=".csv,.txt,text/csv,text/plain" onFile={(file) => void file.text().then(setDeviceListText)} />
           </div>
         </div>
       ) : null}
@@ -430,7 +462,7 @@ function DeviceNames({ plan, saved, deviceListText, setDeviceListText, onError }
         <div className="overflow-hidden rounded-xl border border-border">
           <table className="w-full text-left text-sm">
             <thead className="bg-surface-subtle text-xs text-muted">
-              <tr><th className="px-4 py-2 font-medium">Device</th><th className="px-4 py-2 font-medium">Shown as</th><th className="px-4 py-2 font-medium">Location</th></tr>
+              <tr><th className="px-4 py-2 font-medium">{t("columnDevice")}</th><th className="px-4 py-2 font-medium">{t("columnShownAs")}</th><th className="px-4 py-2 font-medium">{t("columnLocation")}</th></tr>
             </thead>
             <tbody className="divide-y divide-border">
               {rows.map((row) => (
@@ -438,10 +470,10 @@ function DeviceNames({ plan, saved, deviceListText, setDeviceListText, onError }
                   <td className="px-4 py-2 font-mono text-xs">{row.sourceLabel}</td>
                   <td className="px-4 py-2">
                     {row.displayName}
-                    {row === total ? <Badge>Site total</Badge> : null}
-                    {row.status === "new" && plan.mode === "update" ? <Badge tone="green">New</Badge> : null}
+                    {row === total ? <Badge>{t("badgeSiteTotal")}</Badge> : null}
+                    {row.status === "new" && plan.mode === "update" ? <Badge tone="green">{t("badgeNew")}</Badge> : null}
                   </td>
-                  <td className="px-4 py-2 text-muted">{row.location}</td>
+                  <td className="px-4 py-2 text-muted">{row.status === "needs_placement" ? t("notPlaced") : row.location}</td>
                 </tr>
               ))}
             </tbody>
@@ -450,7 +482,7 @@ function DeviceNames({ plan, saved, deviceListText, setDeviceListText, onError }
       ) : null}
       {plan.rows.length > rows.length || (showAll && plan.mode === "update") ? (
         <button type="button" onClick={() => setShowAll((value) => !value)} className="text-xs font-semibold text-primary hover:underline">
-          {showAll ? "Show only new devices" : `Show all ${plan.rows.length} devices`}
+          {showAll ? t("showOnlyNew") : t("showAll", { count: plan.rows.length })}
         </button>
       ) : null}
     </div>
@@ -474,31 +506,38 @@ function Badge({ children, tone = "grey" }: { children: ReactNode; tone?: "grey"
   return <span className={`ml-2 rounded-full px-2 py-0.5 text-[10px] font-semibold ${tone === "green" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-700"}`}>{children}</span>;
 }
 
-function PublishBar({ plan, waiting, devicesTyped, step, busy, onPublish }: {
+function PublishBar({ plan, waiting, devicesTyped, step, busy, onPublish, t, dateLocale }: {
   plan: SmartSetupPlan;
   waiting: EnergyImportBatchDto[];
   devicesTyped: number;
   step: number | null;
   busy: boolean;
   onPublish: () => void;
+  t: T;
+  dateLocale: string;
 }) {
+  const date = dateIn(dateLocale);
+  const steps = [t("stepSaving"), t("stepReading"), t("stepPublishing")];
   const nothingToDo = plan.mode === "update" && !plan.upgraded && devicesTyped === 0 && plan.newLabels.length === 0 && waiting.length === 0;
   const blocked = plan.unplacedLabels.length > 0;
   const range = summariseImport(waiting);
+  const span = { from: date(range.from), to: date(range.to) };
   const description = plan.mode === "new"
-    ? `Sets up ${plan.rows.length} devices and publishes data from ${shortDate(range.from)} to ${shortDate(range.to)}.`
+    ? t("publishNew", { count: plan.rows.length, ...span })
     : waiting.length
-      ? `Adds ${waiting.length} file${waiting.length === 1 ? "" : "s"} (${shortDate(range.from)} – ${shortDate(range.to)})${plan.newLabels.length ? ` and ${plan.newLabels.length} new device${plan.newLabels.length === 1 ? "" : "s"}` : ""}.`
+      ? plan.newLabels.length
+        ? t("publishFilesDevices", { count: waiting.length, devices: plan.newLabels.length, ...span })
+        : waiting.length === 1 ? t("publishFilesOne", span) : t("publishFilesMany", { count: waiting.length, ...span })
       : devicesTyped
-        ? "Updates the device names."
+        ? t("publishNames")
         : plan.upgraded
-          ? "Updates this project so reports list every circuit."
-          : "Everything is already published. Add newer files to extend the data.";
+          ? t("publishUpgrade")
+          : t("publishNothing");
   return (
     <div className="sticky bottom-0 rounded-2xl border border-border bg-surface px-5 py-4 shadow-[0_-8px_24px_-16px_rgba(16,24,20,0.25)]">
       {step !== null ? (
-        <ol className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm" aria-label="Publishing progress">
-          {STEPS.map((label, index) => (
+        <ol className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm" aria-label={t("progress")}>
+          {steps.map((label, index) => (
             <li key={label} className={`flex items-center gap-2 ${index <= step ? "text-foreground" : "text-muted"}`}>
               <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${index < step ? "bg-emerald-500 text-white" : index === step ? "bg-primary text-white" : "bg-slate-200 text-slate-500"}`}>
                 {index < step ? "✓" : index + 1}
@@ -509,14 +548,14 @@ function PublishBar({ plan, waiting, devicesTyped, step, busy, onPublish }: {
         </ol>
       ) : (
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className={`text-sm ${nothingToDo ? "text-muted" : ""}`}>{blocked ? "Place the new devices first, then publish." : description}</p>
+          <p className={`text-sm ${nothingToDo ? "text-muted" : ""}`}>{blocked ? t("publishBlocked") : description}</p>
           <button
             type="button"
             onClick={onPublish}
             disabled={busy || nothingToDo || blocked}
             className="inline-flex h-10 items-center justify-center rounded-lg bg-primary px-5 text-sm font-semibold text-white hover:bg-primary-light disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {plan.mode === "new" ? "Set up & publish" : "Publish"}
+            {plan.mode === "new" ? t("setUpAndPublish") : t("publish")}
           </button>
         </div>
       )}
@@ -525,22 +564,27 @@ function PublishBar({ plan, waiting, devicesTyped, step, busy, onPublish }: {
 }
 
 export function ImportChangeSummary({ change, onDismiss }: { change: ImportChange; onDismiss: () => void }) {
+  const t = useMessages(smartImportMessages);
+  const { locale } = useEnergyIqLocale();
+  const dateLocale = importDateLocale(locale);
+  const date = dateIn(dateLocale);
+  const number = numberIn(dateLocale);
   const { before, after } = change;
   const newDevices = after.devices.filter((device) => !before.devices.includes(device));
   const addedReadings = Math.max(0, after.readings - before.readings);
   const stats = [
-    { label: "Data now covers", value: `${shortDate(after.from)} – ${shortDate(after.to)}`, note: before.to ? `was up to ${shortDate(before.to)}` : "first import" },
-    { label: "Readings added", value: addedReadings.toLocaleString("en-SG"), note: `${after.readings.toLocaleString("en-SG")} in total` },
-    { label: "Devices", value: String(after.devices.length), note: newDevices.length ? `${newDevices.length} new: ${newDevices.slice(0, 4).join(", ")}${newDevices.length > 4 ? "…" : ""}` : "no new devices" },
+    { label: t("statCovers"), value: `${date(after.from)} – ${date(after.to)}`, note: before.to ? t("wasUpTo", { date: date(before.to) }) : t("firstImport") },
+    { label: t("statReadings"), value: number(addedReadings), note: t("inTotal", { count: number(after.readings) }) },
+    { label: t("statDevices"), value: String(after.devices.length), note: newDevices.length ? t("newDevicesList", { count: newDevices.length, list: `${newDevices.slice(0, 4).join(", ")}${newDevices.length > 4 ? "…" : ""}` }) : t("noNewDevices") },
   ];
   return (
-    <section className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-5" aria-label="What changed">
+    <section className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-5" aria-label={t("whatChanged")}>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h3 className="text-base font-semibold text-emerald-900">Published</h3>
-          <p className="mt-1 text-xs text-emerald-800">Overview, Analysis and reports now use the updated data.</p>
+          <h3 className="text-base font-semibold text-emerald-900">{t("published")}</h3>
+          <p className="mt-1 text-xs text-emerald-800">{t("publishedBody")}</p>
         </div>
-        <button type="button" onClick={onDismiss} className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-900 hover:bg-emerald-50">Dismiss</button>
+        <button type="button" onClick={onDismiss} className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-900 hover:bg-emerald-50">{t("dismiss")}</button>
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
         {stats.map((stat) => (

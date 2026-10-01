@@ -2180,7 +2180,7 @@ function DataSourcesPage({
       const saved = await persistDocument({ ...base, source_manifest: sourceManifest });
       const guard = evaluateEnergyImportMaterializationGuard({ document: saved, savedDocument: saved, batches });
       if (!guard.ready) {
-        setImportError(`Can't import yet: ${guard.reasons.map(explainImportBlocker).join(" ")}`);
+        setImportError(`Can't import yet: ${guard.reasons.map((reason) => explainImportBlocker(reason)).join(" ")}`);
         return;
       }
       setApplyStep("Building readings (2 of 3)…");

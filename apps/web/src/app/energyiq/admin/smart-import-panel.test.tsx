@@ -101,3 +101,18 @@ describe("what a new file adds", () => {
   });
 });
 
+
+describe("reader's language", () => {
+  it("writes file summaries and errors in Chinese and Malay", async () => {
+    const { translatorFor } = await import("../_components/energyiq-messages");
+    const { smartImportMessages, importDateLocale } = await import("./smart-import-messages");
+    const zh = translatorFor(smartImportMessages, "zh-Hans");
+    const ms = translatorFor(smartImportMessages, "ms");
+    const value = batch("x", "excel", "inspected", ["A18P"]);
+    const file = { ...value, inspection: { ...value.inspection, coverageFrom: "2026-09-01T00:00:00Z", coverageTo: "2026-09-05T00:00:00Z" } } as never;
+    expect(describeFileCoverage(file, "2026-09-11T00:00:00Z", ["A18P"], zh, importDateLocale("zh-Hans")).text).toBe("没有新内容：此文件中的所有日期都已载入");
+    expect(describeFileCoverage(file, undefined, [], ms, importDateLocale("ms")).text).toMatch(/^Data baharu: /);
+    expect(friendlyImportError("ENERGYIQ_EXCEL_FILE_INVALID", zh)).toBe("只能上传 .csv 和 .xlsx 文件。");
+    expect(friendlyImportError("ENERGYIQ_EXCEL_COLUMN_REQUIRED:Time", ms)).toContain("\"Time\"");
+  });
+});
