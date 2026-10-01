@@ -14,6 +14,7 @@ import {
   sourceLabelsAcrossImportBatches,
 } from "./project-setup-model";
 import { resetMeterHealthRequests } from "../_components/meter-health-notice";
+import { loadAnalysis } from "../_components/analysis-data";
 import { buildSmartSetup, parseDeviceList, savedDeviceList, type SmartSetupPlan } from "./smart-setup";
 
 /**
@@ -172,6 +173,8 @@ export function SmartImportPanel({ projectId, onChanged, onOpenMapping }: {
       await configApi.applyEnergyProjectChanges(projectId);
       const after = (await load())?.filter((batch) => batch.sourceKind === "excel") ?? uploads;
       resetMeterHealthRequests();
+      // Warm the Overview report for the new data in the background, so its first visit is quick.
+      void loadAnalysis(projectId, { kind: "latest-28" }).catch(() => undefined);
       setChange({ before, after: summariseImport(after) });
       setDeviceListText("");
       onChanged?.();

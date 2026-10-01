@@ -49,6 +49,23 @@ export const energySnapshotGuardSql = (scope: EnergySnapshotGuardScope): string 
   WHERE state.project_id = ${sqlLiteral(scope.projectId)}
 )`;
 
+/**
+ * Receipt-only guard: the state row must still pin this snapshot, digest and sources, without re-hashing
+ * every fact row. Only valid for a read in the same transaction as an earlier read that passed
+ * {@link energySnapshotGuardSql}, which already proved the facts match the digest for that transaction.
+ */
+export const energySnapshotReceiptGuardSql = (scope: EnergySnapshotGuardScope): string => `(
+  SELECT CASE
+    WHEN COUNT(*) = 0 THEN error('ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE')
+    WHEN bool_or(state.data_snapshot_id <> ${sqlLiteral(scope.dataSnapshotId)})
+      THEN error('ENERGYIQ_SNAPSHOT_STALE')
+    WHEN bool_and(${energySnapshotReceiptPredicateSql(scope, "state")}) THEN TRUE
+    ELSE error('ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE')
+  END
+  FROM energy_project_fact_state state
+  WHERE state.project_id = ${sqlLiteral(scope.projectId)}
+)`;
+
 const energySnapshotReceiptPredicateSql = (
   scope: EnergySnapshotGuardScope,
   alias: string,

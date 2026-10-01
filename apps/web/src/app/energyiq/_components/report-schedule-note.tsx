@@ -23,7 +23,7 @@ export function ReportScheduleNote({ projectId, schedule: given, canSee = true, 
   useEffect(() => {
     if (!fetching) { setLoaded(null); return; }
     const controller = new AbortController();
-    configApi.reportAgentRequest<{ settings: Schedule }>(projectId, "", { signal: controller.signal })
+    configApi.reportAgentRequest<{ settings: Schedule }>(projectId, "context", { signal: controller.signal })
       .then(data => { if (!controller.signal.aborted) setLoaded(data.settings); })
       .catch(() => undefined);
     return () => controller.abort();

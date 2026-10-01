@@ -60,9 +60,14 @@ export async function handleReportApi(request: IncomingMessage, segments: string
         files: canManageProject ? context.fileAssetService.listRefs({ user_id: context.userId, workspace_id: context.workspaceId, limit: 100 }).map(({ ref, asset }) => ({ id: ref.id, filename: ref.filename, bytes: asset.size_bytes })) : [],
       });
     }
-    // Just the project notes, for pages (e.g. Facility) that do not need report history, files or skills.
+    // Just the project notes and report schedule, for pages (Facility, Overview) that do not need report
+    // history, files, skills or available report periods, which are slow to build.
     if (action === "context" && segments.length === 2 && request.method === "GET") {
-      return ok({ contextNotes: canManageProject ? settings.contextNotes : "", revision: settings.revision });
+      return ok({
+        contextNotes: canManageProject ? settings.contextNotes : "",
+        revision: settings.revision,
+        settings: { frequency: settings.frequency, localHour: settings.localHour, timezone: settings.timezone },
+      });
     }
     if (action === "skills" && segments.length === 2 && request.method === "GET") return ok({ skills: reportSkillCatalog(context, settings, canManageProject) });
     if (action === "skills" && segments.length === 2 && request.method === "POST") {

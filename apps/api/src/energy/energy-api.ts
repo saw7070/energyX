@@ -159,6 +159,25 @@ import {
 const EXPLORER_ANALYSIS_CACHE_LIMIT = 100;
 const explorerAnalysisCache = new Map<string, EnergyScopeAnalysis>();
 const explorerAnchoredWindowCache = new Map<string, { localFrom: string; localTo: string }>();
+// Identical analyses requested at the same time (several panels on one page, a double render, two people)
+// share one computation instead of queueing duplicates on the project's DuckDB file.
+const explorerAnalysisInFlight = new Map<string, Promise<EnergyScopeAnalysis>>();
+const explorerAnchoredWindowInFlight = new Map<string, Promise<{ localFrom: string; localTo: string } | null>>();
+const shareInFlight = <T>(inFlight: Map<string, Promise<T>>, key: string | null, run: () => Promise<T>): Promise<T> => {
+  if (!key) return run();
+  const pending = inFlight.get(key);
+  if (pending) return pending;
+  const next = run().finally(() => inFlight.delete(key));
+  inFlight.set(key, next);
+  return next;
+};
+/** Map lookup that keeps recently used entries from being evicted first. */
+const touch = <T>(cache: Map<string, T>, key: string | null): T | undefined => {
+  if (!key) return undefined;
+  const value = cache.get(key);
+  if (value !== undefined) { cache.delete(key); cache.set(key, value); }
+  return value;
+};
 
 type EnergyApiDependencies = {
   selectCurrentOverviewPeriod: typeof selectEnergyCurrentOverviewPeriod;
@@ -2418,11 +2437,9 @@ export const handleEnergyApiRequest = async (
             projectReleaseId: preliminaryRun.projectRelease?.id ?? null,
           })
         : null;
-      const cachedAnchoredWindow = explorerAnchoredWindowCacheKey
-        ? explorerAnchoredWindowCache.get(explorerAnchoredWindowCacheKey)
-        : undefined;
+      const cachedAnchoredWindow = touch(explorerAnchoredWindowCache, explorerAnchoredWindowCacheKey);
       const resolvedAnchoredWindow = cachedAnchoredWindow ?? (explorerAnchoredWindow
-        ? await resolveExplorerAnchoredWindow({
+        ? await shareInFlight(explorerAnchoredWindowInFlight, explorerAnchoredWindowCacheKey, () => resolveExplorerAnchoredWindow({
             metadataStore: context.metadataStore,
             dataGateway: context.dataGateway,
             userId: context.userId,
@@ -2431,7 +2448,7 @@ export const handleEnergyApiRequest = async (
               || query.analysisWindow === "current-month-to-date"
               ? query.analysisWindow
               : "latest-complete-day",
-          })
+          }))
         : null);
       if (explorerAnchoredWindowCacheKey && resolvedAnchoredWindow && !cachedAnchoredWindow) {
         explorerAnchoredWindowCache.set(explorerAnchoredWindowCacheKey, resolvedAnchoredWindow);
@@ -2476,10 +2493,8 @@ export const handleEnergyApiRequest = async (
             projectReleaseId: preliminaryRun.projectRelease?.id ?? null,
           })
         : null;
-      const cachedExplorerAnalysis = explorerCacheKey
-        ? explorerAnalysisCache.get(explorerCacheKey)
-        : undefined;
-      const analysis = cachedExplorerAnalysis ?? await executeEnergyScopeAnalysisWithLatestAvailable({
+      const cachedExplorerAnalysis = touch(explorerAnalysisCache, explorerCacheKey);
+      const analysis = cachedExplorerAnalysis ?? await shareInFlight(explorerAnalysisInFlight, explorerCacheKey, () => executeEnergyScopeAnalysisWithLatestAvailable({
           metadataStore: context.metadataStore,
           dataGateway: context.dataGateway,
           userId: context.userId,
@@ -2487,7 +2502,7 @@ export const handleEnergyApiRequest = async (
           ...(isRecord(body) && body.surface === "project-explorer"
             ? { profile: "explorer" as const }
             : {}),
-        });
+        }));
       if (explorerCacheKey && !cachedExplorerAnalysis) {
         explorerAnalysisCache.set(explorerCacheKey, analysis);
         while (explorerAnalysisCache.size > EXPLORER_ANALYSIS_CACHE_LIMIT) {

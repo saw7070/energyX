@@ -14,6 +14,7 @@ import {
 import {
   assertEnergySnapshotReceipt,
   energySnapshotGuardSql,
+  energySnapshotReceiptGuardSql,
   type EnergySnapshotGuardScope,
   type EnergySnapshotIdentityScope,
 } from "./energy-snapshot-guard.js";
@@ -308,6 +309,10 @@ export const readEnergyReportingCoverage = async (input: {
         AND resource = ${sqlLiteral(input.resource)}
         AND lower(source_sha256) IN (${factScope.sourceSha256.map(sqlLiteral).join(", ")})`;
   try {
+    // Both reads share one transaction, so they see exactly the same facts. The first re-hashes every
+    // fact row against the snapshot digest; the second then needs only the receipt check, saving a
+    // second full re-hash (~0.6 s on a typical project) without weakening the guarantee.
+    await duckDbRun(connection, "BEGIN TRANSACTION");
     const meterRows = await duckDbAll(connection, `
       WITH snapshot_guard AS MATERIALIZED (
         SELECT ${snapshotGuardSql(factScope)} AS snapshot_valid
@@ -335,7 +340,7 @@ export const readEnergyReportingCoverage = async (input: {
 
     const dayRows = await duckDbAll(connection, `
       WITH snapshot_guard AS MATERIALIZED (
-        SELECT ${snapshotGuardSql(factScope)} AS snapshot_valid
+        SELECT ${energySnapshotReceiptGuardSql(factScope)} AS snapshot_valid
       )
       SELECT
         CAST(local_date AS VARCHAR) AS local_date,
@@ -364,6 +369,8 @@ export const readEnergyReportingCoverage = async (input: {
       days,
     };
   } finally {
+    // Read-only: nothing to commit.
+    await duckDbRun(connection, "ROLLBACK").catch(() => undefined);
     await duckDbClose(connection).catch(ignoreAlreadyClosed);
   }
 };

@@ -113,6 +113,10 @@ async function reportProblem(reason: unknown, projectId: string, t: ReturnType<t
  * disagree. The report is written in the reader's language; switching language rewrites it from the same readings
  * without loading them again.
  */
+/** The last report per project and dates, shown at once on return while a fresh one loads. */
+const REPORT_CACHE_MS = 5 * 60_000;
+const reportCache = new Map<string, { at: number; value: Exclude<Loaded, null> }>();
+
 export function useSiteReport(projectId: string, period: Period, enabled = true) {
   const { locale } = useEnergyIqLocale();
   const t = useMessages(siteReportMessages);
@@ -122,11 +126,14 @@ export function useSiteReport(projectId: string, period: Period, enabled = true)
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
-    setLoaded(null);
+    const cacheKey = `${projectId}|${from ?? ""}|${to ?? ""}`;
+    const cached = reportCache.get(cacheKey);
+    setLoaded(cached && Date.now() - cached.at < REPORT_CACHE_MS ? cached.value : null);
+    const keep = (value: Exclude<Loaded, null>) => { if (!("error" in value)) reportCache.set(cacheKey, { at: Date.now(), value }); };
     // The saved report comes first: it is the one in Reports, and everyone opening the page sees the same one.
     loadSavedSiteReport(projectId).catch(() => null).then(saved => {
       if (cancelled) return;
-      if (saved) { setLoaded(saved); return null; }
+      if (saved) { keep(saved); setLoaded(saved); return null; }
       return Promise.all([
         loadAnalysis(projectId, from && to ? { kind: "custom", from, to } : { kind: "latest-28" }),
         // Project notes hold the floor layout; without them the report shows a zone table instead of the map.
@@ -134,7 +141,9 @@ export function useSiteReport(projectId: string, period: Period, enabled = true)
       ]).then(([data, notes]) => {
         if (cancelled) return;
         if (!data.current.project.dates.length || !data.current.project.total) { setLoaded({ error: { title: t("problem.noReadings"), steps: [t("problem.noReadingsStep")] } }); return; }
-        setLoaded({ data, reference: readProjectSpatialReference(notes, projectId)?.reference ?? null, generatedAt: new Date().toISOString(), saved: null, dataToExclusive: null });
+        const built = { data, reference: readProjectSpatialReference(notes, projectId)?.reference ?? null, generatedAt: new Date().toISOString(), saved: null, dataToExclusive: null };
+        keep(built);
+        setLoaded(built);
       });
     }).catch(async reason => {
       if (cancelled) return;
