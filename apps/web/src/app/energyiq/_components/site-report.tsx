@@ -130,7 +130,7 @@ export function useSiteReport(projectId: string, period: Period, enabled = true)
       return Promise.all([
         loadAnalysis(projectId, from && to ? { kind: "custom", from, to } : { kind: "latest-28" }),
         // Project notes hold the floor layout; without them the report shows a zone table instead of the map.
-        configApi.reportAgentRequest<{ settings: { contextNotes: string } }>(projectId, "").then(result => result.settings.contextNotes ?? "").catch(() => ""),
+        configApi.reportAgentRequest<{ contextNotes: string }>(projectId, "context").then(result => result.contextNotes ?? "").catch(() => ""),
       ]).then(([data, notes]) => {
         if (cancelled) return;
         if (!data.current.project.dates.length || !data.current.project.total) { setLoaded({ error: { title: t("problem.noReadings"), steps: [t("problem.noReadingsStep")] } }); return; }

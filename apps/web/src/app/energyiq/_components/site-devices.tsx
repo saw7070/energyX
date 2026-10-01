@@ -260,7 +260,26 @@ export function withShortDays(
   return extra.length ? [...daily, ...extra] : daily;
 }
 
-async function loadDevices(projectId: string): Promise<Loaded> {
+/**
+ * Results kept briefly so returning to the tab shows the last figures at once while they refresh.
+ * Keyed by project; a refresh always replaces the entry.
+ */
+const DEVICES_CACHE_MS = 5 * 60_000;
+const devicesCache = new Map<string, { at: number; value: Loaded }>();
+const cachedDevices = (projectId: string): Loaded | null => {
+  const entry = devicesCache.get(projectId);
+  return entry && Date.now() - entry.at < DEVICES_CACHE_MS ? entry.value : null;
+};
+
+async function loadDevices(projectId: string, likelyBoardIds: string[] = []): Promise<Loaded> {
+  // Start the per-location analyses alongside the site one rather than after it; the site result only
+  // confirms which locations hold meters. Unused requests are ignored. Large sites skip the head start
+  // so a portfolio with hundreds of locations does not flood the server.
+  const boardRequests = new Map((likelyBoardIds.length <= 40 ? likelyBoardIds : []).map(boardId => {
+    const pending = configApi.executeEnergyScopeAnalysis(request(projectId, boardId));
+    pending.catch(() => undefined);
+    return [boardId, pending] as const;
+  }));
   const [analysis, policies] = await Promise.all([configApi.executeEnergyScopeAnalysis(request(projectId, "project")), configApi.getEnergyOperationalPolicies(projectId).catch(() => null)]);
   const summary = summariseDevices(analysis);
   // Use the calendar the server used for the site's out-of-hours total, so per-device figures agree with it.
@@ -279,7 +298,7 @@ async function loadDevices(projectId: string): Promise<Loaded> {
   const stats = new Map<string, DeviceStatistics>();
   const cells = new Map<string, HourCell[]>();
   const boardIds = [...new Set(summary.rows.map(row => row.boardId))];
-  const results = await Promise.allSettled(boardIds.map(boardId => configApi.executeEnergyScopeAnalysis(request(projectId, boardId))));
+  const results = await Promise.allSettled(boardIds.map(boardId => boardRequests.get(boardId) ?? configApi.executeEnergyScopeAnalysis(request(projectId, boardId))));
   const boards = new Map<string, ScopeData>();
   results.forEach((result, index) => {
     if (result.status !== "fulfilled") return;
@@ -340,7 +359,10 @@ export function SiteDevices({ projectId, boardNames }: { projectId: string; boar
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const [loaded, setLoaded] = useState<Loaded | null>(() => cachedDevices(projectId));
+  // Read when loading starts; the map is rebuilt on every render, so it must not restart the load.
+  const likelyBoards = useRef<string[]>([]);
+  likelyBoards.current = [...boardNames.keys()];
   const [error, setError] = useState<ReportProblem | null>(null);
   const problemText = translatorFor(siteReportMessages, locale);
   const [refresh, setRefresh] = useState(0);
@@ -368,7 +390,13 @@ export function SiteDevices({ projectId, boardNames }: { projectId: string; boar
   useEffect(() => {
     let cancelled = false;
     setError(null);
-    loadDevices(projectId).then(result => { if (!cancelled) setLoaded(result); })
+    // Show the last figures straight away when we have them; fresh ones replace them when ready.
+    const cached = cachedDevices(projectId);
+    if (cached) setLoaded(cached);
+    loadDevices(projectId, likelyBoards.current).then(result => {
+      devicesCache.set(projectId, { at: Date.now(), value: result });
+      if (!cancelled) setLoaded(result);
+    })
       // The readings fail for a reason a person can fix, so say which one and where, not "could not be loaded".
       .catch(reason => describeProblem(reason, projectId, locale).then(problem => { if (!cancelled) setError(problem); }));
     return () => { cancelled = true; };

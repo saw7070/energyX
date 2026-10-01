@@ -13,6 +13,7 @@ import {
   pinEnergySourceManifest,
   sourceLabelsAcrossImportBatches,
 } from "./project-setup-model";
+import { resetMeterHealthRequests } from "../_components/meter-health-notice";
 import { buildSmartSetup, parseDeviceList, savedDeviceList, type SmartSetupPlan } from "./smart-setup";
 
 /**
@@ -170,6 +171,7 @@ export function SmartImportPanel({ projectId, onChanged, onOpenMapping }: {
       setStep(2);
       await configApi.applyEnergyProjectChanges(projectId);
       const after = (await load())?.filter((batch) => batch.sourceKind === "excel") ?? uploads;
+      resetMeterHealthRequests();
       setChange({ before, after: summariseImport(after) });
       setDeviceListText("");
       onChanged?.();

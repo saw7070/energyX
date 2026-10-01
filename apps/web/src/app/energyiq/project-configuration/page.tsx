@@ -37,9 +37,10 @@ function Configuration({ projectId, canPublish }: { projectId: string; canPublis
     setFailed(false);
     Promise.all([
       configApi.getEnergyProjectSetup(projectId),
-      configApi.reportAgentRequest<{ settings: { contextNotes: string } }>(projectId, ""),
+      // Only the notes are shown here; the full advisor state (history, files, skills) is much slower to build.
+      configApi.reportAgentRequest<{ contextNotes: string }>(projectId, "context"),
       configApi.getEnergyOperationalPolicies(projectId).catch(() => null),
-    ]).then(([setup, report, policies]) => { if (!cancelled) setData({ setup, notes: report.settings.contextNotes, policies }); })
+    ]).then(([setup, report, policies]) => { if (!cancelled) setData({ setup, notes: report.contextNotes, policies }); })
       .catch(() => { if (!cancelled) setFailed(true); });
     return () => { cancelled = true; };
   }, [projectId, refresh]);

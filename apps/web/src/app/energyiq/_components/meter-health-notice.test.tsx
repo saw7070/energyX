@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import { configApi, type EnergyMeterHealthDto } from "../../../lib/config-api";
 import { EnergyIqLocaleProvider } from "./energyiq-locale";
-import { MeterHealthNotice, PendingDayNote, StoppedMetersNote, stoppedMeters } from "./meter-health-notice";
+import { MeterHealthNotice, PendingDayNote, resetMeterHealthRequests, StoppedMetersNote, stoppedMeters } from "./meter-health-notice";
 
 const health = (meters: EnergyMeterHealthDto["meters"]): EnergyMeterHealthDto => ({
   meters,
@@ -13,6 +13,7 @@ const health = (meters: EnergyMeterHealthDto["meters"]): EnergyMeterHealthDto =>
 
 const renderNode = async (value: EnergyMeterHealthDto, node: React.ReactNode) => {
   vi.stubGlobal("React", React); vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  resetMeterHealthRequests();
   vi.spyOn(configApi, "getEnergyProjectMeterHealth").mockResolvedValue(value);
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host);

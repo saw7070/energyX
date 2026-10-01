@@ -42,11 +42,26 @@ export function stoppedMeters(meters: ReadonlyArray<Quiet>): Quiet[] {
  * switched off, a tripped breaker, a device off the network — so this is shown to everyone who can
  * read the project, not hidden behind an administrator screen.
  */
+/** Several notices on one page share a single request per project, reused for a short while. */
+const HEALTH_REUSE_MS = 60_000;
+const healthRequests = new Map<string, { at: number; pending: Promise<EnergyMeterHealthDto> }>();
+const meterHealth = (projectId: string): Promise<EnergyMeterHealthDto> => {
+  const current = healthRequests.get(projectId);
+  if (current && Date.now() - current.at < HEALTH_REUSE_MS) return current.pending;
+  const pending = configApi.getEnergyProjectMeterHealth(projectId);
+  healthRequests.set(projectId, { at: Date.now(), pending });
+  pending.catch(() => healthRequests.delete(projectId));
+  return pending;
+};
+
+/** Forget shared results, e.g. after new readings are published or between tests. */
+export const resetMeterHealthRequests = () => healthRequests.clear();
+
 export function useMeterHealth(projectId: string) {
   const [health, setHealth] = useState<EnergyMeterHealthDto | null>(null);
   useEffect(() => {
     let cancelled = false;
-    configApi.getEnergyProjectMeterHealth(projectId)
+    meterHealth(projectId)
       .then(result => { if (!cancelled) setHealth(result); })
       .catch(() => undefined);   // The readings themselves already report their own failures.
     return () => { cancelled = true; };
