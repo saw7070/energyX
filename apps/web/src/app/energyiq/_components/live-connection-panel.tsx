@@ -140,10 +140,10 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
     }
   }, [projectId, t]);
 
-  const canMatch = Boolean(connection?.connected && !connection.managedByServer && connection.publishedSetup);
+  const canListDevices = Boolean(connection?.publishedSetup && (connection.connected || connection.managedByServer));
   useEffect(() => {
-    if (canMatch && devices === null) void loadDevices();
-  }, [canMatch, devices, loadDevices]);
+    if (canListDevices && devices === null) void loadDevices();
+  }, [canListDevices, devices, loadDevices]);
 
   // While a fetch runs, look again every few seconds so the result appears without a reload.
   const running = connection?.sync.running ?? false;
@@ -235,19 +235,6 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
   }
   if (!connection) return <p role="status" className="py-10 text-center text-sm text-muted">{t("loading")}</p>;
 
-  if (connection.managedByServer) {
-    return <Card>
-      <div className="flex items-start gap-3">
-        <Dot tone="green" />
-        <div>
-          <h3 className="text-sm font-semibold">{t("serverTitle")}</h3>
-          <p className="mt-1 text-sm leading-6 text-muted">{t("serverBody")}</p>
-          <SyncSummary connection={connection} when={when} day={day} t={t} />
-        </div>
-      </div>
-    </Card>;
-  }
-
   if (!connection.publishedSetup) {
     return <Card>
       <h3 className="text-sm font-semibold">{t("setupFirstTitle")}</h3>
@@ -258,14 +245,85 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
   const takenBy = new Map(Object.entries(draft).filter(([, ref]) => ref).map(([meterPointId, ref]) => [ref, meterPointId]));
   const failedChecks = new Map((check?.meters ?? []).filter((meter) => !meter.ok).map((meter) => [meter.meterPointId, meter.reason]));
   const accountForm = !connection.connected || editingAccount;
+  const deviceByRef = new Map((devices ?? []).map((device) => [device.ref, device]));
 
-  return <div className="space-y-4">
+  const banners = <>
     {error ? <div role="alert" className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
       <span aria-hidden="true" className="mt-0.5 font-bold">!</span>
       <p className="flex-1">{error}</p>
       <button type="button" onClick={() => setError(null)} className="text-xs font-semibold underline">{t("dismiss")}</button>
     </div> : null}
     {notice ? <p role="status" className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-900">{notice}</p> : null}
+  </>;
+
+  /** Every meter with its device: a drop-down while matching, the device's name and status otherwise. */
+  const meterTable = (mode: "edit" | "view" | "preview") => <div className="overflow-x-auto rounded-xl border border-border">
+    <table className="w-full min-w-[520px] text-left text-sm">
+      <thead className="bg-surface-subtle text-xs text-muted"><tr><th className="px-4 py-2 font-medium">{t("columnMeter")}</th><th className="px-4 py-2 font-medium">{t("columnDevice")}</th></tr></thead>
+      <tbody className="divide-y divide-border">
+        {connection.meters.map((meter) => {
+          const reason = failedChecks.get(meter.meterPointId);
+          const ref = mode === "edit" ? draft[meter.meterPointId] ?? "" : meter.device?.ref ?? "";
+          const device = ref ? deviceByRef.get(ref) : undefined;
+          return <tr key={meter.meterPointId} className={reason ? "bg-amber-50" : undefined}>
+            <td className="px-4 py-2 align-top">
+              <span className="font-medium">{meter.name}</span>
+              {meter.sourceLabel !== meter.name ? <span className="ml-2 font-mono text-[11px] text-muted">{meter.sourceLabel}</span> : null}
+              {reason ? <p className="mt-1 text-xs text-amber-900">{t(checkReasonKey(reason))}</p> : null}
+            </td>
+            <td className="px-4 py-2">
+              {mode === "edit" ? <select aria-label={`${t("columnDevice")}: ${meter.name}`} value={ref} onChange={(event) => setDraft({ ...draft, [meter.meterPointId]: event.target.value })} className={`${inputClass} mt-0`}>
+                <option value="">{t("notConnected")}</option>
+                {(devices ?? []).map((candidate) => {
+                  const owner = takenBy.get(candidate.ref);
+                  const elsewhere = owner !== undefined && owner !== meter.meterPointId;
+                  return <option key={candidate.ref} value={candidate.ref} disabled={elsewhere}>
+                    {candidate.name}{candidate.productName ? ` · ${candidate.productName}` : ""} · {t(candidate.online ? "online" : "offline")}{elsewhere ? ` ${t("usedElsewhere")}` : ""}
+                  </option>;
+                })}
+              </select>
+                : mode === "preview" ? <span className="text-muted">—</span>
+                : device ? <span className="flex items-center gap-2"><Dot tone={device.online ? "green" : "grey"} /><span>{device.name}{device.productName ? <span className="text-muted"> · {device.productName}</span> : null}<span className="text-muted"> · {t(device.online ? "online" : "offline")}</span></span></span>
+                : ref ? <span className="text-muted">{devices === null ? t("loadingDevices") : t("deviceMissing")}</span>
+                : <span className="text-muted">{t("notConnected")}</span>}
+            </td>
+          </tr>;
+        })}
+      </tbody>
+    </table>
+  </div>;
+
+  const checkLine = check ? check.ok
+    ? <p className="text-sm text-emerald-800">{t("checkOk", { count: check.meters.length })}</p>
+    : check.meters.length > 0 ? <p className="text-sm text-amber-900">{t("checkFailed")} {check.meters.filter((meter) => !meter.ok).map((meter) => `${connection.meters.find((row) => row.meterPointId === meter.meterPointId)?.name ?? meter.meterPointId} (${t(checkReasonKey(meter.reason))})`).join(", ")}</p> : null
+    : connection.lastCheck ? <p className="text-xs text-muted">{t("lastChecked", { when: when(connection.lastCheck.at) })}</p> : null;
+
+  if (connection.managedByServer) {
+    return <div className="space-y-4">
+      {banners}
+      <Card>
+        <div className="mb-4 flex items-start gap-3">
+          <Dot tone="green" />
+          <div>
+            <h3 className="text-sm font-semibold">{t("serverTitle")}</h3>
+            <p className="mt-1 text-sm leading-6 text-muted">{t("serverBody")}</p>
+          </div>
+        </div>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-semibold">{t("matchedCount", { matched: connection.matchedCount, total: connection.meters.length })}</p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className={secondaryButton} disabled={busy !== null} onClick={() => void loadDevices()}>{t("refreshDevices")}</button>
+            <button type="button" className={secondaryButton} disabled={!connection.ready || busy !== null} onClick={runCheck}>{busy === "check" ? t("checking") : t("check")}</button>
+          </div>
+        </div>
+        {meterTable("view")}
+        <div className="mt-3 space-y-2">{checkLine}<SyncSummary connection={connection} when={when} day={day} t={t} /></div>
+      </Card>
+    </div>;
+  }
+
+  return <div className="space-y-4">
+    {banners}
 
     <Card>
       <Step number={1} title={t("step.account")} hint={t("step.accountHint")} done={connection.connected && !editingAccount} />
@@ -311,39 +369,15 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
       </div>
       {devices === null || busy === "devices" ? <p role="status" className="py-4 text-sm text-muted">{t("loadingDevices")}</p>
         : devices.length === 0 ? <p className="py-4 text-sm text-muted">{t("noDevices")}</p>
-        : <div className="overflow-x-auto rounded-xl border border-border">
-          <table className="w-full min-w-[520px] text-left text-sm">
-            <thead className="bg-surface-subtle text-xs text-muted"><tr><th className="px-4 py-2 font-medium">{t("columnMeter")}</th><th className="px-4 py-2 font-medium">{t("columnDevice")}</th></tr></thead>
-            <tbody className="divide-y divide-border">
-              {connection.meters.map((meter) => {
-                const reason = failedChecks.get(meter.meterPointId);
-                return <tr key={meter.meterPointId} className={reason ? "bg-amber-50" : undefined}>
-                  <td className="px-4 py-2 align-top">
-                    <span className="font-medium">{meter.name}</span>
-                    {meter.sourceLabel !== meter.name ? <span className="ml-2 font-mono text-[11px] text-muted">{meter.sourceLabel}</span> : null}
-                    {reason ? <p className="mt-1 text-xs text-amber-900">{t(checkReasonKey(reason))}</p> : null}
-                  </td>
-                  <td className="px-4 py-2">
-                    <select aria-label={`${t("columnDevice")}: ${meter.name}`} value={draft[meter.meterPointId] ?? ""} onChange={(event) => setDraft({ ...draft, [meter.meterPointId]: event.target.value })} className={`${inputClass} mt-0`}>
-                      <option value="">{t("notConnected")}</option>
-                      {devices.map((device) => {
-                        const owner = takenBy.get(device.ref);
-                        const elsewhere = owner !== undefined && owner !== meter.meterPointId;
-                        return <option key={device.ref} value={device.ref} disabled={elsewhere}>
-                          {device.name}{device.productName ? ` · ${device.productName}` : ""} · {t(device.online ? "online" : "offline")}{elsewhere ? ` ${t("usedElsewhere")}` : ""}
-                        </option>;
-                      })}
-                    </select>
-                  </td>
-                </tr>;
-              })}
-            </tbody>
-          </table>
-        </div>}
+        : meterTable("edit")}
       <div className="mt-3 flex justify-end">
         <button type="button" className={primaryButton} disabled={!dirty || busy !== null} onClick={saveMatches}>{busy === "save" ? t("saving") : t("save")}</button>
       </div>
-    </Card> : null}
+    </Card> : <Card>
+      <Step number={2} title={t("step.match")} hint={t("step.matchHint")} done={false} />
+      <p className="mb-3 rounded-lg bg-surface-subtle px-3 py-2 text-xs text-muted">{t("connectFirst", { count: connection.meters.length })}</p>
+      {meterTable("preview")}
+    </Card>}
 
     {connection.connected ? <Card>
       <Step number={3} title={t("step.switchOn")} hint={t("step.switchOnHint")} done={connection.schedule.enabled} />
@@ -351,10 +385,7 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-3">
           <button type="button" className={secondaryButton} disabled={!connection.ready || dirty || busy !== null} onClick={runCheck}>{busy === "check" ? t("checking") : t("check")}</button>
-          {check ? check.ok
-            ? <p className="text-sm text-emerald-800">{t("checkOk", { count: check.meters.length })}</p>
-            : check.meters.length > 0 ? <p className="text-sm text-amber-900">{t("checkFailed")} {check.meters.filter((meter) => !meter.ok).map((meter) => `${connection.meters.find((row) => row.meterPointId === meter.meterPointId)?.name ?? meter.meterPointId} (${t(checkReasonKey(meter.reason))})`).join(", ")}</p> : null
-            : connection.lastCheck ? <p className="text-xs text-muted">{t("lastChecked", { when: when(connection.lastCheck.at) })}</p> : null}
+          {checkLine}
         </div>
         <div className="flex flex-wrap items-center gap-3 rounded-xl bg-surface-subtle px-4 py-3">
           <label className="flex items-center gap-2 text-sm font-medium">

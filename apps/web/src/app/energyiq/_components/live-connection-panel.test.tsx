@@ -109,11 +109,37 @@ describe("LiveConnectionPanel", () => {
     expect(button("Fetch now").disabled).toBe(false);
   });
 
-  it("shows a server-managed site without edit controls", async () => {
-    api.liveConnectionRequest.mockResolvedValue({ connection: connection({ managedByServer: true, connected: true, ready: true }) });
+  it("lists the meters before an account is connected", async () => {
+    api.liveConnectionRequest.mockResolvedValue({ connection: connection() });
+    await act(async () => root.render(<LiveConnectionPanel projectId="p" />));
+    await flush();
+    expect(container.textContent).toContain("These are the site's 2 meters");
+    expect(container.textContent).toContain("Aircon level 2");
+    expect(container.querySelector("select")).toBeNull();
+  });
+
+  it("shows a server-managed site's devices and checks them, without edit controls", async () => {
+    api.liveConnectionRequest.mockImplementation(async (_projectId: string, action = "") => {
+      if (action === "devices") return { devices };
+      if (action === "check") return { check: { ok: true, meters: meters.map((meter) => ({ meterPointId: meter.meterPointId, ok: true })) }, connection: serverConnection };
+      return { connection: serverConnection };
+    });
+    const serverConnection = connection({
+      managedByServer: true,
+      connected: true,
+      ready: true,
+      matchedCount: 2,
+      meters: meters.map((meter, index) => ({ ...meter, device: { ref: devices[index]!.ref, name: "" } })),
+    });
     await act(async () => root.render(<LiveConnectionPanel projectId="p" />));
     await flush();
     expect(container.textContent).toContain("Connected through the server settings");
+    expect(container.textContent).toContain("Smart meter · online");
+    expect(container.textContent).toContain("A18P · offline");
     expect(container.querySelector("input")).toBeNull();
+    expect(container.querySelector("select")).toBeNull();
+    await act(async () => { button("Check devices").click(); });
+    await flush();
+    expect(container.textContent).toContain("All 2 devices send energy readings.");
   });
 });

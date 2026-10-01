@@ -210,6 +210,7 @@ type EnergyApiDependencies = {
   resolveTuyaProjectConnector?: typeof resolveEnergyTuyaProjectConnector;
   extractDeviceListFromImage?: typeof extractDeviceListFromImage;
   createTuyaClient?: (credentials: TuyaCredentials) => TuyaOpenApiClient;
+  createTuyaEnvironmentClient?: () => TuyaOpenApiClient;
   liveConnectionScheduler?: () => Pick<EnergyLiveConnectionScheduler, "requestSync" | "isRunning"> | undefined;
 };
 
@@ -1257,6 +1258,7 @@ export const handleEnergyApiRequest = async (
       const live: LiveConnectionDependencies = {
         metadataStore: context.metadataStore,
         createClient: dependencies.createTuyaClient ?? DEFAULT_ENERGY_API_DEPENDENCIES.createTuyaClient!,
+        ...(dependencies.createTuyaEnvironmentClient ? { createEnvironmentClient: dependencies.createTuyaEnvironmentClient } : {}),
         isSyncRunning: (candidate) => scheduler?.isRunning(candidate) ?? false,
       };
       const respond = (body: unknown, status = 200): ConfigApiResponse => ({

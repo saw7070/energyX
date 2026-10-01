@@ -13,7 +13,12 @@ import {
   readLiveConnectionCredentials,
   resolveEnergyTuyaProjectConnector,
 } from "./energy-tuya-connector.js";
-import type { TuyaCredentials, TuyaDeviceSummary, TuyaOpenApiClient } from "./tuya-openapi-client.js";
+import {
+  createTuyaOpenApiClientFromEnv,
+  type TuyaCredentials,
+  type TuyaDeviceSummary,
+  type TuyaOpenApiClient,
+} from "./tuya-openapi-client.js";
 
 /**
  * Live connection: an administrator connects a Project's meters to Tuya from the app. The browser only ever sees
@@ -22,6 +27,8 @@ import type { TuyaCredentials, TuyaDeviceSummary, TuyaOpenApiClient } from "./tu
 export type LiveConnectionDependencies = {
   metadataStore: MetadataStore;
   createClient: (credentials: TuyaCredentials) => TuyaOpenApiClient;
+  /** The server settings' account, for the one Project the environment connects. */
+  createEnvironmentClient?: () => TuyaOpenApiClient;
   isSyncRunning?: (projectId: string) => boolean;
   env?: NodeJS.ProcessEnv;
   now?: () => number;
@@ -87,13 +94,17 @@ export const readLiveConnection = (
   const managedByServer = isEnvironmentTuyaProject(projectId, env);
   const connection = managedByServer ? undefined : metadataStore.energyIq.liveConnectors.find(projectId);
   const rows = publishedMeterRows(metadataStore, projectId);
+  const serverBindings = managedByServer ? environmentBindings(dependencies, projectId) : new Map<string, string>();
   const meters: LiveConnectionMeter[] = (rows ?? []).map((row) => {
     const binding = connection?.bindings[row.id];
+    const serverDeviceId = serverBindings.get(row.id);
     return {
       meterPointId: row.id,
       name: row.presentation?.device_name?.trim() || row.display_name?.trim() || row.source_label,
       sourceLabel: row.source_label,
       ...(binding ? { device: toDeviceView(projectId, binding) } : {}),
+      // The server settings hold only device ids; the device list supplies their names.
+      ...(serverDeviceId ? { device: { ref: liveDeviceRef(projectId, serverDeviceId), name: "" } } : {}),
     };
   });
   const matchedCount = meters.filter((meter) => meter.device).length;
@@ -108,8 +119,8 @@ export const readLiveConnection = (
     publishedSetup: rows !== undefined,
     meters,
     matchedCount,
-    ready: managedByServer || (meters.length > 0 && matchedCount === meters.length
-      && Object.keys(connection?.bindings ?? {}).length === meters.length),
+    ready: meters.length > 0 && matchedCount === meters.length
+      && (managedByServer || Object.keys(connection?.bindings ?? {}).length === meters.length),
     schedule: managedByServer
       ? {
         enabled: env.ENERGYIQ_TUYA_SYNC_ENABLED?.trim().toLocaleLowerCase() === "true",
@@ -190,9 +201,17 @@ export const listLiveConnectionDevices = async (
   dependencies: LiveConnectionDependencies,
   projectId: string,
 ): Promise<LiveConnectionDevice[]> => {
-  const connection = requireConnection(dependencies, projectId);
-  const devices = await listWith(dependencies, readLiveConnectionCredentials(dependencies.metadataStore, connection));
-  const matchedBy = new Map(Object.entries(connection.bindings).map(([meterPointId, binding]) => [binding.device_id, meterPointId]));
+  let devices: TuyaDeviceSummary[];
+  let matchedBy: Map<string, string>;
+  if (isEnvironmentTuyaProject(projectId, dependencies.env ?? process.env)) {
+    dependencies.metadataStore.energyIq.getProject(projectId);
+    devices = await listWithClient(() => environmentClient(dependencies));
+    matchedBy = new Map([...environmentBindings(dependencies, projectId)].map(([meterPointId, deviceId]) => [deviceId, meterPointId]));
+  } else {
+    const connection = requireConnection(dependencies, projectId);
+    devices = await listWith(dependencies, readLiveConnectionCredentials(dependencies.metadataStore, connection));
+    matchedBy = new Map(Object.entries(connection.bindings).map(([meterPointId, binding]) => [binding.device_id, meterPointId]));
+  }
   return devices
     .map((device) => ({
       ref: liveDeviceRef(projectId, device.id),
@@ -263,15 +282,21 @@ export const checkLiveConnection = async (
   projectId: string,
 ): Promise<LiveConnectionCheck> => {
   const { metadataStore } = dependencies;
-  const connection = requireConnection(dependencies, projectId);
+  const managedByServer = isEnvironmentTuyaProject(projectId, dependencies.env ?? process.env);
+  const connection = managedByServer ? undefined : requireConnection(dependencies, projectId);
+  const bindings = connection
+    ? Object.entries(connection.bindings).map(([meterPointId, binding]) => [meterPointId, binding.device_id] as const)
+    : [...environmentBindings(dependencies, projectId)];
   const checkedAt = nowIso(dependencies);
   let result: LiveConnectionCheck;
   try {
-    const client = dependencies.createClient(readLiveConnectionCredentials(metadataStore, connection));
+    const client = connection
+      ? dependencies.createClient(readLiveConnectionCredentials(metadataStore, connection))
+      : environmentClient(dependencies);
     await client.listDevices();
     const meters: LiveConnectionCheck["meters"] = [];
-    for (const [meterPointId, binding] of Object.entries(connection.bindings)) {
-      const check = await client.checkEnergyDevice(binding.device_id);
+    for (const [meterPointId, deviceId] of bindings) {
+      const check = await client.checkEnergyDevice(deviceId);
       meters.push(check.ok ? { meterPointId, ok: true } : { meterPointId, ok: false, reason: check.reason });
     }
     const failed = meters.filter((meter) => !meter.ok).length;
@@ -366,14 +391,33 @@ const publishedMeterRows = (metadataStore: MetadataStore, projectId: string): Pu
   }
 };
 
-const listWith = async (
+const listWith = (
   dependencies: LiveConnectionDependencies,
   credentials: TuyaCredentials,
-): Promise<TuyaDeviceSummary[]> => {
+): Promise<TuyaDeviceSummary[]> => listWithClient(() => dependencies.createClient(credentials));
+
+const listWithClient = async (client: () => TuyaOpenApiClient): Promise<TuyaDeviceSummary[]> => {
   try {
-    return await dependencies.createClient(credentials).listDevices();
+    return await client().listDevices();
   } catch (error) {
     throw new Error(`ENERGYIQ_LIVE_ACCOUNT_REJECTED:${providerErrorCode(error)}`);
+  }
+};
+
+const environmentClient = (dependencies: LiveConnectionDependencies): TuyaOpenApiClient =>
+  (dependencies.createEnvironmentClient ?? (() => createTuyaOpenApiClientFromEnv(dependencies.env ?? process.env)))();
+
+/** Meter id -> device id from the server settings, or nothing when they no longer fit the published setup. */
+const environmentBindings = (dependencies: LiveConnectionDependencies, projectId: string): Map<string, string> => {
+  try {
+    const connector = resolveEnergyTuyaProjectConnector({
+      metadataStore: dependencies.metadataStore,
+      projectId,
+      ...(dependencies.env ? { env: dependencies.env } : {}),
+    });
+    return new Map(connector.meterPoints.map((meterPoint, index) => [meterPoint.meterPointId, connector.devices[index]!.deviceId]));
+  } catch {
+    return new Map();
   }
 };
 

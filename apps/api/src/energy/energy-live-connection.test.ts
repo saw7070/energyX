@@ -106,19 +106,36 @@ describe("Live connection", () => {
     });
   });
 
-  it("leaves a Project connected through the server settings alone", async () => {
-    const previous = process.env.ENERGYIQ_TUYA_CONNECTOR_PROJECT_ID;
-    process.env.ENERGYIQ_TUYA_CONNECTOR_PROJECT_ID = TUYA_OFFICE_PROJECT_ID;
-    try {
-      await withLiveApi(async ({ call }) => {
-        expect((await call("GET", [])).body.data.connection).toMatchObject({ managedByServer: true, connected: true });
+  it("shows and checks a Project connected through the server settings, but leaves editing to the server", async () => {
+    await withLiveApi(async ({ metadata, call, devices }) => {
+      const rows = (JSON.parse(metadata.energyIq.projectSetup.listHierarchyRevisions(TUYA_OFFICE_PROJECT_ID)
+        .find((revision) => revision.id === metadata.energyIq.getProject(TUYA_OFFICE_PROJECT_ID).hierarchy_revision_id)!
+        .snapshot_json) as { meter_mapping: { rows: Array<{ id: string }> } }).meter_mapping.rows;
+      const saved = { ...process.env };
+      Object.assign(process.env, {
+        ENERGYIQ_TUYA_CONNECTOR_PROJECT_ID: TUYA_OFFICE_PROJECT_ID,
+        ENERGYIQ_TUYA_CONNECTOR_WORKSPACE_ID: TUYA_OFFICE_WORKSPACE_ID,
+        ENERGYIQ_TUYA_DEVICE_BINDINGS_JSON: JSON.stringify(Object.fromEntries(rows.map((row, index) => [row.id, devices[index]!.id]))),
+      });
+      try {
+        const read = await call("GET", []);
+        expect(read.body.data.connection).toMatchObject({ managedByServer: true, connected: true, ready: true, matchedCount: rows.length });
+        const listed = await call("GET", ["devices"]);
+        expect(JSON.stringify(listed.body)).not.toContain(devices[0]!.id);
+        expect(listed.body.data.devices.find((device: { name: string }) => device.name === devices[0]!.name))
+          .toMatchObject({ matchedTo: rows[0]!.id, ref: read.body.data.connection.meters[0].device.ref });
+        expect((await call("POST", ["check"])).body.data.check).toMatchObject({ ok: true });
         expect((await call("PUT", ["account"], { accessId: ACCESS_ID, accessSecret: ACCESS_SECRET })).body.error.message)
           .toBe("ENERGYIQ_LIVE_CONNECTION_SERVER_MANAGED");
-      });
-    } finally {
-      if (previous === undefined) delete process.env.ENERGYIQ_TUYA_CONNECTOR_PROJECT_ID;
-      else process.env.ENERGYIQ_TUYA_CONNECTOR_PROJECT_ID = previous;
-    }
+        expect((await call("PUT", ["matches"], { matches: {} })).body.error.message)
+          .toBe("ENERGYIQ_LIVE_CONNECTION_SERVER_MANAGED");
+      } finally {
+        for (const key of ["ENERGYIQ_TUYA_CONNECTOR_PROJECT_ID", "ENERGYIQ_TUYA_CONNECTOR_WORKSPACE_ID", "ENERGYIQ_TUYA_DEVICE_BINDINGS_JSON"]) {
+          if (saved[key] === undefined) delete process.env[key];
+          else process.env[key] = saved[key];
+        }
+      }
+    });
   });
 
   it("removes the sealed account when its Project is deleted", async () => {
@@ -210,6 +227,7 @@ const withLiveApi = async (run: (harness: LiveHarness) => Promise<void>): Promis
             clients.push(credentials);
             return client;
           },
+          createTuyaEnvironmentClient: () => client,
           liveConnectionScheduler: () => scheduler,
         },
       );
