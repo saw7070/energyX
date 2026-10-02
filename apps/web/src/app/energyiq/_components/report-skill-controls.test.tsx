@@ -12,7 +12,7 @@ const method = {id:"method",name:"Baseline",version:"1",content:"Recompute",scop
 beforeEach(() => { vi.stubGlobal("React",React); vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT",true); api.reportAgentRequest.mockReset(); container=document.createElement("div");document.body.append(container);root=createRoot(container); });
 afterEach(async () => { await act(async()=>root.unmount());container.remove();vi.unstubAllGlobals(); });
 async function click(text:string) { const button=[...container.querySelectorAll("button")].find(item=>item.textContent===text)!;expect(button).toBeDefined();await act(async()=>button.click()); }
-async function version(value:string) {const input=container.querySelector<HTMLInputElement>('[aria-label="New Skill version"]')!;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")!.set!.call(input,value);input.dispatchEvent(new Event("input",{bubbles:true}));});}
+async function version(value:string) {const input=container.querySelector<HTMLInputElement>('[aria-label="New version number"]')!;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")!.set!.call(input,value);input.dispatchEvent(new Event("input",{bubbles:true}));});}
 it("keeps visual styles out of analysis selection and analysis draft revision targets", async () => {
   const style = {...method,id:"style",name:"Office style",category:"presentation" as const};
   await act(async()=>root.render(<ReportSkillSelector skills={[method,style]} value={{mode:"selected",refs:[]}} onChange={()=>{}}/>));
@@ -68,7 +68,7 @@ it("keeps method evidence secondary and separates chosen, default and required m
  await act(async()=>root.render(<ReportSkillUsage prepared skills={[{id:"a",name:"Night loads",version:"2",source:"explicit"},{id:"b",name:"Office report",version:"1",source:"default"},{id:"c",name:"Review",version:"3",source:"required"}]}/>));
  expect(container.querySelector('details')?.open).toBe(false);
  expect([...container.querySelectorAll('h4')].map(item=>item.textContent)).toEqual(['Your choices','Project defaults','Built-in checks']);
- expect(container.textContent).toContain('v2');expect(container.textContent).toContain('does not verify how they were applied');
+ expect(container.textContent).toContain('v2');expect(container.textContent).toContain('The advisor received these instructions');
 });
 
 it.each([true,false])("compares saved changes with enabled version or latest fallback (enabled=%s)",async(enabled)=>{
@@ -102,14 +102,14 @@ const LOCALISED = {
   "zh-Hans": {
     automatic: "分析方法 · 自动", selected: "分析方法 · 已选 0 项", heading: "分析方法", close: "关闭分析方法", group: "方法选择", auto: "自动", choose: "选择方法",
     meta: "版本 1 · 与此项目共享", advanced: "高级详情", versionSelect: "Baseline 的版本", savedName: "保存的名称：Baseline", done: "完成",
-    dialog: "保存技能版本", review: "检查技能版本", newVersion: "新技能版本", placeholder: "例如 1.1.0", instructions: "建议的技能说明", create: "创建新技能", save: "保存新版本",
+    dialog: "保存说明", review: "检查说明", newVersion: "新版本号", placeholder: "例如 1.1.0", instructions: "建议的顾问说明", create: "创建新说明", save: "保存新版本",
     saved: "已保存“Baseline”版本 2。项目默认设置保持不变。", setDefault: "设为项目默认", activated: "已更新项目默认方法。今后的消息和自动报告都会使用此方法。",
     groups: ["您的选择", "项目默认", "内置检查"], usage: "此回答使用的方法",
   },
   ms: {
     automatic: "Kaedah analisis · Automatik", selected: "Kaedah analisis · 0 dipilih", heading: "Kaedah analisis", close: "Tutup kaedah analisis", group: "Pemilihan kaedah", auto: "Automatik", choose: "Pilih kaedah",
     meta: "Versi 1 · Dikongsi dengan projek ini", advanced: "Butiran lanjutan", versionSelect: "Versi Baseline", savedName: "Nama yang disimpan: Baseline", done: "Selesai",
-    dialog: "Simpan versi Kemahiran", review: "Semak versi Kemahiran", newVersion: "Versi Kemahiran baharu", placeholder: "cth. 1.1.0", instructions: "Arahan Kemahiran yang dicadangkan", create: "Cipta Kemahiran baharu", save: "Simpan versi baharu",
+    dialog: "Simpan arahan", review: "Semak arahan", newVersion: "Nombor versi baharu", placeholder: "cth. 1.1.0", instructions: "Arahan penasihat yang dicadangkan", create: "Cipta arahan baharu", save: "Simpan versi baharu",
     saved: "Baseline 2 telah disimpan. Lalai projek kekal tidak berubah.", setDefault: "Tetapkan sebagai lalai projek", activated: "Lalai projek dikemas kini. Mesej dan laporan automatik akan datang akan menggunakan kaedah ini.",
     groups: ["Pilihan anda", "Lalai projek", "Semakan terbina dalam"], usage: "Kaedah untuk jawapan ini",
   },

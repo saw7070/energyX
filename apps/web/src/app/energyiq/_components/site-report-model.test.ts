@@ -55,15 +55,15 @@ describe("site report", () => {
   it("leads with the always-on story and the four key figures", () => {
     expect(report.masthead).toEqual({ site: "Tuya Office", detail: "6 Battery Road, Level 27 · Office energy report", period: "3–16 Aug 2026", periodNote: "14 days, SGT" });
     expect(report.title.emphasis).toBe("never switches off");
-    expect(report.title.before).toMatch(/four-fifths of the office load $/);
-    expect(report.lede).toContain("It idles at a near-constant **2.82 kW** around the clock");
-    expect(report.keyFigures.map(figure => figure.label)).toEqual(["total consumption, 14 days", "avg weekday vs weekend kWh per day", expect.stringMatching(/^round-the-clock base load \(~\d+% of total energy\)$/), expect.stringMatching(/^used outside operating hours/)]);
+    expect(report.title.before).toMatch(/four-fifths of the office's electricity use $/);
+    expect(report.lede).toContain("It never drops below about **2.82 kW**, day and night");
+    expect(report.keyFigures.map(figure => figure.label)).toEqual(["total use, 14 days", "average kWh a day, weekday vs weekend", expect.stringMatching(/^always on, day and night \(~\d+% of all use\)$/), expect.stringMatching(/^used outside opening hours/)]);
   });
 
   it("groups numbered channels into one circuit and scales weekday and weekend averages to 30 days", () => {
     const leds = circuit("3 LED displays");
     expect(leds.meterIds).toEqual(["led-1", "led-2", "led-3"]);
-    expect(leds.label).toBe("3 LED displays (Zone C)");
+    expect(leds.label).toBe("3 LED displays (Location C)");
     expect(leds.code).toBe("LED Display 1–3");
     expect(leds.weekdayPerDay).toBeCloseTo(13.68, 6);
     expect(leds.monthKwh).toBeCloseTo(13.68 * 30, 6);
@@ -76,11 +76,11 @@ describe("site report", () => {
   });
 
   it("maps circuits to the floor-layout zones and describes each zone", () => {
-    expect(report.zones.map(zone => [zone.label, zone.board, zone.subgroup])).toEqual([["Zone A", "DB1", false], ["Zone B", "DB2", false], ["Zone C", "DB3", true]]);
+    expect(report.zones.map(zone => [zone.label, zone.board, zone.subgroup])).toEqual([["Location A", "DB1", false], ["Location B", "DB2", false], ["Location C", "DB3", true]]);
     expect(report.profile.intro).toContain("**half of Level 27 at 6 Battery Road — approximately 700 m²**");
-    expect(report.profile.zones[0]).toEqual({ heading: "Zone A (turn right from the entrance · panel DB1)", text: "Open office and Director room. Metered as office area lights (DB1 L1 Light) and office area equipment & sockets (DB1 L1 Power)." });
-    expect(report.profile.zones[2]!.text).toContain("the **three large LED panels** in the showroom, metered as 3 LED displays (LED Display 1–3). Everything on panel DB3 counts as Zone C.");
-    expect(report.estimate.spaceCaption).toBe("Zone C (DB3 · Three large LED panels) is split out from Zone B (DB2), per the circuit map.");
+    expect(report.profile.zones[0]).toEqual({ heading: "Location A (turn right from the entrance · panel DB1)", text: "Open office and Director room. Metered as office area lights (DB1 L1 Light) and office area equipment & sockets (DB1 L1 Power)." });
+    expect(report.profile.zones[2]!.text).toContain("the **three large LED panels** in the showroom, metered as 3 LED displays (LED Display 1–3). Everything on panel DB3 counts as Location C.");
+    expect(report.estimate.spaceCaption).toBe("Location C (DB3 · Three large LED panels) is shown separately from Location B (DB2).");
     expect(report.reference).not.toBeNull();
   });
 
@@ -92,27 +92,27 @@ describe("site report", () => {
     expect(report.benchmark.baseKw).toBeCloseTo(2.82, 6);
     expect(report.benchmark.weekendAvg).toBeCloseTo(2.82 * 24, 6);
     expect(report.benchmark.closeToWeekend).toBe(true);
-    expect(report.benchmark.intro).toContain("The weekend line and the base-load line are effectively the same line");
-    expect(report.benchmark.rows.map(row => row.label)).toEqual(["Weekday average", "Weekend average", "Base load (24/7 idle draw)"]);
+    expect(report.benchmark.intro).toContain("A weekend day uses about the same as a day with nobody in");
+    expect(report.benchmark.rows.map(row => row.label)).toEqual(["Average weekday", "Average weekend day", "Never switches off (24/7)"]);
   });
 
   it("explains the weekday curve and which circuits cause the lunch dip", () => {
     const pattern = report.pattern!;
-    expect(pattern.notes.map(note => note.text)).toEqual(expect.arrayContaining(["arrival ramp", "lunch dip"]));
+    expect(pattern.notes.map(note => note.text)).toEqual(expect.arrayContaining(["staff arrive", "lunch dip"]));
     expect(pattern.intro).toContain("dips through lunch (~4.3 kW, 12–2 pm)");
-    expect(pattern.cause).toContain("None of the power meters drops at lunch");
-    expect(pattern.cause).toContain("**office area lights fall 30%** (2.00 → 1.40 kWh/h)");
-    expect(pattern.caption).toContain("operating window 9 am – 6 pm");
+    expect(pattern.cause).toContain("None of the equipment meters drops at lunch");
+    expect(pattern.cause).toContain("**office area lights fall 30%** (2.00 → 1.40 kWh per hour)");
+    expect(pattern.caption).toContain("opening hours 9 am – 6 pm");
   });
 
   it("screens each circuit against its own baselines", () => {
-    expect(circuit("3 LED displays").finding).toBe("**Zero deviations in 336 hours.** All three ran continuously for the full 14 days — never dimmed, never off.");
-    expect(circuit("Shared area equipment & sockets").finding).toContain("a floor that never drops: after-hours draw is **97% of operating draw**");
-    expect(circuit("Office area lights").finding).toBe("Lit past 6 pm on **all 10 weekdays** (~1.2 kWh/h), usually until 8 pm.");
-    expect(circuit("Office area equipment & sockets").finding).toBe("No flagged hours — steady use; after-hours draw is 75% of daytime draw.");
+    expect(circuit("3 LED displays").finding).toBe("**Ran non-stop the whole time.** All three were on for all 336 hours over 14 days — never dimmed, never off.");
+    expect(circuit("Shared area equipment & sockets").finding).toContain("use that never drops: after hours it still uses **97% of its daytime level**");
+    expect(circuit("Office area lights").finding).toBe("Lit past 6 pm on **all 10 weekdays** (~1.2 kWh per hour), usually until 8 pm.");
+    expect(circuit("Office area equipment & sockets").finding).toBe("Nothing unusual — steady use. After hours it uses 75% of its daytime level.");
     expect(report.screening.rows.find(row => row.label.startsWith("3 LED"))!.open).toBe("0.19 each");
-    expect(report.screening.callout).toContain("Office area lights after 6 pm (~2.1 kWh/evening) could go on a timer");
-    expect(report.screening.callout).toMatch(/Switching the 3 LED displays off outside operating hours alone would cut about \*\*S\$\d+ of their S\$123\/month\*\*/);
+    expect(report.screening.callout).toContain("Office area lights after 6 pm (~2.1 kWh an evening) could go on a timer");
+    expect(report.screening.callout).toMatch(/Switching the 3 LED displays off outside opening hours alone would cut about \*\*S\$\d+ of their S\$123\/month\*\*/);
   });
 
   it("keeps a zone's circuits when the meters are filed by area instead of by panel", () => {
@@ -137,7 +137,7 @@ describe("site report", () => {
     const report = buildSiteReport(renamed, reference, "2026-09-22T10:00:00Z");
 
     // The plan still names the panels, and the zones hold their circuits again.
-    expect(report.zones.map(zone => [zone.label, zone.board])).toEqual([["Zone A", "DB1"], ["Zone B", "DB2"], ["Zone C", "DB3"]]);
+    expect(report.zones.map(zone => [zone.label, zone.board])).toEqual([["Location A", "DB1"], ["Location B", "DB2"], ["Location C", "DB3"]]);
     expect(report.zones.every(zone => zone.monthKwh > 0)).toBe(true);
     expect(report.reference).not.toBeNull();
   });
@@ -160,7 +160,7 @@ describe("site report", () => {
     const plain = buildSiteReport(DATA, null, "2026-09-22T10:00:00Z");
     expect(plain.reference).toBeNull();
     expect(plain.zones.map(zone => zone.label)).toEqual(["Space 1 - Office Area", "Space 2 - Shared Area"]);
-    expect(plain.profile.intro).toBe("Energy is monitored by three distribution boards (the electrical panels that feed each area), grouped into two zones:");
+    expect(plain.profile.intro).toBe("Energy is measured at three distribution boards (the electrical panels that feed each area), grouped into two locations:");
     expect(plain.masthead.detail).toBe("Office energy report");
   });
 });

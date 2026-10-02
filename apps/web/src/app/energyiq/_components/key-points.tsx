@@ -13,6 +13,18 @@ import { ForecastLine } from "./forecast-line";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { intlLocale, type EnergyIqLocale } from "./energyiq-messages";
 import { keyPointsMessages } from "./key-points-messages";
+import { useEnergyIqAccess } from "./energyiq-access";
+
+/** Two sentences that say nearly the same thing ("used after working hours" / "used outside working hours"). */
+const sameText = (left: string, right: string): boolean => {
+  const words = (value: string) => new Set(value.toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
+  const a = words(left);
+  const b = words(right);
+  const shared = [...a].filter((word) => b.has(word)).length;
+  const all = new Set([...a, ...b]).size;
+  // CJK sentences have no spaces, so compare them whole.
+  return all === 0 ? true : all <= 2 ? left.trim() === right.trim() : shared / all >= 0.6;
+};
 
 /**
  * Analysis for the same dates as the headline's report. A headline about equipment left on opens step 3,
@@ -70,6 +82,7 @@ function withBold(sentence: string, placeholder: string, value: string) {
 }
 const reportDate = (value: string, locale: EnergyIqLocale = "en") => new Date(value).toLocaleDateString(locale === "en" ? "en-GB" : intlLocale(locale),{timeZone:"Asia/Singapore",day:"numeric",month:"short",year:"numeric"}).replace("Sept","Sep");
 export function KeyPoints({projectId}:{projectId:string}) {
+  const { activeProject } = useEnergyIqAccess();
   const t=useMessages(keyPointsMessages);
   const {locale}=useEnergyIqLocale();
   const [result,setResult]=useState<Result|null>(null),[error,setError]=useState(false),[retry,setRetry]=useState(0);
@@ -98,9 +111,10 @@ export function KeyPoints({projectId}:{projectId:string}) {
     {error?<div role="alert" className={styles.empty}><h2>{t("loadFailed")}</h2><button onClick={()=>setRetry(n=>n+1)}>{t("tryAgain")}</button></div>
       :!result?<p role="status">{t("loading")}</p>
       :<>
-      <section className={styles.hero}><p className={styles.heroEyebrow}>{metrics?.projectName ?? t("yourProject")}</p>
+      <section className={styles.hero}><p className={styles.heroEyebrow}>{metrics?.projectName ?? activeProject?.name ?? t("yourProject")}</p>
         <h2>{report ? <>{report.title.before}<span>{report.title.emphasis}</span></> : site.state && publication?.selection.summary ? plain(publication.selection.summary) : t("fallbackHeadline")}</h2>
-        <p>{report?.headline}</p>
+        {/* The sentence under the headline only when it adds something: often it is the headline again. */}
+        {report?.headline && sameText(report.headline, `${report.title.before}${report.title.emphasis}`) === false ? <p>{report.headline}</p> : null}
         <ForecastLine projectId={projectId} className={styles.heroForecast} />
         <p className={styles.heroLinks}><Link href={analysisHref(projectId, shownPeriod, report?.headline ?? "", report?.headlineTopic)}>{t("seeWhy")}</Link></p></section>
       {/* Say which report is on screen — the saved one, by its dates and the day it was written — and how to open it. */}

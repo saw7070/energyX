@@ -43,6 +43,7 @@ import {
 } from "../../../lib/config-api";
 import { EnergyIcon } from "../_components/icons";
 import { EnergySelect } from "../_components/energy-select";
+import { friendlyErrorKey, friendlyErrorMessage } from "../_components/friendly-error";
 import type { useEnergyIqAccess } from "../_components/energyiq-access";
 import { PreschoolAdditionalMethodProposalAdmin } from "../_components/preschool-additional-method-proposal-admin";
 import {
@@ -106,12 +107,11 @@ type AdminProjectOption = EnergyProjectDto & { workspaceName: string };
 
 // Saving applies the change straight away, the same as the Facility page: no separate publication step for setup edits.
 export const applyFailure = (reason: unknown) => {
-  const text = reason instanceof Error ? reason.message : "";
-  const invalid = /SETUP_INVALID:([\w,]+)/.exec(text);
-  if (/ADMIN|FORBIDDEN/.test(text)) return "Saved, but only a platform administrator can apply it.";
-  if (invalid) return `Saved, but not applied yet: ${invalid[1]!.replace(/,/g, ", ")}. Fix that and save again.`;
-  if (/DATA_NOT_READY/.test(text)) return "Saved, but not applied yet: this project has no readings to publish.";
-  if (/REVISION|CONFLICT/.test(text)) return "Saved, but not applied: someone else changed this project. Refresh and try again.";
+  const key = reason instanceof Error ? friendlyErrorKey(reason) : null;
+  if (key === "forbidden") return "Saved, but only a platform administrator can apply it.";
+  if (key === "setupIncomplete") return "Saved, but not applied yet: some locations or meters still need setting up. Fix the problems listed under Validation, then save again.";
+  if (key === "dataNotReady") return "Saved, but not applied yet: this project has no readings to publish.";
+  if (key === "conflict") return "Saved, but not applied: someone else changed this project. Refresh and try again.";
   return "Saved, but could not be applied. Try saving again.";
 };
 
@@ -3741,8 +3741,8 @@ function ValidationList({ validation, compact = false }: { validation: EnergyPro
               issue.severity === "error" ? "text-step-error" : "text-step-warning",
             ].join(" ")} />
             <div>
-              <p className="text-xs font-medium">{issue.message}</p>
-              <p className="mt-0.5 font-mono text-[9px] uppercase tracking-wide text-muted-light">{issue.code}</p>
+              {/* The issue's own sentence; its code stays out of sight (a code alone would mean nothing to the reader). */}
+              <p className="text-xs font-medium" data-issue-code={issue.code}>{issue.message?.trim() || friendlyErrorMessage(issue.code)}</p>
             </div>
           </div>
         </div>
@@ -3821,7 +3821,8 @@ function LoadingPanel() {
 
 const optionalNumericInput = (value: string): number | undefined => value === "" ? undefined : Number(value);
 const normalizeProjectStatus = (value: string): EnergyProjectDto["status"] => value === "published" || value === "archived" ? value : "draft";
-const messageFrom = (reason: unknown, fallback: string): string => reason instanceof Error ? reason.message : fallback;
+// Server codes and request failures become plain sentences; human server text (and our own thrown text) reads as written.
+const messageFrom = (reason: unknown, fallback: string): string => friendlyErrorMessage(reason, { fallback });
 const inputClass = "w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none transition-shadow focus:border-primary/30 focus:ring-2 focus:ring-primary/10";
 const resourceOptions = [
   { value: "electricity", label: "Electricity" },

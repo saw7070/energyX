@@ -26,12 +26,8 @@ export function LoginClient() {
       router.replace(returnTo);
       return;
     }
-    try {
-      const access = await configApi.getEnergyAccessContext();
-      router.replace(access.role === "admin" ? "/energyiq/admin" : "/energyiq/overview");
-    } catch {
-      router.replace("/energyiq/overview");
-    }
+    // Everyone starts on the Overview; administrators reach the Admin console from the account menu.
+    router.replace("/energyiq/overview");
   }, [returnTo, router]);
 
   useEffect(() => {

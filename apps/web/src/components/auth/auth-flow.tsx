@@ -3,6 +3,7 @@
 import { useCallback, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { configApi } from "../../lib/config-api/client";
+import { friendlyErrorKey, friendlyErrorMessage } from "../../app/energyiq/_components/friendly-error";
 import { EnergyXMark } from "../brand/energyx-mark";
 
 export type AuthMode = "login" | "invite" | "forgot" | "verify" | "reset";
@@ -14,6 +15,47 @@ const AUTH_MODE_META: Record<AuthMode, { title: string; subtitle: string; submit
   verify: { title: "Verify email", subtitle: "Enter the code we sent you", submit: "Verify email" },
   reset: { title: "Reset password", subtitle: "Choose a new password", submit: "Reset password" },
 };
+
+/**
+ * The form checks its own fields (it is `noValidate`, so the browser's bubbles never appear) and shows one plain
+ * sentence above the button: blank fields are caught here before anything is sent.
+ */
+export function missingAuthFields(mode: AuthMode, values: { email: string; password: string; token: string }): string | null {
+  if (mode === "login" && (!values.email.trim() || !values.password.trim())) return "Enter your email and password.";
+  if (mode === "forgot" && !values.email.trim()) return "Enter your email address.";
+  if (mode === "verify" && !values.token.trim()) return "Enter the verification code from your email.";
+  if (mode === "reset" && !values.token.trim()) return "Enter the reset code from your email.";
+  return null;
+}
+
+const AUTH_FAILURE_FALLBACK: Record<AuthMode, string> = {
+  login: "We couldn't sign you in. Please try again.",
+  invite: "We couldn't activate your account. Please try again.",
+  forgot: "We couldn't send the reset link. Please try again.",
+  verify: "We couldn't verify your email. Please try again.",
+  reset: "We couldn't reset your password. Please try again.",
+};
+
+/**
+ * A failed sign-in step in plain words. The server's own sentences ("Invalid email or password.", "Email verification
+ * is required before login.") are already written for people and are shown as they are; codes, CSRF / token wording
+ * and network failures are not.
+ */
+export function authErrorMessage(reason: unknown, mode: AuthMode): string {
+  // Only a thrown error carries the server's sentence; anything else thrown says nothing a reader can use.
+  if (!(reason instanceof Error)) return AUTH_FAILURE_FALLBACK[mode];
+  const text = reason.message.trim();
+  if (/^(?:email|password|token|currentPassword|newPassword) is required\.?$/i.test(text)) {
+    return missingAuthFields(mode, { email: "", password: "", token: "" }) ?? "Password must be at least 8 characters.";
+  }
+  const key = friendlyErrorKey(reason);
+  if (key === "sessionEnded") return "This sign-in page has expired. Refresh the page and try again.";
+  if (key === "linkExpired") {
+    if (mode === "invite") return "This invitation link has expired or is no longer valid. Ask your administrator for a new invitation.";
+    if (mode === "reset") return "This reset link has expired or is no longer valid. Request a new one with Forgot password.";
+  }
+  return friendlyErrorMessage(reason, { fallback: AUTH_FAILURE_FALLBACK[mode] });
+}
 
 export const AUTH_BUTTON_CLASS =
   "flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#176b59] px-3 text-sm font-semibold text-white shadow-sm transition-[background-color,transform] duration-[140ms] hover:bg-[#115444] active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#176b59]/40 focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none";
@@ -59,6 +101,12 @@ export function AuthFlow({
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const missing = missingAuthFields(mode, { email, password, token });
+    if (missing) {
+      setMessage(null);
+      setLocalError(missing);
+      return;
+    }
     setSubmitting(true);
     setLocalError(null);
     setMessage(null);
@@ -98,7 +146,7 @@ export function AuthFlow({
         setMode("login");
       }
     } catch (err) {
-      setLocalError(err instanceof Error ? err.message : "Authentication failed");
+      setLocalError(authErrorMessage(err, mode));
     } finally {
       setSubmitting(false);
     }
@@ -128,6 +176,7 @@ export function AuthFlow({
             onChange={setToken}
             placeholder={mode === "verify" ? "Paste your verification code" : "Paste your reset code"}
             autoComplete="one-time-code"
+            required
           />
         ) : null}
         {mode === "login" || mode === "forgot" ? (
@@ -139,6 +188,7 @@ export function AuthFlow({
             onChange={setEmail}
             placeholder="you@example.com"
             autoComplete="email"
+            required
           />
         ) : null}
         {mode !== "forgot" && mode !== "verify" ? (
@@ -151,6 +201,7 @@ export function AuthFlow({
             placeholder={mode === "login" ? "Enter your password" : "At least 8 characters"}
             hint={mode === "invite" || mode === "reset" ? "At least 8 characters" : undefined}
             autoComplete={mode === "login" ? "current-password" : "new-password"}
+            required
             {...(mode === "login"
               ? {
                   action: (
@@ -249,6 +300,7 @@ function AuthField({
   hint,
   type = "text",
   autoComplete,
+  required = false,
   action,
 }: {
   id: string;
@@ -259,6 +311,8 @@ function AuthField({
   hint?: string;
   type?: string;
   autoComplete?: string;
+  /** Announced to assistive technology; the form itself checks blank fields (see missingAuthFields). */
+  required?: boolean;
   action?: ReactNode;
 }) {
   const [revealed, setRevealed] = useState(false);
@@ -279,6 +333,7 @@ function AuthField({
           onChange={(event) => onChange(event.target.value)}
           placeholder={placeholder}
           autoComplete={autoComplete}
+          aria-required={required || undefined}
           className={`h-11 w-full rounded-lg border border-border bg-surface px-3.5 text-sm text-foreground outline-none transition-colors duration-[140ms] placeholder:text-muted-light hover:border-muted-light focus:border-[#176b59] focus:ring-[3px] focus:ring-[#176b59]/15 motion-reduce:transition-none ${isPassword ? "pr-11" : ""}`}
         />
         {isPassword ? (

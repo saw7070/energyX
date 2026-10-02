@@ -50,7 +50,7 @@ describe("report workspace", () => {
     ["revision_started", "Revising report"],
     ["review_passed", "Review completed"],
     ["review_blocked", "Needs attention"],
-    ["skill_inputs_prepared", "Skill inputs provided"],
+    ["skill_inputs_prepared", "Gathering your data"],
   ])("labels real %s activity", async (type, label) => {
     api.reportAgentRequest.mockImplementation(async (_project, path = "") => path.includes("events") ? { events: [{ sequence: 1, time: "2026-09-13T00:00:00Z", type }] } : overview("running"));
     await act(async () => root.render(<ReportAgentPanel projectId="p1" />));
@@ -63,7 +63,7 @@ describe("report workspace", () => {
     api.reportAgentRequest.mockImplementation(async (_project, path = "") => path.includes("events") ? { events: [] } : state);
     await act(async () => root.render(<ReportAgentPanel projectId="p1" />));
     expect(container.textContent).toContain("Needs attention");
-    expect(container.textContent).toContain("The draft is preserved with unresolved review issues");
+    expect(container.textContent).toContain("some review issues are still open");
     expect(container.textContent).not.toContain("Check the project data and try again");
   });
   it("restores unsent text after leaving, isolates projects and clears only after accepted submission", async () => {
@@ -87,7 +87,7 @@ describe("report workspace", () => {
     const state = { ...overview(), settings: { ...overview().settings, fileRefIds: ["f1"] }, files: [{ id: "f1", filename: "bill.pdf", bytes: 10 }] };
     api.reportAgentRequest.mockResolvedValue(state);
     await act(async () => root.render(<ReportAgentPanel projectId="p1" initialSessionId="new" />));
-    expect(container.textContent).toContain("Project defaults remain unchanged");
+    expect(container.textContent).toContain("Project defaults stay the same");
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Remove attachment bill.pdf"]')!.click());
     expect(container.textContent).toContain("Save selection as project materials");
     expect(api.reportAgentRequest.mock.calls.some(call => call[1] === "settings")).toBe(false);
@@ -161,9 +161,9 @@ describe("report workspace", () => {
     api.reportAgentRequest.mockImplementation(async(_project,path="")=>path.includes("events")?{events:[]}:path.startsWith("draft-skill/")?{content:"# Draft method"}:path.startsWith("output/")?{content:"<h1>Accepted report</h1>"}:state);
     await act(async()=>root.render(<ReportAgentPanel projectId="p1" />));
     expect(container.textContent).not.toContain("Create report");
-    await act(async()=>[...container.querySelectorAll("button")].find(item=>item.textContent?.includes("HTML report"))!.click());
+    await act(async()=>[...container.querySelectorAll("button")].find(item=>item.textContent?.includes("Report · Open preview"))!.click());
     expect(container.querySelector("iframe")?.getAttribute("srcdoc")).toContain("Accepted report");
-    await act(async()=>[...container.querySelectorAll("button")].find(item=>item.textContent?.includes("Skill draft"))!.click());
+    await act(async()=>[...container.querySelectorAll("button")].find(item=>item.textContent?.includes("Suggested advisor instructions"))!.click());
     expect(container.querySelector('[aria-label="File preview"]')?.textContent).toContain("Draft method");
     expect(api.reportAgentRequest.mock.calls.some(call=>call[1] === "settings")).toBe(false);
   });
@@ -188,13 +188,13 @@ describe("report workspace", () => {
     const state={...overview(),periodOptions:{defaultPeriod:{from:"2026-08-01",toExclusive:"2026-09-13"},availablePeriod:{from:"2026-08-01",toExclusive:"2026-09-11",actualLastIntervalEnd:"2026-09-10T15:45:00Z"}},dataSummary:{actualLastIntervalEnd:"2026-09-10T15:45:00Z",rows:100}};
     api.reportAgentRequest.mockImplementation(async(_project,path="")=>path.includes("events")?{events:[]}:path.startsWith("output/")?{content:"Report"}:state);
     await act(async()=>root.render(<ReportAgentPanel projectId="p1" />));
-    const status=container.querySelector('[aria-label="Project data"]')!;expect(status.textContent).toContain("Status unavailable");expect(status.textContent).not.toContain("Connected");expect(status.textContent).not.toContain("Latest reading");
+    const status=container.querySelector('[aria-label="Meter data"]')!;expect(status.textContent).toContain("Status unavailable");expect(status.textContent).not.toContain("Connected");expect(status.textContent).not.toContain("Latest reading");
   });
   it("keeps Project data connected when removing a supplementary attachment",async()=>{
     const state={...overview(),projectData:{status:"connected",actualLastIntervalEnd:"2026-09-10T15:45:00Z"},files:[{id:"extra",filename:"notes.txt",bytes:5}],settings:{...overview().settings,fileRefIds:["extra"]}};
     api.reportAgentRequest.mockImplementation(async(_project,path="",init)=>path === "settings"?JSON.parse(init.body):path.includes("events")?{events:[]}:path.startsWith("output/")?{content:"Report"}:state);
     await act(async()=>root.render(<ReportAgentPanel projectId="p1" />));
-    const status=container.querySelector('[aria-label="Project data"]')!;expect(status.textContent).toContain("Connected");expect(status.textContent).toContain("SGT");expect(status.querySelector("button")).toBeNull();
+    const status=container.querySelector('[aria-label="Meter data"]')!;expect(status.textContent).toContain("Connected");expect(status.textContent).toContain("Singapore time");expect(status.querySelector("button")).toBeNull();
     await act(async()=>container.querySelector<HTMLButtonElement>('[aria-label="Remove attachment notes.txt"]')!.click());
     expect(status.textContent).toContain("Connected");expect(container.querySelector('[aria-label="Attachments"]')).toBeNull();
     await click("Save selection as project materials");
@@ -205,7 +205,7 @@ describe("report workspace", () => {
     api.reportAgentRequest.mockImplementation(async(_project,path="")=>path.includes("events")?{events:[]}:path.startsWith("output/")?{content:"Report"}:state);
     await act(async()=>root.render(<ReportAgentPanel projectId="p1" />));
     api.reportAgentRequest.mockReturnValue(new Promise(()=>{}));await act(async()=>root.render(<ReportAgentPanel projectId="p2" />));
-    expect(container.querySelector('[aria-label="Project data"]')?.textContent).toContain("Checking connection");expect(container.querySelector('[aria-label="Project data"]')?.textContent).not.toContain("Connected");
+    expect(container.querySelector('[aria-label="Meter data"]')?.textContent).toContain("Checking connection");expect(container.querySelector('[aria-label="Meter data"]')?.textContent).not.toContain("Connected");
   });
   it("prefills Configure project without sending or discarding the message, dates or report preview",async()=>{
     await act(async()=>root.render(<ReportAgentPanel projectId="p1" />));
@@ -214,36 +214,36 @@ describe("report workspace", () => {
     const input=container.querySelector<HTMLTextAreaElement>('[aria-label="Report instructions"]')!;
     await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,"value")!.set!.call(input,"Keep my current question");input.dispatchEvent(new Event("input",{bubbles:true}));});
     const from=container.querySelector<HTMLInputElement>('[aria-label="Start date"]')!.value;
-    await click("Configure project");
+    await click("Review facility setup");
     expect(input.value).toContain("Keep my current question");expect(input.value).toContain("Review this project's current configuration");
     expect(container.querySelector<HTMLInputElement>('[aria-label="Start date"]')!.value).toBe(from);expect(container.querySelector("iframe")).not.toBeNull();
     expect(api.reportAgentRequest.mock.calls.some(call=>call[2]?.method === "POST" || call[2]?.method === "PUT")).toBe(false);
     expect(api.getEnergyProjectSetup).toHaveBeenCalledWith("p1");
-    expect(container.querySelector('[aria-label="Facility status"]')?.textContent).toContain("Published version active · Draft changes not published");
+    expect(container.querySelector('[aria-label="Facility status"]')?.textContent).toContain("Current setup in use · Some changes aren't live yet");
   });
   it.each([
-    ["published",true,"Published version active · Draft changes not published"],
-    ["published",false,"Published · No pending changes"],
-    ["draft",true,"Draft saved · Not published"],
+    ["published",true,"Current setup in use · Some changes aren't live yet"],
+    ["published",false,"Current setup in use · No changes waiting"],
+    ["draft",true,"Setup saved · Not live yet"],
   ])("shows authoritative %s configuration with pending changes=%s",async(status,pending,label)=>{
     api.getEnergyProjectSetup.mockResolvedValue({project:{status,has_unpublished_changes:pending},draft:{revision:9,updated_at:"2026-09-12T02:00:00Z"}});
-    await act(async()=>root.render(<ReportAgentPanel projectId="p1" />));await click("Configure project");
-    const panel=container.querySelector('[aria-label="Facility status"]')!;expect(panel.textContent).toContain(label);expect(panel.textContent).toContain("Draft revision 9");
+    await act(async()=>root.render(<ReportAgentPanel projectId="p1" />));await click("Review facility setup");
+    const panel=container.querySelector('[aria-label="Facility status"]')!;expect(panel.textContent).toContain(label);expect(panel.textContent).toContain("Changes saved");
   });
   it("refreshes configuration after the conversation run finishes",async()=>{
     vi.useFakeTimers();let state=overview("running");
     api.reportAgentRequest.mockImplementation(async(_project,path="")=>path.includes("events")?{events:[]}:path.startsWith("output/")?{content:"Report"}:state);
-    await act(async()=>root.render(<ReportAgentPanel projectId="p1" />));await click("Configure project");expect(api.getEnergyProjectSetup).toHaveBeenCalledTimes(1);
+    await act(async()=>root.render(<ReportAgentPanel projectId="p1" />));await click("Review facility setup");expect(api.getEnergyProjectSetup).toHaveBeenCalledTimes(1);
     state=overview("succeeded");api.getEnergyProjectSetup.mockResolvedValue({project:{status:"published",has_unpublished_changes:false},draft:{revision:4,updated_at:"2026-09-12T03:00:00Z"}});
     await act(async()=>{await vi.advanceTimersByTimeAsync(3000);});
-    expect(api.getEnergyProjectSetup).toHaveBeenCalledTimes(2);expect(container.querySelector('[aria-label="Facility status"]')?.textContent).toContain("Published · No pending changes");
+    expect(api.getEnergyProjectSetup).toHaveBeenCalledTimes(2);expect(container.querySelector('[aria-label="Facility status"]')?.textContent).toContain("Current setup in use · No changes waiting");
   });
   it("does not expose a late configuration response after changing projects",async()=>{
     let resolve:(value:unknown)=>void=()=>{};api.getEnergyProjectSetup.mockReturnValue(new Promise(r=>{resolve=r;}));
-    await act(async()=>root.render(<ReportAgentPanel projectId="p1" />));await click("Configure project");
+    await act(async()=>root.render(<ReportAgentPanel projectId="p1" />));await click("Review facility setup");
     await act(async()=>root.render(<ReportAgentPanel projectId="p2" />));
     await act(async()=>resolve({project:{status:"published",has_unpublished_changes:false},draft:{revision:99,updated_at:"2026-09-12"}}));
-    expect(container.querySelector('[aria-label="Facility status"]')).toBeNull();expect(container.textContent).not.toContain("Draft revision 99");
+    expect(container.querySelector('[aria-label="Facility status"]')).toBeNull();expect(container.textContent).not.toContain("Changes saved");
   });
   it("adopts Agent-updated report preferences after completion before the next local save",async()=>{
     vi.useFakeTimers();let state=overview("running");
@@ -263,9 +263,9 @@ describe("report workspace", () => {
     const context=container.querySelector<HTMLTextAreaElement>('section[aria-label="Report preferences"] textarea')!;
     await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,"value")!.set!.call(context,"My unsaved context");context.dispatchEvent(new Event("input",{bubbles:true}));});
     state={...overview("succeeded"),settings:{...overview().settings,revision:2,contextNotes:"Agent context"}};
-    await act(async()=>{await vi.advanceTimersByTimeAsync(3000);});expect(context.value).toBe("My unsaved context");expect(container.textContent).toContain("Report preferences changed on the server");
+    await act(async()=>{await vi.advanceTimersByTimeAsync(3000);});expect(context.value).toBe("My unsaved context");expect(container.textContent).toContain("Someone else changed these settings");
     await click("Save report preferences");expect(api.reportAgentRequest.mock.calls.some(call=>call[1] === "settings")).toBe(false);
-    await click("Discard local edits and load latest");expect(context.value).toBe("Agent context");
+    await click("Discard my edits and load theirs");expect(context.value).toBe("Agent context");
   });
   it("opens the requested Session instead of the latest conversation", async () => {
     const state = overview();
@@ -320,7 +320,8 @@ describe("report workspace", () => {
     await act(async () => root.render(<ReportAgentPanel projectId="p2" />));
     expect(container.querySelector("iframe")).toBeNull();
     expect(container.textContent).not.toContain("Investigate night consumption");
-    expect(container.textContent).toContain("PROJECT_FORBIDDEN");
+    expect(container.textContent).toContain("You don't have access to this.");
+    expect(container.textContent).not.toContain("PROJECT_FORBIDDEN");
   });
   it("allows a fresh session without discarding saved reports", async () => {
     await act(async () => root.render(<ReportAgentPanel projectId="p1" />));
@@ -406,8 +407,8 @@ it("offers only one save action for a Skill run that also exposes a draft artifa
  const state=overview();state.runs[0]!.kind="skill";Object.assign(state.runs[0]!,{hasSkillDraft:true});
  api.reportAgentRequest.mockImplementation(async(_project,path="")=>path.includes("events")?{events:[]}:path.startsWith("output/")||path.startsWith("draft-skill/")?{content:"# Draft method"}:state);
  await act(async()=>root.render(<ReportAgentPanel projectId="p1"/>));
- expect([...container.querySelectorAll('button')].filter(b=>b.textContent==="Review and save version")).toHaveLength(1);
- await click("Review and save version");
+ expect([...container.querySelectorAll('button')].filter(b=>b.textContent==="Review and save")).toHaveLength(1);
+ await click("Review and save");
  expect(api.reportAgentRequest).toHaveBeenCalledWith("p1","draft-skill/run-1",undefined);
- expect(container.querySelector('[aria-label="Save Skill version"]')).not.toBeNull();
+ expect(container.querySelector('[aria-label="Save instructions"]')).not.toBeNull();
 });

@@ -69,9 +69,9 @@ it("explains why the newest day is not counted yet, instead of looking stuck", a
   };
   const { host, close } = await renderNode(value, <PendingDayNote projectId="office" lastLocalDay="2026-09-21" timezone="Asia/Singapore" />);
   try {
-    expect(host.textContent).toContain("22 September is not counted yet");
-    expect(host.textContent).toContain("2 meters had nothing left to report");
-    expect(host.textContent).toContain("next daily update");
+    expect(host.textContent).toContain("22 September isn't counted yet");
+    expect(host.textContent).toContain("some readings are still coming in");
+    expect(host.textContent).toContain("added after the next update");
   } finally { await close(); }
 });
 
@@ -138,6 +138,6 @@ it("does not promise a pending day will arrive once a meter has stopped", async 
   expect(text).toContain("will not complete on its own");
   expect(text).toContain("one meter stopped sending partway through it");
   // The old wording sent the reader away to wait for an update that never fixes it.
-  expect(text).not.toContain("next daily update");
+  expect(text).not.toContain("next update");
   await close();
 });

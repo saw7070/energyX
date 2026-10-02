@@ -36,17 +36,17 @@ describe("site report page", () => {
       const text = host.textContent ?? "";
       expect(host.querySelector("h1")?.textContent).toBe(`${report.title.before}${report.title.emphasis}`);
       expect(host.querySelector("h1 span")?.textContent).toBe(report.title.emphasis);
-      expect([...host.querySelectorAll("h2")].map(heading => heading.textContent)).toEqual(["Property profile & circuit map", "30-day estimate & electricity bill", "Benchmark: weekday, weekend and base load", "Weekday operating-hour pattern", "Abnormality screening by circuit"]);
+      expect([...host.querySelectorAll("h2")].map(heading => heading.textContent)).toEqual(["About the site and its meters", "A 30-day month: estimated use and bill", "A normal weekday, a weekend, and what never switches off", "A normal weekday, hour by hour", "Meters doing something unusual"]);
       expect(host.querySelectorAll(".keyfigs > div")).toHaveLength(4);
       expect(host.querySelectorAll("svg.donut")).toHaveLength(2);
       expect(host.querySelector('svg[aria-label^="Daily electricity use"]')).not.toBeNull();
-      expect(host.querySelector('svg[aria-label^="Average weekday demand by hour"]')).not.toBeNull();
-      expect(text).toContain("Cause of the lunch dip:");
-      expect(text).toContain("Reading the screen:");
+      expect(host.querySelector('svg[aria-label^="Average weekday use by hour"]')).not.toBeNull();
+      expect(text).toContain("Why use drops at lunch:");
+      expect(text).toContain("What this means:");
       expect(host.querySelector("tr.total")?.textContent).toContain("Office total");
       // Without a floor layout, zones are listed in a table instead of the map.
       expect(host.querySelector("svg.plan")).toBeNull();
-      expect(text).toContain("Est. kWh / 30 days");
+      expect(text).toContain("Est. kWh per 30 days");
 
       const html = standaloneReportHtml(host.querySelector("article")!, report);
       expect(html).toMatch(/^<!DOCTYPE html>/);
@@ -144,7 +144,7 @@ describe("the report the Overview shows", () => {
     const page = await overview();
     try {
       expect(page.host.querySelector("[data-saved]")?.textContent).toBe("site-monthly monthly 2026-08-03→2026-08-17");
-      expect(page.host.querySelector("h1")?.textContent).toBe("Two-thirds of the office load never switches off");
+      expect(page.host.querySelector("h1")?.textContent).toBe("Two-thirds of the office's electricity use never switches off");
       // The document under the heading is the same saved report, and the page says where it lives.
       expect(page.host.querySelector('section[aria-label="Energy report"] h2')?.textContent).toBe("The full report");
       expect(page.text()).toContain("3–16 Aug 2026");
@@ -165,7 +165,7 @@ describe("the report the Overview shows", () => {
     const page = await overview();
     try {
       expect(page.host.querySelector("[data-saved]")?.textContent).toBe("none");
-      expect(page.host.querySelector("h1")?.textContent).toBe("Two-thirds of the office load never switches off");
+      expect(page.host.querySelector("h1")?.textContent).toBe("Two-thirds of the office's electricity use never switches off");
       expect(page.text()).toContain("No report has been saved for this site yet");
       expect(page.text()).not.toContain("kept in Reports");
       // Nothing to be newer than: the report was just built from the latest readings.
@@ -185,7 +185,7 @@ describe("the report the Overview shows", () => {
     const page = await overview();
     try {
       expect(page.host.querySelector("[data-saved]")?.textContent).toBe("none");
-      expect(page.host.querySelector("h1")?.textContent).toBe("Two-thirds of the office load never switches off");
+      expect(page.host.querySelector("h1")?.textContent).toBe("Two-thirds of the office's electricity use never switches off");
       expect(page.text()).toContain("No report has been saved for this site yet");
     } finally { await page.unmount(); }
   });

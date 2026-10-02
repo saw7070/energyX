@@ -142,7 +142,7 @@ describe("LiveConnectionPanel", () => {
     });
     await act(async () => root.render(<LiveConnectionPanel projectId="p" />));
     await flush();
-    expect(container.textContent).toContain("Connected through the server settings");
+    expect(container.textContent).toContain("Managed by EnergyX support");
     const rows = [...container.querySelectorAll("tbody tr")];
     expect(rows[0]!.textContent).toContain("Incoming 3Phase · Smart meter");
     expect(rows[1]!.textContent).toContain("Device offline");
@@ -237,12 +237,12 @@ describe("LiveConnectionPanel", () => {
     expect(container.textContent).toContain("Manage this site here instead");
     const inputs = container.querySelectorAll("input");
     await act(async () => { setValue(inputs[0]!, "abcd1234efgh5678ijkl"); setValue(inputs[1]!, "secretsecret1234"); });
-    await act(async () => { button("Take over").click(); });
+    await act(async () => { button("Manage here").click(); });
     await flush();
     expect(bodies).toEqual([{ accessId: "abcd1234efgh5678ijkl", accessSecret: "secretsecret1234", takeOver: true }]);
     expect(container.textContent).toContain("This site is now managed here.");
-    expect(container.textContent).toContain("Taken over from the server settings");
-    expect(button("Hand back to server settings")).toBeTruthy();
+    expect(container.textContent).toContain("Managed here. To hand it back");
+    expect(button("Let support manage it")).toBeTruthy();
     expect([...container.querySelectorAll("tbody tr")][0]!.textContent).toContain("Edit");
   });
 });

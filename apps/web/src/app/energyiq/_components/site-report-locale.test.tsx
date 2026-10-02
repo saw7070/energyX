@@ -129,28 +129,28 @@ describe("site report in Chinese and Malay", () => {
     expect(chinese.title).toEqual({ before: "超过五分之四的办公室用电", emphasis: "从不关闭" });
     expect(chinese.headline).toMatch(/^估计每月 S\$\d+ 的电费中，约有 S\$\d+ 花在全天候开着的设备上，即使没人在场也一样。$/);
     expect(chinese.masthead).toEqual({ site: "Tuya Office", detail: "6 Battery Road, 27 楼 · 办公室能源报告", period: "2026年8月3日–16日", periodNote: "14 天，SGT" });
-    expect(chinese.lede).toContain("在 14 天里，办公室共用电 **1,148 kWh**，来自 6 条有电表的线路。");
+    expect(chinese.lede).toContain("在 14 天里，办公室共用电 **1,148 kWh**，由 6 个电表计量。");
     expect(chinese.circuits.map(item => item.name).sort()).toEqual(["3 个 LED Display", "Office Area 插座与设备", "Office Area 照明", "Shared Area 插座与设备"]);
-    expect(circuit(chinese, "LED Display 1–3").label).toBe("3 个 LED Display（分区 C）");
+    expect(circuit(chinese, "LED Display 1–3").label).toBe("3 个 LED Display（位置 C）");
     expect(chinese.profile.intro).toContain("Tuya Office 占用 **6 Battery Road 27 楼的一半，约 700 m²**。");
-    expect(chinese.profile.zones[0]).toEqual({ heading: "分区 A（从入口右转 · 配电箱 DB1）", text: "Open office和Director room。对应线路为 Office Area 照明（DB1 L1 Light）和Office Area 插座与设备（DB1 L1 Power）。" });
+    expect(chinese.profile.zones[0]).toEqual({ heading: "位置 A（从入口右转 · 配电箱 DB1）", text: "Open office和Director room。对应电表为 Office Area 照明（DB1 L1 Light）和Office Area 插座与设备（DB1 L1 Power）。" });
     expect(chinese.estimate.intro).toContain("**S$0.3000/kWh（未含消费税）**");
     expect(chinese.pattern!.intro).toContain("午餐时段回落（约 4.3 kW，中午12点–下午2点）");
-    expect(chinese.pattern!.notes.map(note => note.text)).toEqual(expect.arrayContaining(["上班后用电上升", "午餐低谷"]));
-    expect(circuit(chinese, "LED Display 1–3").finding).toBe("**336 小时内零偏离。**全部 3 个都在整整 14 天里持续运行，从未调暗，也从未关闭。");
-    expect(circuit(chinese, "DB1 L1 Light").finding).toBe("在**全部 10 个工作日**，下午6点之后照明仍亮着（约 1.2 kWh/h），通常到晚上8点才关。");
+    expect(chinese.pattern!.notes.map(note => note.text)).toEqual(expect.arrayContaining(["员工到达", "午餐低谷"]));
+    expect(circuit(chinese, "LED Display 1–3").finding).toBe("**一直不停地运行。**全部 3 个在 14 天共 336 小时里一直开着，从未调暗，也从未关闭。");
+    expect(circuit(chinese, "DB1 L1 Light").finding).toBe("在**全部 10 个工作日**，下午6点之后照明仍亮着（每小时约 1.2 kWh），通常到晚上8点才关。");
     expect(chinese.screening.rows.find(row => row.code === "LED Display 1–3")!.open).toBe("每个 0.19");
-    expect(chinese.footer.right).toBe("生成于 2026年9月22日 · 数据根据最新读数重新计算");
+    expect(chinese.footer.right).toBe("编制于 2026年9月22日 · 数据根据最新读数计算");
     expect(englishLeft(prose(chinese))).toEqual([]);
   });
 
   it("writes the Malay report in Bahasa Melayu", () => {
-    expect(malay.title).toEqual({ before: "Lebih daripada empat perlima beban pejabat ", emphasis: "tidak pernah dimatikan" });
+    expect(malay.title).toEqual({ before: "Lebih daripada empat perlima penggunaan elektrik pejabat ", emphasis: "tidak pernah dimatikan" });
     expect(malay.masthead.period).toBe("3–16 Ogo 2026");
     expect(malay.circuits.map(item => item.name).sort()).toEqual(["3 unit LED Display", "Lampu Office Area", "Peralatan & soket Office Area", "Peralatan & soket Shared Area"]);
-    expect(circuit(malay, "LED Display 1–3").finding).toBe("**Sifar sisihan dalam 336 jam.** Kesemua 3 unit berjalan tanpa henti sepanjang 14 hari — tidak pernah malap, tidak pernah dimatikan.");
-    expect(circuit(malay, "DB1 L1 Light").finding).toBe("Masih menyala selepas 6 petang pada **kesemua 10 hari bekerja** (~1.2 kWh/h), biasanya hingga 8 malam.");
-    expect(malay.benchmark.rows.map(row => row.label)).toEqual(["Purata hari bekerja", "Purata hujung minggu", "Beban asas (penggunaan terbiar 24/7)"]);
+    expect(circuit(malay, "LED Display 1–3").finding).toBe("**Berjalan tanpa henti sepanjang masa.** Kesemua 3 unit hidup selama 336 jam dalam 14 hari — tidak pernah malap, tidak pernah dimatikan.");
+    expect(circuit(malay, "DB1 L1 Light").finding).toBe("Masih menyala selepas 6 petang pada **kesemua 10 hari bekerja** (~1.2 kWh sejam), biasanya hingga 8 malam.");
+    expect(malay.benchmark.rows.map(row => row.label)).toEqual(["Purata hari bekerja", "Purata hari hujung minggu", "Tidak pernah dimatikan (24/7)"]);
     expect(malay.headline).toMatch(/^Kira-kira S\$\d+ daripada anggaran bil bulanan S\$\d+ dibayar untuk peralatan yang hidup sepanjang masa, walaupun tiada sesiapa di situ\.$/);
     const malayWords = new Set(["Ia", "ia"]);
     expect(englishLeft(prose(malay)).filter(word => /^(the|and|of|is|are|with|from|per|weekday|weekend|hours?|lights?|equipment|never|after|before|average|load|zone|Weekday|Weekend|Base|Zone|Lit|Still|Steady|Zero|Nothing|Switching|Method|Cost|Across)$/.test(word) && !malayWords.has(word))).toEqual([]);
@@ -167,13 +167,13 @@ describe("site report page in other languages", () => {
   it("shows the whole panel in Chinese, with no English wording left", async () => {
     const report = buildSiteReport(DATA, REFERENCE, GENERATED, "zh-Hans");
     const page = await render("zh-Hans", <SiteReportPanel state={{ report }} onRetry={() => undefined} />);
-    expect([...page.host.querySelectorAll("h2")].map(heading => heading.textContent)).toEqual(["完整报告", "物业概况与线路图", "30 天估算与电费", "基准对比：工作日、周末和基础用电", "工作日营业时段用电规律", "按线路的异常筛查"]);
+    expect([...page.host.querySelectorAll("h2")].map(heading => heading.textContent)).toEqual(["完整报告", "场地概况与电表", "按 30 天计算：估算用电量与电费", "普通工作日、周末，以及从不关闭的用电", "普通工作日的逐小时用电", "用电不寻常的电表"]);
     expect(page.host.querySelector("h1")?.textContent).toBe("超过五分之四的办公室用电从不关闭");
     expect(page.host.querySelector('section[aria-label="能源报告"] button')?.textContent).toBe("下载");
     expect(page.host.querySelector('article[aria-label="Tuya Office 能源报告"]')).not.toBeNull();
-    expect(page.host.querySelector('svg[aria-label="Tuya Office 的楼层示意图"]')).not.toBeNull();
-    expect(page.host.querySelector('svg[aria-label="每日用电量，含工作日平均线和基础用电线"]')).not.toBeNull();
-    for (const text of ["时段：2026年8月3日–16日（14 天，SGT）", "午餐低谷的原因：", "如何解读筛查结果：", "办公室合计", "估算 30 天", "工作日平均", "只有基础用电的一天", "电气面板（配电箱）", "右转 · 分区 A", "左转 · 分区 B + C", "营业时间 上午9点–下午6点", "平均需求（kW）"]) expect(page.text()).toContain(text);
+    expect(page.host.querySelector('svg[aria-label="Tuya Office 的简化楼层图"]')).not.toBeNull();
+    expect(page.host.querySelector('svg[aria-label="每日用电量，含工作日平均线和无人在场日的参考线"]')).not.toBeNull();
+    for (const text of ["时段：2026年8月3日–16日（14 天，SGT）", "午餐时用电下降的原因：", "这意味着什么：", "办公室合计", "估算，30 天", "工作日平均", "无人在场的一天", "电气面板（配电箱）", "右转 · 位置 A", "左转 · 位置 B + C", "营业时间 上午9点–下午6点", "平均功率（kW）"]) expect(page.text()).toContain(text);
     // Everything a reader can see or hear: visible text, accessible names and hover titles.
     const labels = [...page.host.querySelectorAll("[aria-label]")].map(node => node.getAttribute("aria-label")!);
     const titles = [...page.host.querySelectorAll("title")].map(node => node.textContent ?? "");
@@ -255,7 +255,7 @@ describe("site report page in other languages", () => {
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
     expect(page.host.querySelector("h1")?.textContent).toBe("超过五分之四的办公室用电从不关闭");
     await act(async () => page.host.querySelector("button")!.click());
-    expect(page.host.querySelector("h1")?.textContent).toBe("Lebih daripada empat perlima beban pejabat tidak pernah dimatikan");
+    expect(page.host.querySelector("h1")?.textContent).toBe("Lebih daripada empat perlima penggunaan elektrik pejabat tidak pernah dimatikan");
     expect(page.host.querySelector("p")?.textContent).toBe("always-on");
     expect(mock.load).toHaveBeenCalledTimes(1);
     expect(notes).toHaveBeenCalledTimes(1);

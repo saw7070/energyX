@@ -146,8 +146,20 @@ export function SmartImportPanel({ projectId, onChanged, onOpenMapping }: {
   const waiting = uploads.filter((batch) => batch.status !== "materialized");
   const devices = useMemo(() => parseDeviceList(deviceListText), [deviceListText]);
   const plan = useMemo(() => setup && uploads.length
-    ? buildSmartSetup({ document: setup.draft.document, projectId, labels: sourceLabelsAcrossImportBatches(uploads), devices })
-    : null, [devices, projectId, setup, uploads]);
+    ? buildSmartSetup({
+      document: setup.draft.document,
+      projectId,
+      labels: sourceLabelsAcrossImportBatches(uploads),
+      devices,
+      names: {
+        board: t("setup.board"),
+        boardLevel: t("setup.boardLevel"),
+        boardLevelHint: t("setup.boardLevelHint"),
+        circuitLevel: t("setup.circuitLevel"),
+        circuitLevelHint: t("setup.circuitLevelHint"),
+      },
+    })
+    : null, [devices, projectId, setup, uploads, t]);
   const busy = uploadingCount > 0 || step !== null;
   const publishedSummary = summariseImport(published);
 
@@ -408,7 +420,7 @@ function DeviceNames({ plan, saved, deviceListText, setDeviceListText, onError, 
   const [showAll, setShowAll] = useState(plan.mode === "new");
   const [reading, setReading] = useState(false);
   const named = plan.rows.filter((row) => row.displayName !== row.sourceLabel).length;
-  const total = plan.rows.find((row) => row.role === "total" && (plan.mode === "new" || row.location === "Main distribution board"));
+  const total = plan.rows.find((row) => row.role === "total" && (plan.mode === "new" || row.location === plan.boardName));
   const readPhoto = async (file: File) => {
     setReading(true);
     try {

@@ -88,7 +88,7 @@ export function ProjectConfigurationView({ setup, notes, policies, projectId, on
   const applyReason = (reason: unknown) => {
     const text = reason instanceof Error ? reason.message : "";
     const invalid = /SETUP_INVALID:([\w,]+)/.exec(text);
-    return /ADMIN|FORBIDDEN/.test(text) ? t("applyAdmin") : invalid ? t("applyInvalid", { codes: invalid[1]!.replace(/,/g, ", ") }) : /DATA_NOT_READY/.test(text) ? t("applyNoData") : /REVISION|CONFLICT/.test(text) ? t("applyConflict") : t("applyFailed");
+    return /ADMIN|FORBIDDEN/.test(text) ? t("applyAdmin") : invalid ? t("applyInvalid", { reasons: setupProblems(invalid[1]!).map(key => t(key)).join("; ") }) : /DATA_NOT_READY/.test(text) ? t("applyNoData") : /REVISION|CONFLICT/.test(text) ? t("applyConflict") : t("applyFailed");
   };
   // Saving makes a change live straight away: the saved setup, rate and hours are published without a separate review.
   const makeLive = async (saved: string) => {
@@ -205,4 +205,17 @@ function Reference({value,depth=0}:{value:unknown;depth?:number}) {
   if(typeof value !== "object") return <span>{String(value)}</span>;
   if(depth > 5) return <span>{t("nested")}</span>;
   return <dl>{Object.entries(value).map(([key,item])=><div key={key}><dt>{label(key)}</dt><dd><Reference value={item} depth={depth+1}/></dd></div>)}</dl>;
+}
+
+/** What a setup check found, in words: the codes themselves never reach the page. */
+export function setupProblems(codes: string): Array<"invalid.noMeter" | "invalid.totals" | "invalid.unplaced" | "invalid.levels" | "invalid.other"> {
+  const found = new Set<"invalid.noMeter" | "invalid.totals" | "invalid.unplaced" | "invalid.levels" | "invalid.other">();
+  for (const code of codes.split(",").map(item => item.trim()).filter(Boolean)) {
+    if (code === "LOCATION_WITHOUT_METER") found.add("invalid.noMeter");
+    else if (/ROUTE|TOTAL|AGGREGATION|MAPPING_NOT_CONFIRMED/.test(code)) found.add("invalid.totals");
+    else if (/UNMAPPED|SOURCE_LABEL|SCOPE/.test(code)) found.add("invalid.unplaced");
+    else if (/TIER|NODE/.test(code)) found.add("invalid.levels");
+    else found.add("invalid.other");
+  }
+  return found.size ? [...found] : ["invalid.other"];
 }

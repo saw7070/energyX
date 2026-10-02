@@ -96,10 +96,10 @@ export function DecisionSummary(props: StoryInput) {
         </h2>
       </div>
       <div className="mt-5 grid gap-px border-y border-slate-200 bg-slate-200/70 md:grid-cols-3">
-        <Step index={1} label={t("step.spent", { days: dates.length })} value={story.periodCost != null ? money(story.periodCost) : `${num(story.split.total, 0)} kWh`}
-          note={<>{num(story.project.usageKwh ?? story.split.total, 0)} kWh · {shortDate(dates[0]!, locale)} – {shortDate(dates.at(-1)!, locale)}{story.change != null && <> · <span className={story.change > 0 ? "text-amber-700" : "text-emerald-700"}>{t("step.change", { change: `${story.change > 0 ? "+" : ""}${num(story.change)}`, days: dates.length })}</span></>}</>} />
+        <Step index={1} label={t(story.periodCost != null ? "step.spent" : "step.used", { days: dates.length })} value={story.periodCost != null ? money(story.periodCost) : `${num(story.split.total, 0)} kWh`}
+          note={<>{story.periodCost != null ? `${num(story.project.usageKwh ?? story.split.total, 0)} kWh · ` : null}{shortDate(dates[0]!, locale)} – {shortDate(dates.at(-1)!, locale)}{story.change != null && <> · <span className={story.change > 0 ? "text-amber-700" : "text-emerald-700"}>{t("step.change", { change: `${story.change > 0 ? "+" : ""}${num(story.change)}`, days: dates.length })}</span></>}</>} />
         <Step index={2} label={t("step.after")} tone="amber" value={story.periodCost != null ? money(story.closedCost) : `${num(story.split.closedKwh, 0)} kWh`}
-          note={<>{t("step.afterNote", { pct: num(story.closedShare * 100, 0) })}{story.alwaysOn != null ? t("step.neverBelow", { kw: num(story.alwaysOn, 1) }) : null}</>} />
+          note={<>{t(story.periodCost != null ? "step.afterNote" : "step.afterNoteEnergy", { pct: num(story.closedShare * 100, 0) })}{story.alwaysOn != null ? t("step.neverBelow", { kw: num(story.alwaysOn, 1) }) : null}</>} />
         <Step index={3} label={t("step.save")} tone="emerald" value={savingRange(story, money, t)}
           note={story.savingKwh ? <>{story.provenKwh != null && meaningfulLow(story.provenKwh, story.savingKwh)
             ? t("step.saveRange", { low: story.provenCost != null ? money(story.provenCost) : `${num(story.provenKwh, 0)} kWh`, high: story.savingCost != null ? money(story.savingCost) : `${num(story.savingKwh, 0)} kWh` })
@@ -109,10 +109,14 @@ export function DecisionSummary(props: StoryInput) {
         <p className="max-w-3xl text-sm text-slate-600">{first ? rich(first.annualCost != null ? t("start.item", { range: itemRange(first, money, t) }) : t("start.itemNoCost"), { title: <span className="font-medium text-slate-900">{first.title}</span> }) : t("start.none")}{story.alwaysOnYearlyCost != null ? t("start.alwaysOn", { cost: money(story.alwaysOnYearlyCost) }) : null}</p>
         <button type="button" onClick={() => jump("story-plan")} className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3.5 py-2 text-sm font-medium text-white hover:bg-slate-700">{t("start.cta")}<EnergyIcon name="arrow" className="h-4 w-4" /></button>
       </div>
+      {story.periodCost == null ? <p className="border-t border-slate-200 bg-amber-50/60 px-6 py-3 text-sm text-amber-900">
+        {t("rate.missing")}{" "}
+        <Link href={`/energyiq/project-configuration?${new URLSearchParams({ projectId: data.projectId, tab: "tariff" })}`} className="font-medium underline">{t("rate.add")}</Link>
+      </p> : null}
     </section>
 
     <nav aria-label={t("nav.label")} className="flex flex-wrap gap-2 text-xs">
-      {([["story-money", "nav.money"], ["story-when", "nav.when"], ["story-on", "nav.on"], ["story-health", "nav.health"], ["story-plan", "nav.plan"], ["story-ahead", "nav.ahead"], ["details", "nav.details"]] as const).map(([id, label]) => <button key={id} type="button" onClick={() => jump(id)} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-slate-600 hover:border-slate-300 hover:text-slate-900">{t(label)}</button>)}
+      {([["story-money", story.periodCost != null ? "nav.money" : "nav.energy"], ["story-when", "nav.when"], ["story-on", "nav.on"], ["story-health", "nav.health"], ["story-plan", "nav.plan"], ["story-ahead", "nav.ahead"], ["details", "nav.details"]] as const).map(([id, label]) => <button key={id} type="button" onClick={() => jump(id)} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-slate-600 hover:border-slate-300 hover:text-slate-900">{t(label)}</button>)}
     </nav>
 
     <MoneySection story={story} data={data} money={money} />
@@ -201,7 +205,7 @@ function MoneySection({ story, data, money }: { story: Story; data: AnalysisData
   const takeaway = lead[0] ? rich(t(spaces.length && types[0] ? "money.takeawayType" : "money.takeaway", { pct: num(lead[0].value / Math.max(all, 0.001) * 100, 0), what: t(rate != null ? "money.bill" : "money.energy") }), {
     lead: <span className="font-medium text-slate-900">{lead[0].label}</span>, type: types[0] ? <span className="font-medium text-slate-900">{types[0].label.toLowerCase()}</span> : null,
   }) : t("money.none");
-  return <StoryCard id="story-money" step={1} title={t("money.title")} takeaway={takeaway}>
+  return <StoryCard id="story-money" step={1} title={t(rate != null ? "money.title" : "money.titleEnergy")} takeaway={takeaway}>
     <div className={`grid gap-8 ${spaces.length && types.length ? "lg:grid-cols-2" : ""}`}>
       {spaces.length > 0 && <ShareBars title={t("money.byArea")} rows={spaces} format={format} />}
       {types.length > 0 && <ShareBars title={t("money.byType")} rows={types} format={format} />}
@@ -256,7 +260,7 @@ function WhenSection({ story, money, inspect }: { story: Story; money: (amount: 
     <ul className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{TIME_BUCKETS.map(bucket => <li key={bucket} className="rounded-lg border border-slate-200 px-3 py-2.5">
       <p className="flex items-center gap-2 text-sm text-slate-600"><span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: TIME_BUCKET_COLORS[bucket] }} />{timeBucketLabel(bucket, locale)}</p>
       <p className="mt-1 text-base font-semibold tabular-nums text-slate-900">{story.periodCost != null ? money(cost(story.split.kwh[bucket])) : `${num(story.split.kwh[bucket], 0)} kWh`}</p>
-      <p className="text-sm tabular-nums text-slate-600">{num(story.split.kwh[bucket], 0)} kWh · {story.split.total > 0 ? num(story.split.kwh[bucket] / story.split.total * 100, 0) : 0}%</p>
+      <p className="text-sm tabular-nums text-slate-600">{story.periodCost != null ? `${num(story.split.kwh[bucket], 0)} kWh · ` : null}{story.split.total > 0 ? num(story.split.kwh[bucket] / story.split.total * 100, 0) : 0}%</p>
     </li>)}</ul>
     <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
@@ -318,7 +322,7 @@ function StaysOnSection({ story, money }: { story: Story; money: (amount: number
   return <StoryCard id="story-on" step={3} title={t("on.title")} takeaway={takeaway}>
     {story.closedUse.length ? <>
       <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-sm">
-        <thead><tr className="border-b border-slate-200 text-left text-sm text-slate-600"><th className="py-2 pr-3 font-medium">{t("on.colName")}</th><th className="px-3 py-2 font-medium">{t("on.colArea")}</th><th className="px-3 py-2 font-medium">{t("on.colPower")}</th><th className="px-3 py-2 text-right font-medium">{t("on.colCost")}</th><th className="px-3 py-2 text-right font-medium">{t("on.colShare")}</th><th className="py-2 pl-3 font-medium">{t("on.colMeaning")}</th></tr></thead>
+        <thead><tr className="border-b border-slate-200 text-left text-sm text-slate-600"><th className="py-2 pr-3 font-medium">{t("on.colName")}</th><th className="px-3 py-2 font-medium">{t("on.colArea")}</th><th className="px-3 py-2 font-medium">{t("on.colPower")}</th><th className="px-3 py-2 text-right font-medium">{t(story.rate != null ? "on.colCost" : "on.colEnergy")}</th><th className="px-3 py-2 text-right font-medium">{t("on.colShare")}</th><th className="py-2 pl-3 font-medium">{t("on.colMeaning")}</th></tr></thead>
         <tbody>{rows.map(row => { const tag = note(row); return <tr key={row.id} className="border-b border-slate-100 last:border-0">
           <td className="py-2.5 pr-3 font-medium text-slate-900">{row.name}</td>
           <td className="px-3 py-2.5 text-slate-600">{row.kind === "type" ? t("on.wholeSite") : row.space}</td>
@@ -346,7 +350,7 @@ function HealthSection({ story, data, anomalies, floor, onJump, onInspectDay }: 
       text: anomalies.length ? t("health.unusualSome", { days: joinText(anomalies.slice(0, 3).map(item => shortDate(item.date, locale)), locale) + (anomalies.length > 3 ? "…" : "") }) : t("health.unusualNone"),
       ...(anomalies.length ? { days: anomalies.slice(0, 4).map(item => item.date) } : {}) },
     { title: t("health.closedShare"), status: statusFor(story.closedShare * 100, 35, 50), value: `${num(story.closedShare * 100, 0)}%`,
-      text: story.closedShare >= 0.35 ? t("health.closedHigh") : t("health.closedOk"), actions: [{ label: t("health.seeStaysOn"), onClick: () => onJump("story-on") }] },
+      text: story.closedShare >= 0.35 ? t(story.rate != null ? "health.closedHigh" : "health.closedHighEnergy") : t("health.closedOk"), actions: [{ label: t("health.seeStaysOn"), onClick: () => onJump("story-on") }] },
     ...(gap != null ? [{ title: t("health.alwaysOn"), status: statusFor(gap, 10, 25), value: t("health.alwaysOnValue", { now: num(story.alwaysOn!, 2), best: num(floor!.bestKw, 2) }),
       text: gap >= 10 ? t("health.floorHigher", { kw: num(floor!.bestKw, 2), date: shortDate(floor!.bestTo, locale), pct: num(gap, 0) }) : gap < 1 ? t("health.floorAt") : t("health.floorWithin", { pct: num(gap, 0) }), actions: [{ label: t("health.seeStaysOn"), onClick: () => onJump("story-on") }] }] : []),
     ...(story.change != null ? [{ title: t("health.change", { days: story.days.length }), status: statusFor(story.change, 5, 15), value: `${story.change > 0 ? "+" : ""}${num(story.change)}%`,

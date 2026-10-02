@@ -239,7 +239,7 @@ export class AuthService {
     email: string;
     ipAddress?: string | undefined;
     userAgent?: string | undefined;
-  }): Promise<{ resetToken?: string; ok: boolean }> {
+  }): Promise<{ ok: boolean }> {
     const email = normalizeEmail(input.email);
     this.checkRateLimit(`password-reset:email:${email}`, 3, 60 * 60);
     const user = this.metadataStore.users.findByEmail({ email });
@@ -266,7 +266,10 @@ export class AuthService {
       userAgent: input.userAgent,
       userId: user.id
     });
-    return { ok: true, ...(mail.testToken ? { resetToken: mail.testToken } : {}) };
+    // Never hand the reset link back to whoever asked: anyone can type someone else's email address. With email in
+    // test mode the link goes to the server log instead, for whoever runs the server.
+    if (mail.testUrl) console.log(`[auth] password-reset link (email test mode) user=${user.id}: ${mail.testUrl}`);
+    return { ok: true };
   }
 
   async resetPassword(input: {

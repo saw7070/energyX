@@ -61,8 +61,8 @@ describe("Action plan in other languages", () => {
     });
     const { host, unmount } = await renderIn("ms", <ReportActionPanel projectId="p" reportId="r" actionId="a" />);
     try {
-      expect(host.textContent).toContain("Tindakan projek");
-      expect(host.textContent).toContain("Pelaksanaan direkodkan");
+      expect(host.textContent).toContain("Dikongsi dengan pasukan projek");
+      expect(host.textContent).toContain("Selesai");
       expect(host.querySelector("h2")?.textContent).toBe("Perubahan anda sedang dipantau");
       expect(buttons(host)).toEqual(expect.arrayContaining(["Rekodkan kemas kini", "Lihat penilaian AI", "Kemas kini saya", "Manfaat dijangka", "Hasil"]));
       expect(host.querySelector('[aria-label="Beritahu kami apa yang berubah"]')).not.toBeNull();

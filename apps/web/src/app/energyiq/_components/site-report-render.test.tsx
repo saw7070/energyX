@@ -122,7 +122,7 @@ describe("the saved report and the report on the page", () => {
     expect(file).toContain("Not enough readings to split this up");
     // The by-load figure is built from the circuits and is unaffected, so the
     // report still carries the numbers it does know.
-    expect(file).toContain("By load — estimated 30-day share");
+    expect(file).toContain("By meter — share of an estimated 30-day month");
     expect(renderSiteReportHtml(report)).not.toContain("Not enough readings to split this up");
   });
 

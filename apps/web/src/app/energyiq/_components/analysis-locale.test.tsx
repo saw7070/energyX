@@ -110,13 +110,13 @@ describe("Analysis page in other languages", () => {
     mock.load.mockResolvedValue(data);
     const ms = await render("ms", <AnalysisView projectId="office" />);
     expect(ms.host.querySelector("h1")?.textContent).toBe("Analisis");
-    for (const text of ["Laman utama / Analisis", "4 minggu terkini", "Guna", "Office membelanjakan SGD 155 untuk elektrik dalam 7 hari.", "Ke mana wang dibelanjakan", "Analisis terperinci", "Ringkasan eksekutif", "Trend jumlah harian", "Sorotan utama"]) expect(ms.text()).toContain(text);
+    for (const text of ["Gambaran keseluruhan / Analisis", "4 minggu terkini", "Guna", "Office membelanjakan SGD 155 untuk elektrik dalam 7 hari.", "Ke mana wang dibelanjakan", "Analisis terperinci", "Ringkasan eksekutif", "Trend jumlah harian", "Sorotan utama"]) expect(ms.text()).toContain(text);
     expect(ms.host.querySelector('input[aria-label="Dari"]')).not.toBeNull();
     await ms.unmount();
 
     const zh = await render("zh-Hans", <AnalysisView projectId="office" />);
     expect(zh.host.querySelector("h1")?.textContent).toBe("用电分析");
-    for (const text of ["首页 / 用电分析", "最近 4 周", "应用", "2026年8月10日–16日", "详细分析", "执行摘要", "每日总用电趋势", "重点数据", "已发布电价：0.3 SGD/kWh（未含税）。", "发现摘要", "按时间的用电行为分析", "线路分类分析"]) expect(zh.text()).toContain(text);
+    for (const text of ["概览 / 用电分析", "最近 4 周", "应用", "2026年8月10日–16日", "详细分析", "执行摘要", "每日总用电趋势", "重点数据", "电价：0.3 SGD/kWh（未含税）。", "发现摘要", "工作日、周末和假期", "用电最多的线路"]) expect(zh.text()).toContain(text);
     expect(zh.host.querySelector('form[aria-label="日期"]')).not.toBeNull();
     await zh.unmount();
   });

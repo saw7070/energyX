@@ -219,7 +219,8 @@ describe("EnergyX access deep-link recovery", () => {
       await failedAccess.promise.catch(() => undefined);
     });
     await vi.waitFor(() => {
-      expect(container.textContent).toBe("error:NETWORK_TIMEOUT");
+      // The code itself never reaches the page; the reader gets a sentence they can act on.
+      expect(container.textContent).toBe("error:We couldn't reach EnergyX. Check your connection and try again.");
     });
 
     expect(configApiMock.getEnergyAccessContext).toHaveBeenCalledTimes(2);

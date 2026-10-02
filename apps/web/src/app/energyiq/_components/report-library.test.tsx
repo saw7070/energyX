@@ -54,10 +54,10 @@ describe("report navigation and read-only library", () => {
   it("uses explicit Skill scope and category without treating project composition as general",async()=>{
     mock.library.mockResolvedValue({...library,skills:[{...library.skills[0],name:"Investigation",scope:"general",category:"analysis"},{...library.skills[0],id:"style",name:"Tuya composition",scope:"project",category:"presentation"}]});
     await act(async()=>root.render(<ReportLibraryView projectId="p1" view="skills" />));
-    const general=container.querySelector('[aria-label="Open Skill Investigation"]')!;
-    expect(general.textContent).toContain("General method");expect(general.textContent).toContain("Analysis");
-    const project=container.querySelector('[aria-label="Open Skill Tuya composition"]')!;expect(project.textContent).toContain("Project skill");expect(project.textContent).toContain("Report style");
-    expect(container.textContent).toContain("2 skills");
+    const general=container.querySelector('[aria-label="Open Investigation"]')!;
+    expect(general.textContent).toContain("Built in");expect(general.textContent).toContain("Analysis");
+    const project=container.querySelector('[aria-label="Open Tuya composition"]')!;expect(project.textContent).toContain("Shared");expect(project.textContent).toContain("Report style");
+    expect(container.textContent).toContain("2 saved");
   });
   it("groups reports by Singapore generation day with automatic reports first in the same grid",async()=>{
     mock.library.mockResolvedValue({...library,reports:[{...library.reports[1],title:"Later manual",finishedAt:"2026-09-11T18:00:00Z"},{...library.reports[0],title:"Earlier automatic",finishedAt:"2026-09-11T16:30:00Z"},{...library.reports[1],id:"previous-day",title:"Yesterday",finishedAt:"2026-09-11T15:59:00Z"}]});
@@ -66,7 +66,7 @@ describe("report navigation and read-only library", () => {
   });
   it("opens Skill metadata and full instructions in a modal and restores focus on Escape",async()=>{
     await act(async()=>root.render(<ReportLibraryView projectId="p1" view="skills" />));
-    const opener=container.querySelector<HTMLButtonElement>('[aria-label="Open Skill Office method"]')!;
+    const opener=container.querySelector<HTMLButtonElement>('[aria-label="Open Office method"]')!;
     await act(async()=>{opener.focus();opener.click();});const dialog=container.querySelector("dialog")!;expect(dialog.textContent).toContain("Analyze the baseline");expect(dialog.textContent).toContain("Version");expect(dialog.textContent).toContain("This project");expect(dialog.textContent).not.toContain("skill-run");
     await act(async()=>dialog.dispatchEvent(new Event("cancel",{cancelable:true})));expect(container.querySelector("dialog")).toBeNull();expect(document.activeElement).toBe(opener);
   });
@@ -79,7 +79,7 @@ describe("report navigation and read-only library", () => {
     await act(async () => root.render(<ReportLibraryView projectId="p1" view="skills" />));
     for (const text of ["Office method", "v3", "Other"]) expect(container.textContent).toContain(text);
     expect(container.textContent).not.toContain("skill-run"); expect(container.textContent).not.toContain("source-session"); expect(container.textContent).not.toContain("python");
-    await act(async () => [...container.querySelectorAll('[role="tab"]')].find(item=>item.textContent === "Tools")!.dispatchEvent(new MouseEvent("click",{bubbles:true})));
+    await act(async () => [...container.querySelectorAll('[role="tab"]')].find(item=>item.textContent === "Capabilities")!.dispatchEvent(new MouseEvent("click",{bubbles:true})));
     expect(container.textContent).toContain("python");
     expect(container.querySelector('[role="switch"]')).toBeNull(); expect(container.querySelector('input[type="checkbox"]')).toBeNull(); expect(mock.admin).not.toHaveBeenCalled();
   });
@@ -91,17 +91,17 @@ describe("report navigation and read-only library", () => {
   ])("shows a meaningful Skill purpose from frontmatter or body", async (content, expected) => {
     mock.library.mockResolvedValue({...library,skills:[{...library.skills[0],content}]});
     await act(async () => root.render(<ReportLibraryView projectId="p1" view="skills" />));
-    const summary=container.querySelector('[aria-label="Open Skill Office method"] p'); expect(summary?.textContent).toBe(expected); expect(summary?.textContent).not.toContain("name:"); expect(summary?.textContent).not.toContain("version:");
+    const summary=container.querySelector('[aria-label="Open Office method"] p'); expect(summary?.textContent).toBe(expected); expect(summary?.textContent).not.toContain("name:"); expect(summary?.textContent).not.toContain("version:");
   });
   it("edits only the selected named Skill with the current revision and leaves other settings intact",async () => {
     mock.library.mockResolvedValue({...library,canChat:true,canManageProject:true});
     const settings={revision:7,skill:"Legacy",contextNotes:"Keep context",skillRefs:[library.skills[0],{name:"Other",version:"v1",content:"Keep other"}]};
     mock.admin.mockResolvedValue({settings});
     await act(async () => root.render(<ReportLibraryView projectId="p1" view="skills" />));
-    await act(async()=>container.querySelector<HTMLButtonElement>('[aria-label="Open Skill Office method"]')!.click());
-    await act(async () => [...container.querySelectorAll("button")].find(item=>item.textContent === "Edit Skill")!.click());
-    const version=container.querySelector<HTMLInputElement>('[aria-label="New Skill version"]')!;
-    const content=container.querySelector<HTMLTextAreaElement>('[aria-label="Proposed Skill instructions"]')!;
+    await act(async()=>container.querySelector<HTMLButtonElement>('[aria-label="Open Office method"]')!.click());
+    await act(async () => [...container.querySelectorAll("button")].find(item=>item.textContent === "Edit instructions")!.click());
+    const version=container.querySelector<HTMLInputElement>('[aria-label="New version number"]')!;
+    const content=container.querySelector<HTMLTextAreaElement>('[aria-label="Proposed advisor instructions"]')!;
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")!.set!.call(version,"v4"); version.dispatchEvent(new Event("input",{bubbles:true})); });
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,"value")!.set!.call(content,"Updated baseline method"); content.dispatchEvent(new Event("input",{bubbles:true})); });
     await act(async () => [...container.querySelectorAll("button")].find(item=>item.textContent === "Save new version")!.click());
@@ -126,11 +126,11 @@ describe("report navigation and read-only library", () => {
 it("shows the product Skill Creator without offering to overwrite a project Skill", async () => {
   mock.library.mockResolvedValue({...library,canChat:true,canManageProject:true,skills:[{required:true,name:"Skill Creator",version:"1.1.0",content:"# Creator",projectId:"p1",scope:"general",category:"other",readOnly:true}]});
   await act(async()=>root.render(<ReportLibraryView projectId="p1" view="skills" />));
-  await act(async()=>container.querySelector<HTMLButtonElement>('[aria-label="Open Skill Skill Creator"]')!.click());
+  await act(async()=>container.querySelector<HTMLButtonElement>('[aria-label="Open Skill Creator"]')!.click());
   expect(container.textContent).toContain("Save report method");
   expect(container.textContent).toContain("save a new version");
-  expect(container.textContent).toContain("All projects (platform method)");
-  expect([...container.querySelectorAll("button")].some(button=>button.textContent==="Edit Skill")).toBe(false);
+  expect(container.textContent).toContain("All projects (built in)");
+  expect([...container.querySelectorAll("button")].some(button=>button.textContent==="Edit instructions")).toBe(false);
   expect(mock.admin).not.toHaveBeenCalled();
 });
 
@@ -162,17 +162,17 @@ it("shows one card per Skill identity and opens enabled content with selectable 
  const latest={...old,version:"3",content:"Latest instructions"};
  mock.library.mockResolvedValue({...library,skills:[old,enabled,latest,{...old,id:"another",name:"Office method",version:"4"}]});
  await act(async()=>root.render(<ReportLibraryView projectId="p1" view="skills"/>));
- const cards=container.querySelectorAll<HTMLButtonElement>('[aria-label="Open Skill Office method"]');expect(cards).toHaveLength(2);
- expect(cards[0]!.textContent).toContain("Enabled instructions");expect(container.textContent).toContain("2 skills");
+ const cards=container.querySelectorAll<HTMLButtonElement>('[aria-label="Open Office method"]');expect(cards).toHaveLength(2);
+ expect(cards[0]!.textContent).toContain("Enabled instructions");expect(container.textContent).toContain("2 saved");
  await act(async()=>cards[0]!.click());
- const select=container.querySelector<HTMLSelectElement>('[aria-label="Skill version history"]')!;expect(select.value).toBe("2");expect(select.options).toHaveLength(3);
+ const select=container.querySelector<HTMLSelectElement>('[aria-label="Version history"]')!;expect(select.value).toBe("2");expect(select.options).toHaveLength(3);
  await act(async()=>{select.value="1";select.dispatchEvent(new Event("change",{bubbles:true}));});
  expect(container.querySelector('dialog')?.textContent).toContain("Old instructions");expect(mock.admin).not.toHaveBeenCalled();
 });
 it("shows latest saved version when no version is enabled",async()=>{
  const skill=library.skills[0]!;mock.library.mockResolvedValue({...library,skills:[{...skill,version:"10",content:"Old"},{...skill,version:"2",content:"Saved most recently"}]});
  await act(async()=>root.render(<ReportLibraryView projectId="p1" view="skills"/>));
- expect(container.querySelector('[aria-label="Open Skill Office method"]')?.textContent).toContain("Saved most recently");
+ expect(container.querySelector('[aria-label="Open Office method"]')?.textContent).toContain("Saved most recently");
 });
 it("shows inclusive end dates in the earlier-report list across a month boundary",async()=>{
  const old={...library.reports[0]!,id:"old",period:{from:"2026-08-01",toExclusive:"2026-09-01"}};

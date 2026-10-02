@@ -55,10 +55,10 @@ describe("reports library and energy advisor in other languages", () => {
   it("shows the Advisor guidelines page in Malay", async () => {
     await render("ms", <ReportLibraryView projectId="p1" view="skills" />);
     expect(container.querySelector("h1")?.textContent).toBe("Garis panduan penasihat");
-    const skill = container.querySelector('[aria-label="Buka Kemahiran Office method"]')!;
+    const skill = container.querySelector('[aria-label="Buka Office method"]')!;
     // The category, who can use it and the version are separate pills, so check each one.
-    expect(Array.from(skill.querySelectorAll("span span")).map(pill => pill.textContent)).toEqual(expect.arrayContaining(["Analisis", "Kaedah umum", "v3"]));
-    expect(container.textContent).toContain("1 kemahiran");
+    expect(Array.from(skill.querySelectorAll("span span")).map(pill => pill.textContent)).toEqual(expect.arrayContaining(["Analisis", "Terbina dalam", "v3"]));
+    expect(container.textContent).toContain("1 disimpan");
     expect(container.textContent).toContain("Guna semula kaedah analisis");
   });
 

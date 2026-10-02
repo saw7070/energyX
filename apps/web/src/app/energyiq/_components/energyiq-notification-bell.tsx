@@ -4,24 +4,30 @@ import { useEffect, useRef, useState } from "react";
 import { configApi } from "../../../lib/config-api";
 import { EnergyIcon } from "./icons";
 import styles from "./energyiq-top-bar.module.css";
-import { useEnergyIqLocale } from "./energyiq-locale";
+import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
+import { friendlyErrorMessages } from "./friendly-error-messages";
 
 type Notice = { actionId: string; title: string; runId: string };
 
 /** New action results for the active project; opening a result in the Action plan marks it read. */
 export function EnergyIqNotificationBell({ projectId }: { projectId: string }) {
   const { t } = useEnergyIqLocale();
+  const tf = useMessages(friendlyErrorMessages);
   const [items, setItems] = useState<Notice[]>([]);
+  // A failed load is not "no new results": say so, and keep whatever was already listed.
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     let alive = true;
-    const load = async () => { try { const result = await configApi.reportActionRequest<{ items: Notice[] }>(projectId, "notifications"); if (alive) setItems(result.items); } catch { if (alive) setItems([]); } };
+    const load = async () => { try { const result = await configApi.reportActionRequest<{ items: Notice[] }>(projectId, "notifications"); if (alive) { setItems(result.items); setFailed(false); } } catch { if (alive) setFailed(true); } };
     void load();
     const timer = setInterval(() => { if (!document.hidden) void load(); }, 30000);
     return () => { alive = false; clearInterval(timer); };
-  }, [projectId]);
+  }, [projectId, attempt]);
+  useEffect(() => { setItems([]); setFailed(false); }, [projectId]);
   useEffect(() => {
     if (!open) return;
     const outside = (event: MouseEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false); };
@@ -36,6 +42,7 @@ export function EnergyIqNotificationBell({ projectId }: { projectId: string }) {
     {open && <section id="energyiq-notifications" aria-label={t("notifications.title")} className={styles.popover}>
       <h2>{t("notifications.title")}</h2>
       {items.length ? <ul>{items.map(item => <li key={item.runId}><Link href={`/energyiq/actions?${new URLSearchParams({ projectId, actionId: item.actionId })}`} onClick={() => setOpen(false)}><strong>{item.title}</strong><small>{t("notifications.newResult")}</small></Link></li>)}</ul>
+        : failed ? <p role="alert">{tf("notifications.failed")} <button type="button" className="font-medium underline underline-offset-2" onClick={() => setAttempt(value => value + 1)}>{tf("tryAgain")}</button></p>
         : <p>{t("notifications.empty")}</p>}
     </section>}
   </div>;

@@ -21,6 +21,8 @@ import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { advisorMessages, type AdvisorMessageKey, type AdvisorTranslate } from "./report-agent-panel-messages";
 import { ADVISOR_EXAMPLE_PROMPTS, ADVISOR_STARTER_PROMPTS } from "./advisor-starter-prompts";
 import { dateLocale, fillTemplate } from "./report-library-messages";
+import { friendlyErrorKey, useFriendlyError } from "./friendly-error";
+import { activityMessages, friendlyErrorMessages } from "./friendly-error-messages";
 
 type Period = { from: string; toExclusive: string };
 type Settings = {
@@ -47,6 +49,9 @@ export function ReportAgentPanel(props: PanelProps) {
 function ProjectReportPanel({ referenceReportId, settingsMode, configurationFocus, initialConfigure = false, projectId, initialSessionId, sidebarNavigation = false, onSessionChange, configurationEnabled, onConfigure }: PanelProps & { configurationEnabled: boolean; onConfigure: () => void }) {  const [overview, setOverview] = useState<Overview | null>(null);
   const { access, activeProject } = useEnergyIqAccess();
   const t = useMessages(advisorMessages);
+  const tf = useMessages(friendlyErrorMessages);
+  const ta = useMessages(activityMessages);
+  const friendly = useFriendlyError();
   const { locale } = useEnergyIqLocale();
   const draftScope = access?.user?.id ? [access.user.id, access.activeWorkspaceId] : null;
   const draftKey = (id: string) => draftScope ? composerDraftKey(draftScope[0]!, draftScope[1]!, projectId, id, initialConfigure ? configurationFocus : "") : null;
@@ -97,7 +102,7 @@ function ProjectReportPanel({ referenceReportId, settingsMode, configurationFocu
     if (!configurationEnabled || !overview?.canManageProject) return;
     let cancelled = false;
     setConfiguration(null); setConfigurationError("");
-    configApi.getEnergyProjectSetup(projectId).then(data => { if (!cancelled) setConfiguration(data); }).catch(reason => { if (!cancelled) setConfigurationError(message(reason, t("operationFailed"))); });
+    configApi.getEnergyProjectSetup(projectId).then(data => { if (!cancelled) setConfiguration(data); }).catch(reason => { if (!cancelled) setConfigurationError(friendly(reason, t("operationFailed"))); });
     return () => { cancelled = true; };
   }, [projectId, configurationEnabled, !!overview, completedConversation, configurationRefresh]);
   function configureProject() {
@@ -132,7 +137,7 @@ function ProjectReportPanel({ referenceReportId, settingsMode, configurationFocu
       setSessionId(resolvedSession);
       if (latest) { setSelectedId(latest.id); setFrom(latest.period.from); setTo(shiftDate(latest.period.toExclusive,-1)); setPeriodPreset("custom"); } else if (data.periodOptions) { const initial = initialReportPeriod(data.periodOptions); setFrom(initial.period.from); setTo(shiftDate(initial.period.toExclusive,-1)); setPeriodPreset(initial.preset); }
       restoreDraft(resolvedSession);
-    }).catch((reason: unknown) => { if (!controller.signal.aborted) setError(message(reason, t("operationFailed"))); });
+    }).catch((reason: unknown) => { if (!controller.signal.aborted) setError(friendly(reason, t("operationFailed"))); });
     return () => controller.abort();
   }, [projectId]);
 
@@ -166,7 +171,7 @@ function ProjectReportPanel({ referenceReportId, settingsMode, configurationFocu
     const controller = new AbortController();
     configApi.reportAgentRequest<{ content: string }>(projectId, `output/${selectedId}`, { signal: controller.signal })
       .then((data) => { if (!controller.signal.aborted) setOutput(data.content); })
-      .catch((reason: unknown) => { if (!controller.signal.aborted) setError(message(reason, t("operationFailed"))); });
+      .catch((reason: unknown) => { if (!controller.signal.aborted) setError(friendly(reason, t("operationFailed"))); });
     return () => controller.abort();
   }, [projectId, selectedId, selected?.status, selected?.hasReport, library?.reports.length]);
 
@@ -194,7 +199,7 @@ function ProjectReportPanel({ referenceReportId, settingsMode, configurationFocu
 
   async function action(work: () => Promise<void>) {
     setBusy(true); setError(""); setNotice("");
-    try { await work(); } catch (reason) { setError(message(reason, t("operationFailed"))); } finally { setBusy(false); }
+    try { await work(); } catch (reason) { setError(friendly(reason, t("operationFailed"))); } finally { setBusy(false); }
   }
   async function save(next = settings) {
     if (!overview?.canManageProject) throw new Error(t("adminOnlySettings"));
@@ -259,7 +264,7 @@ function ProjectReportPanel({ referenceReportId, settingsMode, configurationFocu
               <section aria-label={t("projectData")} className={styles.dataStatus} data-status={!overview ? "checking" : overview.projectData?.status ?? "unknown"}>
                 <span className="sr-only">{t("projectDataPrefix")}</span><i aria-hidden="true" />
                 <span>{!overview ? error ? t("statusUnavailable") : t("checkingConnection") : overview.projectData?.status === "connected" ? t("connected") : overview.projectData?.status === "not_configured" ? t("setupRequired") : t("statusUnavailable")}</span>
-                {overview?.projectData?.actualLastIntervalEnd && overview.projectData.status === "connected" ? <span>{t("latestReading", { time: new Date(overview.projectData.actualLastIntervalEnd).toLocaleString(dateLocale(locale),{timeZone:"Asia/Singapore",day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}) })}</span> : overview?.projectData?.reason ? <span>· {overview.projectData.reason}</span> : overview?.projectData?.status === "connected" ? <span>{t("latestReadingUnavailable")}</span> : null}
+                {overview?.projectData?.actualLastIntervalEnd && overview.projectData.status === "connected" ? <span>{t("latestReading", { time: new Date(overview.projectData.actualLastIntervalEnd).toLocaleString(dateLocale(locale),{timeZone:"Asia/Singapore",day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}) })}</span> : overview?.projectData?.reason ? <span>· {overview.projectData.status === "not_configured" ? tf("dataNotReady") : friendly(overview.projectData.reason)}</span> : overview?.projectData?.status === "connected" ? <span>{t("latestReadingUnavailable")}</span> : null}
                 {overview?.projectData?.status === "connected" && settings?.useProjectData === false && <span className={styles.dataWarning}>{t("meterDataExcluded")}</span>}
               </section>
             </div>
@@ -290,7 +295,7 @@ function ProjectReportPanel({ referenceReportId, settingsMode, configurationFocu
           {overview?.files.map(file=><label key={file.id} className="flex items-start gap-2"><input type="checkbox" checked={settings.fileRefIds.includes(file.id)} onChange={e=>setSettings({...settings,fileRefIds:e.target.checked?[...settings.fileRefIds,file.id]:settings.fileRefIds.filter(id=>id!==file.id)})} /><span className="break-all">{file.filename}</span></label>)}
           <input aria-label={t("uploadInput")} type="file" accept=".csv,.xlsx,.pptx,.pdf,.md,.txt,.json,.parquet" disabled={busy} onChange={e=>{const file=e.target.files?.[0];if(!file)return;void uploadInput(file);e.target.value="";}} />
         </section>
-        </>}{settingsMode !== "project" && <section className={styles.setupGroup}><h3>{t("scheduleHeading")}</h3>{settings.schedulePermissionIssue && <p role="status">{settings.schedulePermissionIssue}</p>}<p>{t("scheduleIntro")}</p><div className="flex flex-wrap gap-4"><div><span className={styles.fieldLabel}>{t("frequency")}</span><EnergySelect ariaLabel={t("reportFrequency")} value={settings.frequency} onValueChange={value=>setSettings({...settings,frequency:value as Settings["frequency"]})} options={([["off","frequencyOff"],["daily","frequencyDaily"],["weekly","frequencyWeekly"],["monthly","frequencyMonthly"],["weekly-monthly","frequencyWeeklyMonthly"]] as const).map(([value,key])=>({value,label:t(key)}))} /></div><label>{t("runHour", { timezone: settings.timezone })}<input className={inputClass} type="number" min={0} max={23} value={settings.localHour} onChange={e=>setSettings({...settings,localHour:Number(e.target.value)})} /></label></div><label className="block">{t("reportInstructions")}<textarea className={inputClass} rows={3} value={settings.scheduledPrompt} onChange={e=>setSettings({...settings,scheduledPrompt:e.target.value})} placeholder={t("scheduledPlaceholder")} /></label><p>{fillTemplate(t("skillSupplies"), { link: <Link className="underline" href={`/energyiq/skills?${new URLSearchParams({projectId})}`}>{t("reviewSkills")}</Link> })}</p></section>}
+        </>}{settingsMode !== "project" && <section className={styles.setupGroup}><h3>{t("scheduleHeading")}</h3>{settings.schedulePermissionIssue && <p role="status">{friendly(settings.schedulePermissionIssue)}</p>}<p>{t("scheduleIntro")}</p><div className="flex flex-wrap gap-4"><div><span className={styles.fieldLabel}>{t("frequency")}</span><EnergySelect ariaLabel={t("reportFrequency")} value={settings.frequency} onValueChange={value=>setSettings({...settings,frequency:value as Settings["frequency"]})} options={([["off","frequencyOff"],["daily","frequencyDaily"],["weekly","frequencyWeekly"],["monthly","frequencyMonthly"],["weekly-monthly","frequencyWeeklyMonthly"]] as const).map(([value,key])=>({value,label:t(key)}))} /></div><label>{t("runHour", { timezone: settings.timezone })}<input className={inputClass} type="number" min={0} max={23} value={settings.localHour} onChange={e=>setSettings({...settings,localHour:Number(e.target.value)})} /></label></div><label className="block">{t("reportInstructions")}<textarea className={inputClass} rows={3} value={settings.scheduledPrompt} onChange={e=>setSettings({...settings,scheduledPrompt:e.target.value})} placeholder={t("scheduledPlaceholder")} /></label><p>{fillTemplate(t("skillSupplies"), { link: <Link className="underline" href={`/energyiq/skills?${new URLSearchParams({projectId})}`}>{t("reviewSkills")}</Link> })}</p></section>}
         <button className={styles.primaryAction} disabled={busy} onClick={()=>void action(async()=>{await save();setNotice(t("preferencesSaved"));})}>{settingsMode === "project" ? t("saveProjectBackground") : settingsMode === "automation" ? t("saveSchedule") : t("savePreferences")}</button>
       </section>}
 
@@ -302,11 +307,11 @@ function ProjectReportPanel({ referenceReportId, settingsMode, configurationFocu
           {conversation.map(run => <article key={run.id} className={styles.turn}>
             <div className={styles.user}><span className="sr-only">{t("you")}</span>{run.prompt.length > 600 ? <details className={styles.longPrompt}><summary>{run.prompt.slice(0,240)}…<span>{t("showFullMessage")}</span></summary><p>{run.prompt}</p></details> : run.prompt}</div>
             <div className={styles.reply}><ReportRunProgress run={run} phase={runActivityLabel(run, selectedId === run.id ? events : [], t)} lastActivityAt={selectedId === run.id ? events.at(-1)?.time : undefined} connectionLost={statusConnectionLost || (selectedId === run.id && activityConnectionLost)} />
-              <details className={styles.execution} onToggle={event => { if (event.currentTarget.open) setSelectedId(run.id); }}><summary><EnergyIcon name={active(run) ? "spark" : run.status === "succeeded" ? "check" : "alert"} /><span>{runActivityLabel(run, selectedId === run.id ? events : [], t)}</span><span className={styles.executionHint}>{t("activityDetails")}</span><EnergyIcon name="chevron" /></summary><div className={styles.executionBody}><p className={styles.muted}>{run.period.from} → {shiftDate(run.period.toExclusive,-1)}</p>{selectedId === run.id ? events.some(event=>event.type !== "answer_progress") ? <ol>{events.filter(event=>event.type !== "answer_progress").map(event => <li key={event.sequence}><EnergyIcon name={event.isError ? "alert" : event.tool ? "code" : "check"} /><span>{activityLabel(event.type, t) ?? event.tool ?? event.type}<small>{event.type}{event.isError ? ` · ${t("statusFailed")}` : ""}</small></span><time>{new Date(event.time).toLocaleTimeString(dateLocale(locale), {timeZone:"Asia/Singapore"})}</time></li>)}</ol> : <p className={styles.muted}>{t("noActivity")}</p> : <p className={styles.muted}>{t("selectToLoad")}</p>}{!!run.skillUsage?.length && <ReportSkillUsage skills={run.skillUsage} prepared={selectedId === run.id && events.some(event => event.type === "skill_inputs_prepared")} />}</div></details>
+              <details className={styles.execution} onToggle={event => { if (event.currentTarget.open) setSelectedId(run.id); }}><summary><EnergyIcon name={active(run) ? "spark" : run.status === "succeeded" ? "check" : "alert"} /><span>{runActivityLabel(run, selectedId === run.id ? events : [], t)}</span><span className={styles.executionHint}>{t("activityDetails")}</span><EnergyIcon name="chevron" /></summary><div className={styles.executionBody}><p className={styles.muted}>{run.period.from} → {shiftDate(run.period.toExclusive,-1)}</p>{selectedId === run.id ? events.some(event=>event.type !== "answer_progress") ? <ol>{events.filter(event=>event.type !== "answer_progress").map(event => <li key={event.sequence}><EnergyIcon name={event.isError ? "alert" : event.tool ? "code" : "check"} /><span>{activityLabel(event.type, t) ?? eventLabel(event.type, ta) ?? t("working")}{event.isError && <small>{t("statusFailed")}</small>}</span><time>{new Date(event.time).toLocaleTimeString(dateLocale(locale), {timeZone:"Asia/Singapore"})}</time></li>)}</ol> : <p className={styles.muted}>{t("noActivity")}</p> : <p className={styles.muted}>{t("selectToLoad")}</p>}{!!run.skillUsage?.length && <ReportSkillUsage skills={run.skillUsage} prepared={selectedId === run.id && events.some(event => event.type === "skill_inputs_prepared")} />}</div></details>
 <span className="sr-only">{t("assistant")}</span>
               {visibleAnswer(run, selectedId === run.id ? events : []) && <div className={styles.answer} tabIndex={0} aria-label={t("advisorResponse")}><ReportMarkdown>{visibleAnswer(run, selectedId === run.id ? events : [])}</ReportMarkdown></div>}
               {active(run) && visibleAnswer(run, selectedId === run.id ? events : []) && <p role="status" className={styles.muted}>{t("writing")}</p>}
-              {run.errorCode && <div role="alert"><p>{run.errorCode === "REPORT_METER_NAMES_REQUIRED" ? t("errorMeterNames") : run.errorCode === "REPORT_REVIEW_BLOCKED" ? t("errorReviewBlocked") : t("errorGeneric")}</p><details><summary>{t("technicalDetails")}</summary><code>{run.errorCode}</code></details></div>}
+              {run.errorCode && <div role="alert"><p>{run.errorCode === "REPORT_METER_NAMES_REQUIRED" ? t("errorMeterNames") : run.errorCode === "REPORT_REVIEW_BLOCKED" ? t("errorReviewBlocked") : runErrorKey(run.errorCode) ? tf(runErrorKey(run.errorCode)!) : t("errorGeneric")}</p>{(access?.role === "admin" || overview?.canManageProject) && <details><summary>{t("technicalDetails")}</summary><code>{run.errorCode}</code></details>}</div>}
               {run.status === "succeeded" && (run.kind === "skill" || isReport(run)) && <button className={`${styles.fileCard} ${isReport(run) ? styles.reportDelivery : ""}`} onClick={() => openRun(run)}>{isReport(run) && library?.reports.find(item=>item.id===run.id) && <div className={styles.deliveryThumbnail}><ReportThumbnail file={reportFile(projectId,library.reports.find(item=>item.id===run.id)!,locale)} /></div>}<strong>{run.kind === "skill" ? "project-skill.md" : library?.reports.find(item => item.id === run.id)?.title ?? t("energyReportFallback", { date: run.period.from })}</strong><span>{run.kind === "skill" ? t("markdownSkill") : t("htmlReport", { version: library?.reports.find(item => item.id === run.id)?.version ?? 1 })} · {t("openPreview")}</span></button>}
               {run.status === "succeeded" && run.hasSkillDraft && <><button className={styles.fileCard} onClick={()=>openSkillDraft(run)}><strong>project-skill.md</strong><span>{t("skillDraft")} · {t("openPreview")}</span></button><button className={styles.activityLink} disabled={busy} onClick={()=>void action(async()=>{const draft=await request<{content:string}>(`draft-skill/${run.id}`);setSkillDraft({content:draft.content,runId:run.id});})}>{t("reviewAndSave")}</button></>}
               {library?.canChat && library.artifacts?.some(item=>item.runId===run.id) && <details><summary>{t("supportingFiles")}</summary>{library.artifacts.filter(item => item.runId === run.id).map(item => <button key={item.filename} className={styles.activityLink} onClick={() => setFile(artifactFile(projectId, item))}>{item.filename} ↗</button>)}</details>}
@@ -351,7 +356,8 @@ function ProjectReportPanel({ referenceReportId, settingsMode, configurationFocu
 const statusKeys: Record<string, AdvisorMessageKey> = { queued: "statusQueued", running: "statusRunning", succeeded: "statusSucceeded", failed: "statusFailed", interrupted: "statusInterrupted", cancelled: "statusCancelled" };
 const lookup = (keys: Record<string, AdvisorMessageKey>, code: string) => Object.prototype.hasOwnProperty.call(keys, code) ? keys[code] : undefined;
 function statusLabel(status: string, t: AdvisorTranslate): string { const key = lookup(statusKeys, status); return key ? t(key) : status; }
-function message(reason: unknown, fallback: string): string { return reason instanceof Error ? reason.message : fallback; }
+// A failed run's code says why it stopped; codes worth a specific sentence get one, the rest keep the general explanation.
+function runErrorKey(code: string) { const key = friendlyErrorKey(new Error(code)); return key && key !== "network" ? key : null; }
 
 const activityKeys: Record<string, AdvisorMessageKey> = {
   skill_inputs_prepared: "activitySkillInputs",
@@ -361,6 +367,18 @@ const activityKeys: Record<string, AdvisorMessageKey> = {
   review_blocked: "needsAttention",
 };
 function activityLabel(type: string, t: AdvisorTranslate): string | undefined { const key = lookup(activityKeys, type); return key ? t(key) : undefined; }
+// Other recorded steps get a plain label; any step without one reads as "Working on your request", never its internal name.
+const eventKeys: Record<string, keyof typeof activityMessages.en> = {
+  agent_start: "started",
+  agent_end: "finished",
+  tool_execution_end: "stepDone",
+  previous_report_prepared: "previousReport",
+  key_points_published: "keyPoints",
+  project_actions_registered: "actionsAdded",
+  project_actions_need_review: "actionsNeedReview",
+  site_report_published: "reportSaved",
+};
+function eventLabel(type: string, ta: (key: keyof typeof activityMessages.en) => string): string | undefined { return Object.prototype.hasOwnProperty.call(eventKeys, type) ? ta(eventKeys[type]!) : undefined; }
 function runActivityLabel(run: Run, events: Event[], t: AdvisorTranslate): string {
   if (run.status === "queued") return t("waitingToStart");
   if (run.errorCode === "REPORT_METER_NAMES_REQUIRED") return t("meterDetailsNeeded");

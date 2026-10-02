@@ -17,6 +17,9 @@ import {
   type EnergyAccessContextDto,
   type EnergyProjectDto,
 } from "../../../lib/config-api";
+import { useFriendlyError } from "./friendly-error";
+import { friendlyErrorMessages } from "./friendly-error-messages";
+import { useMessages } from "./energyiq-locale";
 
 type EnergyIqAccessValue = {
   access: EnergyAccessContextDto | null;
@@ -41,7 +44,11 @@ export function EnergyIqAccessProvider({ children }: { children: ReactNode }) {
   const [access, setAccess] = useState<EnergyAccessContextDto | null>(null);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // The failure itself is kept so its wording follows the reader's language; consumers receive a plain sentence.
+  const [failure, setFailure] = useState<{ reason: unknown } | null>(null);
+  const friendly = useFriendlyError();
+  const tf = useMessages(friendlyErrorMessages);
+  const error = failure ? friendly(failure.reason, tf("access.loadFailed")) : null;
   const [navigationTransitionPending, setNavigationTransitionPending] = useState(false);
   const navigationTransitionGenerationRef = useRef(0);
   const beginNavigationTransition = useCallback(() => {
@@ -62,7 +69,7 @@ export function EnergyIqAccessProvider({ children }: { children: ReactNode }) {
     requestedProjectId: string | null = getRequestedProjectId(),
   ) => {
     setLoading(true);
-    setError(null);
+    setFailure(null);
     try {
       const restoredWorkspaceId = requestedWorkspaceId || (typeof window === "undefined"
         ? null
@@ -99,7 +106,7 @@ export function EnergyIqAccessProvider({ children }: { children: ReactNode }) {
       setActiveProjectId(selected?.id ?? null);
       return selected;
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to load EnergyX access");
+      setFailure({ reason });
       return null;
     } finally {
       setLoading(false);
@@ -227,8 +234,9 @@ function isStaleOrganisationSelection(reason: unknown): boolean {
 }
 
 function getRequestedProjectId(): string | null {
-  if (typeof window === "undefined"
-    || !["/energyiq/overview", "/energyiq/ai", "/energyiq/reports", "/energyiq/library", "/energyiq/skills"].includes(window.location.pathname)) return null;
+  // Any page that names a project can be opened from a link, even when that project belongs to another client.
+  if (typeof window === "undefined" || !window.location.pathname.startsWith("/energyiq/")
+    || window.location.pathname.startsWith("/energyiq/admin")) return null;
   return new URLSearchParams(window.location.search).get("projectId");
 }
 

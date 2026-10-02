@@ -15,6 +15,7 @@ import { EnergyIcon, type EnergyIconName } from "./icons";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { translatorFor, type EnergyIqLocale } from "./energyiq-messages";
 import { dateLocale, libraryMessages, coverageLabel } from "./report-library-messages";
+import { useFriendlyError } from "./friendly-error";
 import { nextReportRun, type ReportFrequency } from "./report-schedule";
 import styles from "./report-workbench.module.css";
 import { ReportScheduleNote } from "./report-schedule-note";
@@ -31,6 +32,7 @@ export function ReportLibraryLoading() { const t = useMessages(libraryMessages);
 export function ReportLibraryView({ projectId, view }: { projectId: string; view: "reports" | "skills" }) { return <ProjectLibrary key={`${projectId}:${view}`} projectId={projectId} view={view} />; }
 function ProjectLibrary({ projectId, view }: { projectId: string; view: "reports" | "skills" }) {
   const t = useMessages(libraryMessages);
+  const friendly = useFriendlyError();
   const { locale } = useEnergyIqLocale();
   const searchParams = useSearchParams();
   const requestedReport = searchParams.get("reportId");
@@ -47,7 +49,7 @@ function ProjectLibrary({ projectId, view }: { projectId: string; view: "reports
   const [saving, setSaving] = useState(false); const [notice, setNotice] = useState("");
   const [library, setLibrary] = useState<ReportLibrary | null>(null); const [error, setError] = useState(""); const [revision, setRevision] = useState(0);
   const [file, setFile] = useState<PreviewFile | null>(null); const [search, setSearch] = useState(""); const [page, setPage] = useState(0); const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null); const [skillSourceView,setSkillSourceView] = useState(false); const [skillsTab, setSkillsTab] = useState<"skills" | "tools">("skills");
-  useEffect(() => { const controller = new AbortController(); setError(""); configApi.reportLibraryRequest<ReportLibrary>(projectId, requestedReport ? `?reportId=${encodeURIComponent(requestedReport)}` : "", { signal: controller.signal }).then(data => { if (!controller.signal.aborted) setLibrary(data); }).catch(reason => { if (!controller.signal.aborted) { setLibrary(null); setFile(null); setError(reason instanceof Error ? reason.message : t("libraryUnavailable")); } }); return () => controller.abort(); }, [projectId, revision, requestedReport]);
+  useEffect(() => { const controller = new AbortController(); setError(""); configApi.reportLibraryRequest<ReportLibrary>(projectId, requestedReport ? `?reportId=${encodeURIComponent(requestedReport)}` : "", { signal: controller.signal }).then(data => { if (!controller.signal.aborted) setLibrary(data); }).catch(reason => { if (!controller.signal.aborted) { setLibrary(null); setFile(null); setError(friendly(reason, t("libraryUnavailable"))); } }); return () => controller.abort(); }, [projectId, revision, requestedReport]);
   useEffect(()=>{if(view!=="reports" || knowledgeTab==="reports")return;const controller=new AbortController();configApi.reportAgentRequest<{settings:{fileRefIds:string[];contextNotes:string};files:Array<{id:string;filename:string;bytes:number}>}>(projectId,"",{signal:controller.signal}).then(data=>{if(!controller.signal.aborted)setMaterials(data);}).catch(()=>{if(!controller.signal.aborted)setError(t("materialsLoadFailed"));});return()=>controller.abort();},[projectId,knowledgeTab,view,revision]);
   // Only people who may change the schedule fetch it; a reader without that permission would be refused.
   const canSeeSchedule = (activeProject?.id === projectId && activeProject.capabilities?.manageAutomation) ?? false;
@@ -60,7 +62,7 @@ function ProjectLibrary({ projectId, view }: { projectId: string; view: "reports
       const data = await configApi.reportAgentRequest<{ settings: { revision: number } }>(projectId);
       await configApi.reportAgentRequest(projectId, "skills/default", { method: "POST", body: JSON.stringify({ id: skill.id, version: skill.version, revision: data.settings.revision }) });
       setRevision(value => value + 1); setNotice(skill.category === "presentation" ? t("styleUpdated") : t("methodUpdated")); setSelectedSkill(null);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : t("defaultUpdateFailed")); } finally { setSaving(false); }
+    } catch (reason) { setError(friendly(reason, t("defaultUpdateFailed"))); } finally { setSaving(false); }
   }
   // Category is saved as an English word; only its label is translated.
   const categoryLabel = (category?: string) => category === "analysis" ? t("categoryAnalysis") : category === "presentation" ? t("categoryPresentation") : !category || category === "other" ? t("categoryOther") : category;

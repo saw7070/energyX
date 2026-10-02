@@ -4,6 +4,7 @@ import { configApi, type EnergyAccessContextDto, type EnergyProjectDto } from ".
 import { EnergyIcon } from "./icons";
 import styles from "./project-switcher.module.css";
 import { useEnergyIqLocale } from "./energyiq-locale";
+import { useFriendlyError } from "./friendly-error";
 
 type Props = {
   access: EnergyAccessContextDto;
@@ -179,6 +180,7 @@ function MoveProjectModal({ proposal, customers, onCancel, onConfirm }: {
   onConfirm: (targetId: string | null, name: string) => Promise<void>;
 }) {
   const { t } = useEnergyIqLocale();
+  const friendly = useFriendlyError();
   const modal = useRef<HTMLDialogElement>(null);
   const destinations = customers.filter(item => item.id !== proposal.fromId);
   const [targetId, setTargetId] = useState<string | null>(proposal.choose ? destinations[0]?.id ?? null : proposal.targetId);
@@ -198,7 +200,7 @@ function MoveProjectModal({ proposal, customers, onCancel, onConfirm }: {
     if (creating && !trimmed) { setError(t("project.moveNameRequired")); return; }
     setSaving(true); setError("");
     try { await onConfirm(targetId, trimmed); }
-    catch (reason) { setError(t("project.moveFailed", { reason: reason instanceof Error ? reason.message : String(reason) })); setSaving(false); }
+    catch (reason) { setError(t("project.moveFailed", { reason: friendly(reason) })); setSaving(false); }
   };
   return <dialog ref={modal} aria-labelledby="move-project-title" className={styles.moveModal} onCancel={event => { event.preventDefault(); if (!saving) onCancel(); }}>
     <form onSubmit={event => void submit(event)}>
@@ -223,6 +225,7 @@ function AdminActionModal({ action, onCancel, onConfirm }: {
   onConfirm: (typed: string) => Promise<void>;
 }) {
   const { t } = useEnergyIqLocale();
+  const friendly = useFriendlyError();
   const modal = useRef<HTMLDialogElement>(null);
   const [typed, setTyped] = useState("");
   const [saving, setSaving] = useState(false);
@@ -246,7 +249,7 @@ function AdminActionModal({ action, onCancel, onConfirm }: {
     if (!ready) return;
     setSaving(true); setError("");
     try { await onConfirm(typed.trim()); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); setSaving(false); }
+    catch (reason) { setError(friendly(reason)); setSaving(false); }
   };
   return <dialog ref={modal} aria-labelledby="admin-action-title" className={styles.moveModal} onCancel={event => { event.preventDefault(); if (!saving) onCancel(); }}>
     <form onSubmit={event => void submit(event)}>

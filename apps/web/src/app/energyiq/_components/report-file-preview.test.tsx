@@ -200,7 +200,7 @@ it("preserves the same action form, feedback and report across tabs, expansion a
     ),
   );
   const reportFrame = container.querySelector(
-    'iframe[title="HTML report preview"]',
+    'iframe[title="Report preview"]',
   );
   const dialogNode = container.querySelector("dialog");
   await click("Actions");
@@ -239,7 +239,7 @@ it("preserves the same action form, feedback and report across tabs, expansion a
   expect(container.querySelector('iframe[title="Selected feedback"]')).toBe(
     feedbackFrame,
   );
-  expect(container.querySelector('iframe[title="HTML report preview"]')).toBe(
+  expect(container.querySelector('iframe[title="Report preview"]')).toBe(
     reportFrame,
   );
   expect(mounts).toHaveBeenCalledOnce();

@@ -42,8 +42,8 @@ export class AuthMailer {
     const url = `${this.config.publicBaseUrl.replace(/\/$/u, "")}/login?reset=${encodeURIComponent(input.token)}`;
     return this.send({
       email: input.email,
-      subject: "Reset your DataFoundry password",
-      text: `Reset your DataFoundry password: ${url}`,
+      subject: "Reset your EnergyX password",
+      text: `Reset your EnergyX password: ${url}`,
       token: input.token,
       url
     });

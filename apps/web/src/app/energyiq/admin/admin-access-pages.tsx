@@ -9,6 +9,7 @@ import {
 } from "../../../lib/config-api";
 import { EnergyIcon } from "../_components/icons";
 import { EnergySelect } from "../_components/energy-select";
+import { friendlyErrorMessage } from "../_components/friendly-error";
 
 type AdminAccessPagesProps = {
   initialView: "organisations" | "users";
@@ -687,7 +688,8 @@ const formatLastLogin = (value?: string): string => value
   ? `Last login ${new Intl.DateTimeFormat("en-SG", { dateStyle: "medium" }).format(new Date(value))}`
   : "Never signed in";
 
-const messageFrom = (reason: unknown, fallback: string): string => reason instanceof Error ? reason.message : fallback;
+// Admin rules from the server ("Remove this Organisation's users first.") read as written; codes and request failures do not.
+const messageFrom = (reason: unknown, fallback: string): string => friendlyErrorMessage(reason, { fallback });
 
 const inputClass = "h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:bg-surface-subtle disabled:text-muted";
 const primaryButton = "inline-flex h-9 items-center justify-center rounded-lg bg-primary px-3 text-xs font-semibold text-white transition-colors hover:bg-primary-light disabled:cursor-not-allowed disabled:opacity-50";

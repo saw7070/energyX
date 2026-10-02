@@ -21,6 +21,7 @@ import {
 
 import { EnergyIcon, type EnergyIconName } from "./icons";
 import { useEnergyIqAccess } from "./energyiq-access";
+import { friendlyErrorMessage, isTechnicalMessage } from "./friendly-error";
 import { orderProjectNodesDepthFirst, revealProjectTreeSelection } from "./project-tree-model";
 import {
   configApi,
@@ -155,9 +156,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
       .catch((reason) => {
         if (cancelled) return;
         setHierarchyNodes(null);
-        setHierarchyError(
-          reason instanceof Error ? reason.message : "Unable to load project hierarchy",
-        );
+        setHierarchyError(friendlyErrorMessage(reason, { fallback: "Unable to load project hierarchy" }));
         setSelectedId("");
       });
     return () => {
@@ -607,7 +606,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
             ) : analysisError ? (
               <div className="mt-4 rounded-lg border border-step-warning/25 bg-step-warning/5 p-3 text-sm leading-5 text-step-warning">
                 <p>Scope analysis unavailable: {analysisErrorPresentation?.summary}</p>
-                {analysisErrorPresentation?.technicalDetails ? (
+                {analysisErrorPresentation?.technicalDetails && access?.role === "admin" ? (
                   <details className="mt-2 text-xs text-muted">
                     <summary className="cursor-pointer font-medium">Technical details</summary>
                     <p className="mt-1 break-all font-mono">{analysisErrorPresentation.technicalDetails}</p>
@@ -1080,9 +1079,16 @@ export function explorerAnalysisErrorPresentation(
       technicalDetails: message,
     };
   }
+  // Codes and raw request failures become a plain sentence; the original stays in Technical details for administrators.
+  if (isTechnicalMessage(message)) {
+    return {
+      summary: friendlyErrorMessage(message, { fallback: "The analysis for this area could not be prepared. Try again in a moment." }),
+      technicalDetails: message,
+    };
+  }
   if (message.length > 180) {
     return {
-      summary: "Trusted scope analysis could not be completed. Review the technical details or retry after checking the data configuration.",
+      summary: "Trusted scope analysis could not be completed. Retry after checking the data configuration.",
       technicalDetails: message,
     };
   }

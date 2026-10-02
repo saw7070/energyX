@@ -17,7 +17,7 @@ it("applies a saved setup change straight away, like the Facility page", () => {
 
 it("keeps a saved change visible when it could not be applied, and says why", () => {
   expect(applyFailure(new Error("ENERGYIQ_PROJECT_SETUP_INVALID:LOCATION_WITHOUT_METER,DUPLICATE_ROUTE")))
-    .toBe("Saved, but not applied yet: LOCATION_WITHOUT_METER, DUPLICATE_ROUTE. Fix that and save again.");
+    .toBe("Saved, but not applied yet: some locations or meters still need setting up. Fix the problems listed under Validation, then save again.");
   expect(applyFailure(new Error("FORBIDDEN"))).toBe("Saved, but only a platform administrator can apply it.");
   expect(applyFailure(new Error("ENERGYIQ_DATA_NOT_READY"))).toBe("Saved, but not applied yet: this project has no readings to publish.");
   expect(applyFailure(new Error("REVISION_CONFLICT"))).toContain("someone else changed this project");

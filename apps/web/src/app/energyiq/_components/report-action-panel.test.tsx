@@ -44,7 +44,7 @@ it("shows actual execution state and opens a project-time form without pretendin
     await act(async () => {
       root.render(<ReportActionPanel projectId="p" reportId="r" />);
     });
-    expect(div.textContent).toContain("Execution recorded");
+    expect(div.textContent).toContain("Done");
     expect(div.textContent).toContain(
       "the system checks readings automatically",
     );
@@ -113,10 +113,10 @@ it("opens linked feedback safely and offers retry for failed feedback", async ()
     await act(async () =>
       root.render(<ReportActionPanel projectId="p" reportId="r" />),
     );
-    expect(div.textContent).toContain("Retry effect report");
+    expect(div.textContent).toContain("Check the result again");
     await act(async () =>
       [...div.querySelectorAll("button")]
-        .find((b) => b.textContent === "Read initial effect report")!
+        .find((b) => b.textContent === "Did it work?")!
         .click(),
     );
     expect(div.querySelector("iframe")?.getAttribute("sandbox")).toBe(
@@ -400,8 +400,8 @@ describe("report recommendations and scenario planning", () => {
       return state({ actions: [action] });
     });
     await render();
-    await click("Adopt this scenario");
-    await click("Adopt this scenario");
+    await click("Use this estimate");
+    await click("Use this estimate");
     expect(postCalls().map((call) => call[1])).toEqual([
       "action-1/scenario-adoption",
       "action-1/scenario-adoption",
@@ -414,7 +414,7 @@ describe("report recommendations and scenario planning", () => {
       requestId: expect.any(String),
     });
     expect(second.requestId).toBe(first.requestId);
-    expect(host.textContent).not.toContain("Execution recorded");
+    expect(host.textContent).not.toContain("Done");
     expect(host.textContent).toContain(scenario.value.inputs.assumptions);
   });
 
@@ -429,9 +429,9 @@ describe("report recommendations and scenario planning", () => {
         }),
       );
       await render();
-      expect(button("Adopt this scenario")).toBeUndefined();
-      expect(host.textContent).toContain("Linked estimate");
-      expect(host.textContent).toContain("132.00 kWh estimated avoided use");
+      expect(button("Use this estimate")).toBeUndefined();
+      expect(host.textContent).toContain("Estimate in use");
+      expect(host.textContent).toContain("132.00 kWh estimated saving");
       expect(button("Record progress")).toBeDefined();
     },
   );
@@ -516,8 +516,8 @@ describe("report recommendations and scenario planning", () => {
         }),
       );
       await render();
-      expect(button("Adopt this scenario").disabled).toBe(true);
-      expect(host.textContent).toContain("calculate a 3–60 day scenario");
+      expect(button("Use this estimate").disabled).toBe(true);
+      expect(host.textContent).toContain("pick 3–60 days");
     },
   );
   it("explains an unsupported observation window returned by the API", async () => {
@@ -527,7 +527,7 @@ describe("report recommendations and scenario planning", () => {
       return state({ actions: [action] });
     });
     await render();
-    await click("Adopt this scenario");
+    await click("Use this estimate");
     expect(host.querySelector('[role="alert"]')?.textContent).toContain(
       "3–60 days",
     );
@@ -561,9 +561,9 @@ describe("report recommendations and scenario planning", () => {
       }),
     );
     await render();
-    expect(button("Scenario comparison")).toBeDefined();
-    expect(button("Read extended effect report")).toBeDefined();
-    expect(host.textContent).toContain("Partial observation");
+    expect(button("Did it save as much as estimated?")).toBeDefined();
+    expect(button("Did it keep working?")).toBeDefined();
+    expect(host.textContent).toContain("Early result");
   });
 
   it("shows the linked estimate after adoption without marking implementation", async () => {
@@ -583,13 +583,13 @@ describe("report recommendations and scenario planning", () => {
       });
     });
     await render();
-    await click("Adopt this scenario");
-    expect(host.textContent).toContain("Linked estimate");
-    expect(host.textContent).toContain("This does not record implementation");
-    expect(host.textContent).not.toContain("Execution recorded");
-    expect(button("Adopt this scenario")).toBeUndefined();
+    await click("Use this estimate");
+    expect(host.textContent).toContain("Estimate in use");
+    expect(host.textContent).toContain("It is not marked as done");
+    expect(host.textContent).not.toContain("Done");
+    expect(button("Use this estimate")).toBeUndefined();
     await click("Record progress");
-    expect(host.textContent).toContain("enough complete, comparable readings");
+    expect(host.textContent).toContain("enough full days of readings");
   });
   it("keeps scenario parameters after failed calculation and allows retry", async () => {
     request.mockImplementation(async (_project, _path, options) => {
@@ -619,7 +619,7 @@ describe("report recommendations and scenario planning", () => {
     expect(button("Find recommendations")).toBeUndefined();
     await click("Track this action");
     expect(host.textContent).not.toContain(
-      "Share this action with the project",
+      "Share this action with your project team",
     );
     await submit();
     expect(JSON.parse(postCalls()[0]![2].body).visibility).toBe("private");
@@ -678,7 +678,7 @@ describe("report recommendations and scenario planning", () => {
       }),
     );
     await render();
-    expect(button("Adopt this scenario")).toBeUndefined();
+    expect(button("Use this estimate")).toBeUndefined();
     expect(host.textContent).toContain("cannot be changed at this stage");
     expect(button("Record progress")).toBeDefined();
   });
@@ -705,7 +705,7 @@ describe("report recommendations and scenario planning", () => {
       }),
     );
     await render();
-    expect(host.textContent).toContain("Project action");
+    expect(host.textContent).toContain("Shared with project team");
     expect(host.textContent).toContain("Only you");
     expect(host.textContent).toContain("Charles");
     expect(host.textContent).toContain("Lighting timers changed");
@@ -742,7 +742,7 @@ describe("report recommendations and scenario planning", () => {
     await render();
     expect(host.textContent).toContain("An automatic retry is scheduled");
     expect(host.textContent).toContain("Asia/Singapore");
-    expect(button("Retry effect report")).toBeUndefined();
+    expect(button("Check the result again")).toBeUndefined();
     expect(postCalls()).toHaveLength(0);
   });
   it.each(["cancelled", "failed"])(
@@ -764,7 +764,7 @@ describe("report recommendations and scenario planning", () => {
       );
       await render();
       expect(host.textContent).toContain("Automatic retries have stopped");
-      await click("Retry effect report");
+      await click("Check the result again");
       expect(postCalls()[0]?.[1]).toBe("action-1/feedback/retry/retry");
     },
   );
@@ -793,7 +793,7 @@ describe("report recommendations and scenario planning", () => {
       form().querySelector("textarea")!,
       "Keep this edited recommendation while retrying feedback.",
     );
-    await click("Retry effect report");
+    await click("Check the result again");
     expect(
       (form().querySelector("textarea") as HTMLTextAreaElement).value,
     ).toBe("Keep this edited recommendation while retrying feedback.");
@@ -881,7 +881,7 @@ describe("report recommendations and scenario planning", () => {
     );
     await render();
     expect(host.textContent).toContain("next automatic check");
-    expect(button("Retry effect report")).toBeUndefined();
+    expect(button("Check the result again")).toBeUndefined();
     expect(button("Check latest readings")).toBeUndefined();
     expect(postCalls()).toHaveLength(0);
   });

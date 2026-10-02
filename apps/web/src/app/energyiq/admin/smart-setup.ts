@@ -17,8 +17,27 @@ export type SmartSetupPlanRow = {
   status: "new" | "existing" | "needs_placement";
 };
 
+/** Names given to what a new setup creates, in the language of whoever sets it up. */
+export type SmartSetupNames = {
+  board: string;
+  boardLevel: string;
+  boardLevelHint: string;
+  circuitLevel: string;
+  circuitLevelHint: string;
+};
+
+const ENGLISH_NAMES: SmartSetupNames = {
+  board: "Main distribution board",
+  boardLevel: "Board",
+  boardLevelHint: "Distribution board",
+  circuitLevel: "Circuit",
+  circuitLevelHint: "Metered circuit or zone",
+};
+
 export type SmartSetupPlan = {
   mode: "new" | "update";
+  /** The name of the board that holds the site total, as it reads in the setup. */
+  boardName?: string;
   document: EnergyProjectSetupDocumentDto;
   rows: SmartSetupPlanRow[];
   totalLabel?: string;
@@ -159,7 +178,9 @@ export const buildSmartSetup = (input: {
   projectId: string;
   labels: string[];
   devices: DeviceListEntry[];
+  names?: SmartSetupNames;
 }): SmartSetupPlan => {
+  const names = input.names ?? ENGLISH_NAMES;
   const labels = [...new Map(input.labels.map((label) => [key(label), label.trim()])).values()].filter(Boolean)
     .sort((left, right) => left.localeCompare(right));
   const devices = mergeDeviceLists(savedDeviceList(input.document, input.projectId), input.devices);
@@ -175,10 +196,10 @@ export const buildSmartSetup = (input: {
 
   if (isNew) {
     const totalLabel = detectTotalLabel(labels);
-    const boardTier = { id: `${pid}${BOARD_TIER_SUFFIX}`, ordinal: 2, alias: "Board", description: "Distribution board" };
-    const circuitTier = { id: `${pid}${CIRCUIT_TIER_SUFFIX}`, ordinal: 1, alias: "Circuit", description: "Metered circuit or zone" };
+    const boardTier = { id: `${pid}${BOARD_TIER_SUFFIX}`, ordinal: 2, alias: names.boardLevel, description: names.boardLevelHint };
+    const circuitTier = { id: `${pid}${CIRCUIT_TIER_SUFFIX}`, ordinal: 1, alias: names.circuitLevel, description: names.circuitLevelHint };
     const board: EnergyProjectSetupNodeDto = withSavedDeviceList({
-      id: `${pid}${BOARD_NODE_SUFFIX}`, tier_definition_id: boardTier.id, name: "Main distribution board", sort_order: 0, metadata_status: "provisional",
+      id: `${pid}${BOARD_NODE_SUFFIX}`, tier_definition_id: boardTier.id, name: names.board, sort_order: 0, metadata_status: "provisional",
     }, devices);
     const circuits = labels.filter((label) => label !== totalLabel).map((label, index): EnergyProjectSetupNodeDto => {
       const equipment = devicesByCode.get(key(label));
@@ -208,6 +229,7 @@ export const buildSmartSetup = (input: {
     });
     return {
       mode: "new",
+      boardName: board.name,
       document: { ...document, meter_mapping: { schema_version: 2, source_kind: "excel", rows, official_aggregation_routes: smartRoutes(document, rows, board.id), confirmed: true } },
       rows: rows.map((row) => ({ sourceLabel: row.source_label, displayName: row.display_name, location: row.meter_role === "total" ? board.name : row.source_label, role: row.meter_role === "total" ? "total" : "component", status: "new" })),
       ...(totalLabel ? { totalLabel } : {}),
@@ -272,6 +294,7 @@ export const buildSmartSetup = (input: {
   const document: EnergyProjectSetupDocumentDto = { ...input.document, nodes };
   return {
     mode: "update",
+    ...(smartBoard ? { boardName: smartBoard.name } : {}),
     document: {
       ...document,
       meter_mapping: {
