@@ -18,7 +18,7 @@ data/raw_excel/
 docs/Net-Zero Product/
 docs/map.png
 coverage/
-artifacts/
+/artifacts/
 storage/
 **/storage/
 .cache/
