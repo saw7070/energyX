@@ -24,14 +24,16 @@ const TABS = new Set(["structure", "devices", "context", "policies", "holidays",
 function Configuration({ projectId, canPublish }: { projectId: string; canPublish: boolean }) {
   const t = useMessages(facilityPageMessages);
   const router = useRouter();
-  const requestedTab = useSearchParams().get("tab");
+  const searchParams = useSearchParams();
+  const requestedTab = searchParams.get("tab");
   const initialTab = requestedTab && TABS.has(requestedTab) ? requestedTab : undefined;
   const [data, setData] = useState<{ setup: EnergyProjectSetupDto; notes: string; policies: EnergyOperationalPolicyConfigurationDto | null } | null>(null);
   // A flag rather than the message, so the text follows a language change.
   const [failed, setFailed] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [uploading, setUploading] = useState(false);
-  const [connecting, setConnecting] = useState(false);
+  // The bell's "daily update didn't finish" alert opens the Live connection straight away.
+  const [connecting, setConnecting] = useState(() => searchParams.get("connection") === "live");
   // Clear only when switching projects; a refresh keeps the current tab and message on screen.
   useEffect(() => { setData(null); }, [projectId]);
   useEffect(() => {

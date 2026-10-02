@@ -348,6 +348,13 @@ export type EnergyProjectSetupDto = {
 };
 
 /** Whether each meter is actually reporting, so a site can notice one that stopped. */
+/** The bell's site alerts: automatic reports that are ready and, for administrators, a failed daily live update. */
+export type EnergyProjectAlertsDto = {
+  reports: Array<{ key: string; reportId: string; cadence: "daily" | "weekly" | "monthly" | "other"; from: string; toExclusive: string; finishedAt: string }>;
+  sync?: { key: string; failedAt: string; reason: "ip-blocked" | "sign-in" | "other" };
+  readKeys: string[];
+};
+
 export type EnergyMeterHealthDto = {
   meters: Array<{
     meterPointId: string;

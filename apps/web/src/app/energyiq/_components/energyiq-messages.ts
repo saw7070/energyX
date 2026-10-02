@@ -79,7 +79,7 @@ const en = {
   "notifications.title": "Notifications",
   "notifications.count": "Notifications, {count} new",
   "notifications.newResult": "New result to read",
-  "notifications.empty": "No new results. Measured results for your actions appear here when new readings arrive.",
+  "notifications.empty": "You're all caught up. Stopped meters, failed daily updates, new automatic reports and action results show up here.",
 
   "account.open": "Open account menu",
   "account.options": "Account options",
@@ -221,7 +221,7 @@ const zhHans: Messages = {
   "notifications.title": "通知",
   "notifications.count": "通知，{count} 条新消息",
   "notifications.newResult": "有新结果待查看",
-  "notifications.empty": "暂无新结果。收到新读数后，您各项行动的实测结果会显示在这里。",
+  "notifications.empty": "暂无新通知。电表停止发送、每日更新失败、新的自动报告以及行动结果都会显示在这里。",
 
   "account.open": "打开账户菜单",
   "account.options": "账户选项",
@@ -361,7 +361,7 @@ const ms: Messages = {
   "notifications.title": "Pemberitahuan",
   "notifications.count": "Pemberitahuan, {count} baharu",
   "notifications.newResult": "Hasil baharu untuk dibaca",
-  "notifications.empty": "Tiada hasil baharu. Hasil yang diukur untuk tindakan anda akan dipaparkan di sini apabila bacaan baharu diterima.",
+  "notifications.empty": "Tiada pemberitahuan baharu. Meter yang berhenti menghantar, kemas kini harian yang gagal, laporan automatik baharu dan hasil tindakan dipaparkan di sini.",
 
   "account.open": "Buka menu akaun",
   "account.options": "Pilihan akaun",

@@ -88,6 +88,7 @@ import {
   registeredEnergyLiveConnectionScheduler,
   type EnergyLiveConnectionScheduler,
 } from "./energy-live-connection-scheduler.js";
+import { markSiteAlertRead, readSiteAlerts } from "./energy-site-alerts.js";
 import {
   checkLiveConnection,
   disconnectLiveConnection,
@@ -1629,6 +1630,33 @@ export const handleEnergyApiRequest = async (
         const dataThrough = meters.map((meterPoint) => meterPoint.lastReadingAt).filter((value): value is string => !!value).sort().at(-1);
         return { status: 200, headers: { "Cache-Control": "private, no-store" }, body: createSuccessResult({ meters, summary, ...(dataThrough ? { dataThrough } : {}) }) };
       });
+    }
+    // The bell's site alerts: automatic reports that are ready and, for administrators, a daily live update that failed.
+    if (segments[0] === "projects" && segments[2] === "alerts") {
+      const projectId = decodeURIComponent(segments[1] ?? "");
+      const capabilities = resolveEnergyProjectCapabilities({ metadataStore: context.metadataStore, userId: user.id, workspaceId: context.workspaceId, projectId });
+      if (!capabilities.readProjectInformation) throw Error("ENERGYIQ_PROJECT_FORBIDDEN");
+      if (segments.length === 3 && request.method === "GET") {
+        const { findReportService } = await import("../report-agent/report-service.js");
+        const reportRuns = capabilities.readReports ? findReportService(context.metadataStore)?.store.list(projectId) ?? [] : [];
+        return {
+          status: 200,
+          headers: { "Cache-Control": "private, no-store" },
+          body: createSuccessResult(readSiteAlerts({
+            metadataStore: context.metadataStore,
+            projectId,
+            userId: user.id,
+            includeReports: capabilities.readReports,
+            includeSync: capabilities.publishConfiguration,
+            reportRuns,
+          })),
+        };
+      }
+      if (segments.length === 4 && segments[3] === "read" && request.method === "POST") {
+        const body = requireRecord(await readJsonBody(request));
+        markSiteAlertRead({ db: context.metadataStore.db, userId: user.id, projectId, key: body.key });
+        return { status: 200, headers: { "Cache-Control": "private, no-store" }, body: createSuccessResult({ read: true }) };
+      }
     }
     if (segments[0] === "projects" && segments[2] === "information" && segments.length === 3 && request.method === "GET") {
       const projectId = decodeURIComponent(segments[1] ?? "");

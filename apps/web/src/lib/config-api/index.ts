@@ -54,6 +54,7 @@ export type {
   DevIdentityUser,
   EnergyAccessContextDto,
   EnergyMeterHealthDto,
+  EnergyProjectAlertsDto,
   EnergyAdminOrganisationDto,
   EnergyAdminUserDto,
   EnergyAdditionalInsightFeedbackDto,

@@ -16,6 +16,7 @@ import type {
   DevIdentityUser,
   EnergyAccessContextDto,
   EnergyMeterHealthDto,
+  EnergyProjectAlertsDto,
   EnergyAdminOrganisationDto,
   EnergyAdminUserDto,
   EnergyAdditionalInsightFeedbackDto,
@@ -299,6 +300,12 @@ export const configApi = {
   },
   reportTaskHistoryRequest<T>(query = "", init?: RequestInit): Promise<T> {
     return requestEnvelope<T>(`/api/v1/energy/admin/task-history${query}`, init);
+  },
+  getEnergyProjectAlerts(projectId: string): Promise<EnergyProjectAlertsDto> {
+    return requestEnvelope<EnergyProjectAlertsDto>(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/alerts`);
+  },
+  markEnergyProjectAlertRead(projectId: string, key: string): Promise<{ read: boolean }> {
+    return requestEnvelope(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/alerts/read`, { method: "POST", body: JSON.stringify({ key }) });
   },
   liveConnectionRequest<T>(projectId: string, action = "", init?: RequestInit): Promise<T> {
     return requestEnvelope<T>(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/live-connection${action ? `/${action}` : ""}`, init);

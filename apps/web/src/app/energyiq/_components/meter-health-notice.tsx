@@ -45,7 +45,7 @@ export function stoppedMeters(meters: ReadonlyArray<Quiet>): Quiet[] {
 /** Several notices on one page share a single request per project, reused for a short while. */
 const HEALTH_REUSE_MS = 60_000;
 const healthRequests = new Map<string, { at: number; pending: Promise<EnergyMeterHealthDto> }>();
-const meterHealth = (projectId: string): Promise<EnergyMeterHealthDto> => {
+export const meterHealth = (projectId: string): Promise<EnergyMeterHealthDto> => {
   const current = healthRequests.get(projectId);
   if (current && Date.now() - current.at < HEALTH_REUSE_MS) return current.pending;
   const pending = configApi.getEnergyProjectMeterHealth(projectId);
