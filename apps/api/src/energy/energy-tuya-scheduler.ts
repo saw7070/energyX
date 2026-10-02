@@ -3,6 +3,7 @@ import {
   createEnergyTuyaSyncRunner,
   resolveScheduledTuyaSyncWindow,
   sourceSyncErrorCode,
+  sourceSyncErrorDetail,
   type EnergyTuyaPostMaterialization,
 } from "./energy-tuya-sync-runner.js";
 import type { TuyaEnergySyncInput, TuyaReportLogArtifact } from "./tuya-openapi-client.js";
@@ -146,7 +147,7 @@ export const createEnergyTuyaDailyScheduler = (input: {
         return "succeeded" as const;
       } catch (error) {
         console.error(
-          `[tuya-sync] failed project=${projectId} passes=${completed} code=${sourceSyncErrorCode(error)}`,
+          `[tuya-sync] failed project=${projectId} passes=${completed} code=${sourceSyncErrorCode(error)} detail=${JSON.stringify(sourceSyncErrorDetail(error))}`,
         );
         return completed > 0 ? "succeeded" as const : "failed" as const;
       }

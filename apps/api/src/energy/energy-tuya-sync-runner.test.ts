@@ -27,6 +27,7 @@ import {
   resolveLatestCompleteSingaporeDayEnd,
   resolveScheduledTuyaSyncWindow,
   sourceSyncErrorCode,
+  sourceSyncErrorDetail,
 } from "./energy-tuya-sync-runner.js";
 import {
   TUYA_REPORT_LOG_ARTIFACT_VERSION,
@@ -774,6 +775,15 @@ describe("Energy Tuya sync runner", () => {
 
   it("reduces arbitrary failures to a bounded code", () => {
     expect(sourceSyncErrorCode(new Error("provider leaked many words"))).toBe("ENERGYIQ_SOURCE_SYNC_FAILED");
+  });
+
+  it("keeps a provider's code and its first words, and logs the whole reason for operators", () => {
+    const refused = new Error("ENERGYIQ_TUYA_API_ERROR:1114:your_ip(203.0.113.9)_don't_have_access_to_this_API");
+    expect(sourceSyncErrorCode(refused)).toBe("ENERGYIQ_TUYA_API_ERROR:1114:YOUR_IP");
+    expect(sourceSyncErrorDetail(refused)).toBe("Error: ENERGYIQ_TUYA_API_ERROR:1114:your_ip(203.0.113.9)_don't_have_access_to_this_API");
+    const offline = new TypeError("fetch failed", { cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }) });
+    expect(sourceSyncErrorCode(offline)).toBe("ENERGYIQ_SOURCE_SYNC_FAILED");
+    expect(sourceSyncErrorDetail(offline)).toBe("TypeError: fetch failed <- ECONNREFUSED <- Error: connect ECONNREFUSED");
   });
 });
 

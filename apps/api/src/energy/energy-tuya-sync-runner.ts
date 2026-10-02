@@ -284,7 +284,24 @@ const assertArtifactWindow = (artifact: TuyaReportLogArtifact, window: EnergyTuy
 export const sourceSyncErrorCode = (error: unknown): string => {
   const message = error instanceof Error ? error.message : "";
   const candidate = message.split(/\s/u, 1)[0]?.toLocaleUpperCase() ?? "";
-  return /^(?:ENERGYIQ_|SOURCE_SYNC_)[A-Z0-9_:-]{1,150}$/u.test(candidate)
-    ? candidate
-    : "ENERGYIQ_SOURCE_SYNC_FAILED";
+  // A provider code can carry its own explanation ("…API_ERROR:1114:your_ip(1.2.3.4)_don't…"); keep the code and the
+  // words up to the first character outside the code alphabet, so the stored code still says why without the rest.
+  const code = /^(?:ENERGYIQ_|SOURCE_SYNC_)[A-Z0-9_:-]{1,150}/u.exec(candidate)?.[0].replace(/[:_-]+$/u, "");
+  return code && code.length > "ENERGYIQ_".length ? code : "ENERGYIQ_SOURCE_SYNC_FAILED";
+};
+
+/**
+ * The failure as an operator needs to read it in the server log: error type, message and underlying cause (a refused
+ * connection, a timeout), printable and short. Credentials never appear in these messages; the request signature
+ * travels in headers, not in errors.
+ */
+export const sourceSyncErrorDetail = (error: unknown): string => {
+  const describe = (value: unknown): string => {
+    if (!(value instanceof Error)) return typeof value === "string" ? value : "";
+    const cause = (value as Error & { cause?: unknown }).cause;
+    const causeCode = cause && typeof cause === "object" && "code" in cause ? String((cause as { code: unknown }).code) : "";
+    const causeText = cause ? describe(cause) : "";
+    return [`${value.name}: ${value.message}`, causeCode, causeText].filter(Boolean).join(" <- ");
+  };
+  return describe(error).replace(/[^\x20-\x7e]+/gu, " ").replace(/\s+/gu, " ").trim().slice(0, 300) || "unknown";
 };
