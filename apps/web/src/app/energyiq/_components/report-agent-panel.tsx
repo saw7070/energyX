@@ -36,6 +36,8 @@ type Session = { id: string; createdAt: string };
 type Event = { text?: string; sequence: number; time: string; type: string; tool?: string; isError?: boolean };
 type ProjectData = { status: "connected" | "not_configured" | "unavailable"; actualLastIntervalEnd: string | null; reason?: string | null };
 type Overview = { canChat?: boolean; canManageProject?: boolean; skills?: ReportSkillOption[]; projectData?: ProjectData; periodOptions?: PeriodOptions; dataSummary?: { runId: string; dataSnapshotId: string; rows: number; actualLastIntervalEnd: string | null } | null; settings: Settings; runs: Run[]; sessions?: Session[]; files: Array<{ id: string; filename: string; bytes: number }> };
+/** "245 KB", "1.2 MB": enough to tell two files with the same name apart. */
+const formatFileSize = (bytes: number) => bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 const inputClass = "w-full rounded-lg border border-border bg-surface p-2 text-base";
 const buttonClass = "rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-50";
 const active = (run: Run) => ["queued", "running"].includes(run.status);
@@ -245,7 +247,7 @@ function ProjectReportPanel({ referenceReportId, settingsMode, configurationFocu
     setFrom(run.period.from); setTo(shiftDate(run.period.toExclusive,-1)); setPeriodPreset("custom"); setTab("create");
     setNotice(t("continueWithReport"));
   }
-  function uploadInput(file: File) { return action(async()=>{const data=new FormData();data.set("file",file);const uploaded=await request<{id:string}>("inputs",{method:"POST",body:data});if (settingsMode) setSettings(current=>current?{...current,fileRefIds:[...current.fileRefIds,uploaded.id]}:current); else setMessageFiles([...attachedIds,uploaded.id]);await refresh();setNotice(t("fileAttached"));}); }
+  function uploadInput(file: File) { return action(async()=>{const data=new FormData();data.set("file",file);const uploaded=await request<{id:string}>("inputs",{method:"POST",body:data});if (settingsMode) setSettings(current=>current?{...current,fileRefIds:[...current.fileRefIds,uploaded.id]}:current); else setMessageFiles([...attachedIds,uploaded.id]);await refresh();setNotice(t(settingsMode ? "documentAdded" : "fileAttached"));}); }
   function openSkillDraft(run: Run) { setFile({id:`${run.id}:skill`,title:"project-skill.md",mimeType:"text/markdown",load:signal=>configApi.reportAgentRequest(projectId,run.kind === "skill" ? `output/${run.id}` : `draft-skill/${run.id}`,{signal})}); }
   function openRun(run: Run) {
     setSelectedId(run.id);
@@ -285,18 +287,40 @@ function ProjectReportPanel({ referenceReportId, settingsMode, configurationFocu
       {error && <p role="alert" className={styles.banner}>{error}</p>}{notice && <p role="status" className={styles.banner}>{notice}</p>}
       {!settings ? <p className={styles.banner}>{error ? t("settingsUnavailable") : t("loadingSettings")}</p> : <>
       {tab === "settings" && overview?.canManageProject && <section className={styles.settings} aria-label={t("reportPreferences")}>
-        <h2 className="text-xl font-semibold">{settingsMode === "project" ? t("projectBackground") : settingsMode === "automation" ? t("automaticReports") : t("reportPreferences")}</h2><p className="mt-2 text-sm text-muted">{settingsMode === "automation" ? t("automationIntro") : t("preferencesIntro")}</p>
-        {settingsMode !== "automation" && <><section className={styles.setupGroup}><h3>{t("projectContext")}</h3><p>{t("projectContextIntro")}</p>
-          <label className="block">{t("buildingContext")}<textarea className={inputClass} rows={4} value={settings.contextNotes} onChange={e => setSettings({...settings,contextNotes:e.target.value})} placeholder={t("buildingContextPlaceholder")} /></label>
-          <label className="flex items-center gap-2"><input type="checkbox" checked={settings.useProjectData} onChange={e=>setSettings({...settings,useProjectData:e.target.checked})} />{t("includeMeterData")}</label><p>{t("includeMeterDataHint")}</p>
-          <details><summary>{t("advancedCompare")}</summary><div className="mt-3 space-y-3"><label className="flex items-center gap-2"><input type="checkbox" checked={!!settings.comparisonPeriod} onChange={e=>{const next={...settings}; if(e.target.checked) next.comparisonPeriod={from:"",toExclusive:""}; else delete next.comparisonPeriod; setSettings(next);}} />{t("addComparison")}</label>{settings.comparisonPeriod && <div className={styles.period}><label>{t("from")}<input aria-label={t("comparisonStart")} type="date" value={settings.comparisonPeriod.from} onChange={e=>setSettings({...settings,comparisonPeriod:{...settings.comparisonPeriod!,from:e.target.value}})} /></label><label>{t("through")}<input aria-label={t("comparisonEnd")} type="date" value={shiftDate(settings.comparisonPeriod.toExclusive,-1)} onChange={e=>setSettings({...settings,comparisonPeriod:{...settings.comparisonPeriod!,toExclusive:shiftDate(e.target.value,1)}})} /></label></div>}<p>{t("comparisonHint")}</p></div></details>
+        {/* In the settings window its bar already names it; repeat the title only on the full page. */}
+        {!settingsMode && <h2 className="text-xl font-semibold">{t("reportPreferences")}</h2>}<p className={settingsMode ? styles.settingsIntro : "mt-2 text-sm text-muted"}>{settingsMode === "automation" ? t("automationIntro") : t("preferencesIntro")}</p>
+        {settingsMode !== "automation" && <><section className={styles.setupGroup}>
+          <header className={styles.setupHeading}><h3>{t("projectContext")}</h3><p>{t("projectContextIntro")}</p></header>
+          <label className={styles.setupField}>
+            <span className={styles.setupFieldLabel}>{t("buildingContext")}</span>
+            <textarea className={styles.setupTextarea} rows={8} value={settings.contextNotes} onChange={e => setSettings({...settings,contextNotes:e.target.value})} placeholder={t("buildingContextPlaceholder")} />
+            <span className={styles.setupFieldHint}>{t("buildingContextHint")}</span>
+          </label>
+          <label className={styles.setupToggle}>
+            <input type="checkbox" role="switch" checked={settings.useProjectData} onChange={e=>setSettings({...settings,useProjectData:e.target.checked})} />
+            <span><strong>{t("includeMeterData")}</strong><small>{t("includeMeterDataHint")}</small></span>
+          </label>
+          <details className={styles.setupDetails}><summary>{t("advancedCompare")}</summary><div className="mt-3 space-y-3"><label className="flex items-center gap-2"><input type="checkbox" checked={!!settings.comparisonPeriod} onChange={e=>{const next={...settings}; if(e.target.checked) next.comparisonPeriod={from:"",toExclusive:""}; else delete next.comparisonPeriod; setSettings(next);}} />{t("addComparison")}</label>{settings.comparisonPeriod && <div className={styles.period}><label>{t("from")}<input aria-label={t("comparisonStart")} type="date" value={settings.comparisonPeriod.from} onChange={e=>setSettings({...settings,comparisonPeriod:{...settings.comparisonPeriod!,from:e.target.value}})} /></label><label>{t("through")}<input aria-label={t("comparisonEnd")} type="date" value={shiftDate(settings.comparisonPeriod.toExclusive,-1)} onChange={e=>setSettings({...settings,comparisonPeriod:{...settings.comparisonPeriod!,toExclusive:shiftDate(e.target.value,1)}})} /></label></div>}<p>{t("comparisonHint")}</p></div></details>
         </section>
-        <section className={styles.setupGroup}><h3>{t("defaultDocuments")}</h3><p>{t("defaultDocumentsIntro")}</p>
-          {overview?.files.map(file=><label key={file.id} className="flex items-start gap-2"><input type="checkbox" checked={settings.fileRefIds.includes(file.id)} onChange={e=>setSettings({...settings,fileRefIds:e.target.checked?[...settings.fileRefIds,file.id]:settings.fileRefIds.filter(id=>id!==file.id)})} /><span className="break-all">{file.filename}</span></label>)}
-          <input aria-label={t("uploadInput")} type="file" accept=".csv,.xlsx,.pptx,.pdf,.md,.txt,.json,.parquet" disabled={busy} onChange={e=>{const file=e.target.files?.[0];if(!file)return;void uploadInput(file);e.target.value="";}} />
+        <section className={styles.setupGroup}>
+          <header className={styles.setupHeading}><h3>{t("defaultDocuments")}</h3><p>{t("defaultDocumentsIntro")}</p></header>
+          {overview?.files.length ? <ul className={styles.documentList}>
+            {overview.files.map(file=><li key={file.id}>
+              <span className={styles.documentIcon} aria-hidden="true"><EnergyIcon name="document" /></span>
+              <span className={styles.documentName}><strong>{file.filename}</strong><small>{formatFileSize(file.bytes)}</small></span>
+              <label className={styles.documentUse}><input type="checkbox" role="switch" checked={settings.fileRefIds.includes(file.id)} onChange={e=>setSettings({...settings,fileRefIds:e.target.checked?[...settings.fileRefIds,file.id]:settings.fileRefIds.filter(id=>id!==file.id)})} /><span>{t("useInAnalyses")}</span></label>
+            </li>)}
+          </ul> : <p className={styles.documentEmpty}>{t("documentsEmpty")}</p>}
+          <label className={styles.uploadBox} data-busy={busy || undefined}>
+            <input aria-label={t("uploadInput")} type="file" accept=".csv,.xlsx,.pptx,.pdf,.md,.txt,.json,.parquet" disabled={busy} onChange={e=>{const file=e.target.files?.[0];if(!file)return;void uploadInput(file);e.target.value="";}} />
+            <EnergyIcon name="attach" />
+            <span><strong>{t("uploadInput")}</strong><small>{t("uploadTypes")}</small></span>
+          </label>
         </section>
         </>}{settingsMode !== "project" && <section className={styles.setupGroup}><h3>{t("scheduleHeading")}</h3>{settings.schedulePermissionIssue && <p role="status">{friendly(settings.schedulePermissionIssue)}</p>}<p>{t("scheduleIntro")}</p><div className="flex flex-wrap gap-4"><div><span className={styles.fieldLabel}>{t("frequency")}</span><EnergySelect ariaLabel={t("reportFrequency")} value={settings.frequency} onValueChange={value=>setSettings({...settings,frequency:value as Settings["frequency"]})} options={([["off","frequencyOff"],["daily","frequencyDaily"],["weekly","frequencyWeekly"],["monthly","frequencyMonthly"],["weekly-monthly","frequencyWeeklyMonthly"]] as const).map(([value,key])=>({value,label:t(key)}))} /></div><label>{t("runHour", { timezone: settings.timezone })}<input className={inputClass} type="number" min={0} max={23} value={settings.localHour} onChange={e=>setSettings({...settings,localHour:Number(e.target.value)})} /></label></div><label className="block">{t("reportInstructions")}<textarea className={inputClass} rows={3} value={settings.scheduledPrompt} onChange={e=>setSettings({...settings,scheduledPrompt:e.target.value})} placeholder={t("scheduledPlaceholder")} /></label><p>{fillTemplate(t("skillSupplies"), { link: <Link className="underline" href={`/energyiq/skills?${new URLSearchParams({projectId})}`}>{t("reviewSkills")}</Link> })}</p></section>}
-        <button className={styles.primaryAction} disabled={busy} onClick={()=>void action(async()=>{await save();setNotice(t("preferencesSaved"));})}>{settingsMode === "project" ? t("saveProjectBackground") : settingsMode === "automation" ? t("saveSchedule") : t("savePreferences")}</button>
+        <div className={settingsMode ? styles.settingsFooter : undefined}>
+          <button className={styles.primaryAction} disabled={busy} onClick={()=>void action(async()=>{await save();setNotice(t("preferencesSaved"));})}>{settingsMode === "project" ? t("saveProjectBackground") : settingsMode === "automation" ? t("saveSchedule") : t("savePreferences")}</button>
+        </div>
       </section>}
 
       {tab === "library" && <div className={styles.settings}><h2>{t("historyHeading")}</h2>{overview?.runs.map(run => <button key={run.id} className={styles.fileCard} onClick={() => { chooseSession(run.sessionId ?? ""); setTab("create"); if (run.status === "succeeded" && (run.kind === "skill" || isReport(run))) openRun(run); }}><strong>{run.period.from} · {run.kind === "report" ? t("kindReport") : run.kind === "skill" ? t("kindSkill") : run.kind === "chat" ? t("kindChat") : run.kind}</strong><span>{statusLabel(run.status, t)} · {new Date(run.createdAt).toLocaleString(dateLocale(locale),{timeZone:"Asia/Singapore",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})} SGT</span></button>)}</div>}
