@@ -87,6 +87,35 @@ describe("Notification bell", () => {
     expect(container.textContent).not.toContain("weekly report");
   });
 
+  it("marks one notification read without opening it, action results included", async () => {
+    await openBell();
+    const markButton = (text: string) => [...container.querySelectorAll("li")].find((row) => row.textContent?.includes(text))!.querySelector("button")!;
+    expect(markButton("weekly report").getAttribute("aria-label")).toBe("Mark “Your weekly report is ready” as read");
+    await act(async () => { markButton("weekly report").click(); });
+    expect(api.markEnergyProjectAlertRead).toHaveBeenCalledWith("p1", "report:r1");
+    expect(container.textContent).not.toContain("weekly report");
+    // The list stays open, and the bell counts one fewer.
+    expect(container.querySelectorAll("li")).toHaveLength(3);
+    await act(async () => { markButton("LED wall").click(); });
+    expect(api.reportActionRequest).toHaveBeenCalledWith("p1", "notifications/run-1", { method: "POST", body: "{}" });
+    expect(container.textContent).not.toContain("LED wall");
+    expect(container.querySelector("button")!.getAttribute("aria-label")).toBe("Notifications, 2 new");
+  });
+
+  it("marks every notification read at once", async () => {
+    await openBell();
+    const all = [...container.querySelectorAll("button")].find((button) => button.textContent === "Mark all as read")!;
+    await act(async () => { all.click(); });
+    await flush();
+    expect(api.markEnergyProjectAlertRead).toHaveBeenCalledTimes(3);
+    expect(api.markEnergyProjectAlertRead).toHaveBeenCalledWith("p1", "sync:2026-10-01T18:00:05.000Z");
+    expect(api.markEnergyProjectAlertRead).toHaveBeenCalledWith("p1", stoppedKey(health.meters.slice(1)));
+    expect(api.reportActionRequest).toHaveBeenCalledWith("p1", "notifications/run-1", { method: "POST", body: "{}" });
+    expect(container.querySelectorAll("li")).toHaveLength(0);
+    expect(container.textContent).toContain("You're all caught up");
+    expect(container.textContent).not.toContain("Mark all as read");
+  });
+
   it("treats a site without the action pilot as having no action results, not as a failure", async () => {
     api.reportActionRequest.mockRejectedValue(new Error("ACTION_ACCESS_NOT_ENABLED"));
     api.getEnergyProjectAlerts.mockResolvedValue({ reports: [], readKeys: [] });

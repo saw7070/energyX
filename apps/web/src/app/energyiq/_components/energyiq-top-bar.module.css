@@ -14,6 +14,16 @@
 .popover a:hover,.popover a:focus-visible { background:#edf2e9; }
 .popover strong { display:block; font-size:14px; font-weight:550; }
 .popover small { display:block; margin-top:2px; font-size:12px; color:#5b6a5e; }
+.popover:focus { outline:none; }
+.popoverHead { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:4px; border-bottom:1px solid #e4e8e1; }
+.popoverHead h2 { margin-bottom:0; border-bottom:0; }
+.readAll { flex:none; margin-right:4px; padding:5px 8px; border-radius:7px; font-size:12.5px; font-weight:600; color:#1d513a; }
+.readAll:hover,.readAll:focus-visible { background:#edf2e9; }
+.entry { display:flex; align-items:flex-start; gap:2px; }
+.entry > a { flex:1; min-width:0; }
+.readButton { flex:none; display:grid; place-items:center; width:30px; height:30px; margin-top:7px; border-radius:8px; color:#8a978d; }
+.readButton:hover,.readButton:focus-visible { background:#edf2e9; color:#1d513a; }
+.readButton svg { width:16px; height:16px; }
 @media (max-width:767px) { .topBar { gap:8px; padding:0 8px 0 12px; } .project { flex:1; } }
 .themeSwitch { position:relative; display:inline-flex; align-items:center; justify-content:space-between; width:64px; height:32px; padding:0 9px; border-radius:999px; background:var(--surface-subtle); box-shadow:inset 0 0 0 1px var(--border); color:var(--text-secondary); }
 .themeSwitch:hover { color:var(--foreground); }
@@ -44,6 +54,13 @@
 :global(:where(html[data-energyiq-theme="dark"])) .popover a { border-radius:8px; }
 :global(:where(html[data-energyiq-theme="dark"])) .popover a:hover, :global(:where(html[data-energyiq-theme="dark"])) .popover a:focus-visible { background:#1d211a; }
 :global(:where(html[data-energyiq-theme="dark"])) .popover small { color:#a0b0a3; }
+:global(:where(html[data-energyiq-theme="dark"])) .popover:focus { outline:none; }
+:global(:where(html[data-energyiq-theme="dark"])) .popoverHead { border-bottom:1px solid #323530; }
+:global(:where(html[data-energyiq-theme="dark"])) .popoverHead h2 { border-bottom:0; }
+:global(:where(html[data-energyiq-theme="dark"])) .readAll { border-radius:7px; color:#94caae; }
+:global(:where(html[data-energyiq-theme="dark"])) .readAll:hover, :global(:where(html[data-energyiq-theme="dark"])) .readAll:focus-visible { background:#1d211a; }
+:global(:where(html[data-energyiq-theme="dark"])) .readButton { border-radius:8px; color:#8a978d; }
+:global(:where(html[data-energyiq-theme="dark"])) .readButton:hover, :global(:where(html[data-energyiq-theme="dark"])) .readButton:focus-visible { background:#1d211a; color:#94caae; }
 :global(:where(html[data-energyiq-theme="dark"])) .themeSwitch { border-radius:999px; background:var(--surface-subtle); box-shadow:inset 0 0 0 1px var(--border); color:var(--text-secondary); }
 :global(:where(html[data-energyiq-theme="dark"])) .themeSwitch:hover { color:var(--foreground); }
 :global(:where(html[data-energyiq-theme="dark"])) .themeKnob { border-radius:50%; background:#1c1e1b; color:#aecfbe; box-shadow:0 1px 3px #0000007b; }

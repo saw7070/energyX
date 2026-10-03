@@ -15,6 +15,9 @@ export const notificationMessages = defineMessages({
   "report.monthly": "Your monthly report is ready",
   "report.other": "Your automatic report is ready",
   "report.detail": "Covers {period}",
+  "markRead": "Mark as read",
+  "markReadNamed": "Mark “{title}” as read",
+  "markAllRead": "Mark all as read",
 }, {
   "zh-Hans": {
     "meters.one": "{name} 已停止发送读数",
@@ -30,6 +33,9 @@ export const notificationMessages = defineMessages({
     "report.monthly": "您的月报已生成",
     "report.other": "您的自动报告已生成",
     "report.detail": "涵盖 {period}",
+    "markRead": "标为已读",
+    "markReadNamed": "将“{title}”标为已读",
+    "markAllRead": "全部标为已读",
   },
   ms: {
     "meters.one": "{name} berhenti menghantar bacaan",
@@ -45,5 +51,8 @@ export const notificationMessages = defineMessages({
     "report.monthly": "Laporan bulanan anda sudah siap",
     "report.other": "Laporan automatik anda sudah siap",
     "report.detail": "Merangkumi {period}",
+    "markRead": "Tandakan sudah dibaca",
+    "markReadNamed": "Tandakan “{title}” sudah dibaca",
+    "markAllRead": "Tandakan semua sudah dibaca",
   },
 });
