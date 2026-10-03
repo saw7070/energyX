@@ -56,6 +56,7 @@ export type {
   EnergyMeterHealthDto,
   EnergyDataAvailabilityDto,
   EnergyProjectAlertsDto,
+  EnergyLiveReadingsDto,
   EnergyAdminOrganisationDto,
   EnergyAdminUserDto,
   EnergyAdditionalInsightFeedbackDto,

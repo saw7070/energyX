@@ -4,7 +4,7 @@ import { basename, join, resolve } from "node:path";
 import { createEnergyIqSourceManifest, resolveEnergyIqSnapshotFactScope, type EnergyIqProjectSetupDocument, type MetadataStore } from "@datafoundry/metadata";
 import type { FileAssetService } from "@datafoundry/files";
 import { inspectEnergyTuyaArtifact } from "./energy-tuya-import.js";
-import { TUYA_REPORT_LOG_ARTIFACT_VERSION, TUYA_SINGAPORE_ENDPOINT } from "./tuya-openapi-client.js";
+import { normaliseTuyaUnit, TUYA_ENERGY_CODES, TUYA_REPORT_LOG_ARTIFACT_VERSION, TUYA_SINGAPORE_ENDPOINT } from "./tuya-openapi-client.js";
 
 const record = (value: unknown): value is Record<string, any> => typeof value === "object" && value !== null && !Array.isArray(value);
 export function readTuyaNativeBundle(directory: string, document: EnergyIqProjectSetupDocument) {
@@ -32,7 +32,7 @@ export function readTuyaNativeBundle(directory: string, document: EnergyIqProjec
     for (const device of artifact.devices) {
       if (!record(device) || typeof device.sourceLabel !== "string" || !labels.has(device.sourceLabel) || deviceLabels.has(device.sourceLabel) || !record(device.properties) || !record(device.properties.totalForwardEnergy) || !Number.isInteger(device.properties.totalForwardEnergy.scale) || device.properties.totalForwardEnergy.scale < 0 || device.properties.totalForwardEnergy.scale > 12 || !Array.isArray(device.logs)) throw Error("TUYA_BUNDLE_ARTIFACT_INVALID");
       const energyProperty = device.properties.totalForwardEnergy;
-      if (energyProperty.code !== "total_forward_energy" || typeof energyProperty.unit !== "string" || !["kwh", "kw.h"].includes(energyProperty.unit.trim().toLowerCase())) throw Error("TUYA_BUNDLE_ARTIFACT_INVALID");
+      if (typeof energyProperty.code !== "string" || !(TUYA_ENERGY_CODES as readonly string[]).includes(energyProperty.code) || typeof energyProperty.unit !== "string" || normaliseTuyaUnit(energyProperty.unit) !== "kwh") throw Error("TUYA_BUNDLE_ARTIFACT_INVALID");
       deviceLabels.add(device.sourceLabel);
     }
     const inspection = inspectEnergyTuyaArtifact(content);

@@ -74,7 +74,7 @@ describe("Tuya OpenAPI Source Adapter", () => {
 
     expect(requested.filter((item) => item.url.includes("/v1.0/token"))).toHaveLength(1);
     expect(requested.some((item) => item.url.includes(
-      "codes=cur_power%2Ctotal_forward_energy&end_time=1710001000000&size=99&start_time=1710000000000",
+      "codes=total_forward_energy&end_time=1710001000000&size=99&start_time=1710000000000",
     ))).toBe(true);
     const firstReportRequest = requested.find((item) => item.url.includes("/report-logs?")
       && !item.url.includes("last_row_key="))!;
@@ -85,7 +85,7 @@ describe("Tuya OpenAPI Source Adapter", () => {
       timestamp: "1710001000000",
       nonce: "fixed-nonce",
       method: "GET",
-      url: "/v2.0/cloud/thing/exampledevice001/report-logs?codes=cur_power,total_forward_energy&end_time=1710001000000&size=99&start_time=1710000000000",
+      url: "/v2.0/cloud/thing/exampledevice001/report-logs?codes=total_forward_energy&end_time=1710001000000&size=99&start_time=1710000000000",
     }));
     expect(requested.slice(1).every((item) => item.headers.get("access_token") === "short-lived-token")).toBe(true);
     expect(artifact.devices[0]).toMatchObject({
@@ -434,6 +434,103 @@ describe("Tuya OpenAPI Source Adapter", () => {
     const client = createTuyaOpenApiClient({ accessId: "client-id", accessSecret: "secret", fetch: fetchMock, sleep: async () => undefined });
 
     expect(await client.listDevices()).toEqual([{ id: "appdevice0001", name: "Incoming", productName: "Meter", online: true }]);
+  });
+
+  it("reads a three-phase meter that names its energy forward_energy_total and reports no power", async () => {
+    const requested: string[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      requested.push(url);
+      if (url.includes("/token")) return json({ success: true, result: { access_token: "token-1", expire_time: 7_200 } });
+      if (url.includes("/model")) {
+        return json({ success: true, result: { model: JSON.stringify({ properties: [
+          { code: "forward_energy_total", typeSpec: { type: "value", scale: 2, unit: "kW·h" } },
+          { code: "phase_a", typeSpec: { type: "raw" } },
+          { code: "phase_b", typeSpec: { type: "raw" } },
+          { code: "phase_c", typeSpec: { type: "raw" } },
+        ] }) } });
+      }
+      return json({ success: true, result: {
+        logs: [{ code: "forward_energy_total", event_time: 1_710_000_000_000, value: 120050 }],
+        has_more: false,
+      } });
+    }) as unknown as typeof fetch;
+    const client = createTuyaOpenApiClient({ accessId: "client-id", accessSecret: "secret", fetch: fetchMock, sleep: async () => undefined });
+
+    const artifact = await client.syncEnergyReadings({
+      startTime: 1_710_000_000_000,
+      endTime: 1_710_001_000_000,
+      devices: [{ deviceId: "threephase001", sourceLabel: "AHU 8B" }],
+    });
+
+    expect(requested.some((url) => url.includes("/report-logs?codes=forward_energy_total&"))).toBe(true);
+    expect(artifact.request.codes).toEqual(["forward_energy_total"]);
+    expect(artifact.devices[0]).toEqual({
+      sourceLabel: "AHU 8B",
+      properties: {
+        totalForwardEnergy: { code: "forward_energy_total", type: "value", scale: 2, unit: "kW·h" },
+        phaseCodes: ["phase_a", "phase_b", "phase_c"],
+      },
+      logs: [{ code: "forward_energy_total", eventTime: 1_710_000_000_000, value: 120050 }],
+    });
+    expect(await client.checkEnergyDevice("threephase001")).toEqual({ ok: true, phases: 3 });
+  });
+
+  it("waits out Tuya's rate limit with a longer backoff before giving up", async () => {
+    const waits: number[] = [];
+    let tokenAttempts = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/token")) {
+        tokenAttempts += 1;
+        return tokenAttempts <= 4 ? json({}, 429) : json({ success: true, result: { access_token: "token", expire_time: 7_200 } });
+      }
+      return json({ success: true, result: { model: JSON.stringify({ properties: [
+        { code: "total_forward_energy", typeSpec: { scale: 2, unit: "kWh" } },
+      ] }) } });
+    }) as unknown as typeof fetch;
+    const client = createTuyaOpenApiClient({
+      accessId: "client-id",
+      accessSecret: "secret",
+      fetch: fetchMock,
+      sleep: async (milliseconds) => { waits.push(milliseconds); },
+    });
+
+    expect(await client.checkEnergyDevice("exampledevice001")).toEqual({ ok: true, phases: 1 });
+    expect(waits).toEqual([1_000, 2_000, 4_000, 8_000]);
+  });
+
+  it("reads each device's current energy once per model and keeps going past one unreadable meter", async () => {
+    const requested: string[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      requested.push(url);
+      if (url.includes("/token")) return json({ success: true, result: { access_token: "token-1", expire_time: 7_200 } });
+      if (url.includes("brokenmeter1/model")) return json({ success: false, code: "2001", msg: "device is offline" });
+      if (url.includes("/model")) {
+        return json({ success: true, result: { model: JSON.stringify({ properties: [
+          { code: "forward_energy_total", typeSpec: { scale: 2, unit: "kW·h" } },
+        ] }) } });
+      }
+      return json({ success: true, result: { properties: [
+        { code: "forward_energy_total", value: 120050, time: 1_710_000_900_000 },
+      ] } });
+    }) as unknown as typeof fetch;
+    const client = createTuyaOpenApiClient({ accessId: "client-id", accessSecret: "secret", fetch: fetchMock, sleep: async () => undefined });
+    const devices = [
+      { deviceId: "threephase001", sourceLabel: "AHU 8B" },
+      { deviceId: "brokenmeter1", sourceLabel: "AHU 9" },
+    ];
+
+    const first = await client.readLatestEnergy({ devices });
+    await client.readLatestEnergy({ devices });
+
+    expect(first).toEqual([
+      { sourceLabel: "AHU 8B", energyKwh: 1200.5, reportedAt: "2024-03-09T16:15:00.000Z" },
+      { sourceLabel: "AHU 9", error: expect.stringContaining("ENERGYIQ_TUYA_API_ERROR:2001") },
+    ]);
+    expect(requested.filter((url) => url.includes("threephase001/model"))).toHaveLength(1);
+    expect(requested.some((url) => url.includes("/v2.0/cloud/thing/threephase001/shadow/properties?codes=forward_energy_total"))).toBe(true);
   });
 
   it("says when a device does not report cumulative energy", async () => {

@@ -120,7 +120,9 @@ export function ExplorerMeterDetail({
               ? "Loading…"
               : meter.kind === "physical" && available
                 ? `${circuit!.peakKw.toFixed(2)} kW`
-                : "Unavailable"}
+                : meter.kind === "virtual" && trace?.peakKw != null
+                  ? `${trace.peakKw.toFixed(2)} kW`
+                  : "Unavailable"}
           </dd>
         </div>
         <div>
@@ -138,6 +140,12 @@ export function ExplorerMeterDetail({
           </dd>
         </div>
       </dl>
+      {!loading && meter.kind === "virtual" && available && usage != null && usage < 0 && (
+        <p role="note" className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          This calculation is below zero: the meters subtracted add up to more than the main meter. Check the
+          calculation&apos;s meters, or whether a meter is wired or labelled wrongly.
+        </p>
+      )}
       {!loading && !error && published && <section aria-label="Data quality explanation" className="rounded-xl border border-border bg-surface p-5">
         <h2 className="mb-3 text-sm font-semibold">Selected-period coverage</h2>
         <ExplorerMeterQuality meter={published} circuit={circuit} trace={trace} catalog={analysis?.explorerMeters} />

@@ -1,4 +1,4 @@
-import { explorerTrendSql, decodeExplorerTrends, type ExplorerTrendSeries } from "./explorer-trends.js";
+import { explorerTrendSql, decodeExplorerTrends, virtualMeterPeakSql, type ExplorerTrendRoute, type ExplorerTrendSeries } from "./explorer-trends.js";
 import { projectExplorerMeters, type EnergyExplorerMeter } from "./energy-explorer-meters.js";
 import {
   ensureEnergyScopedDataSource,
@@ -623,6 +623,10 @@ export type EnergyScopeAnalysis = {
     scopeId: string;
     status: "available" | "partial";
     usageKwh: number | null;
+    /** Highest 15-minute average power over intervals where every input reported; Explorer analyses only. */
+    peakKw?: number;
+    /** Local start of that interval. */
+    peakAt?: string;
     includedInOfficialTotal: false;
     terms: Array<{
       meterNodeId: string;
@@ -1780,9 +1784,10 @@ export const executeEnergyScopeAnalysis = async (input: {
     limit: 1000
   });
   const meterAggregates = meterResult.rows.map(rowToMeterAggregate);
-  const explorerMeters = explorerProfile ? projectExplorerMeters({
-    document: JSON.parse(input.metadataStore.energyIq.projectSetup.listHierarchyRevisions(input.context.projectId)
-      .find(revision => revision.id === input.context.hierarchyRevisionId)!.snapshot_json) as EnergyIqProjectSetupDocument,
+  const explorerDocument = explorerProfile ? JSON.parse(input.metadataStore.energyIq.projectSetup.listHierarchyRevisions(input.context.projectId)
+    .find(revision => revision.id === input.context.hierarchyRevisionId)!.snapshot_json) as EnergyIqProjectSetupDocument : undefined;
+  const explorerMeters = explorerDocument ? projectExplorerMeters({
+    document: explorerDocument,
     scopeIds: new Set([selectedNode.id, ...collectDescendantIds(selectedNode.id, hierarchy)]),
     resource: input.context.resource,
     officialMeterIds: new Set(aggregateMeterNodeIds),
@@ -1795,11 +1800,23 @@ export const executeEnergyScopeAnalysis = async (input: {
     if (meter.kind !== "physical" || !aggregateMeterNodeIds.includes(meter.id)) continue;
     officialByCategory.set(meter.category, [...(officialByCategory.get(meter.category) ?? []), meter.id]);
   }
+  // Virtual meters (e.g. main − sub-meters) get the same hourly series, computed from their inputs' intervals.
+  const virtualTrendRoutes: ExplorerTrendRoute[] = explorerMeters
+    .filter(m => m.kind === "virtual" && (m.scopeId === selectedNode.id || (!isProjectScope && explorerMeters.length <= MAX_DESCENDANT_METER_TRENDS)))
+    .flatMap(m => {
+      const definition = explorerDocument?.meter_mapping?.virtual_meters?.find(meter => meter.id === m.id);
+      return definition ? [{
+        id: m.id,
+        meters: definition.terms.map(term => term.mapping_row_id),
+        coefficients: Object.fromEntries(definition.terms.map(term => [term.mapping_row_id, term.coefficient])),
+      }] : [];
+    });
   const trendRoutes = explorerProfile ? [
     { id: "__scope__", meters: aggregateMeterNodeIds },
     ...[...officialByCategory].map(([category, meters]) => ({ id: `__category__:${category}`, meters })),
     ...explorerMeters.filter(m => m.kind === "physical" && (m.scopeId === selectedNode.id || (!isProjectScope && explorerMeters.length <= MAX_DESCENDANT_METER_TRENDS)))
       .map(m => ({id: m.id, meters: [m.id]})),
+    ...virtualTrendRoutes,
   ] : [];
   const trendSql = explorerTrendSql(scoped.viewName, trendRoutes);
   const trendRows = trendSql ? await input.dataGateway.runSqlReadonly({
@@ -1807,6 +1824,17 @@ export const executeEnergyScopeAnalysis = async (input: {
     datasource_id: scoped.datasourceId, sql: trendSql, limit: trendRoutes.length,
   }) : null;
   const explorerTrends = explorerProfile ? decodeExplorerTrends(trendRows?.rows.map(row => ({series_id: row[0], cells: row[1]})) ?? [], trendRoutes) : undefined;
+  const virtualPeakSql = virtualMeterPeakSql(scoped.viewName, virtualTrendRoutes);
+  const virtualPeakRows = virtualPeakSql ? await input.dataGateway.runSqlReadonly({
+    user_id: input.userId, workspace_id: input.context.workspaceId,
+    datasource_id: scoped.datasourceId, sql: virtualPeakSql, limit: virtualTrendRoutes.length,
+  }) : null;
+  const virtualMeterPeaks = new Map((virtualPeakRows?.rows ?? []).flatMap(row => {
+    const peakKw = Number(row[1]);
+    return typeof row[0] === "string" && Number.isFinite(peakKw)
+      ? [[row[0], { peakKw: round(peakKw, 4), peakAt: String(row[2] ?? "") }] as const]
+      : [];
+  }));
   const aggregateMeterIds = new Set(aggregateMeterNodeIds);
   const componentMeterNodeIds = publishedMeterRoute.componentMeterPointIds;
   const componentMeterIds = new Set(componentMeterNodeIds);
@@ -2195,6 +2223,9 @@ export const executeEnergyScopeAnalysis = async (input: {
     selectedScopeId: selectedNode.id,
     hierarchy,
     circuits,
+  }).map((trace) => {
+    const peak = virtualMeterPeaks.get(trace.meterNodeId);
+    return peak ? { ...trace, ...peak } : trace;
   });
 
   const headlineProjection = buildEnergyOverviewHeadlineProjection({

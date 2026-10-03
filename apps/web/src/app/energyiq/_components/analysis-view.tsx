@@ -21,6 +21,9 @@ import { EnergyIcon, type EnergyIconName } from "./icons";
 import { circuitSlices, PeakShareDonut } from "./peak-share-donut";
 import { DecisionSummary } from "./analysis-story";
 import { TypeHint } from "./type-hint";
+import { EnergyFlow } from "./energy-flow";
+import { analysisCsvFilename, analysisHourlyCsv } from "./analysis-export";
+import { downloadText } from "./explorer-export";
 import { breakdownSpaces } from "./site-total";
 
 // Layout of the approved NetZero analysis page on a light surface: white panels, slate borders.
@@ -158,6 +161,9 @@ export function AnalysisView({ projectId }: { projectId: string }) {
               <span className="text-slate-500">–</span>
               <input aria-label={t("to")} type="date" value={draft.to} min={draft.from || undefined} onChange={event => setDraft({ ...draft, to: event.target.value })} className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-slate-800" />
               <button type="submit" disabled={!draft.from || !draft.to || draft.from > draft.to} className="rounded-md bg-blue-600 px-3 py-1.5 text-white hover:bg-blue-500 disabled:opacity-40">{t("apply")}</button>
+              {data && <button type="button" onClick={() => downloadText(analysisCsvFilename(data), analysisHourlyCsv(data))} className="ml-1 inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-slate-700 hover:bg-slate-100">
+                <EnergyIcon name="download" className="h-3.5 w-3.5" />{t("download")}
+              </button>}
             </form>
           </div>
         </header>
@@ -234,6 +240,7 @@ function AnalysisBody({ data, derived, loading }: { data: AnalysisData; derived:
       <KeyHighlights data={data} derived={derived} />
       <ConsumptionBreakdown data={data} derived={derived} />
       <EnergyDistribution data={data} derived={derived} />
+      <EnergyFlow data={data} />
       <SummaryOfFindings data={data} derived={derived} />
     </Section>
 

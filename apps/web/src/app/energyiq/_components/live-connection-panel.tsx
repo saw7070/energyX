@@ -24,7 +24,7 @@ export type LiveConnectionDto = {
 
 export type LiveDeviceDto = { ref: string; name: string; productName?: string; category?: string; online: boolean; matchedTo?: string };
 
-type CheckDto = { ok: boolean; message?: string; deviceCount?: number; meters: Array<{ meterPointId: string; ok: boolean; reason?: string }> };
+type CheckDto = { ok: boolean; message?: string; deviceCount?: number; gateways?: { total: number; online: number; offline: string[] }; meters: Array<{ meterPointId: string; ok: boolean; reason?: string; phases?: 1 | 3 }> };
 type LiveKey = keyof (typeof liveConnectionMessages)["en"] & string;
 type T = Translate<LiveKey>;
 
@@ -413,19 +413,30 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
     </table>
   </div>;
 
+  const gatewayLine = (result: CheckDto) => result.gateways
+    ? result.gateways.online === result.gateways.total
+      ? <p className="text-xs text-emerald-800">{t("gatewaysOnline", { count: result.gateways.total })}</p>
+      : <p className="text-xs text-amber-900">{t("gatewaysOffline", { offline: result.gateways.total - result.gateways.online, total: result.gateways.total, names: result.gateways.offline.join(", ") })}</p>
+    : null;
+  const threePhaseNote = (result: CheckDto) => {
+    const count = result.meters.filter((meter) => meter.ok && meter.phases === 3).length;
+    return count > 0 ? ` ${t("threePhaseCount", { count })}` : "";
+  };
   const failedDevices = (result: CheckDto) => result.meters.filter((meter) => !meter.ok)
     .map((meter) => `${connection.meters.find((row) => row.meterPointId === meter.meterPointId)?.name ?? meter.meterPointId} (${t(checkReasonKey(meter.reason))})`).join(", ");
   const lastCheckedLine = connection.lastCheck ? <p className="text-xs text-muted">{t("lastChecked", { when: when(connection.lastCheck.at) })}</p> : null;
   const testLine = check && checkFrom === "test" ? check.deviceCount === undefined ? null : <div className="space-y-1 text-sm">
     <p className="font-medium text-emerald-800">{t("testOk", { count: check.deviceCount })}</p>
     {check.meters.length === 0 ? <p className="text-xs text-muted">{t("testNoMatches")}</p>
-      : check.ok ? <p className="text-xs text-emerald-800">{t("testMatchedOk", { count: check.meters.length })}</p>
+      : check.ok ? <p className="text-xs text-emerald-800">{t("testMatchedOk", { count: check.meters.length })}{threePhaseNote(check)}</p>
       : <p className="text-xs text-amber-900">{t("checkFailed")} {failedDevices(check)}</p>}
+    {gatewayLine(check)}
   </div> : lastCheckedLine;
 
-  const checkLine = check && checkFrom === "test" ? null : check ? check.ok
-    ? <p className="text-sm text-emerald-800">{t("checkOk", { count: check.meters.length })}</p>
-    : check.meters.length > 0 ? <p className="text-sm text-amber-900">{t("checkFailed")} {failedDevices(check)}</p> : null
+  const checkLine = check && checkFrom === "test" ? null : check ? <>{check.ok
+    ? <p className="text-sm text-emerald-800">{t("checkOk", { count: check.meters.length })}{threePhaseNote(check)}</p>
+    : check.meters.length > 0 ? <p className="text-sm text-amber-900">{t("checkFailed")} {failedDevices(check)}</p> : null}
+    {gatewayLine(check)}</>
     : null;
 
   const devicesNote = devices === null || busy === "devices"

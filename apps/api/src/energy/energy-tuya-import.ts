@@ -21,7 +21,9 @@ export const readEnergyTuyaArtifact = (content: Buffer): EnergyExcelWorkbook => 
 
   for (const device of artifact.devices) {
     const scale = device.properties.totalForwardEnergy.scale;
-    const energyLogs = device.logs.filter((log) => log.code === "total_forward_energy");
+    // Older artifacts never recorded a code other than the single-phase one.
+    const energyCode = device.properties.totalForwardEnergy.code || "total_forward_energy";
+    const energyLogs = device.logs.filter((log) => log.code === energyCode);
     labelCounts.set(device.sourceLabel, 0);
     if (energyLogs.length === 0) issues.push(`${device.sourceLabel} has no cumulative energy readings in the requested window.`);
     for (const log of energyLogs) {

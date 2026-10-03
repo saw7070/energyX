@@ -94,6 +94,7 @@ import {
   type EnergyLiveConnectionScheduler,
 } from "./energy-live-connection-scheduler.js";
 import { markSiteAlertRead, readSiteAlerts } from "./energy-site-alerts.js";
+import { readLiveSiteReadings } from "./energy-live-readings.js";
 import {
   checkLiveConnection,
   disconnectLiveConnection,
@@ -1707,6 +1708,17 @@ export const handleEnergyApiRequest = async (
         const dataThrough = meters.map((meterPoint) => meterPoint.lastReadingAt).filter((value): value is string => !!value).sort().at(-1);
         return { status: 200, headers: { "Cache-Control": "private, no-store" }, body: createSuccessResult({ meters, summary, ...(dataThrough ? { dataThrough } : {}) }) };
       });
+    }
+    // Overview's live power: the site's latest 15-minute meter readings. Not published data; never cached.
+    if (segments[0] === "projects" && segments[2] === "live" && segments.length === 3 && request.method === "GET") {
+      const projectId = decodeURIComponent(segments[1] ?? "");
+      const capabilities = resolveEnergyProjectCapabilities({ metadataStore: context.metadataStore, userId: user.id, workspaceId: context.workspaceId, projectId });
+      if (!capabilities.readProjectInformation) throw Error("ENERGYIQ_PROJECT_FORBIDDEN");
+      return {
+        status: 200,
+        headers: { "Cache-Control": "private, no-store" },
+        body: createSuccessResult(readLiveSiteReadings({ metadataStore: context.metadataStore, projectId })),
+      };
     }
     // The bell's site alerts: automatic reports that are ready and, for administrators, a daily live update that failed.
     if (segments[0] === "projects" && segments[2] === "alerts") {

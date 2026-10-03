@@ -13,6 +13,24 @@ import {
 } from "./tuya-openapi-client.js";
 
 describe("Tuya cumulative energy import", () => {
+  it("imports a three-phase meter's forward_energy_total readings", () => {
+    const artifact = JSON.parse(artifactContent().toString("utf8")) as TuyaReportLogArtifact;
+    artifact.request.codes = ["forward_energy_total"];
+    artifact.devices[0]!.properties = {
+      totalForwardEnergy: { code: "forward_energy_total", scale: 2, unit: "kW·h" },
+      phaseCodes: ["phase_a", "phase_b", "phase_c"],
+    };
+    artifact.devices[0]!.logs = [
+      { code: "forward_energy_total", eventTime: 1_710_000_000_000, value: 83036 },
+      { code: "forward_energy_total", eventTime: 1_710_000_900_000, value: 83046 },
+    ];
+    expect(inspectEnergyTuyaArtifact(Buffer.from(JSON.stringify(artifact)))).toMatchObject({
+      sourceLabels: [{ label: "DB1 L1 Power", rowCount: 2 }],
+      validRowCount: 2,
+      qualityStatus: "ready",
+    });
+  });
+
   it("scales raw Tuya energy, ignores instantaneous power for canonical usage, and uses adjacent deltas", async () => {
     const content = artifactContent();
     expect(inspectEnergyTuyaArtifact(content)).toMatchObject({

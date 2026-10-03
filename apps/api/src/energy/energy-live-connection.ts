@@ -79,7 +79,10 @@ export type LiveConnectionCheck = {
   message?: string;
   /** Devices the account can see, when sign-in worked. */
   deviceCount?: number;
-  meters: Array<{ meterPointId: string; ok: boolean; reason?: string }>;
+  /** Zigbee gateways among those devices and how many Tuya sees online. A gateway offline usually means its router or power is down. */
+  gateways?: { total: number; online: number; offline: string[] };
+  /** `phases` is set when the device was readable: 3 for a three-phase meter, 1 otherwise. */
+  meters: Array<{ meterPointId: string; ok: boolean; reason?: string; phases?: 1 | 3 }>;
 };
 
 const SECRET_SCOPE_WORKSPACE_ID = "energyiq-live-connectors";
@@ -329,16 +332,25 @@ export const checkLiveConnection = async (
     const client = connection
       ? dependencies.createClient(readLiveConnectionCredentials(metadataStore, connection))
       : environmentClient(dependencies);
-    const deviceCount = (await client.listDevices()).length;
+    const devices = await client.listDevices();
+    const deviceCount = devices.length;
+    const gatewayDevices = devices.filter(isTuyaGateway);
+    const gateways = gatewayDevices.length > 0
+      ? {
+        total: gatewayDevices.length,
+        online: gatewayDevices.filter((device) => device.online).length,
+        offline: gatewayDevices.filter((device) => !device.online).map((device) => device.name).slice(0, 20),
+      }
+      : undefined;
     const meters: LiveConnectionCheck["meters"] = [];
     for (const [meterPointId, deviceId] of bindings) {
       const check = await client.checkEnergyDevice(deviceId);
-      meters.push(check.ok ? { meterPointId, ok: true } : { meterPointId, ok: false, reason: check.reason });
+      meters.push(check.ok ? { meterPointId, ok: true, phases: check.phases } : { meterPointId, ok: false, reason: check.reason });
     }
     const failed = meters.filter((meter) => !meter.ok).length;
     result = failed === 0
-      ? { ok: true, deviceCount, meters }
-      : { ok: false, message: "ENERGYIQ_LIVE_DEVICES_UNSUITABLE", deviceCount, meters };
+      ? { ok: true, deviceCount, meters, ...(gateways ? { gateways } : {}) }
+      : { ok: false, message: "ENERGYIQ_LIVE_DEVICES_UNSUITABLE", deviceCount, meters, ...(gateways ? { gateways } : {}) };
   } catch (error) {
     result = { ok: false, message: providerErrorCode(error), meters: [] };
   }
@@ -499,3 +511,7 @@ const accessIdHint = (accessId: string): string =>
 
 const nowIso = (dependencies: LiveConnectionDependencies): string =>
   new Date((dependencies.now ?? Date.now)()).toISOString();
+
+/** Tuya's Zigbee gateway categories ("wg2" and the older "wg"), or a device whose product calls itself a gateway. */
+export const isTuyaGateway = (device: { category?: string; productName?: string; name: string }): boolean =>
+  device.category === "wg2" || device.category === "wg" || /gateway|网关/iu.test(device.productName ?? "");

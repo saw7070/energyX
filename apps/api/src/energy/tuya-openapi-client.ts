@@ -1,8 +1,15 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
 
-const TUYA_ENERGY_CODE = "total_forward_energy" as const;
+/**
+ * Cumulative import energy, in the order a model is searched. Single-phase meters name it `total_forward_energy`;
+ * Tuya's three-phase meters (category zndb) name it `forward_energy_total`. The first one a device defines is used.
+ */
+export const TUYA_ENERGY_CODES = ["total_forward_energy", "forward_energy_total"] as const;
 const TUYA_POWER_CODE = "cur_power" as const;
-const TUYA_LOG_CODES = [TUYA_POWER_CODE, TUYA_ENERGY_CODE] as const;
+/** Three-phase meters report each phase as one raw value (voltage, current and power together). */
+const TUYA_PHASE_CODES = ["phase_a", "phase_b", "phase_c"] as const;
+/** Largest device list one sync accepts: several sites' worth, still small enough to hold a day's readings in memory. */
+const TUYA_MAX_SYNC_DEVICES = 200;
 const EMPTY_BODY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
 export const TUYA_REPORT_LOG_ARTIFACT_VERSION = "energyiq-tuya-report-log-artifact-v1" as const;
@@ -20,7 +27,7 @@ export type TuyaReportLog = {
 };
 
 export type TuyaPropertyEvidence = {
-  code: typeof TUYA_ENERGY_CODE | typeof TUYA_POWER_CODE;
+  code: string;
   name?: string;
   type?: string;
   scale: number;
@@ -36,17 +43,23 @@ export type TuyaReportLogArtifact = {
   request: {
     startTime: number;
     endTime: number;
-    codes: typeof TUYA_LOG_CODES;
+    codes: string[];
     deviceCount: number;
   };
   devices: Array<{
     sourceLabel: string;
-    properties: {
-      totalForwardEnergy: TuyaPropertyEvidence;
-      currentPower: TuyaPropertyEvidence;
-    };
+    properties: TuyaDeviceProperties;
     logs: TuyaReportLog[];
   }>;
+};
+
+export type TuyaDeviceProperties = {
+  /** The cumulative energy reading the sync imports, whichever code the device uses for it. */
+  totalForwardEnergy: TuyaPropertyEvidence;
+  /** Recorded when the device has it; a sync no longer fetches its history, which nothing imports. */
+  currentPower?: TuyaPropertyEvidence;
+  /** Present on three-phase meters: the phase codes the device defines. */
+  phaseCodes?: string[];
 };
 
 export type TuyaCredentials = {
@@ -72,7 +85,7 @@ export type TuyaDeviceSummary = {
 };
 
 export type TuyaEnergyDeviceCheck =
-  | { ok: true }
+  | { ok: true; phases: 1 | 3 }
   | { ok: false; reason: string };
 
 export type TuyaOpenApiClient = {
@@ -81,6 +94,17 @@ export type TuyaOpenApiClient = {
   listDevices(input?: { signal?: AbortSignal }): Promise<TuyaDeviceSummary[]>;
   /** Whether a device reports the cumulative energy and power readings a sync needs. */
   checkEnergyDevice(deviceId: string, signal?: AbortSignal): Promise<TuyaEnergyDeviceCheck>;
+  /** Each device's current cumulative energy, as the cloud holds it now: one request per device, no history. */
+  readLatestEnergy(input: { devices: TuyaDeviceBinding[]; signal?: AbortSignal }): Promise<TuyaLatestEnergyReading[]>;
+};
+
+export type TuyaLatestEnergyReading = {
+  sourceLabel: string;
+  /** Absent when the device could not be read; the others still count. */
+  energyKwh?: number;
+  /** When the device last reported that value, which can be well before now for an offline device. */
+  reportedAt?: string;
+  error?: string;
 };
 
 type TuyaClientOptions = {
@@ -160,7 +184,7 @@ export const createTuyaOpenApiClient = (options: TuyaClientOptions): TuyaOpenApi
     const signedUrl = canonicalTuyaUrl(path, query);
     const requestUrl = encodedTuyaUrl(path, query);
     let lastError: unknown;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    for (let attempt = 0; attempt < TUYA_RATE_LIMIT_ATTEMPTS; attempt += 1) {
       if (signal?.aborted) throw new Error("ENERGYIQ_TUYA_REQUEST_ABORTED");
       const timestamp = String(now());
       const requestNonce = nonce();
@@ -185,7 +209,12 @@ export const createTuyaOpenApiClient = (options: TuyaClientOptions): TuyaOpenApi
             ...(accessToken ? { access_token: accessToken } : {}),
           },
         }, requestTimeoutMs, signal);
-        if ((response.status === 429 || response.status >= 500) && attempt < 2) {
+        // A busy site (dozens of meters) can reach Tuya's request rate limit; wait it out with a longer backoff.
+        if (response.status === 429 && attempt < TUYA_RATE_LIMIT_ATTEMPTS - 1) {
+          await sleep(TUYA_RATE_LIMIT_BACKOFF_MS * (2 ** attempt));
+          continue;
+        }
+        if (response.status >= 500 && attempt < 2) {
           await sleep(100 * (2 ** attempt));
           continue;
         }
@@ -262,10 +291,17 @@ export const createTuyaOpenApiClient = (options: TuyaClientOptions): TuyaOpenApi
     throw new Error("ENERGYIQ_TUYA_TOKEN_REFRESH_FAILED");
   };
 
-  const readPropertyEvidence = async (deviceId: string, signal?: AbortSignal): Promise<{
-    totalForwardEnergy: TuyaPropertyEvidence;
-    currentPower: TuyaPropertyEvidence;
-  }> => {
+  // A device's model does not change while the server runs; the 15-minute live read would otherwise ask every time.
+  const propertiesByDevice = new Map<string, TuyaDeviceProperties>();
+  const cachedPropertyEvidence = async (deviceId: string, signal?: AbortSignal): Promise<TuyaDeviceProperties> => {
+    const cached = propertiesByDevice.get(deviceId);
+    if (cached) return cached;
+    const properties = await readPropertyEvidence(deviceId, signal);
+    propertiesByDevice.set(deviceId, properties);
+    return properties;
+  };
+
+  const readPropertyEvidence = async (deviceId: string, signal?: AbortSignal): Promise<TuyaDeviceProperties> => {
     const result = requireRecord(
       await businessGet(`/v2.0/cloud/thing/${encodeURIComponent(deviceId)}/model`, {}, signal),
       "ENERGYIQ_TUYA_MODEL_INVALID",
@@ -277,15 +313,28 @@ export const createTuyaOpenApiClient = (options: TuyaClientOptions): TuyaOpenApi
     } catch {
       throw new Error("ENERGYIQ_TUYA_MODEL_INVALID");
     }
-    const totalForwardEnergy = findPropertyEvidence(model, TUYA_ENERGY_CODE);
-    const currentPower = findPropertyEvidence(model, TUYA_POWER_CODE);
-    assertExpectedUnit(totalForwardEnergy, ["kw.h", "kwh"]);
-    assertExpectedUnit(currentPower, ["kw"]);
-    return { totalForwardEnergy, currentPower };
+    const energyCode = TUYA_ENERGY_CODES.find((code) => findObjectByCode(model, code));
+    if (!energyCode) throw new Error(`ENERGYIQ_TUYA_PROPERTY_REQUIRED:${TUYA_ENERGY_CODES[0]}`);
+    const totalForwardEnergy = findPropertyEvidence(model, energyCode);
+    assertExpectedUnit(totalForwardEnergy, "kwh");
+    // Power is evidence only. Single-phase meters report it in kW or W; three-phase meters often not at all.
+    let currentPower: TuyaPropertyEvidence | undefined;
+    try {
+      currentPower = findObjectByCode(model, TUYA_POWER_CODE) ? findPropertyEvidence(model, TUYA_POWER_CODE) : undefined;
+    } catch {
+      currentPower = undefined;
+    }
+    const phaseCodes = TUYA_PHASE_CODES.filter((code) => findObjectByCode(model, code));
+    return {
+      totalForwardEnergy,
+      ...(currentPower ? { currentPower } : {}),
+      ...(phaseCodes.length > 0 ? { phaseCodes } : {}),
+    };
   };
 
   const readReportLogs = async (
     deviceId: string,
+    energyCode: string,
     input: TuyaEnergySyncInput,
     signal?: AbortSignal,
   ): Promise<TuyaReportLog[]> => {
@@ -296,7 +345,9 @@ export const createTuyaOpenApiClient = (options: TuyaClientOptions): TuyaOpenApi
       const result = requireRecord(await businessGet(
         `/v2.0/cloud/thing/${encodeURIComponent(deviceId)}/report-logs`,
         {
-          codes: TUYA_LOG_CODES.join(","),
+          // Only the cumulative energy: power changes report every few seconds, which multiplied a sync's pages and
+          // memory many times over for readings nothing imports.
+          codes: energyCode,
           end_time: String(input.endTime),
           ...(lastRowKey ? { last_row_key: lastRowKey } : {}),
           size: "99",
@@ -357,6 +408,35 @@ export const createTuyaOpenApiClient = (options: TuyaClientOptions): TuyaOpenApi
   };
 
   return {
+    async readLatestEnergy(input) {
+      if (input.devices.length > TUYA_MAX_SYNC_DEVICES) throw new Error("ENERGYIQ_TUYA_DEVICES_INVALID");
+      return mapWithConcurrency(input.devices, 4, async (binding): Promise<TuyaLatestEnergyReading> => {
+        if (input.signal?.aborted) throw new Error("ENERGYIQ_TUYA_REQUEST_ABORTED");
+        try {
+          const energy = (await cachedPropertyEvidence(binding.deviceId, input.signal)).totalForwardEnergy;
+          const result = requireRecord(await businessGet(
+            `/v2.0/cloud/thing/${encodeURIComponent(binding.deviceId)}/shadow/properties`,
+            { codes: energy.code },
+            input.signal,
+          ), "ENERGYIQ_TUYA_SHADOW_INVALID");
+          const property = (Array.isArray(result.properties) ? result.properties : [])
+            .find((candidate): candidate is Record<string, unknown> => isRecord(candidate) && candidate.code === energy.code);
+          const raw = property ? Number(property.value) : Number.NaN;
+          if (!Number.isFinite(raw) || raw < 0) return { sourceLabel: binding.sourceLabel, error: "ENERGYIQ_TUYA_SHADOW_VALUE_MISSING" };
+          const time = Number(property?.time);
+          return {
+            sourceLabel: binding.sourceLabel,
+            energyKwh: raw / (10 ** energy.scale),
+            ...(Number.isSafeInteger(time) && time > 0 ? { reportedAt: new Date(time).toISOString() } : {}),
+          };
+        } catch (error) {
+          // One unreadable meter must not hide the rest of the site; a refused account still fails the whole read.
+          if (error instanceof TuyaOpenApiError && (isTokenError(error) || /:1114\b|:1004\b|:1106\b/u.test(error.message))) throw error;
+          if (error instanceof Error && error.message === "ENERGYIQ_TUYA_REQUEST_ABORTED") throw error;
+          return { sourceLabel: binding.sourceLabel, error: error instanceof Error ? error.message.slice(0, 160) : "ENERGYIQ_TUYA_REQUEST_FAILED" };
+        }
+      });
+    },
     async listDevices(input) {
       // Cloud projects list their devices through IoT Core; projects that only link a Smart Life app account
       // answer the associated-users list instead. Try the first, and fall back only when Tuya refuses it.
@@ -374,8 +454,8 @@ export const createTuyaOpenApiClient = (options: TuyaClientOptions): TuyaOpenApi
     async checkEnergyDevice(deviceId, signal) {
       if (!/^[A-Za-z0-9]{8,64}$/u.test(deviceId)) return { ok: false, reason: "ENERGYIQ_TUYA_DEVICE_ID_INVALID" };
       try {
-        await readPropertyEvidence(deviceId, signal);
-        return { ok: true };
+        const properties = await readPropertyEvidence(deviceId, signal);
+        return { ok: true, phases: properties.phaseCodes && properties.phaseCodes.length > 1 ? 3 : 1 };
       } catch (error) {
         const message = error instanceof Error ? error.message : "";
         if (message.startsWith("ENERGYIQ_TUYA_PROPERTY_") || message === "ENERGYIQ_TUYA_MODEL_INVALID") {
@@ -394,10 +474,8 @@ export const createTuyaOpenApiClient = (options: TuyaClientOptions): TuyaOpenApi
       try {
         devices = await mapWithConcurrency(input.devices, 4, async (binding) => {
           try {
-            const [properties, logs] = await Promise.all([
-              readPropertyEvidence(binding.deviceId, controller.signal),
-              readReportLogs(binding.deviceId, input, controller.signal),
-            ]);
+            const properties = await readPropertyEvidence(binding.deviceId, controller.signal);
+            const logs = await readReportLogs(binding.deviceId, properties.totalForwardEnergy.code, input, controller.signal);
             return {
               sourceLabel: binding.sourceLabel,
               properties,
@@ -420,7 +498,7 @@ export const createTuyaOpenApiClient = (options: TuyaClientOptions): TuyaOpenApi
         request: {
           startTime: input.startTime,
           endTime: input.endTime,
-          codes: TUYA_LOG_CODES,
+          codes: [...new Set(devices.map((device) => device.properties.totalForwardEnergy.code))].sort(),
           deviceCount: input.devices.length,
         },
         devices,
@@ -430,6 +508,9 @@ export const createTuyaOpenApiClient = (options: TuyaClientOptions): TuyaOpenApi
 };
 
 const TUYA_DEVICE_LIST_PAGE_SIZE = 20;
+/** Attempts for a request Tuya rate-limits (HTTP 429), waiting 1 s, 2 s, 4 s and 8 s in between. */
+const TUYA_RATE_LIMIT_ATTEMPTS = 5;
+const TUYA_RATE_LIMIT_BACKOFF_MS = 1_000;
 /** 50 pages of 20 is a thousand devices: far beyond one site, small enough to answer within a request. */
 const TUYA_DEVICE_LIST_MAX_PAGES = 50;
 
@@ -496,7 +577,7 @@ const parseReportLog = (value: unknown): TuyaReportLog => {
 
 const findPropertyEvidence = (
   model: unknown,
-  code: typeof TUYA_ENERGY_CODE | typeof TUYA_POWER_CODE,
+  code: string,
 ): TuyaPropertyEvidence => {
   const match = findObjectByCode(model, code);
   if (!match) throw new Error(`ENERGYIQ_TUYA_PROPERTY_REQUIRED:${code}`);
@@ -529,8 +610,12 @@ const findObjectByCode = (value: unknown, code: string): Record<string, unknown>
   return undefined;
 };
 
-const assertExpectedUnit = (property: TuyaPropertyEvidence, allowed: string[]): void => {
-  if (!allowed.includes(property.unit.trim().toLocaleLowerCase())) {
+/** "kWh", "kw.h", "kW·h" and "kW*h" are all the same unit; compare without separators or case. */
+export const normaliseTuyaUnit = (unit: string): string =>
+  unit.trim().toLocaleLowerCase().replace(/[\s.·*•]/gu, "");
+
+const assertExpectedUnit = (property: TuyaPropertyEvidence, expected: string): void => {
+  if (normaliseTuyaUnit(property.unit) !== expected) {
     throw new Error(`ENERGYIQ_TUYA_PROPERTY_UNIT_INVALID:${property.code}:${property.unit}`);
   }
 };
@@ -540,7 +625,7 @@ const validateSyncInput = (input: TuyaEnergySyncInput): void => {
     || input.startTime <= 0 || input.endTime <= input.startTime) {
     throw new Error("ENERGYIQ_TUYA_TIME_WINDOW_INVALID");
   }
-  if (input.devices.length === 0 || input.devices.length > 100) {
+  if (input.devices.length === 0 || input.devices.length > TUYA_MAX_SYNC_DEVICES) {
     throw new Error("ENERGYIQ_TUYA_DEVICES_INVALID");
   }
   const deviceIds = new Set<string>();

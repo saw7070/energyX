@@ -10,6 +10,7 @@ import { plainNames, plainTimes, SiteReportPanel, useSiteReport } from "./site-r
 import { ReportScheduleNote } from "./report-schedule-note";
 import { StoppedMetersNote } from "./meter-health-notice";
 import { ForecastLine } from "./forecast-line";
+import { LiveNow } from "./live-now";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { intlLocale, type EnergyIqLocale } from "./energyiq-messages";
 import { keyPointsMessages } from "./key-points-messages";
@@ -117,6 +118,8 @@ export function KeyPoints({projectId}:{projectId:string}) {
         {report?.headline && sameText(report.headline, `${report.title.before}${report.title.emphasis}`) === false ? <p>{report.headline}</p> : null}
         <ForecastLine projectId={projectId} className={styles.heroForecast} />
         <p className={styles.heroLinks}><Link href={analysisHref(projectId, shownPeriod, report?.headline ?? "", report?.headlineTopic)}>{t("seeWhy")}</Link></p></section>
+      {/* What the site is drawing right now, for a site with a live connection. */}
+      <LiveNow projectId={projectId} className={styles.source} />
       {/* Say which report is on screen — the saved one, by its dates and the day it was written — and how to open it. */}
       {saved ? <div className={styles.source} aria-label={t("sourceLabel")}>
         <EnergyIcon name="document" />

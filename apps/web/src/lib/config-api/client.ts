@@ -18,6 +18,7 @@ import type {
   EnergyMeterHealthDto,
   EnergyDataAvailabilityDto,
   EnergyProjectAlertsDto,
+  EnergyLiveReadingsDto,
   EnergyAdminOrganisationDto,
   EnergyAdminUserDto,
   EnergyAdditionalInsightFeedbackDto,
@@ -301,6 +302,9 @@ export const configApi = {
   },
   reportTaskHistoryRequest<T>(query = "", init?: RequestInit): Promise<T> {
     return requestEnvelope<T>(`/api/v1/energy/admin/task-history${query}`, init);
+  },
+  getEnergyLiveReadings(projectId: string): Promise<EnergyLiveReadingsDto> {
+    return requestEnvelope<EnergyLiveReadingsDto>(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/live`);
   },
   getEnergyProjectAlerts(projectId: string): Promise<EnergyProjectAlertsDto> {
     return requestEnvelope<EnergyProjectAlertsDto>(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/alerts`);

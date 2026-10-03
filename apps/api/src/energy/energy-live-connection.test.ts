@@ -96,7 +96,12 @@ describe("Live connection", () => {
         matches: Object.fromEntries(meters.map((meter, index) => [meter.meterPointId, refs.find((ref) => ref.name === devices[index]!.name)!.ref])),
       });
       failures.unsuitable = devices[1]!.id;
+      devices.push(
+        { id: "gatewaydevice01", name: "Level 2 gateway A", category: "wg2", online: true },
+        { id: "gatewaydevice02", name: "Level 1 gateway B", category: "wg2", online: false },
+      );
       const checked = await call("POST", ["check"]);
+      expect(checked.body.data.check.gateways).toEqual({ total: 2, online: 1, offline: ["Level 1 gateway B"] });
       expect(checked.body.data.check.ok).toBe(false);
       expect(checked.body.data.check.meters).toContainEqual({
         meterPointId: meters[1]!.meterPointId,
@@ -266,13 +271,14 @@ const withLiveApi = async (run: (harness: LiveHarness) => Promise<void>): Promis
     const failures: LiveHarness["failures"] = {};
     const client: TuyaOpenApiClient = {
       syncEnergyReadings: async () => { throw new Error("NOT_USED"); },
+      readLatestEnergy: async () => { throw new Error("NOT_USED"); },
       listDevices: async () => {
         if (failures.list) throw failures.list;
         return devices;
       },
       checkEnergyDevice: async (deviceId) => deviceId === failures.unsuitable
         ? { ok: false, reason: "ENERGYIQ_TUYA_PROPERTY_REQUIRED:total_forward_energy" }
-        : { ok: true },
+        : { ok: true, phases: 1 },
     };
     const scheduler = { requestSync: vi.fn(() => "started" as const), isRunning: vi.fn(() => false) };
     const context = {

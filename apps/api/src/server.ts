@@ -214,7 +214,9 @@ import {
   createEnergyLiveConnectionScheduler,
   registerEnergyLiveConnectionScheduler,
 } from "./energy/energy-live-connection-scheduler.js";
-import { createTuyaOpenApiClientFor, createTuyaOpenApiClientFromEnv } from "./energy/tuya-openapi-client.js";
+import { createTuyaOpenApiClientFor, createTuyaOpenApiClientFromEnv, type TuyaOpenApiClient } from "./energy/tuya-openapi-client.js";
+import { createEnergyLiveReadingsPoller } from "./energy/energy-live-readings.js";
+import { createEnergyAlertEmailer } from "./energy/energy-alert-emails.js";
 import { resolveEnergyTuyaProjectConnector } from "./energy/energy-tuya-connector.js";
 import type { ConfigApiContext } from "./routes/types.js";
 import { resolveOverviewAiStageStructuredOutput } from "./energy/preschool-overview-ai-structured-output.js";
@@ -1417,6 +1419,21 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
     },
   });
   registerEnergyLiveConnectionScheduler(liveConnectionScheduler);
+  // Every 15 minutes, each live site's current meter readings for Overview's live power. Nothing is published.
+  // One client per account, so each device's model is fetched once rather than on every read.
+  const liveReadingClients = new Map<string, TuyaOpenApiClient>();
+  const liveReadingsPoller = createEnergyLiveReadingsPoller({
+    metadataStore,
+    readLatestEnergy: ({ credentials, ...readInput }) => {
+      const key = credentials ? `${credentials.accessId}:${credentials.accessSecret}` : "environment";
+      let client = liveReadingClients.get(key);
+      if (!client) {
+        client = createTuyaOpenApiClientFor(credentials);
+        liveReadingClients.set(key, client);
+      }
+      return client.readLatestEnergy(readInput);
+    },
+  });
   // A release that restarts the API mid-publication leaves that journal open, and every read for the project then
   // refuses until a materialization rolls it back. Recover at boot so a deploy cannot strand a site until the next
   // sync — which never arrives when the source sync is switched off or failing. Startup does not wait on it.
@@ -1435,6 +1452,10 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
   });
   tuyaScheduler.start();
   liveConnectionScheduler.start();
+  if (process.env.ENERGYIQ_LIVE_READINGS_ENABLED?.trim() !== "false") liveReadingsPoller.start();
+  // Emails site owners about stopped meters and failed daily updates; off unless ENERGYIQ_ALERT_EMAILS_ENABLED=true.
+  const alertEmailer = createEnergyAlertEmailer({ metadataStore });
+  alertEmailer.start();
   reportService?.start();
 
   gracefulServerClosers.set(server, bindGracefulServerLifecycle({
@@ -1442,6 +1463,8 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
     closeResources: async () => {
       await tuyaScheduler.stop();
       await liveConnectionScheduler.stop();
+      await liveReadingsPoller.stop();
+      alertEmailer.stop();
       registerEnergyLiveConnectionScheduler(undefined);
       await reportService?.stop();
       metadataStore.close();

@@ -347,6 +347,18 @@ export type EnergyProjectSetupDto = {
   };
 };
 
+/** A live site's latest 15-minute meter readings (Overview's live power). Not published data. */
+export type EnergyLiveReadingsDto = {
+  connected: boolean;
+  readAt?: string;
+  powerKw?: number;
+  todayKwh?: number;
+  officialMeterCount: number;
+  reportingMeterCount: number;
+  meters: Array<{ meterPointId: string; name: string; readAt: string; energyKwh: number; powerKw?: number; todayKwh?: number; stale: boolean }>;
+  intervalMinutes: number;
+};
+
 /** Whether each meter is actually reporting, so a site can notice one that stopped. */
 /** The bell's site alerts: automatic reports that are ready and, for administrators, a failed daily live update. */
 export type EnergyProjectAlertsDto = {
@@ -996,6 +1008,9 @@ export type EnergyVirtualMeterTraceDto = {
   scopeId: string;
   status: "available" | "partial";
   usageKwh: number | null;
+  /** Highest 15-minute average power over intervals where every input reported. */
+  peakKw?: number;
+  peakAt?: string;
   includedInOfficialTotal: false;
   missingTermMeterNodeIds: string[];
   terms: EnergyVirtualMeterTraceTermDto[];
