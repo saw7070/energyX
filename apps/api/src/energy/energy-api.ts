@@ -48,6 +48,7 @@ import {
   activeEnergyIqImportBatches,
   createDefaultTemplateDocument,
   createEnergyIqSourceManifest,
+  fingerprintEnergyIqMeterMapping,
   parseEnergyIqTemplateChangeProposalValue,
   resolveEnergyIqMaterializationBlockingReasons,
   resolveEnergyIqProjectDataReadiness,
@@ -75,6 +76,7 @@ import {
   ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION,
   ENERGY_EXCEL_HISTORICAL_MATERIALIZER_CONTRACT_VERSIONS,
   ENERGY_TUYA_MATERIALIZER_CONTRACT_VERSION,
+  isEnergyImportMaterializationCurrent,
 } from "./energy-import-materializer.js";
 import {
   publishEnergyProjectManifestAtomically,
@@ -3248,6 +3250,44 @@ const createProjectDataReadiness = (
   return createProjectDataReadinessAsync(context, projectId, document);
 };
 
+/**
+ * The materializer keeps a batch whose meter names alone changed since it was read, because names never decide a
+ * reading; batches read before and after a rename then carry different mapping fingerprints. Readiness must agree,
+ * or one rename leaves the setup unable to go live: so a mapping mismatch where every active batch is current for
+ * the materializer is not a reason to block. Any other reason still stands.
+ */
+export const withLabelOnlyMappingChangesAccepted = (
+  context: Required<ConfigApiContext>,
+  projectId: string,
+  readiness: ReturnType<typeof resolveEnergyIqProjectDataReadiness>,
+  batches: EnergyIqImportBatchRecord[],
+  document: EnergyIqProjectSetupDocument,
+): ReturnType<typeof resolveEnergyIqProjectDataReadiness> => {
+  if (!readiness.blockingReasons.includes("SNAPSHOT_MAPPING_MISMATCH")) return readiness;
+  let mappingsByFingerprint: Map<string, NonNullable<EnergyIqProjectSetupDocument["meter_mapping"]>> | undefined;
+  const resolveMappingByFingerprint = (fingerprint: string) => {
+    mappingsByFingerprint ??= new Map(context.metadataStore.energyIq.projectSetup.listHierarchyRevisions(projectId).flatMap((revision) => {
+      try {
+        const mapping = (JSON.parse(revision.snapshot_json) as EnergyIqProjectSetupDocument).meter_mapping;
+        return mapping ? [[fingerprintEnergyIqMeterMapping(mapping), mapping] as const] : [];
+      } catch {
+        return [];
+      }
+    }));
+    return mappingsByFingerprint.get(fingerprint);
+  };
+  const materialized = activeEnergyIqImportBatches(batches, document).filter((batch) => batch.status === "materialized");
+  const allCurrent = materialized.length > 0 && materialized.every((batch) => isEnergyImportMaterializationCurrent({
+    batch,
+    document,
+    timezone: document.project.timezone,
+    resolveMappingByFingerprint,
+  }));
+  if (!allCurrent) return readiness;
+  const blockingReasons = readiness.blockingReasons.filter((reason) => reason !== "SNAPSHOT_MAPPING_MISMATCH");
+  return { ...readiness, blockingReasons, ready: blockingReasons.length === 0, status: blockingReasons.length === 0 ? "ready" : "blocked" };
+};
+
 const createProjectDataReadinessAsync = async (
   context: Required<ConfigApiContext>,
   projectId: string,
@@ -3266,7 +3306,7 @@ const createProjectDataReadinessAsync = async (
       source_manifest: createEnergyIqSourceManifest(runtimeState.active_source_sha256, true),
     }
     : document;
-  const readiness = resolveEnergyIqProjectDataReadiness({
+  const strictReadiness = resolveEnergyIqProjectDataReadiness({
     project,
     batches,
     document: effectiveDocument,
@@ -3282,6 +3322,7 @@ const createProjectDataReadinessAsync = async (
       ...ENERGY_FACT_WRITER_HISTORICAL_CONTRACT_VERSIONS,
     ],
   });
+  const readiness = withLabelOnlyMappingChangesAccepted(context, projectId, strictReadiness, batches, effectiveDocument);
   if (!readiness.requiresFormalData || !snapshot || snapshot.id !== project.data_snapshot_id) {
     return readiness;
   }
