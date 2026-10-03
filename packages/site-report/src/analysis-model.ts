@@ -6,7 +6,7 @@ import { intlLocale, type EnergyIqLocale } from "./locale.js";
 // English labels come from the page's wording so every language shares one list (see analysis-messages).
 const EN = analysisMessages.en;
 
-export type AnalysisCategory = "load" | "light" | "aircon" | "other";
+export type AnalysisCategory = "load" | "light" | "aircon" | "it" | "kitchen" | "plug" | "other";
 export type AnalysisDayType = "weekday" | "weekend" | "public_holiday";
 export type HoursByDay = Record<string, Array<{ from: string; to: string }>>;
 export type AnalysisDay = { date: string; dayType: AnalysisDayType; holidayName?: string; complete: boolean; totalKwh: number; byCategory: Partial<Record<AnalysisCategory, number>> };
@@ -15,14 +15,21 @@ export type AnalysisAnomaly = { date: string; dayType: AnalysisDayType; totalKwh
 export type HourRow = { hour: number; total: number } & Partial<Record<AnalysisCategory, number>>;
 export type PeakHour = { date: string; hour: number; kwh: number };
 
-export const CATEGORY_ORDER: AnalysisCategory[] = ["light", "load", "aircon", "other"];
+export const CATEGORY_ORDER: AnalysisCategory[] = ["light", "load", "aircon", "it", "kitchen", "plug", "other"];
 /** English names; use categoryLabel(category, locale) from analysis-messages for the reader's language. */
-export const CATEGORY_LABELS: Record<AnalysisCategory, string> = { load: EN["category.load"], light: EN["category.light"], aircon: EN["category.aircon"], other: EN["category.other"] };
+export const CATEGORY_LABELS: Record<AnalysisCategory, string> = {
+  load: EN["category.load"], light: EN["category.light"], aircon: EN["category.aircon"],
+  it: EN["category.it"], kitchen: EN["category.kitchen"], plug: EN["category.plug"], other: EN["category.other"],
+};
 /** Plain-language meaning of each meter type, for people who do not know the electrical terms (categoryDescription for other languages). */
 export const CATEGORY_DESCRIPTIONS: Record<AnalysisCategory, string> = {
-  light: EN["categoryHint.light"], load: EN["categoryHint.load"], aircon: EN["categoryHint.aircon"], other: EN["categoryHint.other"],
+  light: EN["categoryHint.light"], load: EN["categoryHint.load"], aircon: EN["categoryHint.aircon"],
+  it: EN["categoryHint.it"], kitchen: EN["categoryHint.kitchen"], plug: EN["categoryHint.plug"], other: EN["categoryHint.other"],
 };
-export const CATEGORY_COLORS: Record<AnalysisCategory, string> = { light: "#4F9B86", load: "#5B8BCF", aircon: "#9A8DBF", other: "#8B95A5" };
+// Muted mid-tone hues kept apart from each other (green, blue, violet, rose, amber, olive, grey), each at least 3:1 against white.
+export const CATEGORY_COLORS: Record<AnalysisCategory, string> = {
+  light: "#4F9B86", load: "#5B8BCF", aircon: "#9A8DBF", it: "#C0607F", kitchen: "#C47A28", plug: "#7A8F3C", other: "#8B95A5",
+};
 export const DAY_TYPE_LABELS: Record<AnalysisDayType, string> = { weekday: EN["dayType.weekday"], weekend: EN["dayType.weekend"], public_holiday: EN["dayType.public_holiday"] };
 export const ANOMALY_THRESHOLD_PCT = 15;
 export const MIN_BASELINE_SAMPLES = 3;

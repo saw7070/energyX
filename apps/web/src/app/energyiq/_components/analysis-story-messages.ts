@@ -46,6 +46,10 @@ export const storyMessages = defineMessages({
   "money.takeawayType": "{lead} accounts for {pct}% of the {what}, and {type} is the largest type of use.",
   "money.none": "No split by area or type is available for these readings.",
   "money.byArea": "By area",
+  "money.byCircuit": "By circuit",
+  "money.unmetered": "Not measured by a sub-meter",
+  "money.unmeteredHint": "Measured by the main meter, but no sub-meter shows which equipment used it.",
+  "money.takeawayUnmetered": "{pct}% of the electricity is measured only by the main meter: no sub-meter shows where it goes.",
   "money.byType": "By type of use",
 
   "when.title": "When the energy is used",
@@ -214,6 +218,10 @@ export const storyMessages = defineMessages({
     "money.takeawayType": "{lead}占{what}的 {pct}%，而{type}是最大的用电类型。",
     "money.none": "这些读数无法按区域或用电类型细分。",
     "money.byArea": "按区域",
+    "money.byCircuit": "按回路",
+    "money.unmetered": "没有分表计量的部分",
+    "money.unmeteredHint": "总电表计量到了这部分用电，但没有分表显示是哪些设备用的。",
+    "money.takeawayUnmetered": "{pct}% 的用电只由总电表计量：没有分表显示这部分电用在哪里。",
     "money.byType": "按用电类型",
 
     "when.title": "什么时候用电",
@@ -382,6 +390,10 @@ export const storyMessages = defineMessages({
     "money.takeawayType": "{lead} merangkumi {pct}% daripada {what}, dan {type} ialah jenis penggunaan terbesar.",
     "money.none": "Tiada pecahan mengikut kawasan atau jenis untuk bacaan ini.",
     "money.byArea": "Mengikut kawasan",
+    "money.byCircuit": "Mengikut litar",
+    "money.unmetered": "Tidak diukur oleh sub-meter",
+    "money.unmeteredHint": "Diukur oleh meter utama, tetapi tiada sub-meter yang menunjukkan peralatan mana yang menggunakannya.",
+    "money.takeawayUnmetered": "{pct}% elektrik hanya diukur oleh meter utama: tiada sub-meter yang menunjukkan ke mana ia digunakan.",
     "money.byType": "Mengikut jenis penggunaan",
 
     "when.title": "Bila tenaga digunakan",

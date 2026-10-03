@@ -194,6 +194,8 @@ function plainName(group: { name: string; space: string; category: AnalysisCateg
   const stem = everyday(group.name);
   return t("circuit.many", { count: group.meters.length, things: en ? stem.endsWith("s") ? stem : `${stem}s` : group.name });
 }
+/** Socket, IT, kitchen and plug circuits feed equipment that may rightly stay on (fridges, servers), unlike lights or air-con. */
+const isEquipment = (category: AnalysisCategory | "overall") => category === "load" || category === "it" || category === "kitchen" || category === "plug";
 /** Plural names ("lights", "3 LED displays") take plural verbs. */
 const isPlural = (circuit: { name: string; meterIds: string[] }) => circuit.meterIds.length > 1 || /s$/.test(circuit.name);
 
@@ -419,7 +421,7 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   // ---------- 5. screening ----------
   const tail = circuits.filter(circuit => circuit.eveningKwh != null && circuit.eveningKwh >= 0.3);
   const flat = circuits.filter(circuit => circuit.flat);
-  const target = flat.find(circuit => circuit.category !== "load") ?? flat[0];
+  const target = flat.find(circuit => !isEquipment(circuit.category)) ?? flat[0];
   const closedHoursPerMonth = 30 * 24 - 30 * 5 / 7 * (openRange.to - openRange.from);
   const targetSaving = target?.closedBase != null && rate != null ? target.closedBase * closedHoursPerMonth * rate : null;
   const tailSaving = rate != null && tail.length ? tail.reduce((sum, circuit) => sum + circuit.eveningKwh! * 30 * 5 / 7, 0) * rate : null;
@@ -601,7 +603,7 @@ function screenCircuit(circuit: ScreenInput, context: { dates: string[]; weekday
   const found: string[] = [];
   let eveningKwh: number | null = null;
 
-  if (flat && neverOff && quiet && circuit.category !== "load") {
+  if (flat && neverOff && quiet && !isEquipment(circuit.category)) {
     found.push(t(several ? "find.zero.other" : "find.zero.one", { hours: grouped(circuit.cells.size), count: numberWord(circuit.meters.length, locale), days: context.dates.length }));
   } else if (flat) {
     found.push(t(quiet ? "find.flatQuiet" : "find.flat", { pct: pctText(ratio!) }));

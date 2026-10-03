@@ -396,6 +396,38 @@ describe("validateProjectSetupDocument sibling names", () => {
     }));
   });
 
+  it("keeps the IT, kitchen and plug types of use through saveDraft", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-category-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      metadata.workspaces.upsert({ id: "workspace-category", owner_user_id: "dev-user", name: "Category Workspace", kind: "customer" });
+      metadata.energyIq.upsertProject({ id: "project-category", workspace_id: "workspace-category", name: "Category Project", status: "draft" });
+      const initial = metadata.energyIq.projectSetup.getDraft({ project_id: "project-category", user_id: "dev-user" });
+      const base = componentRouteDocument([
+        { scope_id: "c1", resource: "electricity", category: "it", meter_point_ids: ["m1"] },
+        { scope_id: "c2", resource: "electricity", category: "kitchen", meter_point_ids: ["m2"] },
+        { scope_id: "l1", resource: "electricity", category: "it", meter_point_ids: ["m1"] },
+        { scope_id: "l1", resource: "electricity", category: "kitchen", meter_point_ids: ["m2"] },
+        { scope_id: "project", resource: "electricity", category: "it", meter_point_ids: ["m1"] },
+        { scope_id: "project", resource: "electricity", category: "kitchen", meter_point_ids: ["m2"] },
+      ]);
+      const [first, second] = base.meter_mapping.rows;
+      const document = { ...base, meter_mapping: { ...base.meter_mapping, rows: [{ ...first!, category: "it" as const }, { ...second!, category: "kitchen" as const }] } };
+      expect(validateProjectSetupDocument(document).blocking).toBe(false);
+
+      const saved = metadata.energyIq.projectSetup.saveDraft({ project_id: "project-category", expected_revision: initial.revision, user_id: "dev-user", document });
+      expect(saved.document.meter_mapping?.rows.map((row) => row.category)).toEqual(["it", "kitchen"]);
+      const plugged = metadata.energyIq.projectSetup.saveDraft({
+        project_id: "project-category", expected_revision: saved.revision, user_id: "dev-user",
+        document: { ...document, meter_mapping: { ...document.meter_mapping, virtual_meters: [{ id: "vm", display_name: "Sockets", scope_id: "l1", resource: "electricity", category: "plug", terms: [{ mapping_row_id: "m1", coefficient: 1 }] }] } },
+      });
+      expect(plugged.document.meter_mapping?.virtual_meters?.[0]?.category).toBe("plug");
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
   it("preserves duplicate route members through saveDraft and blocks publication", () => {
     const root = mkdtempSync(join(tmpdir(), "energyiq-route-duplicate-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });

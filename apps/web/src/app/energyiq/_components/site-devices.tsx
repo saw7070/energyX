@@ -129,17 +129,23 @@ export function energyBreakdown(rows: DeviceRow[], boardNames: Map<string, strin
     }
     return false;
   };
+  // The site's main meter: the one whole-site total on a board with nothing above it. Every other meter on site sits
+  // below it, wherever the layout puts them (under it, or as its neighbours), so all of them are its parts.
+  const topTotals = rows.filter(row => row.isBoardTotal && row.category === "overall" && row.usageKwh !== null && !boardParents.has(row.boardId));
+  const siteMain = topTotals.length === 1 ? topTotals[0]! : null;
   for (const boardId of new Set(rows.map(row => row.boardId))) {
     const measured = rows.filter(row => row.boardId === boardId && row.usageKwh !== null);
     const devices = measured.filter(row => !row.isBoardTotal);
     for (const total of measured.filter(row => row.isBoardTotal)) {
-      const parts = total.category === "overall"
+      const parts = total === siteMain
+        ? rows.filter(row => !row.isBoardTotal && row.usageKwh !== null)
+        : total.category === "overall"
         ? rows.filter(row => !row.isBoardTotal && row.usageKwh !== null && within(row.boardId, boardId))
         : devices.filter(device => device.category === total.category);
       if (!parts.length) { shares.push({ id: total.id, name: total.name, kwh: total.usageKwh!, unmetered: false, boardId, type: total.type }); continue; }
       const rest = total.usageKwh! - parts.reduce((sum, part) => sum + part.usageKwh!, 0);
       const boardName = boardNames.get(boardId) ?? boardId;
-      if (rest > 0.05) shares.push({ id: `${total.id}:rest`, name: total.category === "overall" ? t("unmetered.overall", { board: boardName }) : t("unmetered.name", { board: boardName, type: measurementLabel(total.category, locale).toLowerCase() }), kwh: rest, unmetered: true, boardId, type: total.type });
+      if (rest > 0.05) shares.push({ id: `${total.id}:rest`, name: total === siteMain ? t("unmetered.site") : total.category === "overall" ? t("unmetered.overall", { board: boardName }) : t("unmetered.name", { board: boardName, type: measurementLabel(total.category, locale).toLowerCase() }), kwh: rest, unmetered: true, boardId, type: total.type });
     }
     devices.forEach(device => shares.push({ id: device.id, name: device.name, kwh: device.usageKwh!, unmetered: false, boardId, type: device.type }));
   }
@@ -493,7 +499,21 @@ export function SiteDevices({ projectId, boardNames, boardParents }: { projectId
     const peakAt = peakText(analysis.summary.peakAt);
     const largest = shares[0]?.kwh ?? 1;
     const boards = isSite ? boardIds : [boardId];
-    const boardTotals = boards.map(id => ({ id, label: boardName(id), kwh: shares.filter(share => share.boardId === id).reduce((sum, share) => sum + share.kwh, 0) })).sort((a, b) => b.kwh - a.kwh);
+    // What no sub-meter explains is its own line, not part of the board the main meter happens to sit on.
+    const unmeteredKwh = shares.filter(share => share.unmetered).reduce((sum, share) => sum + share.kwh, 0);
+    const boardTotals: Array<{ id?: string; label: string; kwh: number }> = boards
+      .map(id => ({ id, label: boardName(id), kwh: shares.filter(share => share.boardId === id && !share.unmetered).reduce((sum, share) => sum + share.kwh, 0) }))
+      .filter(item => item.kwh > 0);
+    if (unmeteredKwh > 0) boardTotals.push({ label: t("unmetered.site"), kwh: unmeteredKwh });
+    boardTotals.sort((a, b) => b.kwh - a.kwh);
+    // Where the scope's total is a main meter, its "type" is only "Total"; the types come from the meters below it instead.
+    const typeTotals = data.typeTotals.some(item => item.category === "overall")
+      ? [...shares.reduce((sum, share) => {
+        const category = rows.find(row => row.id === (share.unmetered ? share.id.replace(/:rest$/, "") : share.id))?.category ?? "other";
+        const key = category === "overall" ? t("unmetered.site") : measurementLabel(category, locale);
+        return sum.set(key, (sum.get(key) ?? 0) + share.kwh);
+      }, new Map<string, number>())].map(([typeLabel, typeKwh]) => ({ label: typeLabel, kwh: typeKwh })).sort((a, b) => b.kwh - a.kwh)
+      : data.typeTotals.map(item => ({ label: measurementLabel(item.category, locale), kwh: item.kwh }));
     const stat = data.stat;
     const profileMax = stat ? niceMax(Math.max(0, ...stat.openProfileKw.map(value => value ?? 0), ...stat.closedProfileKw.map(value => value ?? 0))) : 1;
     const heatRows = boards.flatMap(id => byBoard(id).filter(row => stats.has(row.id)).map(row => ({ id: row.id, name: row.name, group: boardName(id), profileKw: stats.get(row.id)!.profileKw })));
@@ -532,7 +552,7 @@ export function SiteDevices({ projectId, boardNames, boardParents }: { projectId
           <DailyProfileChart profileKw={stat.openProfileKw} openHours={loaded.openHours} name={t("profile.openName", { label })} title={t("profile.openTitle", { label, count: stat.openDays })} max={profileMax} period={span} />
           <DailyProfileChart profileKw={stat.closedProfileKw} openHours={new Set()} name={t("profile.closedName", { label })} title={t("profile.closedTitle", { label, count: stat.closedDays })} max={profileMax} period={span} />
           {isSite && shareBars(boardTotals, t("byBoard"), id => showView({ kind: "board", id }))}
-          {data.typeTotals.length > 0 && shareBars(data.typeTotals.map(item => ({ label: measurementLabel(item.category, locale), kwh: item.kwh })), t("byType"))}
+          {typeTotals.length > 0 && shareBars(typeTotals, t("byType"))}
         </div>
         {specialDaysSection(stat)}
         {heatRows.length > 0 && <UsageHeatmap rows={heatRows} openHours={loaded.openHours} openingLabel={openingHours} onOpenRow={openDevice} period={span} />}

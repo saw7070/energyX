@@ -21,6 +21,7 @@ import { EnergyIcon, type EnergyIconName } from "./icons";
 import { circuitSlices, PeakShareDonut } from "./peak-share-donut";
 import { DecisionSummary } from "./analysis-story";
 import { TypeHint } from "./type-hint";
+import { breakdownSpaces } from "./site-total";
 
 // Layout of the approved NetZero analysis page on a light surface: white panels, slate borders.
 const PANEL = "rounded-xl border border-slate-200 bg-white shadow-sm";
@@ -322,7 +323,9 @@ function DailyTotalTrend({ data, derived }: { data: AnalysisData; derived: Deriv
   const threshold = baseline.expectedKwh == null ? null : baseline.expectedKwh * (1 + ANOMALY_THRESHOLD_PCT / 100);
   const rows = shown.map(day => ({ date: day.date, total: day.totalKwh > 0 ? day.totalKwh : null, complete: day.complete, expected: baseline.expectedKwh, threshold }));
   const calibrationDates = selected.calibration.map(day => day.date).sort();
-  const showSpaces = !spaceItem && derived.spaces.length > 1;
+  // The area that only holds the main meter is the site total, not a part of it; it is already the daily total column.
+  const listedSpaces = breakdownSpaces(derived.spaces, item => item.scope);
+  const showSpaces = !spaceItem && listedSpaces.length > 1;
   const label = dayTypeWord(dayType, locale);
   const dailyTotalName = t("trend.dailyTotal");
   return <section className={`${PANEL} p-4`}>
@@ -363,11 +366,11 @@ function DailyTotalTrend({ data, derived }: { data: AnalysisData; derived: Deriv
       <div className="border-b border-slate-200 bg-white px-3 py-2"><Title className="text-xs font-medium text-slate-700" guide={{ summary: t("anomalies.summary"), dataAcquisition: [t("anomalies.data1")], chartGeneration: [t("anomalies.chart1")] }}>{t("anomalies.title")}</Title></div>
       <div className="max-h-72 overflow-auto">
         {anomalies.length ? <table className="w-full min-w-[640px] text-sm">
-          <thead className="sticky top-0 bg-slate-100 text-slate-700"><tr><th className="px-3 py-2 text-left">{t("col.date")}</th><th className="px-3 py-2 text-left">{t("col.type")}</th><th className="px-3 py-2 text-right">{t("col.dailyTotal")}</th><th className="px-3 py-2 text-right">{t("col.expected")}</th><th className="px-3 py-2 text-right">{t("col.threshold")}</th>{showSpaces && <th className="px-3 py-2 text-right">{derived.spaces.map(item => item.scope.name).join(" / ")} (kWh)</th>}<th className="px-3 py-2 text-right">{t("col.delta")}</th><th className="px-3 py-2 text-left">{t("col.status")}</th></tr></thead>
+          <thead className="sticky top-0 bg-slate-100 text-slate-700"><tr><th className="px-3 py-2 text-left">{t("col.date")}</th><th className="px-3 py-2 text-left">{t("col.type")}</th><th className="px-3 py-2 text-right">{t("col.dailyTotal")}</th><th className="px-3 py-2 text-right">{t("col.expected")}</th><th className="px-3 py-2 text-right">{t("col.threshold")}</th>{showSpaces && <th className="px-3 py-2 text-right">{listedSpaces.map(item => item.scope.name).join(" / ")} (kWh)</th>}<th className="px-3 py-2 text-right">{t("col.delta")}</th><th className="px-3 py-2 text-left">{t("col.status")}</th></tr></thead>
           <tbody>{anomalies.map(item => <tr key={item.date} className="border-t border-slate-200 text-slate-800 hover:bg-slate-50">
             <td className="px-3 py-2">{dateWithDay(item.date, locale)}</td><td className="px-3 py-2">{dayTypeLabel(item.dayType, locale)}</td>
             <td className="px-3 py-2 text-right">{num(item.totalKwh)}</td><td className="px-3 py-2 text-right">{num(item.expectedKwh)}</td><td className="px-3 py-2 text-right">{num(item.expectedKwh * (1 + ANOMALY_THRESHOLD_PCT / 100))}</td>
-            {showSpaces && <td className="px-3 py-2 text-right text-slate-500">{derived.spaces.map(entry => num(entry.days.find(day => day.date === item.date)?.totalKwh ?? 0)).join(" / ")}</td>}
+            {showSpaces && <td className="px-3 py-2 text-right text-slate-500">{listedSpaces.map(entry => num(entry.days.find(day => day.date === item.date)?.totalKwh ?? 0)).join(" / ")}</td>}
             <td className="px-3 py-2 text-right text-rose-700">+{item.deltaPct.toFixed(1)}%</td><td className="px-3 py-2"><span className="rounded bg-rose-100 px-2 py-0.5 text-rose-700">{t("anomaly")}</span></td>
           </tr>)}</tbody>
         </table> : <p className="px-3 py-4 text-sm text-slate-600">{baseline.expectedKwh == null ? t("trend.noBaseline", { type: label }) : t("trend.noneAbove", { type: label, pct: ANOMALY_THRESHOLD_PCT })}</p>}
@@ -438,7 +441,7 @@ function BreakdownModal({ data, derived, card, kind, previousLabel, onClose }: {
       <button type="button" autoFocus onClick={onClose} className="rounded-md border border-slate-200 px-2.5 py-1 text-sm text-slate-700 hover:bg-slate-50">{t("close")}</button>
     </div>
     <div className="overflow-y-auto p-5">
-      <div className="space-y-3">{derived.spaces.length ? derived.spaces.map(({ scope, previous }) => {
+      <div className="space-y-3">{derived.spaces.length ? breakdownSpaces(derived.spaces, item => item.scope).map(({ scope, previous }) => {
         const open = expanded.has(scope.id), showCircuits = circuits.has(scope.id);
         const withSeries = scope.meters.filter(meter => meter.series);
         const aggregates = withSeries.filter(meter => meter.official), subMeters = withSeries.filter(meter => !meter.official).sort((a, b) => seriesKwh(b.series) - seriesKwh(a.series));
@@ -518,7 +521,8 @@ function ConsumptionBreakdown({ data, derived }: { data: AnalysisData; derived: 
   const categories = CATEGORY_ORDER.filter(category => derived.days.some(day => (day.byCategory[category] ?? 0) > 0));
   const series = mode === "tag"
     ? (value === "all" ? categories : categories.filter(category => category === value)).map(category => ({ key: category as string, label: categoryLabel(category, locale), color: CATEGORY_COLORS[category] }))
-    : derived.spaces.map((item, index) => ({ key: item.scope.id, label: item.scope.name, color: SPACE_COLORS[index % SPACE_COLORS.length]! })).filter(item => value === "all" || item.key === value);
+    // Stacking the main meter's area on top of the areas below it would count the site twice.
+    : breakdownSpaces(derived.spaces, item => item.scope).map((item, index) => ({ key: item.scope.id, label: item.scope.name, color: SPACE_COLORS[index % SPACE_COLORS.length]! })).filter(item => value === "all" || item.key === value);
   const useTotal = series.length === 0;
   const currency = data.current.project.cost?.currency ?? "";
   const rows = derived.days.map(day => {
@@ -682,6 +686,9 @@ function SummaryOfFindings({ data, derived }: { data: AnalysisData; derived: Der
   const spaces = [...data.current.spaces].sort((a, b) => (b.usageKwh ?? 0) - (a.usageKwh ?? 0));
   const typeTotals = CATEGORY_ORDER.filter(category => project.typeTotals[category]).map(category => ({ category, kwh: project.typeTotals[category]! }));
   const typeSum = typeTotals.reduce((sum, item) => sum + item.kwh, 0);
+  // Where only some of the site is sub-metered, the types are shares of the whole site and the rest is its own part.
+  const unmeteredKwh = typeSum > 0 && project.usageKwh != null && project.usageKwh - typeSum > Math.max(0.5, project.usageKwh * 0.02) ? project.usageKwh - typeSum : 0;
+  const splitKwh = typeSum + unmeteredKwh;
   const highestDay = [...derived.complete].sort((a, b) => b.totalKwh - a.totalKwh)[0];
   const peak = topHours(project, 1)[0];
   const calDates = derived.calibration.map(day => day.date).sort();
@@ -700,11 +707,11 @@ function SummaryOfFindings({ data, derived }: { data: AnalysisData; derived: Der
       ...(top ? [second?.usageKwh
         ? t("sf.topSpaceVs", { name: top.name, kwh: kwh(top.usageKwh), pct: project.usageKwh ? num((top.usageKwh ?? 0) / project.usageKwh * 100) : "—", ratio: num((top.usageKwh ?? 0) / second.usageKwh, 2), second: second.name, secondKwh: kwh(second.usageKwh) })
         : t("sf.topSpace", { name: top.name, kwh: kwh(top.usageKwh), pct: project.usageKwh ? num((top.usageKwh ?? 0) / project.usageKwh * 100) : "—" })]
-        : typeTotals.map(item => t("sf.typeLine", { label: categoryLabel(item.category, locale), kwh: kwh(item.kwh), pct: num(item.kwh / typeSum * 100) }))),
+        : typeTotals.map(item => t("sf.typeLine", { label: categoryLabel(item.category, locale), kwh: kwh(item.kwh), pct: num(item.kwh / splitKwh * 100) }))),
       t("sf.averages", { weekday: avg("weekday"), weekend: avg("weekend"), holiday: avg("public_holiday") }),
     ]],
     [t("sf.mix"), [
-      t("sf.tagSplit", { list: joinText(typeTotals.map(item => `${categoryLabel(item.category, locale)} ${num(item.kwh / typeSum * 100)}%`), locale) || t("sf.notAvailable") }),
+      t("sf.tagSplit", { list: joinText([...typeTotals.map(item => `${categoryLabel(item.category, locale)} ${num(item.kwh / splitKwh * 100)}%`), ...(unmeteredKwh ? [`${t("sf.unmetered")} ${num(unmeteredKwh / splitKwh * 100)}%`] : [])], locale) || t("sf.notAvailable") }),
       ...(data.circuits[0] ? [data.circuits[0].location
         ? t("sf.highestCircuitAt", { name: data.circuits[0].name, location: data.circuits[0].location, kwh: kwh(data.circuits[0].kwh) })
         : t("sf.highestCircuit", { name: data.circuits[0].name, kwh: kwh(data.circuits[0].kwh) })] : []),

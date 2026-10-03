@@ -3830,9 +3830,13 @@ const resourceOptions = [
 ];
 const categoryOptions = [
   { value: "overall", label: "Overall" },
-  { value: "load", label: "Load" },
-  { value: "light", label: "Light" },
-  { value: "aircon", label: "Aircon" },
+  // The same words the site's pages use (MEASUREMENT_LABELS): "load" is plug and power circuits.
+  { value: "load", label: "Power (plug loads)" },
+  { value: "light", label: "Lighting" },
+  { value: "aircon", label: "Air conditioning (A/C, AHU)" },
+  { value: "it", label: "IT & network (servers, routers, cameras)" },
+  { value: "kitchen", label: "Kitchen & food (fridges, coffee, microwave)" },
+  { value: "plug", label: "Plugs & sockets" },
   { value: "other", label: "Other" },
 ];
 const formulaOperatorOptions = [

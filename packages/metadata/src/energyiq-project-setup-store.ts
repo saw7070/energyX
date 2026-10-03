@@ -29,7 +29,7 @@ export type EnergyIqProjectSetupNode = {
   metadata?: Record<string, unknown>;
 };
 
-export type EnergyIqMeterCategory = "overall" | "load" | "light" | "aircon" | "other";
+export type EnergyIqMeterCategory = "overall" | "load" | "light" | "aircon" | "it" | "kitchen" | "plug" | "other";
 export type EnergyIqMeterCoverage = "whole" | "partial" | "reference";
 export type EnergyIqMeterRole = "total" | "component" | "standalone";
 export type EnergyIqAggregationUsage = "official" | "excluded";
@@ -1380,6 +1380,7 @@ const canonicalizeDocument = (
 
 const normalizeMeterCategory = (value: unknown): EnergyIqMeterCategory =>
   value === "overall" || value === "load" || value === "light" || value === "aircon"
+    || value === "it" || value === "kitchen" || value === "plug"
     ? value
     : "other";
 

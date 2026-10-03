@@ -78,7 +78,7 @@ const luminance = (hex: string) => {
 const Tip = ({ x, y, children }: { x: number; y: number; children: ReactNode }) => <div className="tip" role="status" style={{ left: x, top: y }}>{children}</div>;
 
 // ---------- 1. floor plan ----------
-const CATEGORIES = ["light", "load", "aircon", "other"] as const;
+const CATEGORIES = ["light", "load", "aircon", "it", "kitchen", "plug", "other"] as const;
 function FloorPlan({ report }: { report: SiteReport }) {
   const t = reportText(report.locale);
   const categoryWord = (category: string) => t(`plan.category.${CATEGORIES.find(item => item === category) ?? "other"}`);

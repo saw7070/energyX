@@ -20,6 +20,9 @@ import { ElectricityRateEditor } from "./electricity-rate-editor";
 import { LocationForm, MeterForm, MeterTotalsCheck, MoveMetersForm, applyLocationEdit, applyMeterEdit, applyMeterMoves, locationRemoval, measurementLabel, withConfirmedTotals } from "./site-structure-editing";
 import styles from "./project-configuration-view.module.css";
 import { ConfirmDialog } from "./confirm-dialog";
+import { MeterTypeBanner, MeterTypeReview } from "./meter-type-review";
+import { applyMeterTypes } from "./meter-type-review-model";
+import { meterTypeReviewMessages } from "./meter-type-review-messages";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { projectConfigurationMessages } from "./project-configuration-messages";
 const label = (value: string) => value.replace(/_/g, " ").replace(/^./, char => char.toUpperCase());
@@ -31,8 +34,9 @@ const siteDate = (value: string, timezone?: string) => {
 
 export function ProjectConfigurationView({ setup, notes, policies, projectId, onPolicyChange, canEditPolicies = false, canEditSetup = false, initialTab, onTabChange }: { initialTab?: string; onTabChange?: (tab: string, extra?: Record<string, string>) => void; onPolicyChange?: () => void; projectId?: string; setup: EnergyProjectSetupDto; notes: string; policies: EnergyOperationalPolicyConfigurationDto | null; canEditPolicies?: boolean; canEditSetup?: boolean }) {
   const t = useMessages(projectConfigurationMessages);
+  const typeText = useMessages(meterTypeReviewMessages);
   const { locale } = useEnergyIqLocale();
-  const [setupEdit, setSetupEdit] = useState<null | { kind: "location"; nodeId: string } | { kind: "new"; tierId: string; parentId?: string } | { kind: "meter"; meterId: string } | { kind: "move"; nodeId: string }>(null);
+  const [setupEdit, setSetupEdit] = useState<null | { kind: "location"; nodeId: string } | { kind: "new"; tierId: string; parentId?: string } | { kind: "meter"; meterId: string } | { kind: "move"; nodeId: string } | { kind: "types" }>(null);
   const [setupBusy, setSetupBusy] = useState(false);
   const [setupError, setSetupError] = useState("");
   const [editingCalendar, setEditingCalendar] = useState(false);
@@ -171,6 +175,9 @@ export function ProjectConfigurationView({ setup, notes, policies, projectId, on
     {policyMessage && <p role="status" className={styles.statusMessage}>{policyMessage}</p>}
     <nav className={styles.tabs} aria-label={t("sections")}>{[["structure",t("tabFloor"),String(meters.length)],["devices",t("tabDevices"),""],["context",t("tabNotes"),notes ? (factCount ? String(factCount) : "") : t("stateAddNotes")],["policies",t("tabHours"),policies ? "" : t("stateUnavailable")],["holidays",t("tabHolidays"),!policies ? t("stateUnavailable") : holidayCount ? String(holidayCount) : ""],["tariff",t("tabRate"),!policies ? t("stateUnavailable") : tariff ? "" : t("stateAddRate")]].map(([id,title,state]) => <button key={id} aria-label={title} aria-pressed={tab === id} onClick={()=>setTab(id!)}><span>{title}</span>{state && <small>{state}</small>}</button>)}</nav>
     {tab === "structure" && editable && <MeterTotalsCheck document={doc} busy={setupBusy} onConfirm={() => doc.meter_mapping && void saveDraft({ ...doc, meter_mapping: { ...doc.meter_mapping, confirmed: true } }, t("totalsConfirmed"))} />}
+    {tab === "structure" && editable && !editingPlan && (setupEdit?.kind === "types"
+      ? <MeterTypeReview document={doc} busy={setupBusy} error={setupError} onCancel={() => setSetupEdit(null)} onSave={choices => { const next = applyMeterTypes(doc, choices, locale); if ("error" in next) setSetupError(next.error); else void saveDraft(next, typeText("saved")); }} />
+      : <MeterTypeBanner document={doc} onOpen={() => startSetupEdit({ kind: "types" })} />)}
     {tab === "structure" && editingPlan && projectId && <FloorPlanEditor projectId={projectId} notes={notes} block={spatial?.block ?? null} previous={(spatial?.reference as StoredSpatialReference | undefined) ?? null} meters={planMeters} boards={planBoards} onCancel={() => setEditingPlan(false)} onSaved={message => { setEditingPlan(false); setPolicyMessage(message); onPolicyChange?.(); }} />}
     {tab === "structure" && !editingPlan && <div className={styles.workspace}>
       <section className={styles.locations}><header><h3>{t("locations")}</h3>{!editable && edit("structure",t("editStructure"))}</header><ul className={styles.tree}>{tree}</ul>{editable && tiersTopDown[0] && <button type="button" className={styles.addLocation} onClick={() => startSetupEdit({ kind: "new", tierId: tiersTopDown[0]!.id })}>{t("addTier", { tier: tiersTopDown[0].alias })}</button>}{nodes.filter(node=>!seen.has(node.id)).map(node=><button className={styles.unassigned} key={node.id} onClick={()=>setSelectedId(node.id)}>{t("unresolved", { name: node.name })}</button>)}{meters.some(meter=>!names.has(meter.scope_id)) && <button className={styles.unassigned} onClick={()=>setSelectedId("unassigned")}>{t("unassignedMeters")}</button>}{!nodes.length && <div className={styles.empty}><h3>{t("firstLocation")}</h3>{edit("structure",t("organiseAdvisor"))}</div>}</section>

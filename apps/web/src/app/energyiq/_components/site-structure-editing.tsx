@@ -9,7 +9,9 @@ import { translatorFor, type EnergyIqLocale } from "./energyiq-messages";
 import { measurementMessages, structureMessages } from "./facility-messages";
 
 /** English names, also used as values in logic (e.g. `type === "Lighting"`); show measurementLabel() to readers. */
-export const MEASUREMENT_LABELS: Record<EnergyMeterCategoryDto, string> = { load: "Power", light: "Lighting", aircon: "Air conditioning", overall: "Total", other: "Other" };
+export const MEASUREMENT_LABELS: Record<EnergyMeterCategoryDto, string> = {
+  load: "Power", light: "Lighting", aircon: "Air conditioning", it: "IT & network", kitchen: "Kitchen & food", plug: "Plugs & sockets", overall: "Total", other: "Other",
+};
 /** What a meter measures, in the reader's language; unknown categories read as "Other", like MEASUREMENT_LABELS[category] ?? "Other". */
 export function measurementLabel(category: EnergyMeterCategoryDto | string, locale: EnergyIqLocale = "en"): string {
   return translatorFor(measurementMessages, locale)(category in MEASUREMENT_LABELS ? category as EnergyMeterCategoryDto : "other");

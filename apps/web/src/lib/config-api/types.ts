@@ -145,7 +145,7 @@ export type EnergyProjectSetupNodeDto = {
   metadata?: Record<string, unknown>;
 };
 
-export type EnergyMeterCategoryDto = "overall" | "load" | "light" | "aircon" | "other";
+export type EnergyMeterCategoryDto = "overall" | "load" | "light" | "aircon" | "it" | "kitchen" | "plug" | "other";
 export type EnergyMeterCoverageDto = "whole" | "partial" | "reference";
 export type EnergyMeterRoleDto = "total" | "component" | "standalone";
 export type EnergyAggregationUsageDto = "official" | "excluded";

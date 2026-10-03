@@ -7,7 +7,7 @@
  */
 import type { AnalysisCategory } from "./analysis-model.js";
 import { PLANNED_CLOSURE_SUFFIX } from "./analysis-messages.js";
-import type { AnalysisData, LoadedPeriod, ProjectAction, ScopeCircuit, ScopeData, TrendSeries } from "./analysis-types.js";
+import type { AnalysisData, LoadedPeriod, ProjectAction, ScopeCircuit, ScopeData, TrendCell, TrendSeries } from "./analysis-types.js";
 
 /**
  * The part of one Energy consumption result this mapping reads. Both the browser's response type and the server's
@@ -36,7 +36,7 @@ export type ProjectInformationSource = {
   calendar: null | { entries: Array<{ location: string; from: string; toExclusive: string | null; weekly: unknown; exceptions: Array<{ date: string; label: string; classification?: string | undefined }> }> };
 } | null;
 
-const CATEGORY_OF: Record<string, AnalysisCategory | "overall"> = { light: "light", load: "load", aircon: "aircon", overall: "overall" };
+const CATEGORY_OF: Record<string, AnalysisCategory | "overall"> = { light: "light", load: "load", aircon: "aircon", it: "it", kitchen: "kitchen", plug: "plug", overall: "overall" };
 export const categoryOf = (value: string): AnalysisCategory | "overall" => CATEGORY_OF[value] ?? "other";
 
 /** The project's own calendar day for an instant; readings are always grouped by the site's local dates. */
@@ -60,6 +60,43 @@ export function analysisScopeDates(analysis: AnalysisSource | null): string[] {
 /** Move a local date by whole days, staying on calendar dates rather than instants. */
 export const shiftScopeDate = (date: string, days: number): string => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 
+/**
+ * A site whose total is its main meter has no split by type of its own: the main meter is "Total". Add up the
+ * sub-meters below it by type instead. Totals come from each sub-meter's usage; hourly series only where the result
+ * carries the sub-meters' own readings, and an hour counts as complete only when every sub-meter of that type
+ * reported for all of it.
+ */
+function subMeterTypes(analysis: AnalysisSource, trends: TrendSeries[], typeTotals: Partial<Record<AnalysisCategory, number>>): Partial<Record<AnalysisCategory, TrendSeries>> {
+  const meters = new Map((analysis.explorerMeters ?? []).map(meter => [meter.id, meter]));
+  const parts = analysis.circuits.filter(circuit => meters.get(circuit.meterNodeId)?.kind !== "virtual"
+    && circuit.meterRole !== "total" && circuit.meterRole !== "derived"
+    && categoryOf(meters.get(circuit.meterNodeId)?.category ?? circuit.category) !== "overall");
+  const byType = new Map<AnalysisCategory, TrendSeries[]>();
+  for (const circuit of parts) {
+    const category = categoryOf(meters.get(circuit.meterNodeId)?.category ?? circuit.category) as AnalysisCategory;
+    typeTotals[category] = (typeTotals[category] ?? 0) + circuit.usageKwh;
+    const series = trends.find(item => item.id === circuit.meterNodeId);
+    byType.set(category, [...(byType.get(category) ?? []), ...(series ? [series] : [])]);
+  }
+  const types: Partial<Record<AnalysisCategory, TrendSeries>> = {};
+  for (const [category, list] of byType) {
+    // Without every sub-meter's readings, an hourly line for the type would quietly leave some of them out.
+    if (!list.length || list.length < parts.filter(circuit => categoryOf(meters.get(circuit.meterNodeId)?.category ?? circuit.category) === category).length) continue;
+    const hours = new Map<string, TrendCell[]>();
+    for (const series of list) for (const cell of series.cells) {
+      const key = `${cell[0]}\u0000${cell[1]}`;
+      hours.set(key, [...(hours.get(key) ?? []), cell]);
+    }
+    const cells = [...hours.values()].map((cells): TrendCell => {
+      const readings = cells.filter(cell => cell[2] != null);
+      return [cells[0]![0], cells[0]![1], readings.length ? readings.reduce((sum, cell) => sum + cell[2]!, 0) : null,
+        cells.length === list.length ? Math.min(...cells.map(cell => cell[3])) : 0, Math.max(...cells.map(cell => cell[4]))];
+    }).sort((left, right) => left[0].localeCompare(right[0]) || left[1] - right[1]);
+    types[category] = { id: `__category__:${category}`, expectedMinutesPerHour: Math.min(...list.map(series => series.expectedMinutesPerHour)), cells };
+  }
+  return types;
+}
+
 export function toScope(analysis: AnalysisSource, locations: Map<string, string>, name?: string): ScopeData {
   const trends = (analysis.explorerTrends ?? []) as TrendSeries[];
   const types: Partial<Record<AnalysisCategory, TrendSeries>> = {};
@@ -70,6 +107,7 @@ export function toScope(analysis: AnalysisSource, locations: Map<string, string>
   }
   const typeTotals: Partial<Record<AnalysisCategory, number>> = {};
   for (const item of analysis.categories) { const category = categoryOf(item.category); if (category !== "overall") typeTotals[category] = (typeTotals[category] ?? 0) + item.usageKwh; }
+  if (!Object.keys(types).length && !Object.keys(typeTotals).length) Object.assign(types, subMeterTypes(analysis, trends, typeTotals));
   const cost = analysis.cost.status === "available" ? analysis.cost : null;
   const basis = cost?.allocations[0]?.rateBasis;
   const rates = [...new Set(cost?.allocations.map(item => item.ratePerKwh) ?? [])];
@@ -105,8 +143,10 @@ export function rankCircuits(sources: AnalysisSource[], previous: { circuits?: A
   });
   const placeOf = (id: string) => meterLocations.get(id) ?? meters.get(id)?.scopeId ?? "";
   const official = (circuit: AnalysisSource["circuits"][number]) => meters.get(circuit.meterNodeId)?.includedInOfficialTotal ?? !!circuit.includedInOfficialTotal;
-  const subMeteredPlaces = new Set(physical.filter(circuit => !official(circuit)).map(circuit => placeOf(circuit.meterNodeId)));
-  const isTotal = (circuit: AnalysisSource["circuits"][number]) => circuit.meterRole === "total" || categoryOf(circuit.category) === "overall"
+  const mainMeter = (circuit: AnalysisSource["circuits"][number]) => circuit.meterRole === "total" || categoryOf(circuit.category) === "overall";
+  // A main meter left out of the sum is not a sub-meter: the circuits beside it are the real circuits, not totals.
+  const subMeteredPlaces = new Set(physical.filter(circuit => !official(circuit) && !mainMeter(circuit)).map(circuit => placeOf(circuit.meterNodeId)));
+  const isTotal = (circuit: AnalysisSource["circuits"][number]) => mainMeter(circuit)
     || (official(circuit) && subMeteredPlaces.has(placeOf(circuit.meterNodeId)));
   const circuits = physical.filter(circuit => !isTotal(circuit));
   return (circuits.length ? circuits : physical).map(circuit => {

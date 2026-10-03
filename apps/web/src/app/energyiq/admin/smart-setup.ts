@@ -4,6 +4,7 @@ import type {
   EnergyProjectSetupDocumentDto,
   EnergyProjectSetupNodeDto,
 } from "../../../lib/config-api";
+import { suggestMeterCategory } from "./meter-category-suggestion";
 import { buildOfficialAggregationRoutes, inferMeterCategory } from "./project-setup-model";
 
 /** One line of an admin-supplied device list, e.g. "A18P" → "Coffee machine x1, Warmer machine x1". */
@@ -107,7 +108,11 @@ export const detectTotalLabel = (labels: string[]): string | undefined => {
   return matches.length === 1 ? matches[0] : undefined;
 };
 
-const categoryFor = (label: string, equipment: string | undefined): EnergyMeterCategoryDto => {
+/** What a new circuit meter is used for: suggested from its name and equipment list, else the older label rules. */
+const categoryFor = (label: string, equipment: string | undefined): EnergyMeterCategoryDto =>
+  suggestMeterCategory(equipment ? `${label} · ${equipment}` : label) ?? fallbackCategory(label, equipment);
+
+const fallbackCategory = (label: string, equipment: string | undefined): EnergyMeterCategoryDto => {
   const fromLabel = inferMeterCategory(label);
   if (fromLabel !== "other" || !equipment) return fromLabel;
   const value = equipment.toLocaleLowerCase();

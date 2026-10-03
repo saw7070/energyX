@@ -151,6 +151,18 @@
 .totalsCheck { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:14px 18px; margin-bottom:16px; border-radius:12px; background:#fff4dc; color:#5e4309; }
 .totalsCheck p { font-size:13px; margin-top:2px; }
 .totalsCheck ul { margin:6px 0 0 18px; list-style:disc; font-size:13px; }
+.typesBanner { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:14px 18px; margin-bottom:16px; border-radius:12px; background:#eaf3ee; color:#1d4a35; }
+.typesBanner p { font-size:13px; margin-top:2px; }
+.typeRows { display:grid; }
+.typeRowHeading,.typeRow { display:grid; grid-template-columns:minmax(0,1fr) 220px; gap:12px; align-items:center; }
+.typeRowHeading { padding:0 0 8px; color:#7a8995; font-size:12px; border-bottom:1px solid #dce3e9; }
+.typeRow { padding:10px 0; border-bottom:1px solid #edf0f3; font-size:14px; }
+.typeRow > span { display:grid; gap:2px; min-width:0; overflow-wrap:anywhere; }
+.typeRow small { color:#627383; font-size:12.5px; }
+.typeSelect select { width:100%; min-height:36px; padding:6px 10px; border:1px solid #d0dbd2; border-radius:8px; background:white; font-size:14px; color:var(--color-foreground); }
+.typeSelect select:focus-visible { outline:2px solid #368c7c; outline-offset:1px; }
+.editorActions .formHint { margin-right:auto; align-self:center; }
+@media(max-width:760px) { .typeRowHeading { display:none; } .typeRow { grid-template-columns:1fr; gap:6px; } }
 .holidaySummary { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:12px; color:#586b5e; font-size:14px; }
 .version { color:#775209; background:#fff4dc; padding:8px 12px; border-radius:7px; font-size:13px; }
 .week { margin:16px 0; }
@@ -280,6 +292,12 @@
 :global(:where(html[data-energyiq-theme="dark"])) .moveGroup legend { color:#a3c0d4; }
 :global(:where(html[data-energyiq-theme="dark"])) .formHint { color:var(--color-muted); }
 :global(:where(html[data-energyiq-theme="dark"])) .totalsCheck { border-radius:12px; background:#241c09; color:#d4b580; }
+:global(:where(html[data-energyiq-theme="dark"])) .typesBanner { border-radius:12px; background:#1a211d; color:#9cccb2; }
+:global(:where(html[data-energyiq-theme="dark"])) .typeRowHeading { color:#7a8995; border-bottom:1px solid #31363b; }
+:global(:where(html[data-energyiq-theme="dark"])) .typeRow { border-bottom:1px solid #303234; }
+:global(:where(html[data-energyiq-theme="dark"])) .typeRow small { color:#96a8b9; }
+:global(:where(html[data-energyiq-theme="dark"])) .typeSelect select { border:1px solid #323b34; border-radius:8px; background:#191919; color:var(--color-foreground); }
+:global(:where(html[data-energyiq-theme="dark"])) .typeSelect select:focus-visible { outline:2px solid #368c7c; }
 :global(:where(html[data-energyiq-theme="dark"])) .holidaySummary { color:#9db1a3; }
 :global(:where(html[data-energyiq-theme="dark"])) .version { color:#d3a96b; background:#241c09; border-radius:7px; }
 :global(:where(html[data-energyiq-theme="dark"])) .week > div { border-bottom:1px solid #303234; }

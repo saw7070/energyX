@@ -4499,7 +4499,7 @@ const requiredComponentHourlyUsage = (
 };
 
 const componentProfileCategoryOrder = (left: string, right: string): number => {
-  const order = ["load", "light", "aircon", "other", "overall"];
+  const order = ["load", "light", "aircon", "it", "kitchen", "plug", "other", "overall"];
   const leftIndex = order.indexOf(left);
   const rightIndex = order.indexOf(right);
   return (leftIndex < 0 ? order.length : leftIndex)

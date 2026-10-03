@@ -240,14 +240,33 @@ export const buildOfficialAggregationRoutes = (
   rows: EnergyMeterMappingRowDto[],
 ): NonNullable<EnergyMeterMappingDraftDto["official_aggregation_routes"]> => {
   const nodesById = new Map(document.nodes.map((node) => [node.id, node]));
+  const scopeOf = (row: EnergyMeterMappingRowDto) => row.navigation_scope_id ?? row.scope_id;
+  const isBelow = (scopeId: string, ancestorId: string) => {
+    const visited = new Set<string>();
+    for (let current = nodesById.get(scopeId); current?.parent_id && !visited.has(current.parent_id); current = nodesById.get(current.parent_id)) {
+      if (current.parent_id === ancestorId) return true;
+      visited.add(current.parent_id);
+    }
+    return false;
+  };
+  // A site's one main meter with its circuits in locations below it (as Smart setup builds a board): the site total is
+  // that meter alone and its location is the sum of the circuits, so no location holds a total and its parts together.
+  const totals = rows.filter((row) => row.category === "overall" && row.meter_role === "total" && nodesById.has(scopeOf(row)));
+  const siteMain = totals.length === 1
+    && rows.some((row) => row !== totals[0] && row.aggregation_usage === "official" && isBelow(scopeOf(row), scopeOf(totals[0]!)))
+    ? totals[0]!
+    : null;
   const routeMembers = new Map<string, Set<string>>();
   const add = (scopeId: string, row: EnergyMeterMappingRowDto) => {
+    if (siteMain && scopeId === "project" && row !== siteMain) return;
     const key = `${scopeId}\u0000${row.resource}\u0000${row.category}`;
     const members = routeMembers.get(key) ?? new Set<string>();
     members.add(row.id);
     routeMembers.set(key, members);
   };
+  if (siteMain) add("project", siteMain);
   for (const row of rows) {
+    if (row === siteMain) continue;
     const navigationScopeId = row.navigation_scope_id ?? row.scope_id;
     if (!navigationScopeId || !nodesById.has(navigationScopeId)) continue;
     add(navigationScopeId, row);
@@ -268,6 +287,9 @@ export const buildOfficialAggregationRoutes = (
         || category === "load"
         || category === "light"
         || category === "aircon"
+        || category === "it"
+        || category === "kitchen"
+        || category === "plug"
         ? category
         : "other";
       return {
@@ -553,7 +575,8 @@ const stringMetadata = (value: unknown): string | undefined =>
   typeof value === "string" ? value : undefined;
 
 const meterCategoryMetadata = (value: unknown): EnergyMeterCategoryDto | undefined =>
-  value === "overall" || value === "load" || value === "light" || value === "aircon" || value === "other"
+  value === "overall" || value === "load" || value === "light" || value === "aircon"
+    || value === "it" || value === "kitchen" || value === "plug" || value === "other"
     ? value
     : undefined;
 

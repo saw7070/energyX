@@ -23,10 +23,23 @@ describe("energy breakdown with an incoming supply meter", () => {
     expect(shares.map((share) => share.id)).not.toContain("Incoming 3Phase");
     expect(shares.find((share) => !share.unmetered)?.name).toBe("B5B");
     const rest = shares.find((share) => share.unmetered)!;
-    expect(rest.name).toBe("Not sub-metered (Main distribution board)");
+    expect(rest.name).toBe("Not measured by a sub-meter");
     expect(rest.kwh).toBeCloseTo(3994 - 143 - 129 - 49, 6);
     // The pieces still add up to the measured supply.
     expect(shares.reduce((sum, share) => sum + share.kwh, 0)).toBeCloseTo(3994, 6);
+  });
+
+  it("treats the main meter as the site total when the circuits sit beside it, not under it", () => {
+    // As the live site lays Elite IOT out: "Elite IOT Site" holds the main meter, each circuit is a neighbouring area.
+    const flat = [
+      device("Incoming 3Phase", "site", 3772, { isBoardTotal: true, category: "overall", type: "Overall" }),
+      device("B5B", "b5b", 133),
+      device("B3B", "b3b", 121),
+    ];
+    const shares = energyBreakdown(flat, new Map([["site", "Elite IOT Site"]]), "en", new Map());
+    expect(shares.map((share) => share.id)).not.toContain("Incoming 3Phase");
+    expect(shares.find((share) => share.unmetered)).toMatchObject({ name: "Not measured by a sub-meter", kwh: 3772 - 133 - 121 });
+    expect(shares.reduce((sum, share) => sum + share.kwh, 0)).toBeCloseTo(3772, 6);
   });
 
   it("keeps the old behaviour for totals of one kind of use on their own board", () => {

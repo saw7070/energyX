@@ -220,6 +220,9 @@ function categoryLabel(value: string): string {
   const normalized = value.trim().toLowerCase();
   if (normalized === "aircon") return "Aircon";
   if (normalized === "light" || normalized === "lighting") return "Lighting";
+  if (normalized === "it") return "IT & network";
+  if (normalized === "kitchen") return "Kitchen & food";
+  if (normalized === "plug") return "Plugs & sockets";
   return "Load";
 }
 

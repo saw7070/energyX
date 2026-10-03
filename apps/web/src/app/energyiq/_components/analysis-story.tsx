@@ -20,6 +20,7 @@ import { EnergyIcon, type EnergyIconName } from "./icons";
 import { DayPicker } from "./day-picker";
 import { dayKindLabel, type DayKind as CalendarDayKind } from "./day-context";
 import { TypeHint } from "./type-hint";
+import { siteBreakdown, UNMETERED_KEY } from "./site-total";
 
 // The forecast's three colours: what really happened (green), next month's working days (blue) and its closed
 // days (pale blue, striped like the after-hours band in step 2), so past, working and closed never look alike.
@@ -196,18 +197,26 @@ function MoneySection({ story, data, money }: { story: Story; data: AnalysisData
   const value = (kwh: number) => rate != null ? kwh * rate : kwh;
   const format = (amount: number) => rate != null ? money(amount) : `${num(amount, 0)} kWh`;
   const spaceColors = ["#2a78d6", "#4a3aa7", "#1baf7a", "#eb6834", "#eda100", "#e87ba4", "#008300", "#e34948"];
-  const spaces = [...data.current.spaces].filter(space => (space.usageKwh ?? 0) > 0).sort((a, b) => (b.usageKwh ?? 0) - (a.usageKwh ?? 0))
-    .map((space, index) => ({ key: space.id, label: space.name, value: value(space.usageKwh ?? 0), color: spaceColors[index % spaceColors.length]! }));
-  const types = CATEGORY_ORDER.filter(category => (story.project.typeTotals[category] ?? 0) > 0)
+  const unmeteredColor = "#9aa5b1";
+  // The main meter is the site total, not an area: list what is below it, and what no sub-meter explains as its own line.
+  const breakdown = siteBreakdown({ projectKwh: data.current.project.usageKwh, spaces: data.current.spaces, circuits: data.circuits, unmeteredLabel: t("money.unmetered") });
+  let colour = 0;
+  const spaces = breakdown.rows.map(row => ({ key: row.key, label: row.label, value: value(row.kwh), color: row.unmetered ? unmeteredColor : spaceColors[colour++ % spaceColors.length]! }));
+  const types: Array<{ key: string; label: string; value: number; color: string; hint?: ReactNode }> = CATEGORY_ORDER.filter(category => (story.project.typeTotals[category] ?? 0) > 0)
     .map(category => ({ key: category, label: categoryLabel(category, locale), value: value(story.project.typeTotals[category]!), color: CATEGORY_COLORS[category], hint: <TypeHint category={category} examples={data.circuits.filter(circuit => circuit.category === category).slice(0, 3).map(circuit => circuit.name)} place={data.projectName} /> })).sort((a, b) => b.value - a.value);
+  if (types.length && breakdown.unmeteredKwh > 0) {
+    types.push({ key: UNMETERED_KEY, label: t("money.unmetered"), value: value(breakdown.unmeteredKwh), color: unmeteredColor, hint: <span title={t("money.unmeteredHint")}>{t("money.unmetered")}</span> });
+    types.sort((a, b) => b.value - a.value);
+  }
   const lead = spaces.length ? spaces : types;
+  const firstType = types.find(type => type.key !== UNMETERED_KEY);
   const all = lead.reduce((sum, row) => sum + row.value, 0);
-  const takeaway = lead[0] ? rich(t(spaces.length && types[0] ? "money.takeawayType" : "money.takeaway", { pct: num(lead[0].value / Math.max(all, 0.001) * 100, 0), what: t(rate != null ? "money.bill" : "money.energy") }), {
-    lead: <span className="font-medium text-slate-900">{lead[0].label}</span>, type: types[0] ? <span className="font-medium text-slate-900">{types[0].label.toLowerCase()}</span> : null,
+  const takeaway = lead[0]?.key === UNMETERED_KEY ? t("money.takeawayUnmetered", { pct: num(lead[0].value / Math.max(all, 0.001) * 100, 0) }) : lead[0] ? rich(t(spaces.length && firstType ? "money.takeawayType" : "money.takeaway", { pct: num(lead[0].value / Math.max(all, 0.001) * 100, 0), what: t(rate != null ? "money.bill" : "money.energy") }), {
+    lead: <span className="font-medium text-slate-900">{lead[0].label}</span>, type: firstType ? <span className="font-medium text-slate-900">{firstType.label.toLowerCase()}</span> : null,
   }) : t("money.none");
   return <StoryCard id="story-money" step={1} title={t(rate != null ? "money.title" : "money.titleEnergy")} takeaway={takeaway}>
     <div className={`grid gap-8 ${spaces.length && types.length ? "lg:grid-cols-2" : ""}`}>
-      {spaces.length > 0 && <ShareBars title={t("money.byArea")} rows={spaces} format={format} />}
+      {spaces.length > 0 && <ShareBars title={t(breakdown.byCircuit ? "money.byCircuit" : "money.byArea")} rows={spaces} format={format} />}
       {types.length > 0 && <ShareBars title={t("money.byType")} rows={types} format={format} />}
     </div>
   </StoryCard>;

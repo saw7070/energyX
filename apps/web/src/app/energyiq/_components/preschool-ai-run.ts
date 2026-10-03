@@ -1208,6 +1208,9 @@ function applianceCategoryLabel(value: string): string {
   if (category === "load") return "Plugload";
   if (category === "aircon") return "Air conditioning";
   if (category === "light") return "Lighting";
+  if (category === "it") return "IT & network";
+  if (category === "kitchen") return "Kitchen & food";
+  if (category === "plug") return "Plugs & sockets";
   return dayTypeLabel(value);
 }
 

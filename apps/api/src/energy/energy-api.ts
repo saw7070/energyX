@@ -43,6 +43,7 @@ import type {
   UserRecord,
 } from "@datafoundry/metadata";
 import {
+  activeEnergyIqImportBatches,
   createDefaultTemplateDocument,
   createEnergyIqSourceManifest,
   parseEnergyIqTemplateChangeProposalValue,
@@ -4847,7 +4848,7 @@ const parseMeterMappingDraft = (
       if (row.resource !== "electricity" && row.resource !== "water") {
         throw new Error(`ENERGYIQ_METER_RESOURCE_INVALID:${index}`);
       }
-      if (category !== "overall" && category !== "load" && category !== "light" && category !== "aircon" && category !== "other") {
+      if (category !== "overall" && category !== "load" && category !== "light" && category !== "aircon" && category !== "it" && category !== "kitchen" && category !== "plug" && category !== "other") {
         throw new Error(`ENERGYIQ_METER_CATEGORY_INVALID:${index}`);
       }
       if (coverage !== "whole" && coverage !== "partial" && coverage !== "reference") {
@@ -4885,7 +4886,7 @@ const parseMeterMappingDraft = (
         if (route.resource !== "electricity" && route.resource !== "water") {
           throw new Error(`ENERGYIQ_OFFICIAL_ROUTE_RESOURCE_INVALID:${index}`);
         }
-        if (category !== "overall" && category !== "load" && category !== "light" && category !== "aircon" && category !== "other") {
+        if (category !== "overall" && category !== "load" && category !== "light" && category !== "aircon" && category !== "it" && category !== "kitchen" && category !== "plug" && category !== "other") {
           throw new Error(`ENERGYIQ_OFFICIAL_ROUTE_CATEGORY_INVALID:${index}`);
         }
         return {
@@ -4904,7 +4905,7 @@ const parseMeterMappingDraft = (
           throw new Error(`ENERGYIQ_VIRTUAL_METER_TERMS_INVALID:${index}`);
         }
         const category = virtualMeter.category;
-        if (category !== "overall" && category !== "load" && category !== "light" && category !== "aircon" && category !== "other") {
+        if (category !== "overall" && category !== "load" && category !== "light" && category !== "aircon" && category !== "it" && category !== "kitchen" && category !== "plug" && category !== "other") {
           throw new Error(`ENERGYIQ_VIRTUAL_METER_CATEGORY_INVALID:${index}`);
         }
         return {
@@ -5101,7 +5102,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** Shared lifecycle entry points: browser Admin and bound Agent use the same publication pipeline. */
-export async function materializeAgentProjectSource(context: Required<ConfigApiContext>, projectId: string, batchId: string, dependencies: EnergyApiDependencies = DEFAULT_ENERGY_API_DEPENDENCIES): Promise<ConfigApiResponse> {
+export async function materializeAgentProjectSource(context: Required<ConfigApiContext>, projectId: string, batchId: string, dependencies: EnergyApiDependencies = DEFAULT_ENERGY_API_DEPENDENCIES, sourceManifestSha256?: readonly string[]): Promise<ConfigApiResponse> {
   const user = context.metadataStore.users.getById({user_id: context.userId});
   requireEnergyAdminProject(context, user, projectId);
         let overviewProjection: Awaited<ReturnType<typeof materializeCurrentProjectOverviewProjection>>
@@ -5113,6 +5114,7 @@ export async function materializeAgentProjectSource(context: Required<ConfigApiC
             userId: user.id,
             projectId,
             requestedBatchId: batchId,
+            ...(sourceManifestSha256 ? { sourceManifestSha256 } : {}),
           },
           publishProjection: async (_candidate, beforePublish) => {
             overviewProjection = await materializeConfiguredCurrentOverview({
@@ -5169,6 +5171,7 @@ export async function materializeAgentProjectSource(context: Required<ConfigApiC
 export async function applyProjectChangesNow(context: Required<ConfigApiContext>, projectId: string, dependencies: EnergyApiDependencies = DEFAULT_ENERGY_API_DEPENDENCIES): Promise<ConfigApiResponse> {
   const user = context.metadataStore.users.getById({ user_id: context.userId });
   requireEnergyAdminProject(context, user, projectId);
+  await rebuildReadingsForChangedMeters(context, projectId, user.id, dependencies);
   const draft = context.metadataStore.energyIq.projectSetup.getDraft({ project_id: projectId, user_id: user.id });
   const tierDefinitionIds = [...draft.document.tiers].sort((left, right) => right.ordinal - left.ordinal).map((tier) => tier.id);
   return publishAgentProjectSetup(context, projectId, {
@@ -5177,6 +5180,34 @@ export async function applyProjectChangesNow(context: Required<ConfigApiContext>
     expectedMetricConfigRevision: context.metadataStore.energyIq.metrics.getProjectConfig(projectId).revision,
     expectedRuleConfigRevision: context.metadataStore.energyIq.rules.getProjectConfig(projectId).revision,
   }, dependencies);
+}
+
+/**
+ * Moving a meter or changing its type changes how its readings are stored, so the stored readings no longer match the
+ * saved setup. Rebuild them under the saved setup first, as uploading data does. Any other reason the data is not
+ * ready still stops the change with that reason.
+ */
+async function rebuildReadingsForChangedMeters(context: Required<ConfigApiContext>, projectId: string, userId: string, dependencies: EnergyApiDependencies): Promise<void> {
+  const draft = context.metadataStore.energyIq.projectSetup.getDraft({ project_id: projectId, user_id: userId });
+  const readiness = await createProjectDataReadiness(context, projectId, draft.document);
+  if (readiness.ready || !readiness.blockingReasons.length
+    || readiness.blockingReasons.some((reason) => reason !== "SNAPSHOT_MAPPING_MISMATCH")) return;
+  // A live Tuya site's readings are the ones its last sync kept, as the readiness check above reads them.
+  const runtimeState = context.metadataStore.energyIq.sourceSync.findState({ project_id: projectId, source_kind: "tuya" });
+  const sourceManifestSha256 = runtimeState?.active_source_sha256.length ? runtimeState.active_source_sha256 : undefined;
+  const document = sourceManifestSha256
+    ? { ...draft.document, source_manifest: createEnergyIqSourceManifest(sourceManifestSha256, true) }
+    : draft.document;
+  const latest = activeEnergyIqImportBatches(context.metadataStore.energyIq.listImportBatches(projectId), document)
+    .filter((batch) => batch.status === "materialized")
+    .sort((left, right) => right.created_at.localeCompare(left.created_at))[0];
+  if (!latest) return;
+  try {
+    await materializeAgentProjectSource(context, projectId, latest.id, dependencies, sourceManifestSha256);
+  } catch (error) {
+    // Publishing below then stops with the usual "data not ready" reason; the log keeps why the rebuild failed.
+    console.warn(`[apply] readings rebuild failed project=${projectId} code=${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 export async function publishAgentProjectSetup(context: Required<ConfigApiContext>, projectId: string, body: Record<string, unknown>, dependencies: EnergyApiDependencies = DEFAULT_ENERGY_API_DEPENDENCIES): Promise<ConfigApiResponse> {

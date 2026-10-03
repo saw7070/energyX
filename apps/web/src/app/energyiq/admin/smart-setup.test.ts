@@ -77,6 +77,40 @@ describe("smart setup for a new project", () => {
     expect(blockingIssues(plan.document)).toEqual([]);
   });
 
+  it("sorts each new circuit by what its equipment is used for", () => {
+    const devices = [
+      ...parseDeviceList(ELITE_DEVICES),
+      { code: "B4B", description: "IP Camera x1, Work Desk x2, Printer x1" },
+      { code: "B5B", description: "Router x1, Modem x1, Server x1, IP Camera x5, POE Switch x1" },
+      { code: "B9P", description: "Waffle machine x1, Eggette machine x1" },
+    ];
+    const plan = buildSmartSetup({ document: emptyDocument(), projectId: "p", labels: ELITE_LABELS, devices });
+    const categories = Object.fromEntries(plan.document.meter_mapping!.rows.map((row) => [row.source_label, row.category]));
+    expect(categories).toEqual({
+      "Incoming 3Phase": "overall",
+      A18P: "kitchen",
+      B11P: "light",
+      B2R: "light",
+      B3B: "kitchen",
+      B4B: "it",
+      B5B: "it",
+      B6B: "plug",
+      B8P: "kitchen",
+      B9P: "kitchen",
+    });
+    // Each type of use gets its own route on the board, and the setup still passes server validation.
+    const boardCategories = plan.document.meter_mapping!.official_aggregation_routes!
+      .filter((route) => route.scope_id === "p-smart-board").map((route) => route.category).sort();
+    expect(boardCategories).toEqual(["it", "kitchen", "light", "plug"]);
+    expect(blockingIssues(plan.document)).toEqual([]);
+  });
+
+  it("falls back to the meter name when there is no equipment list", () => {
+    const plan = buildSmartSetup({ document: emptyDocument(), projectId: "p", labels: ["B4B", "DB1 Lighting", "Aircon 1"], devices: [] });
+    const categories = Object.fromEntries(plan.document.meter_mapping!.rows.map((row) => [row.source_label, row.category]));
+    expect(categories).toEqual({ B4B: "other", "DB1 Lighting": "light", "Aircon 1": "aircon" });
+  });
+
   it("adds circuits up to the site total when there is no incoming meter", () => {
     const plan = buildSmartSetup({ document: emptyDocument(), projectId: "p", labels: ["A18P", "B2R"], devices: [] });
     expect(plan.totalLabel).toBeUndefined();
@@ -105,6 +139,10 @@ describe("smart setup for an existing project", () => {
     expect(plan.newLabels).toEqual(["B6B"]);
     expect(plan.unplacedLabels).toEqual([]);
     expect(plan.rows.find((row) => row.sourceLabel === "B6B")).toMatchObject({ status: "new", location: "B6B", displayName: "B6B · Power Plug ×6" });
+    // New meters are sorted by their equipment; meters already set up keep the type they have.
+    const rows = plan.document.meter_mapping!.rows;
+    expect(rows.find((row) => row.source_label === "B6B")?.category).toBe("plug");
+    expect(rows.find((row) => row.source_label === "A18P")?.category).toBe("other");
     // An existing meter that still had its raw code picks up the name from the list.
     expect(plan.rows.find((row) => row.sourceLabel === "A18P")?.displayName).toBe("A18P · Coffee machine, Warmer machine");
     expect(blockingIssues(plan.document)).toEqual([]);
