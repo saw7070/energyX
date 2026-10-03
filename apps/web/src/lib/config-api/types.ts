@@ -151,7 +151,7 @@ export type EnergyMeterRoleDto = "total" | "component" | "standalone";
 export type EnergyAggregationUsageDto = "official" | "excluded";
 
 export type EnergyMeterMappingRowDto = {
-  presentation?: { device_name?: string; circuit_name?: string; group?: string };
+  presentation?: { device_name?: string; circuit_name?: string; group?: string; not_in_use?: string };
   id: string;
   source_label: string;
   scope_id: string;
@@ -355,6 +355,31 @@ export type EnergyProjectAlertsDto = {
   readKeys: string[];
 };
 
+/** Data availability for a period: each meter's share of readings received, against the contract target. */
+export type EnergyDataAvailabilityDto = {
+  from: string;
+  to: string;
+  timezone: string;
+  targetPct: number;
+  site: { availabilityPct: number | null; metersCounted: number; metersBelowTarget: number; outageCount: number; estimatedKwh: number; checkCount: number };
+  meters: Array<{
+    meterPointId: string;
+    name: string;
+    location?: string;
+    notInUse?: string;
+    status: "ok" | "below_target" | "stopped" | "no_readings" | "not_in_use";
+    availabilityPct: number;
+    realHours: number;
+    estimatedHours: number;
+    estimatedKwh: number;
+    missingHours: number;
+    longestOutageHours: number;
+    lastReadingAt?: string;
+    checks: Array<{ kind: "stuck_value" | "flat_zero"; from: string; to: string; hours: number; kwhPerHour: number }>;
+  }>;
+  outages: Array<{ meterPointId: string; name: string; from: string; to: string; hours: number; kind: "estimated" | "missing"; estimatedKwh: number; ongoing: boolean }>;
+};
+
 export type EnergyMeterHealthDto = {
   meters: Array<{
     meterPointId: string;
@@ -362,6 +387,8 @@ export type EnergyMeterHealthDto = {
     sourceLabel: string;
     status: "usable" | "insufficient_history" | "no_readings";
     lastReadingAt?: string;
+    /** Someone confirmed the meter is not in use, so its silence is expected. */
+    notInUse?: string;
   }>;
   summary: { total: number; usable: number; insufficientHistory: number; noReadings: number };
   dataThrough?: string;

@@ -31,6 +31,7 @@ const navigation: Array<NavigationItem | NavigationGroup> = [
   { id: "site-profile", label: "nav.facility", icon: "building", description: "nav.facility.hint", items: [
     { href: SITE_PROFILE, tab: "structure", label: "nav.floorLayout", icon: "floor", description: "nav.floorLayout.hint" },
     { href: SITE_PROFILE, tab: "devices", label: "nav.devices", icon: "meter", description: "nav.devices.hint" },
+    { href: SITE_PROFILE, tab: "availability", label: "nav.availability", icon: "check", description: "nav.availability.hint" },
     { href: SITE_PROFILE, tab: "context", label: "nav.projectNotes", icon: "info", description: "nav.projectNotes.hint" },
     { href: SITE_PROFILE, tab: "policies", label: "nav.operatingHours", icon: "clock", description: "nav.operatingHours.hint" },
     { href: SITE_PROFILE, tab: "holidays", label: "nav.holidays", icon: "calendar", description: "nav.holidays.hint" },

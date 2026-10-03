@@ -1297,6 +1297,15 @@ const rebuildProjectCumulativeQualityEvents = async (
   await duckDbRun(connection, "DROP TABLE canonical_cumulative_pairs");
 };
 
+/**
+ * Tuya meters report their running total about once an hour, and only when it has moved; an idle meter can stay quiet
+ * for hours. A quiet spell that ends with energy used is different: the meter was offline and its first reading back
+ * carries everything it counted meanwhile. That energy is real, but when it was used is not known, so the 15-minute
+ * intervals it is spread across are kept as an estimate ('gap'): they count in totals, never as real readings.
+ */
+export const TUYA_OUTAGE_MIN_HOURS = 3;
+export const TUYA_OUTAGE_MIN_KWH = 0.05;
+
 const rebuildProjectEventCumulativeIntervals = async (
   connection: DuckDbModule.Connection,
   projectId: string,
@@ -1317,7 +1326,9 @@ const rebuildProjectEventCumulativeIntervals = async (
     )
     SELECT *,
       date_diff('millisecond', previous_event_time, event_time) AS elapsed_milliseconds,
-      active_energy_kwh - previous_active_energy_kwh AS raw_delta_kwh
+      active_energy_kwh - previous_active_energy_kwh AS raw_delta_kwh,
+      date_diff('millisecond', previous_event_time, event_time) > ${TUYA_OUTAGE_MIN_HOURS * 3_600_000}
+        AND active_energy_kwh - previous_active_energy_kwh >= ${TUYA_OUTAGE_MIN_KWH} AS is_outage
     FROM ordered_readings
     WHERE previous_event_time IS NOT NULL
   `, [projectId]);
@@ -1363,6 +1374,7 @@ const rebuildProjectEventCumulativeIntervals = async (
         interval_start + INTERVAL '15 minutes' AS interval_end,
         SUM(overlap_milliseconds) AS covered_milliseconds,
         COUNT(*) FILTER (WHERE raw_delta_kwh < 0) AS negative_pair_count,
+        BOOL_OR(is_outage) AS estimated,
         ARG_MAX(workspace_id, event_time) AS workspace_id,
         ARG_MAX(import_batch_id, event_time) AS import_batch_id,
         ARG_MAX(scope_id, event_time) AS scope_id,
@@ -1394,7 +1406,7 @@ const rebuildProjectEventCumulativeIntervals = async (
       usage_kwh AS raw_delta_kwh,
       usage_kwh,
       usage_kwh * 4.0 AS average_kw,
-      'ok' AS quality_status,
+      CASE WHEN estimated THEN 'gap' ELSE 'ok' END AS quality_status,
       CAST(timezone(?, interval_start) AS DATE) AS local_date,
       CAST(date_part('hour', timezone(?, interval_start)) AS INTEGER) AS local_hour,
       CASE WHEN date_part('isodow', timezone(?, interval_start)) IN (6, 7)
@@ -1416,7 +1428,7 @@ const rebuildProjectEventCumulativeQualityEvents = async (
     DELETE FROM energy_quality_events
     WHERE project_id = ?
       AND source_reading_kind = 'cumulative_energy_event'
-      AND code IN ('boundary', 'negative_delta', 'tuya_event_readings_resampled')
+      AND code IN ('boundary', 'negative_delta', 'gap', 'tuya_event_readings_resampled')
   `, [projectId]);
   await duckDbRun(connection, `
     INSERT INTO energy_quality_events (${QUALITY_COLUMNS.join(", ")})
@@ -1451,6 +1463,24 @@ const rebuildProjectEventCumulativeQualityEvents = async (
       source_sha256
     FROM canonical_event_pairs
     WHERE raw_delta_kwh < 0
+  `);
+  // One record per outage: when the meter went quiet, when it came back and how much it counted meanwhile.
+  await duckDbRun(connection, `
+    INSERT INTO energy_quality_events (${QUALITY_COLUMNS.join(", ")})
+    SELECT
+      workspace_id, project_id, import_batch_id, meter_node_id, device_name, event_time,
+      'gap' AS code, 'warning' AS severity,
+      json_object(
+        'intervalStart', previous_event_time,
+        'intervalEnd', event_time,
+        'elapsedMinutes', elapsed_milliseconds / 60000.0,
+        'rawDeltaKwh', raw_delta_kwh,
+        'reason', 'offline_catch_up_estimated'
+      ) AS details_json,
+      'cumulative_energy_event' AS source_reading_kind,
+      source_sha256
+    FROM canonical_event_pairs
+    WHERE is_outage
   `);
   await duckDbRun(connection, `
     INSERT INTO energy_quality_events (${QUALITY_COLUMNS.join(", ")})

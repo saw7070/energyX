@@ -16,6 +16,7 @@ import type {
   DevIdentityUser,
   EnergyAccessContextDto,
   EnergyMeterHealthDto,
+  EnergyDataAvailabilityDto,
   EnergyProjectAlertsDto,
   EnergyAdminOrganisationDto,
   EnergyAdminUserDto,
@@ -391,6 +392,12 @@ export const configApi = {
 
   getEnergyProjectMeterHealth(projectId: string): Promise<EnergyMeterHealthDto> {
     return requestEnvelope<EnergyMeterHealthDto>(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/meter-health`);
+  },
+
+  /** How much of a period each meter's readings were received; the last 30 complete days unless dates are given. */
+  getEnergyDataAvailability(projectId: string, period?: { from: string; to: string }): Promise<EnergyDataAvailabilityDto> {
+    const query = period ? `?from=${encodeURIComponent(period.from)}&to=${encodeURIComponent(period.to)}` : "";
+    return requestEnvelope<EnergyDataAvailabilityDto>(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/data-availability${query}`);
   },
 
   getEnergyAccessContext(options?: { workspaceId?: string; signal?: AbortSignal }): Promise<EnergyAccessContextDto> {

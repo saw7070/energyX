@@ -163,7 +163,7 @@ export const lastSentText = (iso: string, timezone: string, locale: EnergyIqLoca
 /** Findings that ask the reader to do something are drawn to be noticed; the rest simply report. */
 const needsAttention = (finding: Finding) => finding.icon === "alert" || finding.icon === "info";
 /** Deterministic, plain-language highlights. Savings are framed as questions to check, never as proven waste. */
-export function siteFindings({ rows, stats, shares, siteKwh, rate, openingHours, board = null, locale = "en", timezone }: { rows: DeviceRow[]; stats: Map<string, DeviceStatistics>; shares: EnergyShare[]; siteKwh: number; rate: number | null; openingHours: string | null; /** The board's name when the figures cover one board; the whole site otherwise. */ board?: string | null; locale?: EnergyIqLocale; timezone?: string }): Finding[] {
+export function siteFindings({ rows, stats, shares, siteKwh, rate, openingHours, board = null, locale = "en", timezone, notInUse = new Set() }: { rows: DeviceRow[]; stats: Map<string, DeviceStatistics>; shares: EnergyShare[]; siteKwh: number; rate: number | null; openingHours: string | null; /** The board's name when the figures cover one board; the whole site otherwise. */ board?: string | null; locale?: EnergyIqLocale; timezone?: string; /** Meters someone confirmed are not in use: their silence is not a problem. */ notInUse?: ReadonlySet<string> }): Finding[] {
   const t = translatorFor(deviceMessages, locale);
   const { kwh, kw, pct, sgd } = numberFormats(locale);
   const findings: Finding[] = [];
@@ -177,10 +177,10 @@ export function siteFindings({ rows, stats, shares, siteKwh, rate, openingHours,
   if (alwaysOn) findings.push({ icon: "bolt", title: t("finding.alwaysOn.title", { name: alwaysOn.row.name }), detail: rate ? t("finding.alwaysOn.siteCost", { kw: kw(alwaysOn.kw), amount: sgd(alwaysOn.kw * 24 * 365 * rate) }) : t("finding.alwaysOn.site", { kw: kw(alwaysOn.kw) }) });
   const unmetered = shares.filter(share => share.unmetered && siteKwh > 0 && share.kwh / siteKwh >= 0.2).sort((a, b) => b.kwh - a.kwh)[0];
   if (unmetered) findings.push({ icon: "meter", title: t("finding.unmetered.title"), detail: t("finding.unmetered.detail", { name: unmetered.name, kwh: kwh(unmetered.kwh), pct: pct(unmetered.kwh / siteKwh * 100) }) });
-  const silent = rows.filter(row => row.status === "silent");
+  const silent = rows.filter(row => row.status === "silent" && !notInUse.has(row.id));
   // A meter that was healthy and went quiet is a site problem, not thin data:
   // something was switched off, tripped, or fell off the network.
-  const stopped = rows.filter(row => row.status === "stopped" && row.stoppedAt);
+  const stopped = rows.filter(row => row.status === "stopped" && row.stoppedAt && !notInUse.has(row.id));
   if (stopped.length && timezone) {
     const earliest = [...stopped].sort((left, right) => left.stoppedAt!.localeCompare(right.stoppedAt!))[0]!;
     findings.push({
@@ -372,7 +372,7 @@ function DevicePicker({ rows, boardName, value, onPick }: { rows: DeviceRow[]; b
   </div>;
 }
 
-export function SiteDevices({ projectId, boardNames, boardParents }: { projectId: string; boardNames: Map<string, string>; boardParents?: Map<string, string> }) {
+export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: { projectId: string; boardNames: Map<string, string>; boardParents?: Map<string, string>; notInUse?: ReadonlySet<string> }) {
   const t = useMessages(deviceMessages);
   const tChart = useMessages(chartMessages);
   const { locale } = useEnergyIqLocale();
@@ -493,7 +493,7 @@ export function SiteDevices({ projectId, boardNames, boardParents }: { projectId
     const scopeName = isSite ? t("scope.site") : label;
     const scopeKwh = analysis.summary.usageKwh;
     const shares = energyBreakdown(rows, boardNames, locale, boardParents);
-    const findings = siteFindings({ rows, stats, shares, siteKwh: scopeKwh, rate, openingHours, board: isSite ? null : boardName(boardId), locale, timezone: summary.timezone });
+    const findings = siteFindings({ rows, stats, shares, siteKwh: scopeKwh, rate, openingHours, board: isSite ? null : boardName(boardId), locale, timezone: summary.timezone, ...(notInUse ? { notInUse } : {}) });
     const dailyAverage = analysis.summary.averageDailyUsageKwh;
     const offHours = analysis.offHours.status === "available" ? analysis.offHours : null;
     const peakAt = peakText(analysis.summary.peakAt);

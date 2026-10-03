@@ -678,6 +678,53 @@ describe("writeEnergyFactProjectMaterialization", () => {
     ]);
   });
 
+  it("keeps energy counted during a Tuya outage as an estimate, but a quiet idle spell as real readings", async () => {
+    const databasePath = ":memory:";
+    const projectId = "project-tuya-outage";
+    const batch = eventBatch({
+      databasePath,
+      projectId,
+      importBatchId: "tuya-outage",
+      sourceSha256: "tuya-outage-sha",
+      readings: [
+        ["2026-05-01T00:00:00.000Z", 100],
+        ["2026-05-01T01:00:00.000Z", 100.2],
+        // Offline for 6 hours; the first reading back carries the 3 kWh used meanwhile.
+        ["2026-05-01T07:00:00.000Z", 103.2],
+        ["2026-05-01T08:00:00.000Z", 103.4],
+        // Idle for 5 hours: almost nothing used, so nothing is missing.
+        ["2026-05-01T13:00:00.000Z", 103.41],
+      ],
+    });
+
+    await writeProjectSnapshot(batch, [batch], "snapshot-tuya-outage", [batch.sourceSha256], "unavailable");
+
+    const facts = await readCanonicalIntervals(databasePath, projectId);
+    const statusAt = (iso: string) => facts.find((fact) => (fact.interval_start as Date).toISOString() === iso)?.quality_status;
+    expect(statusAt("2026-05-01T00:45:00.000Z")).toBe("ok");
+    expect(statusAt("2026-05-01T01:00:00.000Z")).toBe("gap");
+    expect(statusAt("2026-05-01T06:45:00.000Z")).toBe("gap");
+    expect(statusAt("2026-05-01T07:00:00.000Z")).toBe("ok");
+    expect(statusAt("2026-05-01T10:00:00.000Z")).toBe("ok");
+    // The estimate still adds up to what the meter counted.
+    const estimated = facts.filter((fact) => fact.quality_status === "gap");
+    expect(estimated).toHaveLength(24);
+    expect(estimated.reduce((sum, fact) => sum + Number(fact.usage_kwh), 0)).toBeCloseTo(3, 6);
+
+    const database = await getDuckDbDatabase(databasePath);
+    const connection = database.connect();
+    try {
+      const events = await new Promise<Array<Record<string, unknown>>>((resolve, reject) => {
+        connection.all(`SELECT code, CAST(details_json AS VARCHAR) AS details FROM energy_quality_events WHERE project_id = ? AND code = 'gap'`, projectId,
+          (error, rows) => error ? reject(error) : resolve(rows as Array<Record<string, unknown>>));
+      });
+      expect(events).toHaveLength(1);
+      expect(JSON.parse(String(events[0]!.details))).toMatchObject({ elapsedMinutes: 360, rawDeltaKwh: expect.closeTo(3, 6), reason: "offline_catch_up_estimated" });
+    } finally {
+      await new Promise<void>((resolve, reject) => connection.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
   it("keeps project-wide cumulative gaps aggregate-eligible without making them cadence-eligible", async () => {
     const databasePath = ":memory:";
     const projectId = "project-cross-batch-quality";

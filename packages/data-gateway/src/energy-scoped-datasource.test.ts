@@ -17,6 +17,7 @@ import {
   exportEnergyScopedCsv,
   readEnergyScopedActionIntervals,
   readEnergyAnalysisEligibleCoverage,
+  readEnergyMeterIntervalCoverage,
   readEnergyCurrentOverviewPeriod,
   readEnergyFactCoverage,
   readEnergyReportingCoverage,
@@ -68,6 +69,31 @@ describe("Energy scoped datasource Snapshot guard", () => {
         to: "2026-05-01T00:45:00.000Z",
         intervalCount: 2,
       });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("reads each meter's real and estimated intervals inside a period, and nothing outside it", async () => {
+    const fixture = await createCoverageFixture([
+      { start: "2026-05-01T00:00:00.000Z", qualityStatus: "ok" },
+      { start: "2026-05-01T00:15:00.000Z", qualityStatus: "gap" },
+      { start: "2026-05-01T00:30:00.000Z", qualityStatus: "ok" },
+      { start: "2026-05-01T01:00:00.000Z", qualityStatus: "ok" },
+    ]);
+    try {
+      const rows = await readEnergyMeterIntervalCoverage({
+        ...fixture.input,
+        meterPointIds: ["meter-a"],
+        fromMs: Date.parse("2026-05-01T00:10:00.000Z"),
+        toMs: Date.parse("2026-05-01T00:45:00.000Z"),
+      });
+      expect(rows.map((row) => [new Date(row.startMs).toISOString(), row.qualityStatus])).toEqual([
+        ["2026-05-01T00:00:00.000Z", "ok"],
+        ["2026-05-01T00:15:00.000Z", "gap"],
+        ["2026-05-01T00:30:00.000Z", "ok"],
+      ]);
+      await expect(readEnergyMeterIntervalCoverage({ ...fixture.input, meterPointIds: [], fromMs: 0, toMs: 1 })).resolves.toEqual([]);
     } finally {
       fixture.close();
     }

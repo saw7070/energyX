@@ -20,7 +20,7 @@ function ProjectPage({ projectId }: { projectId: string }) {
   const project = access?.projects.find(p => p.id === projectId);
   return (project?.capabilities?.editConfiguration ?? access?.role === "admin") ? <Configuration projectId={projectId} canPublish={project?.capabilities?.publishConfiguration ?? access?.role === "admin"} /> : <PublishedProjectInformation projectId={projectId} />;
 }
-const TABS = new Set(["structure", "devices", "context", "policies", "holidays", "tariff"]);
+const TABS = new Set(["structure", "devices", "availability", "context", "policies", "holidays", "tariff"]);
 function Configuration({ projectId, canPublish }: { projectId: string; canPublish: boolean }) {
   const t = useMessages(facilityPageMessages);
   const router = useRouter();

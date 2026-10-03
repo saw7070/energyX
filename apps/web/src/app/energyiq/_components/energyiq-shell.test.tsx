@@ -219,7 +219,7 @@ describe("EnergyX Shell Project navigation", () => {
     const current = container.querySelector('a[aria-current="page"]');
     expect(current?.getAttribute("aria-label")).toBe("Holidays");
     expect(current?.getAttribute("href")).toBe("/energyiq/project-configuration?projectId=project-a&tab=holidays");
-    expect(Array.from(container.querySelectorAll("#nav-group-site-profile a")).map(link => link.getAttribute("aria-label"))).toEqual(["Floor layout", "Devices", "Project notes", "Operating hours", "Holidays", "Electricity rate"]);
+    expect(Array.from(container.querySelectorAll("#nav-group-site-profile a")).map(link => link.getAttribute("aria-label"))).toEqual(["Floor layout", "Devices", "Data availability", "Project notes", "Operating hours", "Holidays", "Electricity rate"]);
     const ai = container.querySelector<HTMLButtonElement>('button[aria-controls="nav-group-ai"]');
     expect(ai?.getAttribute("aria-expanded")).toBe("false");
     await act(async () => ai?.click());

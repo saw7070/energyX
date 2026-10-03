@@ -29,7 +29,8 @@ const STOPPED_AFTER_MS = 12 * 60 * 60_000;
 
 /** The meters that were sending and went quiet, furthest behind first. */
 export function stoppedMeters(meters: ReadonlyArray<Quiet>): Quiet[] {
-  const sending = meters.filter(meter => meter.status === "usable" && meter.lastReadingAt);
+  // A meter someone confirmed is not in use is quiet on purpose.
+  const sending = meters.filter(meter => meter.status === "usable" && meter.lastReadingAt && !meter.notInUse);
   const newest = sending.reduce((latest, meter) => Math.max(latest, Date.parse(meter.lastReadingAt!)), 0);
   if (!newest) return [];
   return sending

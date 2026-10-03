@@ -480,6 +480,77 @@ export const readEnergyMeterDataHealth = async (input: {
   }
 };
 
+export type EnergyMeterIntervalCoverage = {
+  meterPointId: string;
+  startMs: number;
+  endMs: number;
+  /** 'ok' is a real reading; 'gap' is energy the meter counted while offline, spread as an estimate. */
+  qualityStatus: string;
+  usageKwh: number | null;
+};
+
+/**
+ * Every interval each meter covers between two instants, for working out how much of a period it reported. Only the
+ * snapshot's own sources count, as for {@link readEnergyMeterDataHealth}.
+ */
+export const readEnergyMeterIntervalCoverage = async (input: {
+  metadataStore: MetadataStore;
+  workspaceId: string;
+  projectId: string;
+  dataSnapshotId: string;
+  resource: "electricity" | "water";
+  meterPointIds: readonly string[];
+  fromMs: number;
+  toMs: number;
+  databasePath?: string;
+}): Promise<EnergyMeterIntervalCoverage[]> => {
+  if (!input.meterPointIds.length || input.toMs <= input.fromMs) return [];
+  const databasePath = input.databasePath
+    ? input.databasePath === ":memory:" ? input.databasePath : resolve(input.databasePath)
+    : resolveEnergyFactStorePath(input.workspaceId);
+  if (databasePath !== ":memory:" && !existsSync(databasePath)) {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  }
+  const factScope = await resolveValidatedSnapshotFactScope({
+    metadataStore: input.metadataStore,
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    dataSnapshotId: input.dataSnapshotId,
+    databasePath,
+  });
+  const database = await getDuckDbDatabase(databasePath);
+  const connection = database.connect();
+  try {
+    const rows = await duckDbAll(connection, `
+      WITH snapshot_guard AS MATERIALIZED (
+        SELECT ${snapshotGuardSql(factScope)} AS snapshot_valid
+      )
+      SELECT meter_node_id, epoch_ms(interval_start) AS start_ms, epoch_ms(interval_end) AS end_ms, quality_status, usage_kwh
+      FROM snapshot_guard
+      CROSS JOIN energy_interval_facts
+      WHERE snapshot_guard.snapshot_valid
+        AND workspace_id = ${sqlLiteral(input.workspaceId)}
+        AND project_id = ${sqlLiteral(input.projectId)}
+        AND resource = ${sqlLiteral(input.resource)}
+        AND source_reading_kind IN ('cumulative_energy', 'interval_usage')
+        AND lower(source_sha256) IN (${factScope.sourceSha256.map(sqlLiteral).join(", ")})
+        AND meter_node_id IN (${input.meterPointIds.map(sqlLiteral).join(", ")})
+        AND interval_end > to_timestamp(${Math.trunc(input.fromMs)} / 1000.0)
+        AND interval_start < to_timestamp(${Math.trunc(input.toMs)} / 1000.0)
+      ORDER BY meter_node_id, interval_start
+    `);
+    return rows.map((row) => ({
+      meterPointId: String(row.meter_node_id),
+      startMs: numericValue(row.start_ms) ?? 0,
+      endMs: numericValue(row.end_ms) ?? 0,
+      qualityStatus: String(row.quality_status),
+      usageKwh: numericValue(row.usage_kwh) ?? null,
+    }));
+  } finally {
+    await duckDbClose(connection).catch(ignoreAlreadyClosed);
+  }
+};
+
 export const readEnergyCurrentOverviewPeriod = async (input: {
   metadataStore: MetadataStore;
   workspaceId: string;

@@ -22,7 +22,9 @@ import {
   readEnergyAnalysisEligibleCoverage,
   readEnergyFactCoverage,
   readEnergyMeterDataHealth,
+  readEnergyMeterIntervalCoverage,
 } from "@datafoundry/data-gateway";
+import { resolveDataAvailabilityPeriod, summariseDataAvailability } from "./energy-data-availability.js";
 import type {
   EnergyIqAcademicCalendarPeriod,
   EnergyIqDataSnapshotRecord,
@@ -1585,6 +1587,77 @@ export const handleEnergyApiRequest = async (
     }
     // Which meters are actually reporting. Everyone who can read the project can see this: a meter that
     // stopped sending is something the site notices, not something only an administrator should discover.
+    // Data availability: how much of a period each meter's readings were actually received, against HDB's 95%.
+    if (segments[0] === "projects" && segments[2] === "data-availability" && segments.length === 3 && request.method === "GET") {
+      const projectId = decodeURIComponent(segments[1] ?? "");
+      if (!resolveEnergyProjectCapabilities({ metadataStore: context.metadataStore, userId: user.id, workspaceId: context.workspaceId, projectId }).readProjectInformation) throw Error("ENERGYIQ_PROJECT_FORBIDDEN");
+      const project = context.metadataStore.energyIq.getProject(projectId);
+      const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+      const period = resolveDataAvailabilityPeriod({
+        from: requestUrl.searchParams.get("from"),
+        to: requestUrl.searchParams.get("to"),
+        nowMs: Date.now(),
+        timezone: project.timezone,
+      });
+      return await withEnergyProjectPublicationReadLock({
+        metadataStore: context.metadataStore,
+        workspaceId: project.workspace_id,
+        projectId,
+      }, async () => {
+        const snapshot = context.metadataStore.energyIq.findCurrentDataSnapshot(projectId);
+        const hierarchyRevisionId = project.hierarchy_revision_id;
+        const meterPoints = snapshot && hierarchyRevisionId ? resolveEnergyPublishedMeterPoints({
+          metadataStore: context.metadataStore,
+          projectId,
+          hierarchyRevisionId,
+          resource: "electricity",
+        }) : [];
+        const details = hierarchyRevisionId ? readPublishedMeterDetails(context.metadataStore, projectId, hierarchyRevisionId) : new Map();
+        const [health, intervals] = snapshot && meterPoints.length ? await Promise.all([
+          readEnergyMeterDataHealth({
+            metadataStore: context.metadataStore,
+            workspaceId: project.workspace_id,
+            projectId,
+            dataSnapshotId: snapshot.id,
+            resource: "electricity",
+            meterPoints,
+          }),
+          readEnergyMeterIntervalCoverage({
+            metadataStore: context.metadataStore,
+            workspaceId: project.workspace_id,
+            projectId,
+            dataSnapshotId: snapshot.id,
+            resource: "electricity",
+            meterPointIds: meterPoints.map((meterPoint) => meterPoint.meterPointId),
+            fromMs: period.fromMs,
+            toMs: period.toMs,
+          }),
+        ]) : [[], []];
+        const summary = summariseDataAvailability({
+          fromMs: period.fromMs,
+          toMs: period.toMs,
+          meters: meterPoints.map((meterPoint) => {
+            const detail = details.get(meterPoint.meterPointId);
+            return {
+              meterPointId: meterPoint.meterPointId,
+              name: detail?.name ?? meterPoint.sourceLabel,
+              ...(detail?.location ? { location: detail.location } : {}),
+              ...(detail?.notInUse ? { notInUse: detail.notInUse } : {}),
+            };
+          }),
+          intervals,
+          lastReadingAt: new Map(health.flatMap((meterPoint) => {
+            const last = meterPoint.coverageTo ?? meterPoint.readingTo;
+            return last ? [[meterPoint.meterPointId, last] as const] : [];
+          })),
+        });
+        return {
+          status: 200,
+          headers: { "Cache-Control": "private, no-store" },
+          body: createSuccessResult({ from: period.from, to: period.to, timezone: project.timezone, ...summary }),
+        };
+      });
+    }
     if (segments[0] === "projects" && segments[2] === "meter-health" && segments.length === 3 && request.method === "GET") {
       const projectId = decodeURIComponent(segments[1] ?? "");
       if (!resolveEnergyProjectCapabilities({ metadataStore: context.metadataStore, userId: user.id, workspaceId: context.workspaceId, projectId }).readProjectInformation) throw Error("ENERGYIQ_PROJECT_FORBIDDEN");
@@ -1613,12 +1686,13 @@ export const handleEnergyApiRequest = async (
           resource: "electricity",
           meterPoints,
         });
-        const names = readPublishedMeterNames(context.metadataStore, projectId, hierarchyRevisionId);
+        const details = readPublishedMeterDetails(context.metadataStore, projectId, hierarchyRevisionId);
         const meters = health.map((meterPoint) => ({
           meterPointId: meterPoint.meterPointId,
-          name: names.get(meterPoint.meterPointId) ?? meterPoint.sourceLabel,
+          name: details.get(meterPoint.meterPointId)?.name ?? meterPoint.sourceLabel,
           sourceLabel: meterPoint.sourceLabel,
           status: meterPoint.status,
+          ...(details.get(meterPoint.meterPointId)?.notInUse ? { notInUse: details.get(meterPoint.meterPointId)!.notInUse } : {}),
           ...(meterPoint.coverageTo ?? meterPoint.readingTo ? { lastReadingAt: meterPoint.coverageTo ?? meterPoint.readingTo } : {}),
         }));
         const summary = meters.reduce((total, meterPoint) => {
@@ -3046,13 +3120,25 @@ const toEnergySourceSyncRunDto = (run: EnergyIqSourceSyncRunRecord) => ({
   ...(run.completed_at ? { completedAt: run.completed_at } : {}),
 });
 
-/** The name people gave a meter in the published setup; the panel label is the fallback. */
-const readPublishedMeterNames = (metadataStore: Required<ConfigApiContext>["metadataStore"], projectId: string, hierarchyRevisionId: string): Map<string, string> => {
+/** Each meter's name as people gave it (the panel label is the fallback), its location and, if someone said so, why it is not in use. */
+const readPublishedMeterDetails = (metadataStore: Required<ConfigApiContext>["metadataStore"], projectId: string, hierarchyRevisionId: string): Map<string, { name: string; location?: string; notInUse?: string }> => {
   const revision = metadataStore.energyIq.projectSetup.listHierarchyRevisions(projectId).find((candidate: { id: string }) => candidate.id === hierarchyRevisionId);
   if (!revision) return new Map();
-  const document = JSON.parse(revision.snapshot_json) as { meter_mapping?: { rows?: Array<{ id: string; display_name?: string; source_label?: string; presentation?: { device_name?: string } }> } };
-  return new Map((document.meter_mapping?.rows ?? []).map((row) => [row.id, row.presentation?.device_name || row.display_name || row.source_label || row.id]));
+  const document = JSON.parse(revision.snapshot_json) as {
+    nodes?: Array<{ id: string; name: string }>;
+    meter_mapping?: { rows?: Array<{ id: string; display_name?: string; source_label?: string; scope_id?: string; navigation_scope_id?: string; presentation?: { device_name?: string; not_in_use?: string } }> };
+  };
+  const nodeNames = new Map((document.nodes ?? []).map((node) => [node.id, node.name]));
+  return new Map((document.meter_mapping?.rows ?? []).map((row) => {
+    const location = nodeNames.get(row.navigation_scope_id ?? row.scope_id ?? "");
+    return [row.id, {
+      name: row.presentation?.device_name || row.display_name || row.source_label || row.id,
+      ...(location ? { location } : {}),
+      ...(row.presentation?.not_in_use ? { notInUse: row.presentation.not_in_use } : {}),
+    }];
+  }));
 };
+
 
 const createTuyaSyncStatus = async (
   context: Required<ConfigApiContext>,
@@ -4817,7 +4903,7 @@ const parseTemplatePresentation = (
 
 const parseMeterPresentation = (value: unknown) => {
   const presentation = requireRecord(value, "ENERGYIQ_METER_PRESENTATION_INVALID");
-  return Object.fromEntries(["device_name", "circuit_name", "group"].flatMap(key => {
+  return Object.fromEntries(["device_name", "circuit_name", "group", "not_in_use"].flatMap(key => {
     if (presentation[key] === undefined) return [];
     if (typeof presentation[key] !== "string") throw new Error(`ENERGYIQ_METER_PRESENTATION_INVALID:${key}`);
     const label = presentation[key].trim().slice(0, 160);
