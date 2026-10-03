@@ -48,6 +48,14 @@
 .editForm input { min-height:36px; padding:6px 10px; border:1px solid #d0dbd2; border-radius:8px; background:white; font-size:14px; font-weight:400; color:#1f2d25; }
 .editForm p { font-size:12.5px; color:#627383; }
 .editActions { display:flex; gap:8px; }
+.pickLabel { font-size:13px; font-weight:600; color:#41534a; }
+.reasons { display:flex; flex-wrap:wrap; gap:8px; }
+.reason { min-height:36px; padding:6px 14px; border:1px solid #c9d6cc; border-radius:999px; background:white; color:#1d513a; font-size:14px; font-weight:600; }
+.reason:hover { background:#eef3ed; border-color:#9cbfa9; }
+.reason[aria-pressed="true"] { background:#e3f1e8; border-color:#2f7a55; }
+.reason:disabled { opacity:.5; cursor:not-allowed; }
+.otherForm { display:flex; flex-wrap:wrap; align-items:flex-end; gap:8px; }
+.otherForm label { flex:1 1 280px; }
 .section h4 { font-size:17px; font-weight:650; color:#24352b; margin-bottom:8px; }
 .footnote { font-size:13px; color:#586b5e; line-height:1.55; max-width:90ch; }
 @media(max-width:760px) { .panel { padding:18px; } .received { grid-template-columns:70px auto; } }
@@ -89,6 +97,10 @@
 :global(:where(html[data-energyiq-theme="dark"])) .editForm label { color:#9db1a3; }
 :global(:where(html[data-energyiq-theme="dark"])) .editForm input { border:1px solid #323b34; border-radius:8px; background:#191919; color:#bfd1c6; }
 :global(:where(html[data-energyiq-theme="dark"])) .editForm p { color:#96a8b9; }
+:global(:where(html[data-energyiq-theme="dark"])) .pickLabel { color:#a8bdb2; }
+:global(:where(html[data-energyiq-theme="dark"])) .reason { border:1px solid #333d35; border-radius:999px; background:#191919; color:#94caae; }
+:global(:where(html[data-energyiq-theme="dark"])) .reason:hover { background:#1c201c; border-color:#2b4a38; }
+:global(:where(html[data-energyiq-theme="dark"])) .reason[aria-pressed="true"] { background:#19231d; border-color:#2f7a55; }
 :global(:where(html[data-energyiq-theme="dark"])) .section h4 { color:#b9cdc0; }
 :global(:where(html[data-energyiq-theme="dark"])) .footnote { color:#9db1a3; }
 /* energyiq-dark-theme:end */

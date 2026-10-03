@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EnergyDataAvailabilityDto, EnergyProjectSetupDocumentDto } from "../../../lib/config-api";
-import { applyMeterNotInUse, availabilityCsv, availabilityPeriods, siteDateTime } from "./data-availability-model";
+import { applyMeterNotInUse, availabilityCsv, availabilityPeriods, notInUsePreset, notInUseText, siteDateTime } from "./data-availability-model";
 
 const document = {
   project: { name: "Tuya Office", timezone: "Asia/Singapore" }, tier_structure_locked: true, tiers: [], nodes: [],
@@ -56,5 +56,12 @@ describe("data availability model", () => {
     expect(lines[2]).toBe('"TV, meeting room",Level 2,90,95,648,6,3,66,2026-09-29 23:00,Below 95%,');
     expect(lines[6]).toBe('"TV, meeting room",2026-09-10 10:00,2026-09-10 16:00,6,Offline,3');
     expect(siteDateTime("2026-09-30T16:00:00.000Z", "Asia/Singapore")).toBe("2026-10-01 00:00");
+  });
+
+  it("reads a picked reason in the reader's own words and keeps a typed one as written", () => {
+    const label = (reason: string) => ({ nobody_uses: "没有人使用" } as Record<string, string>)[reason] ?? reason;
+    expect(notInUseText(notInUsePreset("nobody_uses"), label)).toBe("没有人使用");
+    expect(notInUseText("Kept for events only", label)).toBe("Kept for events only");
+    expect(notInUseText("reason:made_up", label)).toBe("reason:made_up");
   });
 });

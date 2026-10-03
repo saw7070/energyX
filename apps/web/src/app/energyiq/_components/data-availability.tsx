@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { configApi, type EnergyDataAvailabilityDto, type EnergyProjectSetupDocumentDto } from "../../../lib/config-api";
-import { applyMeterNotInUse, availabilityCsv, availabilityPeriods } from "./data-availability-model";
+import { applyMeterNotInUse, availabilityCsv, availabilityPeriods, NOT_IN_USE_REASONS, notInUsePreset, notInUseText } from "./data-availability-model";
 import { dataAvailabilityMessages } from "./data-availability-messages";
 import { intlLocale } from "./energyiq-messages";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
@@ -31,7 +31,8 @@ export function DataAvailability({ projectId, siteName, document, canEdit, busy,
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const [editing, setEditing] = useState<{ meterId: string; reason: string } | null>(null);
+  // Picking a reason saves at once; only "Other reason" asks for typing.
+  const [editing, setEditing] = useState<{ meterId: string; other: boolean; reason: string } | null>(null);
   // Marking a meter not in use goes live first; the figures follow once the saved setup says so.
   const notInUseKey = (document.meter_mapping?.rows ?? []).map(row => row.presentation?.not_in_use ? `${row.id}:${row.presentation.not_in_use}` : "").join("|");
   useEffect(() => {
@@ -52,13 +53,14 @@ export function DataAvailability({ projectId, siteName, document, canEdit, busy,
   const target = data?.targetPct ?? 95;
   const statusText = (status: Meter["status"]) => t(`status.${status}`, { target });
   const statusClass = (status: Meter["status"]) => status === "ok" ? styles.chipOk : status === "not_in_use" ? styles.chipMuted : status === "below_target" ? styles.chipWarn : styles.chipBad;
+  const reasonText = (stored: string) => notInUseText(stored, reason => t(`reason.${reason}`));
   const checkText = (meter: Meter, check: Meter["checks"][number], short = false) => short
     ? t(`check.short.${check.kind}`, { hours: check.hours, from: when(check.from) })
     : t(`check.${check.kind}`, { name: meter.name, hours: check.hours, from: when(check.from), kwh: number(check.kwhPerHour, 3) });
 
   const download = () => {
     if (!data) return;
-    const csv = availabilityCsv(data, siteName, {
+    const csv = availabilityCsv({ ...data, meters: data.meters.map(meter => meter.notInUse ? { ...meter, notInUse: reasonText(meter.notInUse) } : meter) }, siteName, {
       title: t("csv.title"),
       meterColumns: t("csv.meterColumns").split("|") as Parameters<typeof availabilityCsv>[2]["meterColumns"],
       outageTitle: t("csv.outageTitle"),
@@ -129,21 +131,28 @@ export function DataAvailability({ projectId, siteName, document, canEdit, busy,
               <td className={styles.number}>{meter.longestOutageHours >= 1 ? t("hours", { hours: number(meter.longestOutageHours) }) : t("none")}</td>
               <td className={styles.number}>{meter.estimatedKwh > 0 ? t("kwh", { kwh: number(meter.estimatedKwh, 2) }) : "—"}</td>
               <td>{meter.lastReadingAt ? when(meter.lastReadingAt) : "—"}</td>
-              <td><span className={`${styles.chip} ${statusClass(meter.status)}`}>{statusText(meter.status)}</span>{meter.notInUse && <small>{meter.notInUse}</small>}</td>
+              <td><span className={`${styles.chip} ${statusClass(meter.status)}`}>{statusText(meter.status)}</span>{meter.notInUse && <small>{reasonText(meter.notInUse)}</small>}</td>
               {canEdit && <td>{meter.status === "not_in_use"
                 ? <button type="button" className={styles.link} disabled={busy} onClick={() => save(meter, null)}>{t("action.inUse")}</button>
-                : <button type="button" className={styles.link} disabled={busy} onClick={() => setEditing({ meterId: meter.meterPointId, reason: "" })}>{t("action.notInUse")}</button>}</td>}
+                : <button type="button" className={styles.link} disabled={busy} onClick={() => setEditing({ meterId: meter.meterPointId, other: false, reason: "" })}>{t("action.notInUse")}</button>}</td>}
             </tr>;
             if (editing?.meterId !== meter.meterPointId) return [row];
             return [row, <tr key={`${meter.meterPointId}-edit`} className={styles.editRow}><td colSpan={canEdit ? 7 : 6}>
-              <form className={styles.editForm} onSubmit={event => { event.preventDefault(); save(meter, editing.reason.trim() || t("notInUse.default")); }}>
-                <label>{t("notInUse.label")}<input autoFocus value={editing.reason} placeholder={t("notInUse.placeholder")} onChange={event => setEditing({ ...editing, reason: event.target.value })} /></label>
+              <div className={styles.editForm} role="group" aria-label={t("notInUse.pick")}>
+                <p className={styles.pickLabel}>{t("notInUse.pick")}</p>
+                <div className={styles.reasons}>
+                  {NOT_IN_USE_REASONS.map(reason => <button key={reason} type="button" className={styles.reason} disabled={busy} onClick={() => save(meter, notInUsePreset(reason))}>{t(`reason.${reason}`)}</button>)}
+                  <button type="button" className={styles.reason} aria-pressed={editing.other} disabled={busy} onClick={() => setEditing({ ...editing, other: true })}>{t("reason.other")}</button>
+                </div>
+                {editing.other && <form className={styles.otherForm} onSubmit={event => { event.preventDefault(); if (editing.reason.trim()) save(meter, editing.reason); }}>
+                  <label>{t("notInUse.label")}<input autoFocus value={editing.reason} placeholder={t("notInUse.placeholder")} onChange={event => setEditing({ ...editing, reason: event.target.value })} /></label>
+                  <button type="submit" className={styles.primary} disabled={busy || !editing.reason.trim()}>{busy ? t("saving") : t("save")}</button>
+                </form>}
                 <p>{t("notInUse.hint")}</p>
                 <div className={styles.editActions}>
-                  <button type="submit" className={styles.primary} disabled={busy}>{busy ? t("saving") : t("save")}</button>
                   <button type="button" className={styles.secondary} disabled={busy} onClick={() => setEditing(null)}>{t("cancel")}</button>
                 </div>
-              </form>
+              </div>
             </td></tr>];
           })}</tbody>
         </table>

@@ -19,6 +19,7 @@ const data: EnergyDataAvailabilityDto = {
   meters: [
     { meterPointId: "router", name: "Router", location: "Office Area", status: "ok", availabilityPct: 99.2, realHours: 714, estimatedHours: 6, estimatedKwh: 3, missingHours: 0, longestOutageHours: 6, lastReadingAt: "2026-10-02T15:00:00.000Z",
       checks: [{ kind: "stuck_value", from: "2026-09-10T00:00:00.000Z", to: "2026-09-11T06:00:00.000Z", hours: 30, kwhPerHour: 1.25 }] },
+    { meterPointId: "door", name: "Side door", status: "not_in_use", notInUse: "reason:switched_off", availabilityPct: 0, realHours: 0, estimatedHours: 0, estimatedKwh: 0, missingHours: 720, longestOutageHours: 720, checks: [] },
     { meterPointId: "blind", name: "Showroom Blind", status: "no_readings", availabilityPct: 0, realHours: 0, estimatedHours: 0, estimatedKwh: 0, missingHours: 720, longestOutageHours: 720, checks: [] },
   ],
   outages: [{ meterPointId: "router", name: "Router", from: "2026-09-20T02:00:00.000Z", to: "2026-09-20T08:00:00.000Z", hours: 6, kind: "estimated", estimatedKwh: 3, ongoing: false }],
@@ -39,20 +40,31 @@ it("shows each meter against the target, the outages and stuck readings, and let
     expect(text).toContain("No readings");
     expect(text).toContain("the same reading, 1.25 kWh, every hour for 30 hours");
     expect(text).toContain("3 kWh arrived when it came back, kept as an estimate.");
+    expect(text).toContain("Switched off on purpose");
+    expect(text).not.toContain("reason:switched_off");
 
-    const mark = Array.from(host.querySelectorAll("button")).filter(button => button.textContent === "Mark not in use")[1]!;
-    await act(async () => mark.click());
-    const input = host.querySelector("input")!;
-    await act(async () => {
-      const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
-      setValue.call(input, "Nobody uses the showroom blind");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await act(async () => host.querySelector("form")!.requestSubmit());
+    // One click on a reason saves it; nothing to type.
+    const mark = () => Array.from(host.querySelectorAll("button")).filter(button => button.textContent === "Mark not in use")[1]!;
+    await act(async () => mark().click());
+    const reason = (text: string) => Array.from(host.querySelectorAll("button")).find(button => button.textContent === text)!;
+    await act(async () => reason("Nobody uses it").click());
     expect(onSave).toHaveBeenCalledTimes(1);
     const [saved, message] = onSave.mock.calls[0]! as [EnergyProjectSetupDocumentDto, string];
-    expect(saved.meter_mapping!.rows[0]!.presentation).toEqual({ not_in_use: "Nobody uses the showroom blind" });
+    expect(saved.meter_mapping!.rows[0]!.presentation).toEqual({ not_in_use: "reason:nobody_uses" });
     expect(message).toBe("Showroom Blind is marked not in use.");
+
+    // Only "Other reason" asks for words, and only saves once there are some.
+    await act(async () => mark().click());
+    await act(async () => reason("Other reason…").click());
+    const save = () => Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Save")!;
+    expect(save().disabled).toBe(true);
+    const input = host.querySelector("input")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!.call(input, "Kept for events only");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => save().click());
+    expect((onSave.mock.calls[1]![0] as EnergyProjectSetupDocumentDto).meter_mapping!.rows[0]!.presentation).toEqual({ not_in_use: "Kept for events only" });
 
     // Another month asks for exactly that month.
     const select = host.querySelector("select")!;

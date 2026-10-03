@@ -14,6 +14,17 @@ export function availabilityPeriods(today: string): AvailabilityPeriod[] {
   return [{ id: "last30" }, ...months];
 }
 
+/** Reasons picked with one click. Stored as a code, so each reader sees the reason in their own language. */
+export const NOT_IN_USE_REASONS = ["nobody_uses", "switched_off", "spare", "removed"] as const;
+export type NotInUseReason = typeof NOT_IN_USE_REASONS[number];
+const PRESET = "reason:";
+export const notInUsePreset = (reason: NotInUseReason): string => `${PRESET}${reason}`;
+/** A stored note as words: a picked reason in the reader's language, or exactly what someone typed. */
+export const notInUseText = (stored: string, label: (reason: NotInUseReason) => string): string => {
+  const code = stored.startsWith(PRESET) ? stored.slice(PRESET.length) : "";
+  return (NOT_IN_USE_REASONS as readonly string[]).includes(code) ? label(code as NotInUseReason) : stored;
+};
+
 /** Mark a meter not in use with the reason someone gave, or in use again. Nothing that decides readings changes. */
 export function applyMeterNotInUse(document: EnergyProjectSetupDocumentDto, meterId: string, reason: string | null): EnergyProjectSetupDocumentDto {
   const mapping = document.meter_mapping;
