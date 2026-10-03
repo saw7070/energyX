@@ -102,6 +102,8 @@ export type EnergyProjectDto = {
   status: "draft" | "published" | "archived";
   timezone: string;
   capabilities?: { readReports: boolean; readExplorer: boolean; readProjectInformation: boolean; readOwnHistory: boolean; createReport: boolean; manageSkills: boolean; manageAutomation: boolean; editConfiguration: boolean; publishConfiguration: boolean };
+  /** Where readings come from: a live meter connection, uploaded files, or nothing yet. */
+  dataSource?: "live" | "upload" | "none";
 };
 
 export type EnergyDeliveryStage = "draft" | "configured" | "published";

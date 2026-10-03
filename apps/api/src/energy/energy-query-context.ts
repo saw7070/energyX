@@ -37,7 +37,29 @@ export type EnergyAccessContext = {
     status: EnergyIqProjectRecord["status"];
     timezone: string;
     capabilities: EnergyProjectCapabilities;
+    /** Where readings come from: a live meter connection, uploaded files, or nothing yet. */
+    dataSource: EnergyProjectDataSource;
   }>;
+};
+
+export type EnergyProjectDataSource = "live" | "upload" | "none";
+
+/**
+ * "live" while a meter connection updates the project by itself (connected in the app with daily updates on, or the
+ * server's own Tuya settings with their sync on); otherwise "upload" once any readings have been published from
+ * files, or "none". A site that was live and was disconnected keeps its data but counts as "upload" from then on.
+ */
+export const resolveEnergyProjectDataSource = (
+  metadataStore: MetadataStore,
+  projectId: string,
+  env: Record<string, string | undefined> = process.env,
+): EnergyProjectDataSource => {
+  if (metadataStore.energyIq.liveConnectors.find(projectId)?.sync_enabled) return "live";
+  if (env.ENERGYIQ_TUYA_CONNECTOR_PROJECT_ID?.trim() === projectId
+    && env.ENERGYIQ_TUYA_DEVICE_BINDINGS_JSON?.trim()
+    && env.ENERGYIQ_TUYA_SYNC_ENABLED?.trim() === "true"
+    && !metadataStore.energyIq.liveConnectors.find(projectId)) return "live";
+  return metadataStore.energyIq.listImportBatches(projectId).some((batch) => batch.status === "materialized") ? "upload" : "none";
 };
 
 export type EnergyQueryContextRequest = {
@@ -147,7 +169,8 @@ export const resolveEnergyAccessContext = (input: {
       name: project.name,
       status: project.status,
       timezone: project.timezone,
-      capabilities: resolveEnergyProjectCapabilities({ metadataStore: input.metadataStore, userId: input.user.id, workspaceId: activeWorkspace.id, projectId: project.id, ...(input.env ? { env: input.env } : {}) })
+      capabilities: resolveEnergyProjectCapabilities({ metadataStore: input.metadataStore, userId: input.user.id, workspaceId: activeWorkspace.id, projectId: project.id, ...(input.env ? { env: input.env } : {}) }),
+      dataSource: resolveEnergyProjectDataSource(input.metadataStore, project.id, input.env)
     }))
   };
 };
