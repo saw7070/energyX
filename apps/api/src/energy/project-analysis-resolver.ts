@@ -4306,7 +4306,9 @@ export const resolveAllAvailableProjectAnalysisIdentity = async (input: {
       from: coverage.from,
       to: coverage.to,
       expectedDataSnapshotId: preliminary.context.dataSnapshotId,
-      expectedProjectReleaseId: preliminary.projectRelease?.id ?? null,
+      // Without a Project Release the first context used the latest template revision; asking for "no release"
+      // here would drop that revision's pins and never match. The identity check below still catches a new release.
+      ...(preliminary.projectRelease ? { expectedProjectReleaseId: preliminary.projectRelease.id } : {}),
       expectedHierarchyRevisionId: preliminary.context.hierarchyRevisionId,
       expectedMeterMappingRevisionId: preliminary.context.meterMappingRevisionId,
       expectedMeterFormulaRevisionId: preliminary.context.meterFormulaRevisionId,
@@ -4322,6 +4324,10 @@ const assertStableAllAvailableIdentity = (
   preliminary: PublishedRunContext,
   resolved: PublishedRunContext,
 ): void => {
+  // A release published in between changes every pinned version; name the real cause first.
+  if ((preliminary.projectRelease?.id ?? null) !== (resolved.projectRelease?.id ?? null)) {
+    throw new Error("ENERGYIQ_PROJECT_RELEASE_MISMATCH");
+  }
   for (const field of [
     "dataSnapshotId",
     "hierarchyRevisionId",
@@ -4336,9 +4342,6 @@ const assertStableAllAvailableIdentity = (
         `ENERGYIQ_PUBLISHED_CONTEXT_CONFLICT:${field}:${preliminary.context[field]}:${resolved.context[field]}`,
       );
     }
-  }
-  if ((preliminary.projectRelease?.id ?? null) !== (resolved.projectRelease?.id ?? null)) {
-    throw new Error("ENERGYIQ_PROJECT_RELEASE_MISMATCH");
   }
 };
 

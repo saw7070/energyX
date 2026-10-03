@@ -9,7 +9,8 @@ import { EnergyIqAccessProvider, useEnergyIqAccess } from "./energyiq-access";
 
 const configApiMock = vi.hoisted(() => ({
   activeWorkspaceId: null as string | null,
-  getEnergyAccessContext: vi.fn<() => Promise<EnergyAccessContextDto>>(),
+  // Like the server: the Organisation asked for in the call wins over the one remembered for every call.
+  getEnergyAccessContext: vi.fn<(options?: { workspaceId?: string }) => Promise<EnergyAccessContextDto>>(),
   setWorkspaceId: vi.fn<(workspaceId: string | null) => void>(),
 }));
 
@@ -72,8 +73,8 @@ describe("EnergyX access deep-link recovery", () => {
       "ngee-ann-workspace",
       [project("ngee-ann-polytechnic", "ngee-ann-workspace")],
     );
-    configApiMock.getEnergyAccessContext.mockImplementation(async () => {
-      if (configApiMock.activeWorkspaceId === "ngee-ann-workspace") return ngeeAnn;
+    configApiMock.getEnergyAccessContext.mockImplementation(async (options) => {
+      if ((options?.workspaceId ?? configApiMock.activeWorkspaceId) === "ngee-ann-workspace") return ngeeAnn;
       return tuya;
     });
 
@@ -93,6 +94,54 @@ describe("EnergyX access deep-link recovery", () => {
     expect(window.location.hash).toBe("#ngee-ann-summary-findings");
   });
 
+  it("asks the Organisation a project was last opened in first, so its link needs one request", async () => {
+    window.localStorage.setItem("energyiq:project-organisation:v1", JSON.stringify({ "ngee-ann-polytechnic": "ngee-ann-workspace" }));
+    const tuya = accessContext("tuya-office", [project("tuya-office", "tuya-office")]);
+    const ngeeAnn = accessContext("ngee-ann-workspace", [project("ngee-ann-polytechnic", "ngee-ann-workspace")]);
+    configApiMock.getEnergyAccessContext.mockImplementation(async (options) =>
+      (options?.workspaceId ?? configApiMock.activeWorkspaceId) === "ngee-ann-workspace" ? ngeeAnn : tuya);
+
+    await act(async () => {
+      root.render(
+        <EnergyIqAccessProvider>
+          <AccessProbe />
+        </EnergyIqAccessProvider>,
+      );
+    });
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toBe("ready:ngee-ann-workspace:ngee-ann-polytechnic");
+    });
+    expect(configApiMock.getEnergyAccessContext).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks every other Organisation at once and remembers where the project was found", async () => {
+    const base = accessContext("tuya-office", [project("tuya-office", "tuya-office")]);
+    const tuya = { ...base, workspaces: [...base.workspaces, { id: "preschool-workspace", name: "Preschool", kind: "customer" as const, disabled: false }] };
+    const ngeeAnn = accessContext("ngee-ann-workspace", [project("ngee-ann-polytechnic", "ngee-ann-workspace")]);
+    let open = 0, most = 0;
+    configApiMock.getEnergyAccessContext.mockImplementation(async (options) => {
+      open += 1; most = Math.max(most, open);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      open -= 1;
+      return (options?.workspaceId ?? configApiMock.activeWorkspaceId) === "ngee-ann-workspace" ? ngeeAnn : tuya;
+    });
+
+    await act(async () => {
+      root.render(
+        <EnergyIqAccessProvider>
+          <AccessProbe />
+        </EnergyIqAccessProvider>,
+      );
+    });
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toBe("ready:ngee-ann-workspace:ngee-ann-polytechnic");
+    });
+    expect(most).toBe(2);
+    expect(JSON.parse(window.localStorage.getItem("energyiq:project-organisation:v1") ?? "{}")).toMatchObject({ "ngee-ann-polytechnic": "ngee-ann-workspace" });
+  });
+
   it("keeps the original Workspace when the requested Project is not authorised", async () => {
     const tuya = accessContext("tuya-office", [project("tuya-office", "tuya-office")]);
     const ngeeAnn = accessContext(
@@ -104,8 +153,8 @@ describe("EnergyX access deep-link recovery", () => {
       "",
       "/energyiq/overview?projectId=preschool-demo&currentDataSnapshotId=private-snapshot",
     );
-    configApiMock.getEnergyAccessContext.mockImplementation(async () => {
-      if (configApiMock.activeWorkspaceId === "ngee-ann-workspace") return ngeeAnn;
+    configApiMock.getEnergyAccessContext.mockImplementation(async (options) => {
+      if ((options?.workspaceId ?? configApiMock.activeWorkspaceId) === "ngee-ann-workspace") return ngeeAnn;
       return tuya;
     });
 
@@ -248,8 +297,8 @@ describe("EnergyX access deep-link recovery", () => {
       workspaces: tuya.workspaces,
     };
     window.history.replaceState({}, "", "/energyiq/ai?projectId=preschool-demo");
-    configApiMock.getEnergyAccessContext.mockImplementation(async () => {
-      if (configApiMock.activeWorkspaceId === "preschool-workspace") return preschool;
+    configApiMock.getEnergyAccessContext.mockImplementation(async (options) => {
+      if ((options?.workspaceId ?? configApiMock.activeWorkspaceId) === "preschool-workspace") return preschool;
       return tuya;
     });
 

@@ -10,7 +10,7 @@ import {
   findAnomalies, hourlyProfile, meterHeatmap, openingLabel, overnightFloor, percentChange, scopeDays, shortDate, topHours, weekdayShort, weekdayWindows,
   type AnalysisCategory, type AnalysisDay, type AnalysisDayType, type PeakHour,
 } from "./analysis-model";
-import { loadAnalysis, type AnalysisData, type AnalysisRange, type ScopeData, type ScopeMeter, type TrendSeries } from "./analysis-data";
+import { loadAnalysis, recentAnalysis, type AnalysisData, type AnalysisRange, type ScopeData, type ScopeMeter, type TrendSeries } from "./analysis-data";
 import { categoryLabel, dayTypeLabel, dayTypeWord, holidayName, joinText, rich, tariffNote } from "./analysis-messages";
 import { viewMessages } from "./analysis-view-messages";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
@@ -111,10 +111,14 @@ export function AnalysisView({ projectId }: { projectId: string }) {
   const t = useMessages(viewMessages);
   useEffect(() => {
     let cancelled = false;
-    setLoading(true); setError(false);
+    // Seen earlier in this tab: show it straight away and swap in the fresh copy when it arrives.
+    const recent = recentAnalysis(projectId, range);
+    if (recent) { setData(recent); setDraft({ from: recent.current.project.dates[0] ?? "", to: recent.current.project.dates.at(-1) ?? "" }); }
+    setLoading(!recent); setError(false);
     loadAnalysis(projectId, range)
       .then(result => { if (!cancelled) { setData(result); setDraft({ from: result.current.project.dates[0] ?? "", to: result.current.project.dates.at(-1) ?? "" }); } })
-      .catch(() => { if (!cancelled) setError(true); })
+      // A failed refresh keeps what is already on screen from earlier in this tab.
+      .catch(() => { if (!cancelled && !recent) setError(true); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [projectId, range]);

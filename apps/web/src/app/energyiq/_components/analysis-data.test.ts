@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { configApi, type EnergyScopeAnalysisDto } from "../../../lib/config-api";
-import { loadAnalysis } from "./analysis-data";
+import { loadAnalysis, recentAnalysis } from "./analysis-data";
 import { scopeDays } from "./analysis-model";
 
 // Two local days (Sat 8 Aug, Sun 9 Aug public holiday) with 24 complete hours each on two official meters.
@@ -52,11 +52,13 @@ describe("analysis data", () => {
 
     const data = await loadAnalysis("campus", { kind: "latest-28" });
     const requests = execute.mock.calls.map(call => call[0] as Request);
-    expect(requests[0]).toMatchObject({ projectId: "campus", scopeId: "project", surface: "project-explorer", period: "Custom", analysisWindow: "current-overview-28d" });
+    expect(requests.find(request => request.analysisWindow === "current-overview-28d")).toMatchObject({ projectId: "campus", scopeId: "project", surface: "project-explorer", period: "Custom" });
     expect(requests).toContainEqual(expect.objectContaining({ scopeId: "level-6", from: "2026-08-08", to: "2026-08-09", expectedDataSnapshotId: "snap-1" }));
     expect(requests).toContainEqual(expect.objectContaining({ scopeId: "project", from: "2026-08-06", to: "2026-08-07", expectedDataSnapshotId: "snap-1" }));
     expect(requests).toContainEqual(expect.objectContaining({ scopeId: "level-6", from: "2026-08-06", to: "2026-08-07" }));
-    expect(requests).toContainEqual(expect.objectContaining({ scopeId: "project", analysisWindow: "all-available", expectedDataSnapshotId: "snap-1" }));
+    // All history starts with the first request, before the snapshot is known; it read the same one, so it is kept.
+    expect(requests[0]).toMatchObject({ scopeId: "project", analysisWindow: "all-available" });
+    expect(requests.filter(request => request.analysisWindow === "all-available")).toHaveLength(1);
 
     expect(data).toMatchObject({ projectName: "Campus", snapshotId: "snap-1", openingHours: weekly, actions: [{ id: "a1" }] });
     // Public holidays and special closures both count as holiday-type days; closures are labelled as such.
@@ -93,10 +95,37 @@ describe("analysis data", () => {
     vi.spyOn(configApi, "getEnergyProjectInformation").mockRejectedValue(new Error("forbidden"));
     vi.spyOn(configApi, "reportActionRequest").mockResolvedValue({ actions: [] });
     const data = await loadAnalysis("campus", { kind: "custom", from: "2026-08-08", to: "2026-08-09" });
-    expect(execute.mock.calls[0]![0]).toMatchObject({ from: "2026-08-08", to: "2026-08-09" });
+    expect(execute.mock.calls.map(call => call[0] as Request)).toContainEqual(expect.objectContaining({ scopeId: "project", from: "2026-08-08", to: "2026-08-09" }));
     expect(data.current.project.types).toEqual({});
     expect(data.current.project.typeTotals).toEqual({ load: 96, light: 48 });
     expect(data.openingHours).toBeNull();
     expect(scopeDays(data.current.project, data.holidays).map(day => [day.dayType, day.totalKwh, day.byCategory])).toEqual([["weekend", 144, {}], ["weekend", 144, {}]]);
+  });
+
+  it("asks for all history again on the right snapshot when the early copy read another one", async () => {
+    const execute = vi.spyOn(configApi, "executeEnergyScopeAnalysis").mockImplementation(async input => {
+      const request = input as Request;
+      if (request.analysisWindow === "all-available") {
+        const older = analysis("2026-08-01", "2026-08-09", 1);
+        return request.expectedDataSnapshotId ? older : { ...older, context: { ...older.context, dataSnapshotId: "snap-0" } };
+      }
+      return analysis("2026-08-07", "2026-08-09", 1);
+    });
+    vi.spyOn(configApi, "getEnergyProjectInformation").mockResolvedValue({ name: "Campus", meters, calendar: null });
+    vi.spyOn(configApi, "reportActionRequest").mockResolvedValue({ actions: [] });
+    const data = await loadAnalysis("campus-reread", { kind: "latest-28" });
+    expect(execute.mock.calls.map(call => call[0] as Request).filter(request => request.analysisWindow === "all-available").map(request => request.expectedDataSnapshotId))
+      .toEqual([undefined, "snap-1"]);
+    expect(data.history).not.toBeNull();
+  });
+
+  it("keeps the last result for each site and dates, so the page can show it at once next time", async () => {
+    vi.spyOn(configApi, "executeEnergyScopeAnalysis").mockImplementation(async () => analysis("2026-08-07", "2026-08-09", 1));
+    vi.spyOn(configApi, "getEnergyProjectInformation").mockResolvedValue({ name: "Campus", meters, calendar: null });
+    vi.spyOn(configApi, "reportActionRequest").mockResolvedValue({ actions: [] });
+    expect(recentAnalysis("campus-recent", { kind: "latest-28" })).toBeNull();
+    const data = await loadAnalysis("campus-recent", { kind: "latest-28" });
+    expect(recentAnalysis("campus-recent", { kind: "latest-28" })).toBe(data);
+    expect(recentAnalysis("campus-recent", { kind: "all" })).toBeNull();
   });
 });

@@ -1424,6 +1424,142 @@ describe("Energy AI query-context analysis windows", () => {
     }
   });
 
+  it("reads all available history for a project with a published template but no Overview release", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-all-available-no-release-"));
+    const databasePath = join(root, "energy.duckdb");
+    process.env.ENERGYIQ_DUCKDB_PATH = databasePath;
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      metadata.energyIq.upsertUserRole({ user_id: "dev-user", role: "admin" });
+      metadata.workspaces.upsert({
+        id: "default",
+        owner_user_id: "dev-user",
+        name: "Release appearance race",
+        kind: "customer",
+      });
+      metadata.workspaceMemberships.upsert({
+        workspace_id: "default",
+        user_id: "dev-user",
+        role: "owner",
+      });
+      metadata.energyIq.projectSetup.bootstrapPublished({
+        project: {
+          id: "release-appearance-project",
+          workspace_id: "default",
+          name: "Release appearance project",
+          timezone: "Asia/Singapore",
+          hierarchy_revision_id: "release-appearance-hierarchy-v1",
+          meter_formula_revision_id: "release-appearance-formula-v1",
+          root_scope_id: "release-appearance-root",
+        },
+        document: {
+          project: { name: "Release appearance project", timezone: "Asia/Singapore" },
+          tier_structure_locked: true,
+          tiers: [{ id: "release-appearance-tier", ordinal: 1, alias: "Area" }],
+          nodes: [{
+            id: "release-appearance-area",
+            tier_definition_id: "release-appearance-tier",
+            name: "Release appearance area",
+            sort_order: 1,
+            metadata_status: "confirmed",
+          }],
+          meter_mapping: {
+            schema_version: 2,
+            source_kind: "tuya",
+            confirmed: true,
+            rows: [{
+              id: "release-appearance-meter",
+              source_label: "Release appearance meter",
+              scope_id: "release-appearance-area",
+              navigation_scope_id: "release-appearance-area",
+              display_name: "Release appearance meter",
+              resource: "electricity",
+              category: "load",
+              coverage: "whole",
+              meter_role: "total",
+              aggregation_usage: "official",
+            }],
+            official_aggregation_routes: [
+              {
+                scope_id: "release-appearance-area",
+                resource: "electricity",
+                category: "load",
+                meter_point_ids: ["release-appearance-meter"],
+              },
+              {
+                scope_id: "project",
+                resource: "electricity",
+                category: "load",
+                meter_point_ids: ["release-appearance-meter"],
+              },
+            ],
+            virtual_meters: [],
+          },
+        },
+        published_by: "dev-user",
+      });
+      metadata.energyIq.upsertProjectAccess({
+        project_id: "release-appearance-project",
+        user_id: "dev-user",
+        role: "editor",
+      });
+      const sourceSha256 = "8".repeat(64);
+      await materializeTestProjectSnapshot({
+        metadataStore: metadata,
+        databasePath,
+        workspaceId: "default",
+        projectId: "release-appearance-project",
+        timezone: "Asia/Singapore",
+        batches: [{
+          importBatchId: "release-appearance-batch",
+          sourceSha256,
+          rawReadings: [],
+          normalizedReadings: [],
+          intervalFacts: [{
+            ...intervalFactForMeter({
+              intervalStart: "2026-05-01T00:00:00.000Z",
+              intervalEnd: "2026-05-01T00:15:00.000Z",
+              sourceSha256,
+              sourceRowNumber: 1,
+              meterPointId: "release-appearance-meter",
+              scopeId: "release-appearance-area",
+            }),
+            projectId: "release-appearance-project",
+            importBatchId: "release-appearance-batch",
+          }],
+          qualityEvents: [],
+        }],
+      });
+      // As a site with a published setup but no Overview page reads: a template revision and no Project Release.
+      metadata.energyIq.templates.publishProjectRevisionWithinTransaction({
+        project_id: "release-appearance-project",
+        tier_definition_ids: ["release-appearance-tier"],
+        hierarchy_revision_id: "release-appearance-hierarchy-v1",
+        meter_mapping_revision_id: resolvePublishedEnergyQueryContext({
+          metadataStore: metadata,
+          user: metadata.users.getById({ user_id: "dev-user" }),
+          workspaceId: "default",
+          request: { projectId: "release-appearance-project", period: "Last 30 days" },
+        }).context.meterMappingRevisionId,
+        published_by: "dev-user",
+        published_at: "2026-08-25T00:00:00.000Z",
+      });
+
+      const response = await handleEnergyApiRequest(
+        jsonPost({ projectId: "release-appearance-project", analysisWindow: "all-available" }),
+        ["query-context", "resolve"],
+        apiContext(metadata),
+        { selectCurrentOverviewPeriod: selectEnergyCurrentOverviewPeriod },
+      );
+
+      expect(response).toMatchObject({ status: 200, body: { success: true } });
+    } finally {
+      metadata.close();
+      removeTemporaryEnergyFixture(root);
+    }
+  });
+
   it("keeps an explicit Custom range exact instead of widening it to available coverage", async () => {
     const root = mkdtempSync(join(tmpdir(), "energy-explicit-window-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });

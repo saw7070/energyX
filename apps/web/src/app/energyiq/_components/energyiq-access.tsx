@@ -39,6 +39,8 @@ type EnergyIqAccessValue = {
 const EnergyIqAccessContext = createContext<EnergyIqAccessValue | null>(null);
 const ORGANISATION_STORAGE_KEY = "energyiq:active-organisation:v1";
 const projectStorageKey = (workspaceId: string) => `energyiq:active-project:${workspaceId}:v1`;
+// Which Organisation each project was last opened in, so a link to it asks that Organisation first.
+const PROJECT_ORGANISATION_STORAGE_KEY = "energyiq:project-organisation:v1";
 
 export function EnergyIqAccessProvider({ children }: { children: ReactNode }) {
   const [access, setAccess] = useState<EnergyAccessContextDto | null>(null);
@@ -71,7 +73,7 @@ export function EnergyIqAccessProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     setFailure(null);
     try {
-      const restoredWorkspaceId = requestedWorkspaceId || (typeof window === "undefined"
+      const restoredWorkspaceId = requestedWorkspaceId || rememberedOrganisation(requestedProjectId) || (typeof window === "undefined"
         ? null
         : window.localStorage.getItem(ORGANISATION_STORAGE_KEY));
       if (restoredWorkspaceId) setConfigApiWorkspaceId(restoredWorkspaceId);
@@ -104,6 +106,7 @@ export function EnergyIqAccessProvider({ children }: { children: ReactNode }) {
         ?? selectable[0]
         ?? null;
       setActiveProjectId(selected?.id ?? null);
+      if (selected) rememberOrganisation(selected.id, next.activeWorkspaceId);
       return selected;
     } catch (reason) {
       setFailure({ reason });
@@ -128,6 +131,7 @@ export function EnergyIqAccessProvider({ children }: { children: ReactNode }) {
 
   const selectProject = useCallback((projectId: string) => {
     setActiveProjectId(projectId);
+    if (access?.activeWorkspaceId) rememberOrganisation(projectId, access.activeWorkspaceId);
     try {
       if (access?.activeWorkspaceId) {
         window.localStorage.setItem(projectStorageKey(access.activeWorkspaceId), projectId);
@@ -246,19 +250,33 @@ async function recoverRequestedProjectContext(
 ): Promise<EnergyAccessContextDto> {
   if (!requestedProjectId || hasSelectableProject(initial, requestedProjectId)) return initial;
 
-  for (const workspace of initial.workspaces) {
-    if (workspace.disabled || workspace.id === initial.activeWorkspaceId) continue;
-    setConfigApiWorkspaceId(workspace.id);
-    try {
-      const candidate = await configApi.getEnergyAccessContext();
-      if (hasSelectableProject(candidate, requestedProjectId)) return candidate;
-    } catch {
-      // Deep-link recovery only probes Workspaces already authorised by the access response.
-    }
-  }
+  // Deep-link recovery only probes Workspaces already authorised by the access response, all at once.
+  const candidates = await Promise.all(initial.workspaces
+    .filter((workspace) => !workspace.disabled && workspace.id !== initial.activeWorkspaceId)
+    .map((workspace) => configApi.getEnergyAccessContext({ workspaceId: workspace.id }).catch(() => null)));
+  const found = candidates.find((candidate) => candidate && hasSelectableProject(candidate, requestedProjectId));
+  setConfigApiWorkspaceId(found?.activeWorkspaceId ?? initial.activeWorkspaceId);
+  return found ?? initial;
+}
 
-  setConfigApiWorkspaceId(initial.activeWorkspaceId);
-  return initial;
+function rememberedOrganisation(projectId: string | null): string | null {
+  if (!projectId || typeof window === "undefined") return null;
+  try {
+    const remembered = JSON.parse(window.localStorage.getItem(PROJECT_ORGANISATION_STORAGE_KEY) ?? "{}") as Record<string, unknown>;
+    return typeof remembered[projectId] === "string" ? remembered[projectId] : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberOrganisation(projectId: string, workspaceId: string): void {
+  if (typeof window === "undefined" || rememberedOrganisation(projectId) === workspaceId) return;
+  try {
+    const remembered = JSON.parse(window.localStorage.getItem(PROJECT_ORGANISATION_STORAGE_KEY) ?? "{}") as Record<string, unknown>;
+    window.localStorage.setItem(PROJECT_ORGANISATION_STORAGE_KEY, JSON.stringify({ ...remembered, [projectId]: workspaceId }));
+  } catch {
+    // Without storage, a link to another Organisation's project still works by asking each Organisation.
+  }
 }
 
 function hasSelectableProject(access: EnergyAccessContextDto, projectId: string): boolean {
