@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { ensureEnergyIqBootstrap } from "./energy-bootstrap.js";
-import { readLiveSiteReadings, recordLiveReadings } from "./energy-live-readings.js";
+import { pollLiveReadings, readLiveSiteReadings, recordLiveReadings } from "./energy-live-readings.js";
+import type { EnergyTuyaProjectConnector } from "./energy-tuya-connector.js";
 import { TUYA_OFFICE_PROJECT_ID } from "./tuya-office-project.js";
 
 const OFFICIAL = ["panel-a-total", "panel-b-total", "panel-a-lighting", "panel-b-lighting", "panel-c-meter-01", "panel-c-meter-02", "panel-c-meter-03"];
@@ -86,12 +87,70 @@ describe("Live readings", () => {
   });
 });
 
+describe("Offline meters", () => {
+  it("lists a meter Tuya keeps reporting offline, by name and since when, and drops it once it is back", async () => {
+    await withMetadataAsync(async (metadata) => {
+      const connector = {
+        projectId: TUYA_OFFICE_PROJECT_ID,
+        publishedDocument: { project: { timezone: "Asia/Singapore" } },
+        devices: [{ deviceId: "dev-a", sourceLabel: "A" }, { deviceId: "dev-b", sourceLabel: "B" }],
+        meterPoints: [{ meterPointId: "panel-a-total", sourceLabel: "A" }, { meterPointId: "panel-b-total", sourceLabel: "B" }],
+      } as unknown as EnergyTuyaProjectConnector;
+      const poll = (at: number, bOnline: boolean) => pollLiveReadings({
+        metadataStore: metadata,
+        connector,
+        readLatestEnergy: async () => [{ sourceLabel: "A", energyKwh: 10 + at / 1e12 }, { sourceLabel: "B", energyKwh: 20 }],
+        listDevices: async () => [{ id: "dev-a", online: true }, { id: "dev-b", online: bOnline }, { id: "someone-else", online: false }],
+        now: () => at,
+      });
+      await poll(T0, true);
+      await poll(T0 + 15 * MIN, false);
+      await poll(T0 + 30 * MIN, false);
+      await poll(T0 + 45 * MIN, false);
+      const live = readLiveSiteReadings({ metadataStore: metadata, projectId: TUYA_OFFICE_PROJECT_ID, now: T0 + 46 * MIN });
+      expect(live.offline).toEqual([{ meterPointId: "panel-b-total", name: expect.any(String), since: new Date(T0 + 15 * MIN).toISOString() }]);
+      await poll(T0 + 60 * MIN, true);
+      expect(readLiveSiteReadings({ metadataStore: metadata, projectId: TUYA_OFFICE_PROJECT_ID, now: T0 + 61 * MIN }).offline).toEqual([]);
+    });
+  });
+
+  it("keeps the power readings when the status check fails", async () => {
+    await withMetadataAsync(async (metadata) => {
+      const connector = {
+        projectId: TUYA_OFFICE_PROJECT_ID,
+        publishedDocument: { project: { timezone: "Asia/Singapore" } },
+        devices: [{ deviceId: "dev-a", sourceLabel: "A" }],
+        meterPoints: [{ meterPointId: "panel-a-total", sourceLabel: "A" }],
+      } as unknown as EnergyTuyaProjectConnector;
+      const result = await pollLiveReadings({
+        metadataStore: metadata, connector, now: () => T0,
+        readLatestEnergy: async () => [{ sourceLabel: "A", energyKwh: 10 }],
+        listDevices: async () => { throw new Error("ENERGYIQ_TUYA_API_ERROR:1010"); },
+      });
+      expect(result).toEqual({ read: 1, failed: 0 });
+      expect(readLiveSiteReadings({ metadataStore: metadata, projectId: TUYA_OFFICE_PROJECT_ID, now: T0 + MIN }).meters).toHaveLength(1);
+    });
+  });
+});
+
 const withMetadata = (run: (metadata: ReturnType<typeof createMetadataStore>) => void): void => {
   const root = mkdtempSync(join(tmpdir(), "energy-live-readings-"));
   const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
   try {
     ensureEnergyIqBootstrap(metadata);
     run(metadata);
+  } finally {
+    metadata.close();
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+};
+
+const withMetadataAsync = async (run: (metadata: ReturnType<typeof createMetadataStore>) => Promise<void>): Promise<void> => {
+  const root = mkdtempSync(join(tmpdir(), "energy-live-readings-"));
+  const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+  try {
+    ensureEnergyIqBootstrap(metadata);
+    await run(metadata);
   } finally {
     metadata.close();
     rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

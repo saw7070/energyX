@@ -1422,17 +1422,20 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
   // Every 15 minutes, each live site's current meter readings for Overview's live power. Nothing is published.
   // One client per account, so each device's model is fetched once rather than on every read.
   const liveReadingClients = new Map<string, TuyaOpenApiClient>();
+  const liveReadingClient = (credentials: Parameters<typeof createTuyaOpenApiClientFor>[0]) => {
+    const key = credentials ? `${credentials.accessId}:${credentials.accessSecret}` : "environment";
+    let client = liveReadingClients.get(key);
+    if (!client) {
+      client = createTuyaOpenApiClientFor(credentials);
+      liveReadingClients.set(key, client);
+    }
+    return client;
+  };
   const liveReadingsPoller = createEnergyLiveReadingsPoller({
     metadataStore,
-    readLatestEnergy: ({ credentials, ...readInput }) => {
-      const key = credentials ? `${credentials.accessId}:${credentials.accessSecret}` : "environment";
-      let client = liveReadingClients.get(key);
-      if (!client) {
-        client = createTuyaOpenApiClientFor(credentials);
-        liveReadingClients.set(key, client);
-      }
-      return client.readLatestEnergy(readInput);
-    },
+    readLatestEnergy: ({ credentials, ...readInput }) => liveReadingClient(credentials).readLatestEnergy(readInput),
+    // Which meters are online, for an alert within the hour when one goes offline.
+    listDevices: ({ credentials, signal }) => liveReadingClient(credentials).listDevices(signal ? { signal } : {}),
   });
   // A release that restarts the API mid-publication leaves that journal open, and every read for the project then
   // refuses until a materialization rolls it back. Recover at boot so a deploy cannot strand a site until the next

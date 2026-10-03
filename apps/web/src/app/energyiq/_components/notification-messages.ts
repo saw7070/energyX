@@ -2,6 +2,10 @@ import { defineMessages } from "./energyiq-messages";
 
 /** The bell's alerts besides action results: stopped meters, a failed daily update and automatic reports. */
 export const notificationMessages = defineMessages({
+  "offline.one": "{name} went offline",
+  "offline.many": "{count} meters went offline",
+  "offline.detail": "Offline since {when}. Every hour offline counts against data availability: check its power and its Wi-Fi or gateway.",
+  "offline.detailMany": "{names}. The first went offline {when}. Check their power and their Wi-Fi or gateway.",
   "meters.one": "{name} stopped sending readings",
   "meters.many": "{count} meters stopped sending readings",
   "meters.detail": "Last reading {when}. Check that it is powered and connected.",
@@ -20,6 +24,10 @@ export const notificationMessages = defineMessages({
   "markAllRead": "Mark all as read",
 }, {
   "zh-Hans": {
+    "offline.one": "{name} 已离线",
+    "offline.many": "{count} 个电表已离线",
+    "offline.detail": "自 {when} 起离线。离线的每一小时都会计入数据可用率：请检查它的电源和 Wi-Fi 或网关。",
+    "offline.detailMany": "{names}。最早于 {when} 离线。请检查它们的电源和 Wi-Fi 或网关。",
     "meters.one": "{name} 已停止发送读数",
     "meters.many": "{count} 个电表已停止发送读数",
     "meters.detail": "最近读数：{when}。请检查它是否通电并已连接。",
@@ -38,6 +46,10 @@ export const notificationMessages = defineMessages({
     "markAllRead": "全部标为已读",
   },
   ms: {
+    "offline.one": "{name} di luar talian",
+    "offline.many": "{count} meter di luar talian",
+    "offline.detail": "Di luar talian sejak {when}. Setiap jam di luar talian dikira terhadap ketersediaan data: semak kuasa dan Wi-Fi atau gateway.",
+    "offline.detailMany": "{names}. Yang pertama di luar talian {when}. Semak kuasa dan Wi-Fi atau gateway.",
     "meters.one": "{name} berhenti menghantar bacaan",
     "meters.many": "{count} meter berhenti menghantar bacaan",
     "meters.detail": "Bacaan terakhir {when}. Semak sama ada ia mempunyai kuasa dan disambung.",

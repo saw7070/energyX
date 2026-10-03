@@ -17,6 +17,7 @@ const data: EnergyDataAvailabilityDto = {
   from: "2026-09-03", to: "2026-10-02", timezone: "Asia/Singapore", targetPct: 95,
   site: { availabilityPct: 61.2, metersCounted: 2, metersBelowTarget: 1, outageCount: 1, estimatedKwh: 3, checkCount: 1 },
   meters: [
+    { meterPointId: "tv", name: "Showroom TV", status: "ok", availabilityPct: 97.5, realHours: 702, estimatedHours: 0, estimatedKwh: 0, missingHours: 18, longestOutageHours: 1, offlineSince: "2026-10-02T06:15:00.000Z", checks: [] },
     { meterPointId: "router", name: "Router", location: "Office Area", status: "ok", availabilityPct: 99.2, realHours: 714, estimatedHours: 6, estimatedKwh: 3, missingHours: 0, longestOutageHours: 6, lastReadingAt: "2026-10-02T15:00:00.000Z",
       checks: [{ kind: "stuck_value", from: "2026-09-10T00:00:00.000Z", to: "2026-09-11T06:00:00.000Z", hours: 30, kwhPerHour: 1.25 }] },
     { meterPointId: "door", name: "Side door", status: "not_in_use", notInUse: "reason:switched_off", availabilityPct: 0, realHours: 0, estimatedHours: 0, estimatedKwh: 0, missingHours: 720, longestOutageHours: 720, checks: [] },
@@ -44,8 +45,12 @@ it("shows each meter against the target, the outages and stuck readings, and let
     expect(text).not.toContain("reason:switched_off");
 
     // One click on a reason saves it; nothing to type.
-    // Meters that need attention come first: the blind with no readings leads the table.
-    expect(host.querySelector("tbody tr")!.textContent).toContain("Showroom Blind");
+    // A meter offline right now leads the table, then those that need attention: the blind with no readings.
+    const order = Array.from(host.querySelectorAll("tbody tr")).map(row => row.textContent!);
+    expect(order[0]).toContain("Showroom TV");
+    expect(order[0]).toContain("Offline now");
+    expect(order[0]).toContain("Since 2 Oct, 02:15 pm");
+    expect(order[1]).toContain("Showroom Blind");
     const mark = () => Array.from(host.querySelectorAll("tbody tr")).find(row => row.textContent!.startsWith("Showroom Blind"))!.querySelector("button")!;
     await act(async () => mark().click());
     const reason = (text: string) => Array.from(host.querySelectorAll("button")).find(button => button.textContent === text)!;

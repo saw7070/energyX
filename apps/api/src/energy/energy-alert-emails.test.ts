@@ -58,6 +58,27 @@ describe("Alert emails", () => {
     });
   });
 
+  it("emails a meter that went offline within the hour, once per outage, and does not report it again as stopped", async () => {
+    await withMetadata(async (metadata) => {
+      const outbox: Array<{ to: string[]; subject: string; text: string }> = [];
+      const run = (offline: Array<{ meterPointId: string; name: string; since: string }>) => sendPendingAlertEmails({
+        metadataStore: metadata,
+        projectId: TUYA_OFFICE_PROJECT_ID,
+        emails: collectSiteAlertEmails({ metadataStore: metadata, projectId: TUYA_OFFICE_PROJECT_ID, meters, offline, publicBaseUrl: "" }),
+        recipients: ["facilities@example.com"],
+        send: async (message) => { outbox.push(message); },
+      });
+      const canteen = { meterPointId: "b", name: "Canteen lighting", since: "2026-10-02T06:15:00.000Z" };
+      expect(await run([canteen])).toHaveLength(1);
+      expect(outbox[0]!.subject).toContain("Canteen lighting went offline");
+      expect(outbox[0]!.text).toContain("offline since");
+      expect(outbox[0]!.text).toContain("data availability");
+      // The same outage is not emailed twice; a new one is.
+      expect(await run([canteen])).toEqual([]);
+      expect(await run([{ ...canteen, since: "2026-10-03T01:00:00.000Z" }])).toHaveLength(1);
+    });
+  });
+
   it("sends nothing when the site has no one to send to", async () => {
     await withMetadata(async (metadata) => {
       let sent = 0;

@@ -356,6 +356,8 @@ export type EnergyLiveReadingsDto = {
   officialMeterCount: number;
   reportingMeterCount: number;
   meters: Array<{ meterPointId: string; name: string; readAt: string; energyKwh: number; powerKw?: number; todayKwh?: number; stale: boolean }>;
+  /** Meters reported offline for half an hour or more, longest first. */
+  offline?: Array<{ meterPointId: string; name: string; since: string }>;
   intervalMinutes: number;
 };
 
@@ -387,6 +389,8 @@ export type EnergyDataAvailabilityDto = {
     missingHours: number;
     longestOutageHours: number;
     lastReadingAt?: string;
+    /** Offline right now, per the 15-minute live check. */
+    offlineSince?: string;
     checks: Array<{ kind: "stuck_value" | "flat_zero"; from: string; to: string; hours: number; kwhPerHour: number }>;
   }>;
   outages: Array<{ meterPointId: string; name: string; from: string; to: string; hours: number; kind: "estimated" | "missing"; estimatedKwh: number; ongoing: boolean }>;

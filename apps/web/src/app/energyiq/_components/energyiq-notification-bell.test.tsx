@@ -8,9 +8,10 @@ const api = vi.hoisted(() => ({
   getEnergyProjectAlerts: vi.fn(),
   markEnergyProjectAlertRead: vi.fn(),
   getEnergyProjectMeterHealth: vi.fn(),
+  getEnergyLiveReadings: vi.fn(),
 }));
 vi.mock("../../../lib/config-api", () => ({ configApi: api }));
-import { EnergyIqNotificationBell, stoppedKey } from "./energyiq-notification-bell";
+import { EnergyIqNotificationBell, offlineKey, stoppedKey } from "./energyiq-notification-bell";
 import { resetMeterHealthRequests } from "./meter-health-notice";
 
 let container: HTMLDivElement;
@@ -42,6 +43,7 @@ beforeEach(() => {
   api.getEnergyProjectAlerts.mockResolvedValue(alerts);
   api.reportActionRequest.mockResolvedValue({ items: [{ actionId: "a1", title: "Switch off the LED wall at night", runId: "run-1" }] });
   api.markEnergyProjectAlertRead.mockResolvedValue({ read: true });
+  api.getEnergyLiveReadings.mockResolvedValue({ connected: true, officialMeterCount: 0, reportingMeterCount: 0, meters: [], offline: [], intervalMinutes: 15 });
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -114,6 +116,21 @@ describe("Notification bell", () => {
     expect(container.querySelectorAll("li")).toHaveLength(0);
     expect(container.textContent).toContain("You're all caught up");
     expect(container.textContent).not.toContain("Mark all as read");
+  });
+
+  it("says within the hour that a meter went offline, links to Data availability and does not repeat it as stopped", async () => {
+    const offline = [{ meterPointId: "m5", name: "Meter 05", since: "2026-10-03T06:15:00.000Z" }];
+    api.getEnergyLiveReadings.mockResolvedValue({ connected: true, officialMeterCount: 0, reportingMeterCount: 0, meters: [], offline, intervalMinutes: 15 });
+    await openBell();
+    const rows = [...container.querySelectorAll("li")];
+    const row = rows.find((item) => item.textContent?.includes("Meter 05 went offline"))!;
+    expect(row.textContent).toContain("Offline since 3 Oct, 2:15 pm");
+    expect(row.querySelector("a")!.getAttribute("href")).toBe("/energyiq/project-configuration?projectId=p1&tab=availability");
+    // Meter 06 is still only stopped; Meter 05 is not listed twice.
+    expect(rows.find((item) => item.textContent?.includes("Meter 06 stopped sending readings"))).toBeDefined();
+    expect(rows.filter((item) => item.textContent?.includes("Meter 05"))).toHaveLength(1);
+    await act(async () => { row.querySelector("button")!.click(); });
+    expect(api.markEnergyProjectAlertRead).toHaveBeenCalledWith("p1", offlineKey(offline));
   });
 
   it("treats a site without the action pilot as having no action results, not as a failure", async () => {

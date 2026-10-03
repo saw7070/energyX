@@ -7,16 +7,19 @@ import { loadPasswordAuthConfig } from "../auth/config.js";
 import { withEnergyProjectPublicationReadLock } from "./energy-project-materialization.js";
 import { resolveEnergyPublishedMeterPoints } from "./energy-query-context.js";
 import { readSiteAlerts } from "./energy-site-alerts.js";
+import { readLiveSiteReadings } from "./energy-live-readings.js";
 
 /**
  * Alert emails: the same two site problems the bell shows, sent to the people who own the site's workspace, so a
  * facility team hears about them without opening EnergyX.
  * - meters that stopped sending readings (the Overview rule: half a day behind the rest of the site);
- * - a daily live update that did not finish.
- * Each problem is emailed once: a new set of stopped meters, or a new failure, is a new email. Off unless
+ * - a daily live update that did not finish;
+ * - meters Tuya has reported offline for half an hour, from the 15-minute live check, so a fault is known within the
+ *   hour rather than the next day.
+ * Each problem is emailed once: a new set of stopped or offline meters, or a new failure, is a new email. Off unless
  * ENERGYIQ_ALERT_EMAILS_ENABLED=true and SMTP is configured.
  */
-const CHECK_INTERVAL_MS = 60 * 60_000;
+const CHECK_INTERVAL_MS = 15 * 60_000;
 /** Mirrors STALE_METER_REPORTING_MS in energy-analysis.ts and the web's stoppedMeters(). */
 const STOPPED_AFTER_MS = 12 * 60 * 60_000;
 
@@ -27,6 +30,8 @@ export const collectSiteAlertEmails = (input: {
   metadataStore: MetadataStore;
   projectId: string;
   meters: MeterHealthRow[];
+  /** Meters offline right now, from the live check. */
+  offline?: Array<{ meterPointId: string; name: string; since: string }>;
   publicBaseUrl: string;
 }): AlertEmail[] => {
   const project = input.metadataStore.energyIq.getProject(input.projectId);
@@ -35,7 +40,22 @@ export const collectSiteAlertEmails = (input: {
     ? `\n\nOpen in EnergyX: ${input.publicBaseUrl.replace(/\/$/u, "")}${path}?projectId=${encodeURIComponent(input.projectId)}`
     : "";
   const emails: AlertEmail[] = [];
-  const stopped = stoppedMeters(input.meters);
+  const offline = input.offline ?? [];
+  if (offline.length > 0) {
+    emails.push({
+      key: `offline:${offline.map((meter) => `${meter.meterPointId}@${meter.since}`).sort().join(",")}`,
+      subject: `${site}: ${offline.length === 1 ? `${offline[0]!.name} went offline` : `${offline.length} meters went offline`}`,
+      text: [
+        `${offline.length === 1 ? "This meter" : "These meters"} at ${site} went offline and ${offline.length === 1 ? "has" : "have"} not come back:`,
+        "",
+        ...offline.map((meter) => `- ${meter.name}: offline since ${formatTime(meter.since)}`),
+        "",
+        "Every hour offline counts against data availability. Worth checking straight away: whether the meter still has power, and whether its Wi-Fi or gateway is online.",
+      ].join("\n") + link("/energyiq/project-configuration"),
+    });
+  }
+  // A meter already reported offline above is not reported again as stopped.
+  const stopped = stoppedMeters(input.meters).filter((meter) => !offline.some((item) => item.meterPointId === meter.meterPointId));
   if (stopped.length > 0) {
     const since = stopped[0]!.lastReadingAt!;
     emails.push({
@@ -157,6 +177,7 @@ export const createEnergyAlertEmailer = (input: {
               metadataStore: input.metadataStore,
               projectId,
               meters: await readMeters(projectId),
+              offline: readLiveSiteReadings({ metadataStore: input.metadataStore, projectId }).offline,
               publicBaseUrl: config.publicBaseUrl,
             });
             const sent = await sendPendingAlertEmails({

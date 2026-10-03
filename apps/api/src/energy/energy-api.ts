@@ -25,6 +25,7 @@ import {
   readEnergyMeterIntervalCoverage,
 } from "@datafoundry/data-gateway";
 import { resolveDataAvailabilityPeriod, summariseDataAvailability } from "./energy-data-availability.js";
+import { readOfflineMeters } from "./energy-live-status.js";
 import type {
   EnergyIqAcademicCalendarPeriod,
   EnergyIqDataSnapshotRecord,
@@ -1654,10 +1655,15 @@ export const handleEnergyApiRequest = async (
             return last ? [[meterPoint.meterPointId, last] as const] : [];
           })),
         });
+        // Meters offline right now, from the 15-minute live check, so the fault can be chased before the hours add up.
+        const offlineNow = new Map(readOfflineMeters({ db: context.metadataStore.db, projectId }).map((meter) => [meter.meterPointId, meter.offlineSince]));
+        const meters = summary.meters.map((meter) => offlineNow.has(meter.meterPointId) && meter.status !== "not_in_use"
+          ? { ...meter, offlineSince: offlineNow.get(meter.meterPointId)! }
+          : meter);
         return {
           status: 200,
           headers: { "Cache-Control": "private, no-store" },
-          body: createSuccessResult({ from: period.from, to: period.to, timezone: project.timezone, ...summary }),
+          body: createSuccessResult({ from: period.from, to: period.to, timezone: project.timezone, ...summary, meters }),
         };
       });
     }

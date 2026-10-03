@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { configApi, type EnergyMeterHealthDto, type EnergyProjectAlertsDto } from "../../../lib/config-api";
+import { configApi, type EnergyLiveReadingsDto, type EnergyMeterHealthDto, type EnergyProjectAlertsDto } from "../../../lib/config-api";
 import { EnergyIcon } from "./icons";
 import styles from "./energyiq-top-bar.module.css";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
@@ -25,8 +25,13 @@ export const stoppedKey = (meters: ReadonlyArray<{ meterPointId: string; lastRea
   return `meters:${hash.toString(36)}`;
 };
 
+/** "These meters went offline at these times": the same meters going offline again later is a new alert. */
+export const offlineKey = (meters: ReadonlyArray<{ meterPointId: string; since: string }>): string =>
+  stoppedKey(meters.map((meter) => ({ meterPointId: meter.meterPointId, lastReadingAt: meter.since }))).replace(/^meters:/, "offline:");
+
 /**
- * Alerts for the active project: meters that stopped sending, a daily live update that failed, automatic reports that
+ * Alerts for the active project: meters that went offline in the last hour (from the 15-minute live check), meters
+ * that stopped sending, a daily live update that failed, automatic reports that
  * are ready, and measured results of actions. Opening an alert marks it read, and any entry, action results included,
  * can be marked read from the list without opening it.
  */
@@ -37,6 +42,7 @@ export function EnergyIqNotificationBell({ projectId }: { projectId: string }) {
   const [items, setItems] = useState<Notice[]>([]);
   const [alerts, setAlerts] = useState<EnergyProjectAlertsDto | null>(null);
   const [health, setHealth] = useState<EnergyMeterHealthDto | null>(null);
+  const [offline, setOffline] = useState<NonNullable<EnergyLiveReadingsDto["offline"]>>([]);
   const [readNow, setReadNow] = useState<Set<string>>(new Set());
   const [actionsReadNow, setActionsReadNow] = useState<Set<string>>(new Set());
   // A failed load is not "no new results": say so, and keep whatever was already listed.
@@ -51,12 +57,15 @@ export function EnergyIqNotificationBell({ projectId }: { projectId: string }) {
     const load = async () => {
       // Action results exist only where the action pilot is on; elsewhere that list is simply empty.
       // Each source fails on its own: a missing or refused one never takes the others down.
-      const [actionResult, alertResult] = await Promise.allSettled([
+      const [actionResult, alertResult, liveResult] = await Promise.allSettled([
         Promise.resolve().then(() => configApi.reportActionRequest<{ items: Notice[] }>(projectId, "notifications")),
         Promise.resolve().then(() => configApi.getEnergyProjectAlerts(projectId)),
+        // Sites without a live connection simply have no offline meters.
+        Promise.resolve().then(() => configApi.getEnergyLiveReadings(projectId)),
       ]);
       if (!alive) return;
       setItems(actionResult.status === "fulfilled" ? actionResult.value.items : []);
+      setOffline(liveResult.status === "fulfilled" ? liveResult.value?.offline ?? [] : []);
       if (alertResult.status === "fulfilled") { setAlerts(alertResult.value); setFailed(false); } else setFailed(true);
     };
     void load();
@@ -70,7 +79,7 @@ export function EnergyIqNotificationBell({ projectId }: { projectId: string }) {
     const timer = setInterval(() => { if (!document.hidden) load(); }, HEALTH_REFRESH_MS);
     return () => { alive = false; clearInterval(timer); };
   }, [projectId]);
-  useEffect(() => { setItems([]); setAlerts(null); setHealth(null); setReadNow(new Set()); setActionsReadNow(new Set()); setFailed(false); }, [projectId]);
+  useEffect(() => { setItems([]); setAlerts(null); setHealth(null); setOffline([]); setReadNow(new Set()); setActionsReadNow(new Set()); setFailed(false); }, [projectId]);
   useEffect(() => {
     if (!open) return;
     const outside = (event: MouseEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false); };
@@ -92,7 +101,20 @@ export function EnergyIqNotificationBell({ projectId }: { projectId: string }) {
         href: `/energyiq/project-configuration?${new URLSearchParams({ projectId, connection: "live" })}`,
       });
     }
-    const stopped = health ? stoppedMeters(health.meters) : [];
+    if (offline.length) {
+      const key = offlineKey(offline);
+      const first = offline[0]!;
+      list.push({
+        key, readKey: key, tone: "warning",
+        title: offline.length === 1 ? tn("offline.one", { name: first.name }) : tn("offline.many", { count: offline.length }),
+        detail: offline.length === 1
+          ? tn("offline.detail", { when: when(first.since) })
+          : tn("offline.detailMany", { names: offline.slice(0, 3).map((meter) => meter.name).join(", ") + (offline.length > 3 ? "…" : ""), when: when(first.since) }),
+        href: `/energyiq/project-configuration?${new URLSearchParams({ projectId, tab: "availability" })}`,
+      });
+    }
+    // A meter already shown as offline now is not repeated as stopped.
+    const stopped = health ? stoppedMeters(health.meters).filter((meter) => !offline.some((item) => item.meterPointId === meter.meterPointId)) : [];
     if (stopped.length) {
       const key = stoppedKey(stopped);
       const first = stopped[0]!;
@@ -121,7 +143,7 @@ export function EnergyIqNotificationBell({ projectId }: { projectId: string }) {
       });
     }
     return list.filter((entry) => (!entry.readKey || !read.has(entry.readKey)) && (!entry.runId || !actionsReadNow.has(entry.runId)));
-  }, [alerts, health, items, readNow, actionsReadNow, locale, projectId, t, tn]);
+  }, [alerts, health, offline, items, readNow, actionsReadNow, locale, projectId, t, tn]);
 
   const markRead = (entry: BellEntry) => {
     if (entry.readKey) {

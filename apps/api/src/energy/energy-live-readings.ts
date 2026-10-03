@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { EnergyIqProjectSetupDocument, MetadataStore } from "@datafoundry/metadata";
 
 import { resolveEnergyTuyaProjectConnector, type EnergyTuyaProjectConnector } from "./energy-tuya-connector.js";
+import { readOfflineMeters, recordDeviceStatus } from "./energy-live-status.js";
 import type { TuyaDeviceBinding, TuyaLatestEnergyReading } from "./tuya-openapi-client.js";
 
 /**
@@ -42,6 +43,8 @@ export type LiveSiteReadings = {
   /** Official meters with a current (not stale) power value. */
   reportingMeterCount: number;
   meters: LiveMeterReading[];
+  /** Meters Tuya has reported offline for half an hour or more, longest first; meters marked not in use are left out. */
+  offline: Array<{ meterPointId: string; name: string; since: string }>;
   intervalMinutes: number;
 };
 
@@ -115,7 +118,9 @@ export const readLiveSiteReadings = (input: {
   const document = publishedDocument(input.metadataStore, input.projectId, project.hierarchy_revision_id);
   const timezone = document?.project.timezone ?? "Asia/Singapore";
   const rows = document?.meter_mapping?.rows.filter((row) => row.resource === "electricity") ?? [];
-  const names = new Map(rows.map((row) => [row.id, row.display_name]));
+  // The name people gave the meter, as everywhere else in the app; the panel label is the fallback.
+  const names = new Map(rows.map((row) => [row.id, row.presentation?.device_name?.trim() || row.presentation?.circuit_name?.trim() || row.display_name]));
+  const notInUse = new Set(rows.filter((row) => row.presentation?.not_in_use).map((row) => row.id));
   const official = officialProjectMeterIds(document);
   ensureTable(input.metadataStore.db);
   const stored = input.metadataStore.db
@@ -153,6 +158,9 @@ export const readLiveSiteReadings = (input: {
     officialMeterCount: official.size,
     reportingMeterCount: reporting.length,
     meters,
+    offline: readOfflineMeters({ db: input.metadataStore.db, projectId: input.projectId, now })
+      .filter((meter) => names.has(meter.meterPointId) && !notInUse.has(meter.meterPointId))
+      .map((meter) => ({ meterPointId: meter.meterPointId, name: names.get(meter.meterPointId)!, since: meter.offlineSince })),
     intervalMinutes: LIVE_READING_INTERVAL_MS / 60_000,
   };
 };
@@ -162,6 +170,8 @@ export const pollLiveReadings = async (input: {
   metadataStore: MetadataStore;
   connector: EnergyTuyaProjectConnector;
   readLatestEnergy: (input: { devices: TuyaDeviceBinding[]; credentials?: EnergyTuyaProjectConnector["credentials"]; signal?: AbortSignal }) => Promise<TuyaLatestEnergyReading[]>;
+  /** The account's devices with whether each is online now, for the offline alert. */
+  listDevices?: (input: { credentials?: EnergyTuyaProjectConnector["credentials"]; signal?: AbortSignal }) => Promise<Array<{ id: string; online: boolean }>>;
   now?: () => number;
   signal?: AbortSignal;
 }): Promise<{ read: number; failed: number }> => {
@@ -176,13 +186,36 @@ export const pollLiveReadings = async (input: {
     const meterPointId = meterByLabel.get(reading.sourceLabel);
     return meterPointId && reading.energyKwh !== undefined ? [{ meterPointId, energyKwh: reading.energyKwh }] : [];
   });
+  const readAt = now();
   recordLiveReadings({
     db: input.metadataStore.db,
     projectId: input.connector.projectId,
     timezone: input.connector.publishedDocument.project.timezone,
-    readAt: now(),
+    readAt,
     readings,
   });
+  if (input.listDevices) {
+    // A failed status check must not cost the power readings above; the next poll tries again.
+    try {
+      const devices = await input.listDevices({
+        ...(input.connector.credentials ? { credentials: input.connector.credentials } : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
+      });
+      const online = new Map(devices.map((device) => [device.id, device.online]));
+      recordDeviceStatus({
+        db: input.metadataStore.db,
+        projectId: input.connector.projectId,
+        checkedAt: readAt,
+        statuses: input.connector.devices.flatMap((binding) => {
+          const meterPointId = meterByLabel.get(binding.sourceLabel);
+          const isOnline = online.get(binding.deviceId);
+          return meterPointId && isOnline !== undefined ? [{ meterPointId, online: isOnline }] : [];
+        }),
+      });
+    } catch (error) {
+      console.warn(`[live-readings] status check failed project=${input.connector.projectId} code=${error instanceof Error ? error.message.slice(0, 160) : "unknown"}`);
+    }
+  }
   return { read: readings.length, failed: latest.length - readings.length };
 };
 
@@ -200,6 +233,7 @@ export type EnergyLiveReadingsPoller = {
 export const createEnergyLiveReadingsPoller = (input: {
   metadataStore: MetadataStore;
   readLatestEnergy: Parameters<typeof pollLiveReadings>[0]["readLatestEnergy"];
+  listDevices?: Parameters<typeof pollLiveReadings>[0]["listDevices"];
   env?: NodeJS.ProcessEnv;
   now?: () => number;
   intervalMs?: number;
@@ -220,6 +254,7 @@ export const createEnergyLiveReadingsPoller = (input: {
               metadataStore: input.metadataStore,
               connector,
               readLatestEnergy: input.readLatestEnergy,
+              ...(input.listDevices ? { listDevices: input.listDevices } : {}),
               ...(input.now ? { now: input.now } : {}),
               signal: controller.signal,
             });

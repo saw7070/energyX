@@ -83,7 +83,9 @@ export function DataAvailability({ projectId, siteName, document, canEdit, busy,
   const checks = (data?.meters ?? []).flatMap(meter => meter.checks.map(check => ({ meter, check })));
   // Meters that need attention first; within each, the least received first.
   const severity: Record<Meter["status"], number> = { no_readings: 0, stopped: 1, below_target: 2, ok: 3, not_in_use: 4 };
-  const meters = [...(data?.meters ?? [])].sort((left, right) => severity[left.status] - severity[right.status] || left.availabilityPct - right.availabilityPct || left.name.localeCompare(right.name));
+  // A meter offline right now leads: every hour it stays offline costs availability.
+  const rank = (meter: Meter) => meter.offlineSince ? -1 : severity[meter.status];
+  const meters = [...(data?.meters ?? [])].sort((left, right) => rank(left) - rank(right) || left.availabilityPct - right.availabilityPct || left.name.localeCompare(right.name));
   const locations = new Map((data?.meters ?? []).map(meter => [meter.meterPointId, meter.location]));
   const sitePct = data?.site.availabilityPct ?? null;
   const meets = sitePct !== null && sitePct >= target;
@@ -150,7 +152,9 @@ export function DataAvailability({ projectId, siteName, document, canEdit, busy,
                 <td className={styles.number}>{meter.longestOutageHours >= 1 ? t("hours", { hours: number(meter.longestOutageHours) }) : <span className={styles.quiet}>{t("none")}</span>}</td>
                 <td className={styles.number}>{meter.estimatedKwh > 0 ? t("kwh", { kwh: number(meter.estimatedKwh, 2) }) : <span className={styles.quiet}>—</span>}</td>
                 <td>{meter.lastReadingAt ? when(meter.lastReadingAt) : <span className={styles.quiet}>—</span>}</td>
-                <td><span className={`${styles.badge} ${badgeClass(meter.status)}`}><i aria-hidden="true" />{statusText(meter.status)}</span>{meter.notInUse && <small className={styles.note}>{reasonText(meter.notInUse)}</small>}</td>
+                <td>{meter.offlineSince
+                  ? <><span className={`${styles.badge} ${styles.badgeBad}`}><i aria-hidden="true" />{t("status.offline_now")}</span><small className={styles.note}>{t("offlineSince", { when: when(meter.offlineSince) })}</small></>
+                  : <span className={`${styles.badge} ${badgeClass(meter.status)}`}><i aria-hidden="true" />{statusText(meter.status)}</span>}{meter.notInUse && <small className={styles.note}>{reasonText(meter.notInUse)}</small>}</td>
                 {canEdit && <td className={styles.actionCell}>{meter.status === "not_in_use"
                   ? <button type="button" className={styles.rowAction} disabled={busy} onClick={() => save(meter, null)}>{t("action.inUse")}</button>
                   : <button type="button" className={styles.rowAction} disabled={busy} aria-expanded={editing?.meterId === meter.meterPointId} onClick={() => setEditing(editing?.meterId === meter.meterPointId ? null : { meterId: meter.meterPointId, other: false, reason: "" })}>{t("action.notInUse")}</button>}</td>}
