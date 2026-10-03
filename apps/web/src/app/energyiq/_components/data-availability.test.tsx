@@ -38,13 +38,15 @@ it("shows each meter against the target, the outages and stuck readings, and let
     expect(text).toContain("61.2%");
     expect(text).toContain("Meets target");
     expect(text).toContain("No readings");
-    expect(text).toContain("the same reading, 1.25 kWh, every hour for 30 hours");
-    expect(text).toContain("3 kWh arrived when it came back, kept as an estimate.");
+    expect(text).toContain("Router — The same reading, 1.25 kWh, every hour for 30 hours");
+    expect(text).toContain("3 kWh arrived when it came back");
     expect(text).toContain("Switched off on purpose");
     expect(text).not.toContain("reason:switched_off");
 
     // One click on a reason saves it; nothing to type.
-    const mark = () => Array.from(host.querySelectorAll("button")).filter(button => button.textContent === "Mark not in use")[1]!;
+    // Meters that need attention come first: the blind with no readings leads the table.
+    expect(host.querySelector("tbody tr")!.textContent).toContain("Showroom Blind");
+    const mark = () => Array.from(host.querySelectorAll("tbody tr")).find(row => row.textContent!.startsWith("Showroom Blind"))!.querySelector("button")!;
     await act(async () => mark().click());
     const reason = (text: string) => Array.from(host.querySelectorAll("button")).find(button => button.textContent === text)!;
     await act(async () => reason("Nobody uses it").click());
