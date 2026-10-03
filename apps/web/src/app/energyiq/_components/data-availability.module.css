@@ -5,7 +5,9 @@
 .range { display:inline-flex; align-items:center; gap:6px; margin-top:12px; padding:4px 10px; border-radius:999px; background:#f1f5f2; color:#41534a; font-size:13px; font-weight:500; }
 .controls { display:flex; flex-wrap:wrap; align-items:flex-end; gap:10px; }
 .controls label { display:grid; gap:5px; font-size:12px; font-weight:600; color:#586b5e; }
-.controls select { min-height:38px; min-width:170px; padding:6px 10px; border:1px solid #d0dbd2; border-radius:8px; background:white; font-size:14px; color:#1f2d25; }
+.controls select { appearance:none; -webkit-appearance:none; min-height:38px; min-width:180px; padding:6px 38px 6px 12px; border:1px solid #d0dbd2; border-radius:8px; background-color:white; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%23586b5e' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 13px center; background-size:12px 12px; font-size:14px; font-weight:600; color:#1f2d25; cursor:pointer; }
+.controls select:hover { border-color:#9cbfa9; }
+.controls select:focus-visible { outline:2px solid #368c7c; outline-offset:1px; }
 .secondary { display:inline-flex; align-items:center; gap:6px; min-height:38px; border:1px solid #d0dbd2; border-radius:8px; padding:7px 14px; background:white; color:#1d513a; font-size:14px; font-weight:600; }
 .secondary:hover { background:#eef3ed; }
 .secondary:disabled { opacity:.5; cursor:not-allowed; }
@@ -102,7 +104,9 @@
 :global(:where(html[data-energyiq-theme="dark"])) .muted { color:#a6b7ad; }
 :global(:where(html[data-energyiq-theme="dark"])) .range { border-radius:999px; background:#1c1f1c; color:#a8bdb2; }
 :global(:where(html[data-energyiq-theme="dark"])) .controls label { color:#9db1a3; }
-:global(:where(html[data-energyiq-theme="dark"])) .controls select { border:1px solid #323b34; border-radius:8px; background:#191919; color:#bfd1c6; }
+:global(:where(html[data-energyiq-theme="dark"])) .controls select { border:1px solid #323b34; border-radius:8px; background-color:#191919; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%23586b5e' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); color:#bfd1c6; }
+:global(:where(html[data-energyiq-theme="dark"])) .controls select:hover { border-color:#2b4a38; }
+:global(:where(html[data-energyiq-theme="dark"])) .controls select:focus-visible { outline:2px solid #368c7c; }
 :global(:where(html[data-energyiq-theme="dark"])) .secondary { border:1px solid #323b34; border-radius:8px; background:#191919; color:#94caae; }
 :global(:where(html[data-energyiq-theme="dark"])) .secondary:hover { background:#1c201c; }
 :global(:where(html[data-energyiq-theme="dark"])) .primary { border-radius:8px; background:#1d513a; color:white; }
