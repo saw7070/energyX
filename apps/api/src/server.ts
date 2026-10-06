@@ -217,6 +217,7 @@ import {
 import { createTuyaOpenApiClientFor, createTuyaOpenApiClientFromEnv, type TuyaOpenApiClient } from "./energy/tuya-openapi-client.js";
 import { createEnergyLiveReadingsPoller } from "./energy/energy-live-readings.js";
 import { createEnergyAlertEmailer } from "./energy/energy-alert-emails.js";
+import { repairMovedProjectFactDigests } from "./energy/energy-project-move.js";
 import { resolveEnergyTuyaProjectConnector } from "./energy/energy-tuya-connector.js";
 import type { ConfigApiContext } from "./routes/types.js";
 import { resolveOverviewAiStageStructuredOutput } from "./energy/preschool-overview-ai-structured-output.js";
@@ -1452,6 +1453,12 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
     }
   }).catch((error) => {
     console.error(`[energy-publication] recovery-failed code=${error instanceof Error ? error.message : "unknown"}`);
+  });
+  // A project moved before moves re-recorded the readings digest is refused in its new Organisation; repair at boot.
+  void repairMovedProjectFactDigests({ metadataStore }).then((repaired) => {
+    for (const projectId of repaired) console.log(`[energy-project-move] repaired-readings-digest project=${projectId}`);
+  }).catch((error) => {
+    console.error(`[energy-project-move] repair-failed code=${error instanceof Error ? error.message : "unknown"}`);
   });
   tuyaScheduler.start();
   liveConnectionScheduler.start();

@@ -76,16 +76,21 @@ const energySnapshotReceiptPredicateSql = (
       AND ${alias}.canonical_interval_count = ${scope.canonicalIntervalCount}
       AND ${alias}.canonical_interval_digest = ${sqlLiteral(scope.canonicalIntervalDigest)}`;
 
+/**
+ * Count and digest of a project's canonical interval facts. `digestWorkspaceId` hashes the rows as if they were
+ * still labelled with that Workspace: after a project moves, the copied rows must hash to the digest recorded
+ * under the old label before the new digest may replace it.
+ */
 export const energyCanonicalIntervalIntegritySql = (scope: Pick<
   EnergySnapshotGuardScope,
   "workspaceId" | "projectId" | "sourceSha256"
->): string => `
+>, options: { digestWorkspaceId?: string } = {}): string => `
   SELECT
     COUNT(*) AS canonical_interval_count,
     sha256(COALESCE(string_agg(row_digest, '' ORDER BY row_digest), '')) AS canonical_interval_digest
   FROM (
     SELECT sha256(to_json(struct_pack(
-      workspace_id := workspace_id,
+      workspace_id := ${options.digestWorkspaceId === undefined ? "workspace_id" : `CAST(${sqlLiteral(options.digestWorkspaceId)} AS VARCHAR)`},
       project_id := project_id,
       import_batch_id := import_batch_id,
       resource := resource,

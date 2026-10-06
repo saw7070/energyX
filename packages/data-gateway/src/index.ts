@@ -116,6 +116,7 @@ export {
   writeEnergyFactProjectMaterialization,
   copyEnergyFactProjectToWorkspace,
   purgeEnergyFactProject,
+  repairMovedEnergyFactProjectDigest,
   type EnergyFactProjectRowCounts,
   type EnergyFactMaterializationBatchWrite,
   type EnergyFactProjectAudit,

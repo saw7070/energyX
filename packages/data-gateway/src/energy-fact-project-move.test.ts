@@ -4,7 +4,8 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { getDuckDbDatabase } from "./duckdb-database-cache.js";
-import { copyEnergyFactProjectToWorkspace, purgeEnergyFactProject } from "./energy-fact-writer.js";
+import { copyEnergyFactProjectToWorkspace, purgeEnergyFactProject, repairMovedEnergyFactProjectDigest } from "./energy-fact-writer.js";
+import { energyCanonicalIntervalIntegritySql } from "./energy-snapshot-guard.js";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -39,7 +40,71 @@ const seedSource = async (path: string): Promise<void> => {
   }
 };
 
+const digestOf = async (path: string, workspaceId: string, options: { digestWorkspaceId?: string } = {}) => {
+  const [row] = await query(path, energyCanonicalIntervalIntegritySql({ workspaceId, projectId: "moving", sourceSha256: ["abc"] }, options));
+  return { count: Number(row!.canonical_interval_count), digest: String(row!.canonical_interval_digest) };
+};
+
+const recordedDigest = async (path: string) => {
+  const [row] = await query(path, "SELECT canonical_interval_count, canonical_interval_digest FROM energy_project_fact_state WHERE project_id = 'moving'");
+  return { count: Number(row!.canonical_interval_count), digest: String(row!.canonical_interval_digest) };
+};
+
+/** Interval facts with a state row whose digest matches them, as materialization leaves a store. */
+const seedIntervalFacts = async (path: string, workspaceId: string, digestWorkspaceId = workspaceId): Promise<void> => {
+  mkdirSync(dirname(path), { recursive: true });
+  await query(path, "SELECT 1");
+  await purgeEnergyFactProject({ databasePath: path, projectId: "none" });
+  await query(path, `INSERT INTO energy_interval_facts (workspace_id, project_id, resource, meter_node_id, scope_id, source_reading_kind,
+      interval_start, usage_kwh, quality_status, source_sha256)
+    VALUES (?, 'moving', 'electricity', 'meter-1', 'meter-1', 'cumulative_energy', TIMESTAMPTZ '2026-09-01 00:00:00+08', 0.5, 'ok', 'abc'),
+           (?, 'moving', 'electricity', 'meter-1', 'meter-1', 'cumulative_energy', TIMESTAMPTZ '2026-09-01 00:15:00+08', 0.7, 'ok', 'abc')`, [workspaceId, workspaceId]);
+  const { count, digest } = await digestOf(path, workspaceId, { digestWorkspaceId });
+  await query(path, `INSERT INTO energy_project_fact_state (project_id, workspace_id, data_snapshot_id, manifest_fingerprint,
+      source_sha256_json, fact_writer_contract_version, canonical_interval_count, canonical_interval_digest, updated_at)
+    VALUES ('moving', ?, 'snapshot-1', 'fp', '["abc"]', 'v4', ?, ?, now())`, [workspaceId, count, digest]);
+};
+
 describe("energy fact project move", () => {
+  it("re-records the interval digest for the target workspace so the moved facts stay readable", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-fact-move-"));
+    roots.push(root);
+    const source = join(root, "old-org", "energy.duckdb");
+    const target = join(root, "new-org", "energy.duckdb");
+    await seedIntervalFacts(source, "old-org");
+
+    await copyEnergyFactProjectToWorkspace({ sourceDatabasePath: source, targetDatabasePath: target, projectId: "moving", targetWorkspaceId: "new-org" });
+
+    expect(await recordedDigest(target)).toEqual(await digestOf(target, "new-org"));
+    expect((await recordedDigest(target)).count).toBe(2);
+  });
+
+  it("repairs a project moved with its old digest, once, and only when the label is all that changed", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-fact-move-"));
+    roots.push(root);
+    const store = join(root, "new-org", "energy.duckdb");
+    // As an earlier move left it: rows relabelled new-org, digest still recorded under old-org.
+    await seedIntervalFacts(store, "new-org", "old-org");
+    expect(await recordedDigest(store)).not.toEqual(await digestOf(store, "new-org"));
+    const input = { databasePath: store, projectId: "moving", previousWorkspaceIds: ["somewhere-else", "old-org"] };
+
+    expect(await repairMovedEnergyFactProjectDigest(input)).toBe(true);
+    expect(await recordedDigest(store)).toEqual(await digestOf(store, "new-org"));
+    expect(await repairMovedEnergyFactProjectDigest(input)).toBe(false);
+  });
+
+  it("leaves the digest alone when the moved facts changed in more than their label", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-fact-move-"));
+    roots.push(root);
+    const store = join(root, "new-org", "energy.duckdb");
+    await seedIntervalFacts(store, "new-org", "old-org");
+    const before = await recordedDigest(store);
+    await query(store, "UPDATE energy_interval_facts SET usage_kwh = 9 WHERE usage_kwh = 0.7");
+
+    expect(await repairMovedEnergyFactProjectDigest({ databasePath: store, projectId: "moving", previousWorkspaceIds: ["old-org"] })).toBe(false);
+    expect(await recordedDigest(store)).toEqual(before);
+  });
+
   it("copies one project's facts into the target store restamped with the target workspace, then purges the source", async () => {
     const root = mkdtempSync(join(tmpdir(), "energy-fact-move-"));
     roots.push(root);

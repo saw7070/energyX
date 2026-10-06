@@ -12,7 +12,7 @@ import { ReportStore } from "../report-agent/report-store.js";
 import { EnergyAdminAccessService } from "./energy-admin-access.js";
 import { ensureEnergyIqBootstrap } from "./energy-bootstrap.js";
 import { handleEnergyApiRequest } from "./energy-api.js";
-import type { EnergyProjectMoveFactStore } from "./energy-project-move.js";
+import { repairMovedProjectFactDigests, type EnergyProjectMoveFactStore } from "./energy-project-move.js";
 import { resolveEnergyAccessContext } from "./energy-query-context.js";
 
 const authConfig = {
@@ -115,6 +115,24 @@ describe("moving a project to another customer Organisation", () => {
     expect(organisations.find((organisation) => organisation.id === newOrg.id)?.projects.map((project) => project.id)).toEqual(["elite-iot"]);
     const audit = db.prepare("SELECT event_type FROM auth_audit_events WHERE event_type = 'energyiq.project_moved'").all();
     expect(audit).toHaveLength(1);
+  });
+
+  it("at startup, re-records readings digests for projects the audit log shows were moved", async () => {
+    const { metadata, service, oldOrg, newOrg } = await setup();
+    await service.moveProject({ actorUserId: "dev-user", projectId: "elite-iot", organisationId: newOrg.id });
+    const repairs: Array<{ databasePath: string; projectId: string; previousWorkspaceIds: readonly string[] }> = [];
+
+    const repaired = await repairMovedProjectFactDigests({
+      metadataStore: metadata,
+      resolvePath: (workspaceId) => `/facts/${workspaceId}.duckdb`,
+      repair: async (input) => {
+        repairs.push(input);
+        return true;
+      },
+    });
+
+    expect(repairs).toEqual([{ databasePath: `/facts/${newOrg.id}.duckdb`, projectId: "elite-iot", previousWorkspaceIds: [oldOrg.id] }]);
+    expect(repaired).toEqual(["elite-iot"]);
   });
 
   it("leaves everything in place and discards the copied facts when the metadata move fails", async () => {

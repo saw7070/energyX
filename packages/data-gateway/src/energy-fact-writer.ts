@@ -659,8 +659,11 @@ export const copyEnergyFactProjectToWorkspace = async (input: {
   if (!existsSync(sourcePath)) return counts;
   const stagingDirectory = mkdtempSync(join(tmpdir(), "energyiq-project-move-"));
   const source = (await getDuckDbDatabase(sourcePath)).connect();
+  let sourceWorkspaceId: string | null = null;
   try {
     await ensureFactSchema(source);
+    const state = await duckDbGet(source, "SELECT workspace_id FROM energy_project_fact_state WHERE project_id = ?", [input.projectId]);
+    sourceWorkspaceId = typeof state.workspace_id === "string" ? state.workspace_id : null;
     for (const table of ENERGY_FACT_PROJECT_TABLES) {
       const row = await duckDbGet(source, `SELECT COUNT(*) AS n FROM ${table} WHERE project_id = ?`, [input.projectId]);
       counts[table] = Number(row.n ?? 0);
@@ -688,6 +691,7 @@ export const copyEnergyFactProjectToWorkspace = async (input: {
       const copied = await duckDbGet(target, `SELECT COUNT(*) AS n FROM ${table} WHERE project_id = ? AND workspace_id = ?`, [input.projectId, input.targetWorkspaceId]);
       if (Number(copied.n ?? 0) !== counts[table]) throw new Error(`ENERGYIQ_FACT_STORE_MOVE_COUNT_MISMATCH:${table}`);
     }
+    if (sourceWorkspaceId) await restampWorkspaceDigest(target, input.projectId, [sourceWorkspaceId]);
     await duckDbRun(target, "COMMIT");
     await duckDbRun(target, "CHECKPOINT");
   } catch (error) {
@@ -698,6 +702,67 @@ export const copyEnergyFactProjectToWorkspace = async (input: {
     rmSync(stagingDirectory, { recursive: true, force: true });
   }
   return counts;
+};
+
+/**
+ * The interval digest hashes each fact row's Workspace, so relabelling a moved project's facts leaves a digest the
+ * snapshot guard rejects. Re-records it only when the rows, hashed under one of their previous Workspace labels,
+ * still match the recorded digest exactly: the label is all that changed. Returns whether the digest was replaced;
+ * a digest that already matches, or rows that differ in any other way, are left as they are.
+ */
+const restampWorkspaceDigest = async (
+  connection: DuckDbModule.Connection,
+  projectId: string,
+  previousWorkspaceIds: readonly string[],
+): Promise<boolean> => {
+  const state = await duckDbGet(connection, `
+    SELECT workspace_id, source_sha256_json, canonical_interval_count, canonical_interval_digest
+    FROM energy_project_fact_state WHERE project_id = ?
+  `, [projectId]);
+  if (typeof state.workspace_id !== "string" || typeof state.canonical_interval_digest !== "string") return false;
+  const sourceSha256 = JSON.parse(String(state.source_sha256_json)) as string[];
+  const scope = { workspaceId: state.workspace_id, projectId, sourceSha256 };
+  const recorded = { count: Number(state.canonical_interval_count), digest: state.canonical_interval_digest };
+  const matches = (row: Record<string, unknown>) =>
+    Number(row.canonical_interval_count) === recorded.count && row.canonical_interval_digest === recorded.digest;
+  const current = await duckDbGet(connection, energyCanonicalIntervalIntegritySql(scope));
+  if (matches(current)) return false;
+  for (const previous of previousWorkspaceIds) {
+    if (previous === state.workspace_id) continue;
+    if (!matches(await duckDbGet(connection, energyCanonicalIntervalIntegritySql(scope, { digestWorkspaceId: previous })))) continue;
+    await duckDbRun(connection, `
+      UPDATE energy_project_fact_state SET canonical_interval_count = ?, canonical_interval_digest = ? WHERE project_id = ?
+    `, [Number(current.canonical_interval_count), String(current.canonical_interval_digest), projectId]);
+    return true;
+  }
+  return false;
+};
+
+/**
+ * Repairs a project moved before moves re-recorded the interval digest: its facts carry the new Workspace label but
+ * the digest of the old one, so every read is refused. See {@link restampWorkspaceDigest} for what is checked.
+ */
+export const repairMovedEnergyFactProjectDigest = async (input: {
+  databasePath: string;
+  projectId: string;
+  previousWorkspaceIds: readonly string[];
+}): Promise<boolean> => {
+  const databasePath = resolve(input.databasePath);
+  if (!existsSync(databasePath)) return false;
+  const connection = (await getDuckDbDatabase(databasePath)).connect();
+  try {
+    await ensureFactSchema(connection);
+    await duckDbRun(connection, "BEGIN TRANSACTION");
+    const repaired = await restampWorkspaceDigest(connection, input.projectId, input.previousWorkspaceIds);
+    await duckDbRun(connection, "COMMIT");
+    if (repaired) await duckDbRun(connection, "CHECKPOINT");
+    return repaired;
+  } catch (error) {
+    await duckDbRun(connection, "ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    await duckDbClose(connection).catch(ignoreAlreadyClosed);
+  }
 };
 
 /** Removes one project's facts from a workspace store, e.g. the old store after a move or a rolled-back copy. */

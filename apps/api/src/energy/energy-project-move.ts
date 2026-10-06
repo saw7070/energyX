@@ -2,6 +2,7 @@ import type { MetadataStore } from "@datafoundry/metadata";
 import {
   copyEnergyFactProjectToWorkspace,
   purgeEnergyFactProject,
+  repairMovedEnergyFactProjectDigest,
   resolveEnergyFactStorePath,
   type EnergyFactProjectRowCounts,
 } from "@datafoundry/data-gateway";
@@ -108,6 +109,42 @@ export const moveEnergyProjectToWorkspace = async (input: {
     await factStore.purge({ databasePath: stagingPath, projectId });
     return counts;
   }
+};
+
+/**
+ * Projects moved before moves re-recorded the interval digest cannot be read in their new Organisation. For each
+ * project the audit log shows as moved, re-record its digest from the Workspaces it left; facts that differ in
+ * anything but the Workspace label stay refused. Returns the projects repaired.
+ */
+export const repairMovedProjectFactDigests = async (input: {
+  metadataStore: MetadataStore;
+  repair?: typeof repairMovedEnergyFactProjectDigest;
+  resolvePath?: (workspaceId: string) => string;
+}): Promise<string[]> => {
+  const repair = input.repair ?? repairMovedEnergyFactProjectDigest;
+  const resolvePath = input.resolvePath ?? resolveEnergyFactStorePath;
+  const previousWorkspaces = new Map<string, string[]>();
+  const events = input.metadataStore.db.prepare(
+    "SELECT metadata_json FROM auth_audit_events WHERE event_type = 'energyiq.project_moved' ORDER BY created_at DESC",
+  ).all() as Array<{ metadata_json: string | null }>;
+  for (const event of events) {
+    const moved = JSON.parse(event.metadata_json ?? "{}") as Partial<EnergyProjectMoveResult>;
+    if (!moved.projectId || !moved.fromWorkspaceId) continue;
+    const previous = previousWorkspaces.get(moved.projectId) ?? [];
+    if (!previous.includes(moved.fromWorkspaceId)) previous.push(moved.fromWorkspaceId);
+    previousWorkspaces.set(moved.projectId, previous);
+  }
+  const repaired: string[] = [];
+  for (const [projectId, previousWorkspaceIds] of previousWorkspaces) {
+    let workspaceId: string;
+    try {
+      workspaceId = input.metadataStore.energyIq.getProject(projectId).workspace_id;
+    } catch {
+      continue;
+    }
+    if (await repair({ databasePath: resolvePath(workspaceId), projectId, previousWorkspaceIds })) repaired.push(projectId);
+  }
+  return repaired;
 };
 
 /** Restamps every metadata row that records the project's Workspace. Returns rows changed. */
