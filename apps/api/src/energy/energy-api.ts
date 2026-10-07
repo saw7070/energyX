@@ -27,6 +27,7 @@ import {
 import { resolveDataAvailabilityPeriod, summariseDataAvailability } from "./energy-data-availability.js";
 import { readOfflineMeters } from "./energy-live-status.js";
 import type {
+  EnergyIqPermissionArea,
   EnergyIqAcademicCalendarPeriod,
   EnergyIqDataSnapshotRecord,
   EnergyIqImportBatchRecord,
@@ -60,6 +61,9 @@ import { isDeepStrictEqual } from "node:util";
 
 import type { ConfigApiContext, ConfigApiResponse } from "../routes/types.js";
 import { AuthError } from "../auth/service.js";
+import { EnergyTeamAccessService } from "./energy-team-access.js";
+import { readEnergyFacilityView } from "./energy-facility-view.js";
+import { can as canDo, resolveEnergyPermissions } from "./energy-permissions.js";
 import { readMultipartUpload } from "../upload-parser.js";
 import {
   executeEnergyScopeAnalysisWithLatestAvailable,
@@ -500,6 +504,42 @@ export const handleEnergyApiRequest = async (
           }))
         };
       }
+      if (segments[1] === "roles" && segments.length === 2 && request.method === "GET") {
+        return { status: 200, body: createSuccessResult({ roles: service.listRoles() }) };
+      }
+      if (segments[1] === "roles" && segments.length === 2 && request.method === "POST") {
+        const body = requireRecord(await readJsonBody(request));
+        const description = optionalString(body.description);
+        return {
+          status: 201,
+          body: createSuccessResult(service.createRole({
+            actorUserId: user.id,
+            name: requireNonEmptyString(body.name, "ENERGYIQ_ROLE_NAME_REQUIRED"),
+            ...(description !== undefined ? { description } : {}),
+            permissions: body.permissions
+          }))
+        };
+      }
+      if (segments[1] === "roles" && segments[2] && segments.length === 3 && request.method === "PATCH") {
+        const body = requireRecord(await readJsonBody(request));
+        const description = optionalString(body.description);
+        return {
+          status: 200,
+          body: createSuccessResult(service.updateRole({
+            actorUserId: user.id,
+            id: decodeURIComponent(segments[2]),
+            name: requireNonEmptyString(body.name, "ENERGYIQ_ROLE_NAME_REQUIRED"),
+            ...(description !== undefined ? { description } : {}),
+            permissions: body.permissions
+          }))
+        };
+      }
+      if (segments[1] === "roles" && segments[2] && segments.length === 3 && request.method === "DELETE") {
+        return {
+          status: 200,
+          body: createSuccessResult(service.deleteRole({ actorUserId: user.id, id: decodeURIComponent(segments[2]) }))
+        };
+      }
       if (segments[1] === "users" && segments.length === 2 && request.method === "GET") {
         return { status: 200, body: createSuccessResult({ users: service.listUsers() }) };
       }
@@ -513,7 +553,8 @@ export const handleEnergyApiRequest = async (
             email: requireNonEmptyString(body.email, "ENERGYIQ_USER_EMAIL_REQUIRED"),
             ...(displayName ? { displayName } : {}),
             organisationIds: requireStringArray(body.organisationIds, "ENERGYIQ_USER_ORGANISATIONS_REQUIRED"),
-            role: body.role === "admin" ? "admin" : "user"
+            role: body.role === "admin" ? "admin" : "user",
+            ...optionalOrganisationRoles(body)
           }))
         };
       }
@@ -527,7 +568,8 @@ export const handleEnergyApiRequest = async (
             displayName: requireNonEmptyString(body.displayName, "ENERGYIQ_USER_NAME_REQUIRED"),
             organisationIds: requireStringArray(body.organisationIds, "ENERGYIQ_USER_ORGANISATIONS_REQUIRED"),
             role: body.role === "admin" ? "admin" : "user",
-            disabled: body.disabled === true
+            disabled: body.disabled === true,
+            ...optionalOrganisationRoles(body)
           }))
         };
       }
@@ -536,6 +578,43 @@ export const handleEnergyApiRequest = async (
           status: 200,
           body: createSuccessResult(await service.resendInvitation({
             actorUserId: user.id,
+            userId: decodeURIComponent(segments[2])
+          }))
+        };
+      }
+    }
+    if (segments[0] === "team") {
+      const team = new EnergyTeamAccessService(context.metadataStore, context.authService);
+      const workspaceId = context.workspaceId;
+      if (segments.length === 1 && request.method === "GET") {
+        return { status: 200, body: createSuccessResult(team.list({ actor: user, workspaceId })) };
+      }
+      if (segments[1] === "users" && segments.length === 2 && request.method === "POST") {
+        const body = requireRecord(await readJsonBody(request));
+        const displayName = optionalString(body.displayName);
+        return {
+          status: 201,
+          body: createSuccessResult(await team.invite({
+            actor: user,
+            workspaceId,
+            email: requireNonEmptyString(body.email, "ENERGYIQ_USER_EMAIL_REQUIRED"),
+            ...(displayName ? { displayName } : {})
+          }))
+        };
+      }
+      if (segments[1] === "users" && segments[2] && segments.length === 3 && request.method === "DELETE") {
+        return {
+          status: 200,
+          body: createSuccessResult(team.remove({ actor: user, workspaceId, userId: decodeURIComponent(segments[2]) }))
+        };
+      }
+      if (segments[1] === "users" && segments[2] && segments[3] === "resend-invitation"
+        && segments.length === 4 && request.method === "POST") {
+        return {
+          status: 200,
+          body: createSuccessResult(await team.resendInvitation({
+            actor: user,
+            workspaceId,
             userId: decodeURIComponent(segments[2])
           }))
         };
@@ -1260,7 +1339,7 @@ export const handleEnergyApiRequest = async (
     }
     if (segments[0] === "projects" && segments[2] === "live-connection") {
       const projectId = decodeURIComponent(segments[1] ?? "");
-      requireEnergyAdminProject(context, user, projectId);
+      requireProjectArea(context, user, projectId, ["live_connection"], "write");
       const scheduler = (dependencies.liveConnectionScheduler
         ?? DEFAULT_ENERGY_API_DEPENDENCIES.liveConnectionScheduler!)();
       const live: LiveConnectionDependencies = {
@@ -1323,7 +1402,7 @@ export const handleEnergyApiRequest = async (
     }
     if (segments[0] === "projects" && segments[2] === "imports") {
       const projectId = decodeURIComponent(segments[1] ?? "");
-      requireEnergyAdminProject(context, user, projectId);
+      requireProjectArea(context, user, projectId, ["facility"], "write");
       const project = context.metadataStore.energyIq.getProject(projectId);
       if (segments.length === 5 && segments[4] === "materialize" && request.method === "POST") {
         const batchId = decodeURIComponent(segments[3] ?? "");
@@ -1757,10 +1836,19 @@ export const handleEnergyApiRequest = async (
       const projectId = decodeURIComponent(segments[1] ?? "");
       return await withEnergyProjectPublicationReadLock({ metadataStore: context.metadataStore, workspaceId: context.workspaceId, projectId }, async () => ({ status: 200, headers: { "Cache-Control": "private, no-store" }, body: createSuccessResult(readEnergyProjectInformation(context.metadataStore, user.id, context.workspaceId, projectId)) }));
     }
+    if (segments[0] === "projects" && segments[2] === "facility" && segments.length === 3 && request.method === "GET") {
+      const projectId = decodeURIComponent(segments[1] ?? "");
+      const projectForLock = context.metadataStore.energyIq.getProject(projectId);
+      return await withEnergyProjectPublicationReadLock({ metadataStore: context.metadataStore, workspaceId: projectForLock.workspace_id, projectId }, async () => ({
+        status: 200,
+        headers: { "Cache-Control": "private, no-store" },
+        body: createSuccessResult(readEnergyFacilityView(context.metadataStore, user.id, context.workspaceId, projectId))
+      }));
+    }
     if (segments[0] === "projects" && segments[2] === "operational-policies") {
       const projectId = decodeURIComponent(segments[1] ?? "");
       if (!resolveEnergyProjectCapabilities({ metadataStore: context.metadataStore, userId: user.id, workspaceId: context.workspaceId, projectId }).editConfiguration) throw Error("ENERGYIQ_PROJECT_FORBIDDEN");
-      if (request.method !== "GET" && segments[3] !== "select") requireEnergyAdminProject(context, user, projectId);
+      if (request.method !== "GET") requireProjectArea(context, user, projectId, ["hours_rate"], "write");
       if (segments.length === 3 && request.method === "GET") {
         return {
           status: 200,
@@ -1869,6 +1957,7 @@ export const handleEnergyApiRequest = async (
         });
       }
       if (segments[3] === "draft" && request.method === "PUT") {
+        requireProjectArea(context, user, projectId, ["facility"], "write");
         const body = requireRecord(await readJsonBody(request));
         const draft = context.metadataStore.energyIq.projectSetup.saveDraft({
           project_id: projectId,
@@ -1893,12 +1982,13 @@ export const handleEnergyApiRequest = async (
         };
       }
       if (segments[3] === "publish" && request.method === "POST") {
-        requireEnergyAdminProject(context, user, projectId);
+        requireProjectArea(context, user, projectId, ["facility"], "write");
         const body = requireRecord(await readJsonBody(request));
         return await publishAgentProjectSetup(context, projectId, body, dependencies);
       }
       if (segments[3] === "apply" && request.method === "POST") {
-        requireEnergyAdminProject(context, user, projectId);
+        // Saving makes a change live, so whoever may change the Facility, hours and rate, or notes may apply it.
+        requireProjectArea(context, user, projectId, ["facility", "hours_rate", "notes"], "write");
         return await applyProjectChangesNow(context, projectId, dependencies);
       }
     }
@@ -4381,6 +4471,23 @@ const transitionInsightMethodProposal = <T>(transition: () => T): T => {
   }
 };
 
+/**
+ * Lets a super admin, or anyone whose role in the project's Organisation allows `needed` on one of `areas`, through.
+ * The project must belong to the Organisation named by the request.
+ */
+const requireProjectArea = (
+  context: Required<ConfigApiContext>,
+  user: ReturnType<Required<ConfigApiContext>["metadataStore"]["users"]["getById"]>,
+  projectId: string,
+  areas: EnergyIqPermissionArea[],
+  needed: "read" | "write"
+): void => {
+  const project = context.metadataStore.energyIq.getProject(projectId);
+  if (project.workspace_id !== context.workspaceId) throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
+  const permissions = resolveEnergyPermissions(context.metadataStore, user, context.workspaceId);
+  if (!areas.some((area) => canDo(permissions, area, needed))) throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
+};
+
 const requireEnergyAdminProject = (
   context: Required<ConfigApiContext>,
   user: ReturnType<Required<ConfigApiContext>["metadataStore"]["users"]["getById"]>,
@@ -4392,6 +4499,19 @@ const requireEnergyAdminProject = (
     throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
   }
 };
+
+/** Reads `organisationRoles: { [organisationId]: roleId }`; absent means "leave Organisation roles as they are". */
+const optionalOrganisationRoles = (body: Record<string, unknown>): { organisationRoles?: Record<string, string> } => {
+  if (!isPlainRecord(body.organisationRoles)) return {};
+  return {
+    organisationRoles: Object.fromEntries(
+      Object.entries(body.organisationRoles).filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].length > 0)
+    )
+  };
+};
+
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const readJsonBody = async (request: IncomingMessage): Promise<unknown> => {
   const chunks: Buffer[] = [];

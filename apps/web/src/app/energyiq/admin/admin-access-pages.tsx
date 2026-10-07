@@ -5,25 +5,31 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import {
   configApi,
   type EnergyAdminOrganisationDto,
+  type EnergyAdminRoleDto,
   type EnergyAdminUserDto,
+  type EnergyPermissionArea,
+  type EnergyPermissionLevel,
+  type EnergyRolePermissionsDto,
 } from "../../../lib/config-api";
-import { EnergyIcon } from "../_components/icons";
+import { EnergyIcon, type EnergyIconName } from "../_components/icons";
 import { EnergySelect } from "../_components/energy-select";
 import { friendlyErrorMessage } from "../_components/friendly-error";
 
 type AdminAccessPagesProps = {
-  initialView: "organisations" | "users";
+  initialView: "organisations" | "users" | "roles";
 };
 
 export function AdminAccessPages({ initialView }: AdminAccessPagesProps) {
   const [organisations, setOrganisations] = useState<EnergyAdminOrganisationDto[]>([]);
   const [users, setUsers] = useState<EnergyAdminUserDto[]>([]);
+  const [roles, setRoles] = useState<EnergyAdminRoleDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [dialog, setDialog] = useState<
     | { kind: "organisation"; organisation?: EnergyAdminOrganisationDto }
     | { kind: "user"; user?: EnergyAdminUserDto }
+    | { kind: "role"; role?: EnergyAdminRoleDto }
     | { kind: "move"; project: MovableProject }
     | { kind: "deleteProject"; project: MovableProject }
     | { kind: "deleteOrganisation"; organisation: EnergyAdminOrganisationDto }
@@ -35,12 +41,14 @@ export function AdminAccessPages({ initialView }: AdminAccessPagesProps) {
     setLoading(true);
     setError(null);
     try {
-      const [organisationResult, userResult] = await Promise.all([
+      const [organisationResult, userResult, roleResult] = await Promise.all([
         configApi.listEnergyAdminOrganisations(),
         configApi.listEnergyAdminUsers(),
+        configApi.listEnergyAdminRoles(),
       ]);
       setOrganisations(organisationResult.organisations);
       setUsers(userResult.users);
+      setRoles(roleResult.roles);
     } catch (reason) {
       setError(messageFrom(reason, "Failed to load access management"));
     } finally {
@@ -94,6 +102,22 @@ export function AdminAccessPages({ initialView }: AdminAccessPagesProps) {
             }
           }}
         />
+      ) : initialView === "roles" ? (
+        <RolesView
+          roles={roles}
+          onCreate={() => setDialog({ kind: "role" })}
+          onEdit={(role) => setDialog({ kind: "role", role })}
+          onDelete={async (role) => {
+            if (!window.confirm(`Delete the role "${role.name}"?`)) return;
+            setError(null);
+            try {
+              await configApi.deleteEnergyAdminRole(role.id);
+              await finishMutation(`The role "${role.name}" was deleted.`);
+            } catch (reason) {
+              setError(messageFrom(reason, "Failed to delete role"));
+            }
+          }}
+        />
       ) : (
         <UsersView
           users={users}
@@ -112,6 +136,13 @@ export function AdminAccessPages({ initialView }: AdminAccessPagesProps) {
         />
       )}
 
+      {dialog?.kind === "role" ? (
+        <RoleDialog
+          role={dialog.role}
+          onClose={() => setDialog(null)}
+          onSaved={async (role) => finishMutation(dialog.role ? `The role "${role.name}" was updated.` : `The role "${role.name}" was created.`)}
+        />
+      ) : null}
       {dialog?.kind === "organisation" ? (
         <OrganisationDialog
           organisation={dialog.organisation}
@@ -149,6 +180,7 @@ export function AdminAccessPages({ initialView }: AdminAccessPagesProps) {
         <UserDialog
           user={dialog.user}
           organisations={organisations}
+          roles={roles}
           onClose={() => setDialog(null)}
           onSaved={async (result) => finishMutation(
             dialog.user
@@ -327,7 +359,7 @@ function UsersView({
                   ? user.organisations.map((organisation) => <Tag key={organisation.id}>{organisation.name}</Tag>)
                   : <span className="text-xs text-muted-light">Platform access only</span>}
               </div>
-              <span className="text-xs font-medium capitalize">{user.role}</span>
+              <span className="text-xs font-medium capitalize">{user.role === "admin" ? "Admin" : [...new Set(Object.values(user.organisationRoles).map((entry) => entry.roleName))].join(", ") || "User"}</span>
               <div><StatusBadge status={user.status} /><p className="mt-1 text-[10px] text-muted-light">{formatLastLogin(user.lastLoginAt)}</p></div>
               <div className="flex justify-end gap-2">
                 {user.status === "pending" ? (
@@ -528,21 +560,30 @@ function DeleteOrganisationDialog({
   );
 }
 
+type AccountRole = "user" | "admin";
+const VIEWER_ROLE_ID = "role-viewer";
+
 function UserDialog({
   user,
   organisations,
+  roles,
   onClose,
   onSaved,
 }: {
   user?: EnergyAdminUserDto;
   organisations: EnergyAdminOrganisationDto[];
+  roles: EnergyAdminRoleDto[];
   onClose: () => void;
   onSaved: (result: { invitationUrl?: string; user: EnergyAdminUserDto }) => Promise<void>;
 }) {
   const [displayName, setDisplayName] = useState(user?.displayName ?? "");
   const [email, setEmail] = useState(user?.email ?? "");
-  const [role, setRole] = useState<"user" | "admin">(user?.role ?? "user");
+  const [role, setRole] = useState<AccountRole>(user?.role === "admin" ? "admin" : "user");
   const [organisationIds, setOrganisationIds] = useState<string[]>(user?.organisationIds ?? []);
+  // The role held in each client. A client with no entry yet is a Viewer.
+  const [organisationRoles, setOrganisationRoles] = useState<Record<string, string>>(
+    Object.fromEntries(Object.entries(user?.organisationRoles ?? {}).map(([id, entry]) => [id, entry.roleId])),
+  );
   const [disabled, setDisabled] = useState(user?.status === "disabled");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -554,6 +595,7 @@ function UserDialog({
       return;
     }
     if ((role === "admin" || disabled) && !window.confirm("This changes platform access. Continue?")) return;
+    const chosenRoles = Object.fromEntries(organisationIds.map((id) => [id, organisationRoles[id] ?? VIEWER_ROLE_ID]));
     setSaving(true);
     setError(null);
     try {
@@ -563,6 +605,7 @@ function UserDialog({
           role,
           organisationIds,
           disabled,
+          organisationRoles: chosenRoles,
         });
         await onSaved({ user: updated });
       } else {
@@ -571,6 +614,7 @@ function UserDialog({
           email,
           role,
           organisationIds,
+          organisationRoles: chosenRoles,
         }));
       }
     } catch (reason) {
@@ -599,28 +643,331 @@ function UserDialog({
             value={role}
             options={[
               { value: "user", label: "User — customer product access" },
-              { value: "admin", label: "Admin — platform-wide access" },
+              { value: "admin", label: "Super admin — platform-wide access" },
             ]}
             onValueChange={(nextRole) => setRole(nextRole === "admin" ? "admin" : "user")}
             className="w-full"
           />
         </Field>
         <fieldset>
-          <legend className="text-xs font-semibold">Organisations</legend>
-          <p className="mt-1 text-[11px] text-muted">Membership grants all published Projects in the Organisation.</p>
-          <div className="mt-2 max-h-44 space-y-2 overflow-auto rounded-lg border border-border p-3">
+          <legend className="text-xs font-semibold">Organisations{role === "user" ? " and roles" : ""}</legend>
+          <p className="mt-1 text-[11px] text-muted">
+            {role === "admin"
+              ? "Super admins can open every Organisation."
+              : "Choose each Organisation this person can open, and the role they hold there. Roles are managed under Role access."}
+          </p>
+          <div className="mt-2 max-h-56 space-y-2 overflow-auto rounded-lg border border-border p-3">
             {organisations.filter((organisation) => organisation.status === "active").map((organisation) => (
-              <label key={organisation.id} className="flex cursor-pointer items-center gap-3 text-xs">
-                <input type="checkbox" checked={organisationIds.includes(organisation.id)} onChange={(event) => toggleOrganisation(organisation.id, event.target.checked)} />
-                <span className="flex-1">{organisation.name}</span>
-                <span className="text-[10px] text-muted-light">{organisation.projectCount} Projects</span>
-              </label>
+              <div key={organisation.id} className="flex items-center gap-3 text-xs">
+                <label className="flex flex-1 cursor-pointer items-center gap-3">
+                  <input type="checkbox" checked={organisationIds.includes(organisation.id)} onChange={(event) => toggleOrganisation(organisation.id, event.target.checked)} />
+                  <span className="flex-1">{organisation.name}</span>
+                </label>
+                {role === "user" && organisationIds.includes(organisation.id) ? (
+                  <EnergySelect
+                    ariaLabel={`Role at ${organisation.name}`}
+                    value={organisationRoles[organisation.id] ?? VIEWER_ROLE_ID}
+                    options={roles.map((entry) => ({ value: entry.id, label: entry.name }))}
+                    onValueChange={(next) => setOrganisationRoles((current) => ({ ...current, [organisation.id]: next }))}
+                    className="w-44"
+                  />
+                ) : <span className="text-[10px] text-muted-light">{organisation.projectCount} Projects</span>}
+              </div>
             ))}
           </div>
         </fieldset>
         {user ? <Toggle label="Disable this account" checked={disabled} onChange={setDisabled} hint="All active sessions are revoked immediately; historical records remain." /> : null}
         {error ? <AccessBanner tone="error">{error}</AccessBanner> : null}
         <DialogActions onClose={onClose} saving={saving} submitLabel={user ? "Save changes" : "Create invitation"} />
+      </form>
+    </AccessDialog>
+  );
+}
+
+type AreaDefinition = {
+  area: EnergyPermissionArea;
+  icon: EnergyIconName;
+  title: string;
+  /** Where in the product this shows up, so a super admin knows what they are switching on. */
+  where: string;
+  /** Exactly what holders can do at each level. Write always includes read. */
+  effect: Record<EnergyPermissionLevel, string>;
+};
+
+const PERMISSION_AREAS: AreaDefinition[] = [
+  {
+    area: "reports", icon: "analysis", title: "Overview, Analysis and Reports",
+    where: "Overview, Analysis, Reports and the energy advisor",
+    effect: {
+      none: "Cannot open the overview, analysis, reports or the advisor.",
+      read: "Can see the overview, analysis charts, device usage and finished reports.",
+      write: "Everything in Read, plus ask the advisor questions and create reports.",
+    },
+  },
+  {
+    area: "facility", icon: "building", title: "Facility structure",
+    where: "Facility → Floor layout, Devices, Data availability",
+    effect: {
+      none: "Cannot see the site's locations or meters.",
+      read: "Can see the locations, meters and floor layout.",
+      write: "Can add and rename locations and meters, change the floor layout and upload data. Changes go live straight away.",
+    },
+  },
+  {
+    area: "hours_rate", icon: "clock", title: "Operating hours, holidays and rate",
+    where: "Facility → Operating hours, Holidays, Electricity rate",
+    effect: {
+      none: "Cannot see opening hours, holidays or the electricity rate.",
+      read: "Can see when the site is open, its holidays and the electricity rate.",
+      write: "Can change hours, holidays and the rate. This changes cost and after-hours figures across the app.",
+    },
+  },
+  {
+    area: "notes", icon: "info", title: "Project notes",
+    where: "Facility → Project notes",
+    effect: {
+      none: "Cannot read the notes written about the site.",
+      read: "Can read the background notes the advisor uses about the site.",
+      write: "Can edit the notes and the floor-plan reference. The advisor uses them in its answers.",
+    },
+  },
+  {
+    area: "live_connection", icon: "bolt", title: "Live connection",
+    where: "Facility → Live connection",
+    effect: {
+      none: "Cannot see or change how the site's meters are connected.",
+      read: "Can see how the site's meters are connected.",
+      write: "Can connect the site's meter account, test the connection, match meters and set the daily update.",
+    },
+  },
+  {
+    area: "people", icon: "user", title: "People",
+    where: "Team page in the client portal",
+    effect: {
+      none: "Has no Team page.",
+      read: "Can see who has access to the client and the role each holds.",
+      write: "Can invite viewers, resend invitations and remove viewers. Cannot change roles, or touch anyone with equal or more access.",
+    },
+  },
+];
+
+const LEVELS: Array<{ level: EnergyPermissionLevel; label: string }> = [
+  { level: "none", label: "None" },
+  { level: "read", label: "Read" },
+  { level: "write", label: "Write" },
+];
+
+const LEVEL_TONE: Record<EnergyPermissionLevel, { chip: string; card: string; active: string }> = {
+  none: { chip: "bg-surface-subtle text-muted-light", card: "border-border", active: "bg-muted text-white" },
+  read: { chip: "bg-primary/10 text-primary", card: "border-primary/30", active: "bg-primary/80 text-white" },
+  write: { chip: "bg-step-success/15 text-step-success", card: "border-step-success/50", active: "bg-primary text-white" },
+};
+
+/** Starting points, so a new role does not begin as twelve separate decisions. */
+const ROLE_PRESETS: Array<{ label: string; note: string; permissions: EnergyRolePermissionsDto }> = [
+  { label: "Viewer", note: "Look and ask the advisor", permissions: { reports: "write", facility: "read", hours_rate: "read", notes: "read", live_connection: "none", people: "none" } },
+  { label: "Facility editor", note: "Also edits the site's setup", permissions: { reports: "write", facility: "write", hours_rate: "write", notes: "write", live_connection: "none", people: "none" } },
+  { label: "Team manager", note: "Also invites and removes viewers", permissions: { reports: "write", facility: "read", hours_rate: "read", notes: "read", live_connection: "none", people: "write" } },
+  { label: "Full manager", note: "Runs the whole client", permissions: { reports: "write", facility: "write", hours_rate: "write", notes: "write", live_connection: "write", people: "write" } },
+];
+
+function LevelBadge({ level }: { level: EnergyPermissionLevel }) {
+  return <span className={["inline-flex h-5 items-center rounded-full px-2 text-[10px] font-semibold uppercase tracking-wide", LEVEL_TONE[level].chip].join(" ")}>{level}</span>;
+}
+
+export function RolesView({
+  roles,
+  onCreate,
+  onEdit,
+  onDelete,
+}: {
+  roles: EnergyAdminRoleDto[];
+  onCreate: () => void;
+  onEdit: (role: EnergyAdminRoleDto) => void;
+  onDelete: (role: EnergyAdminRoleDto) => Promise<void>;
+}) {
+  return (
+    <section className="overflow-hidden rounded-xl border border-border bg-surface">
+      <AccessSectionHeader
+        title="Role access"
+        description="A role says what its holders can read and change. Give it to people per Organisation when you invite or edit them. Write always includes read."
+        actionLabel="Create role"
+        onAction={onCreate}
+      />
+      <div className="grid gap-4 p-5 lg:grid-cols-2">
+        {roles.map((role) => (
+          <article key={role.id} className="flex flex-col rounded-xl border border-border bg-surface p-4 shadow-sm">
+            <header className="flex items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><EnergyIcon name="user" className="h-4 w-4" /></span>
+              <div className="min-w-0 flex-1">
+                <h4 className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+                  {role.name}
+                  {role.builtin ? <span className="rounded-full bg-surface-subtle px-2 py-0.5 text-[10px] font-medium text-muted">Built in</span> : null}
+                </h4>
+                {role.description ? <p className="mt-0.5 text-xs text-muted">{role.description}</p> : null}
+              </div>
+              {!role.builtin ? (
+                <div className="flex shrink-0 gap-2">
+                  <button type="button" onClick={() => onEdit(role)} className={secondaryButton}>Edit</button>
+                  <button type="button" onClick={() => void onDelete(role)} disabled={role.assignedCount > 0} title={role.assignedCount > 0 ? "Change the role of the people who hold it first" : undefined} className={dangerButton}>Delete</button>
+                </div>
+              ) : null}
+            </header>
+            <ul className="mt-4 divide-y divide-border rounded-lg border border-border">
+              {PERMISSION_AREAS.map((entry) => (
+                <li key={entry.area} className="flex items-center gap-3 px-3 py-2" title={entry.effect[role.permissions[entry.area]]}>
+                  <EnergyIcon name={entry.icon} className="h-3.5 w-3.5 shrink-0 text-muted-light" />
+                  <span className="min-w-0 flex-1 truncate text-xs">{entry.title}</span>
+                  <LevelBadge level={role.permissions[entry.area]} />
+                </li>
+              ))}
+            </ul>
+            <p className="mt-3 text-[11px] text-muted-light">
+              {role.assignedCount === 0 ? "Not given to anyone yet" : `Held by ${role.assignedCount} ${role.assignedCount === 1 ? "person" : "people"}`}
+            </p>
+          </article>
+        ))}
+      </div>
+      <p className="border-t border-border bg-surface-subtle/50 px-5 py-3 text-[11px] text-muted">
+        The advisor&apos;s guidelines, automatic reports and alerts, and managing Organisations, users and roles always stay with super admins.
+      </p>
+    </section>
+  );
+}
+
+export function RoleDialog({
+  role,
+  onClose,
+  onSaved,
+}: {
+  role?: EnergyAdminRoleDto;
+  onClose: () => void;
+  onSaved: (role: EnergyAdminRoleDto) => Promise<void>;
+}) {
+  const [name, setName] = useState(role?.name ?? "");
+  const [description, setDescription] = useState(role?.description ?? "");
+  const [permissions, setPermissions] = useState<EnergyRolePermissionsDto>(role?.permissions ?? ROLE_PRESETS[0]!.permissions);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      const body = { name, description, permissions };
+      await onSaved(role
+        ? await configApi.updateEnergyAdminRole(role.id, body)
+        : await configApi.createEnergyAdminRole(body));
+    } catch (reason) {
+      setError(messageFrom(reason, "Failed to save role"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const activePreset = ROLE_PRESETS.find((preset) => PERMISSION_AREAS.every(({ area }) => preset.permissions[area] === permissions[area]));
+  const can = PERMISSION_AREAS.filter(({ area }) => permissions[area] !== "none");
+  const cannot = PERMISSION_AREAS.filter(({ area }) => permissions[area] === "none");
+
+  return (
+    <AccessDialog title={role ? "Edit role" : "Create role"} subtitle="Choose what people holding this role can see and change inside a client." onClose={onClose} wide>
+      <form onSubmit={(event) => void submit(event)} className="space-y-6">
+        <section className="grid gap-4 sm:grid-cols-2">
+          <Field label="Role name">
+            <input autoFocus value={name} onChange={(event) => setName(event.target.value)} className={inputClass} maxLength={60} placeholder="e.g. Facility editor" required />
+            <span className="mt-1 block text-right text-[10px] text-muted-light">{name.length}/60</span>
+          </Field>
+          <Field label="What it is for (optional)">
+            <input value={description} onChange={(event) => setDescription(event.target.value)} className={inputClass} maxLength={300} placeholder="e.g. Keeps the site's setup up to date" />
+            <span className="mt-1 block text-right text-[10px] text-muted-light">{description.length}/300</span>
+          </Field>
+        </section>
+
+        <section>
+          <h3 className="text-xs font-semibold">Start from</h3>
+          <p className="mt-0.5 text-[11px] text-muted">Pick the closest match, then adjust any area below.</p>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {ROLE_PRESETS.map((preset) => {
+              const selected = activePreset?.label === preset.label;
+              return (
+                <button
+                  key={preset.label}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => setPermissions(preset.permissions)}
+                  className={["rounded-lg border px-3 py-2 text-left transition-colors", selected ? "border-primary bg-primary/5 ring-1 ring-primary/30" : "border-border bg-surface hover:bg-surface-subtle"].join(" ")}
+                >
+                  <span className="block text-xs font-semibold">{preset.label}</span>
+                  <span className="mt-0.5 block text-[11px] text-muted">{preset.note}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <fieldset>
+          <legend className="text-xs font-semibold">What this role can do</legend>
+          <p className="mt-0.5 text-[11px] text-muted">Write always includes read. Everything applies only inside the client the role is given for.</p>
+          <div className="mt-3 space-y-3">
+            {PERMISSION_AREAS.map((entry) => {
+              const level = permissions[entry.area];
+              return (
+                <div key={entry.area} className={["rounded-xl border bg-surface p-4 transition-colors", LEVEL_TONE[level].card].join(" ")}>
+                  <div className="flex flex-wrap items-start gap-3">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface-subtle text-muted"><EnergyIcon name={entry.icon} className="h-4 w-4" /></span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold">{entry.title}</p>
+                      <p className="mt-0.5 text-[11px] text-muted-light">{entry.where}</p>
+                    </div>
+                    <div role="radiogroup" aria-label={entry.title} className="inline-flex overflow-hidden rounded-lg border border-border">
+                      {LEVELS.map((option) => (
+                        <button
+                          key={option.level}
+                          type="button"
+                          role="radio"
+                          aria-checked={level === option.level}
+                          onClick={() => setPermissions((current) => ({ ...current, [entry.area]: option.level }))}
+                          className={["h-8 min-w-16 px-3 text-xs font-semibold transition-colors", level === option.level ? LEVEL_TONE[option.level].active : "bg-surface text-muted hover:bg-surface-subtle"].join(" ")}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <p className="mt-3 flex items-start gap-2 rounded-lg bg-surface-subtle/70 px-3 py-2 text-xs leading-5" aria-live="polite">
+                    <LevelBadge level={level} />
+                    <span className="min-w-0 flex-1">{entry.effect[level]}</span>
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </fieldset>
+
+        <section className="rounded-xl border border-border bg-surface-subtle/50 p-4" aria-label="Summary of this role">
+          <h3 className="text-xs font-semibold">In short, {name.trim() ? <span className="text-primary">{name.trim()}</span> : "this role"}</h3>
+          <div className="mt-2 grid gap-4 text-xs sm:grid-cols-2">
+            <div>
+              <p className="font-semibold text-step-success">Can</p>
+              {can.length === 0 ? <p className="mt-1 text-muted">Nothing yet. People with this role could not open the client.</p> : (
+                <ul className="mt-1 space-y-1 text-muted">
+                  {can.map((entry) => <li key={entry.area} className="flex gap-2"><span aria-hidden="true">✓</span><span>{entry.title}: {permissions[entry.area] === "write" ? "read and change" : "read only"}</span></li>)}
+                </ul>
+              )}
+            </div>
+            <div>
+              <p className="font-semibold text-muted">Cannot</p>
+              <ul className="mt-1 space-y-1 text-muted">
+                {cannot.map((entry) => <li key={entry.area} className="flex gap-2"><span aria-hidden="true">–</span><span>{entry.title}</span></li>)}
+                <li className="flex gap-2"><span aria-hidden="true">–</span><span>Advisor guidelines, automatic reports, other clients, other users and roles</span></li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        {error ? <AccessBanner tone="error">{error}</AccessBanner> : null}
+        <DialogActions onClose={onClose} saving={saving} submitLabel={role ? "Save role" : "Create role"} />
       </form>
     </AccessDialog>
   );
@@ -647,8 +994,8 @@ function AccessSectionHeader({ title, description, actionLabel, onAction }: { ti
   return <header className="flex flex-wrap items-center gap-4 border-b border-border px-5 py-4"><div className="min-w-0 flex-1"><h3 className="text-sm font-semibold">{title}</h3><p className="mt-1 text-xs text-muted">{description}</p></div><button type="button" onClick={onAction} className={primaryButton}>+ {actionLabel}</button></header>;
 }
 
-function AccessDialog({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4" role="dialog" aria-modal="true" aria-label={title}><div className="max-h-[90vh] w-full max-w-2xl overflow-auto rounded-xl border border-border bg-surface shadow-2xl"><header className="flex items-center justify-between border-b border-border px-5 py-4"><h2 className="text-base font-semibold">{title}</h2><button type="button" onClick={onClose} className="rounded-lg p-2 text-muted hover:bg-surface-subtle" aria-label="Close dialog">×</button></header><div className="p-5">{children}</div></div></div>;
+function AccessDialog({ title, subtitle, wide, children, onClose }: { title: string; subtitle?: string; wide?: boolean; children: React.ReactNode; onClose: () => void }) {
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4" role="dialog" aria-modal="true" aria-label={title}><div className={["max-h-[92vh] w-full overflow-auto rounded-xl border border-border bg-surface shadow-2xl", wide ? "max-w-3xl" : "max-w-2xl"].join(" ")}><header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4"><div><h2 className="text-base font-semibold">{title}</h2>{subtitle ? <p className="mt-0.5 text-xs text-muted">{subtitle}</p> : null}</div><button type="button" onClick={onClose} className="rounded-lg p-2 text-muted hover:bg-surface-subtle" aria-label="Close dialog">×</button></header><div className="p-5">{children}</div></div></div>;
 }
 
 function DialogActions({ onClose, saving, submitLabel }: { onClose: () => void; saving: boolean; submitLabel: string }) {

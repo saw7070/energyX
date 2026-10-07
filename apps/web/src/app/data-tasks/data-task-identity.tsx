@@ -415,14 +415,30 @@ function PasswordIdentityProvider({ children }: { children: ReactNode }) {
     };
   }, [changePassword, createUser, currentUser, error, loading, signOut, signOutAll, updateProfile]);
 
+  // Only a real "not signed in" answer sends someone to the sign-in page. If the server could not be reached,
+  // their session may be perfectly good, so ask them to try again instead of signing them out.
   useEffect(() => {
-    if (!loading && (!currentUser || !value)) {
+    if (!loading && !error && (!currentUser || !value)) {
       router.replace("/login");
     }
-  }, [loading, currentUser, value, router]);
+  }, [loading, error, currentUser, value, router]);
 
   if (loading) {
     return <AuthLoadingScreen label="Loading your workspace…" />;
+  }
+  if (error && (!currentUser || !value)) {
+    return (
+      <PasswordAuthShell title="Can't reach the server" subtitle="Your session is still safe">
+        <div className="flex flex-col gap-4">
+          <p role="alert" className="text-sm leading-6 text-muted">
+            EnergyX could not load your account just now. This is usually a short interruption.
+          </p>
+          <button type="button" onClick={() => void loadMe()} className={AUTH_BUTTON_CLASS}>
+            Try again
+          </button>
+        </div>
+      </PasswordAuthShell>
+    );
   }
   if (!currentUser || !value) {
     return <AuthLoadingScreen label="Redirecting to sign in…" />;

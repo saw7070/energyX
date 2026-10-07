@@ -35,7 +35,7 @@ const expectDenied = (value: ReturnType<typeof capabilities>) => expect(Object.v
 it.each(["viewer", "member"])("lets %s read the project and ask the advisor, but change nothing", user => {
   expect(capabilities(user)).toEqual({ readReports: true, readExplorer: true, readProjectInformation: true,
     readOwnHistory: true, createReport: true, manageSkills: false, manageAutomation: false,
-    editConfiguration: false, publishConfiguration: false });
+    editConfiguration: false, editFacility: false, editHoursRate: false, editNotes: false, manageLiveConnection: false, publishConfiguration: false });
 });
 it("ignores an older editor access row: only administrators manage a project", () => {
   expect(capabilities("editor")).toMatchObject({ readReports: true, createReport: true, manageSkills: false, manageAutomation: false, editConfiguration: false, publishConfiguration: false });

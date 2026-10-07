@@ -53,6 +53,7 @@ import {
 import { initializeEnergyIqReportTimePolicySchema } from "./energyiq-report-time-policy-store.js";
 import { initializeEnergyIqSourceSyncSchema } from "./energyiq-source-sync-store.js";
 import { initializeEnergyIqLiveConnectorSchema } from "./energyiq-live-connector-store.js";
+import { ENERGYIQ_ORGANISATION_ADMIN_ROLE_ID, initializeEnergyIqAccessRoleSchema, upgradeSeededOrganisationAdminRole } from "./energyiq-access-role-store.js";
 import { recordSchemaMigration, runSchemaMigration } from "./schema-migration.js";
 
 export * from "./config-store.js";
@@ -74,6 +75,7 @@ export * from "./energyiq-overview-definition-store.js";
 export * from "./energyiq-report-time-policy-store.js";
 export * from "./energyiq-source-sync-store.js";
 export * from "./energyiq-live-connector-store.js";
+export * from "./energyiq-access-role-store.js";
 export * from "./workspace-model-profile-store.js";
 
 export type UserRecord = {
@@ -142,6 +144,8 @@ export type WorkspaceMembershipRecord = {
   workspace_id: string;
   user_id: string;
   role: "owner" | "member";
+  /** The access role held in this Organisation. Absent means Viewer. */
+  role_id?: string;
   created_at: string;
 };
 
@@ -1301,13 +1305,17 @@ export class WorkspaceMembershipRepository {
     workspace_id: string;
     user_id: string;
     role: WorkspaceMembershipRecord["role"];
+    /** Omit to keep the person's current access role; pass null to make them a Viewer. */
+    role_id?: string | null;
   }): WorkspaceMembershipRecord {
     const now = new Date().toISOString();
     this.db.prepare(`
-      INSERT INTO workspace_memberships (workspace_id, user_id, role, created_at)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(workspace_id, user_id) DO UPDATE SET role = excluded.role
-    `).run(input.workspace_id, input.user_id, input.role, now);
+      INSERT INTO workspace_memberships (workspace_id, user_id, role, role_id, created_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, user_id) DO UPDATE SET
+        role = excluded.role,
+        role_id = CASE WHEN ? THEN excluded.role_id ELSE workspace_memberships.role_id END
+    `).run(input.workspace_id, input.user_id, input.role, input.role_id ?? null, now, input.role_id !== undefined ? 1 : 0);
     return this.get(input);
   }
 
@@ -4596,6 +4604,39 @@ const runMigrations = (db: DatabaseSync): void => {
     },
     { atomic: true },
   );
+  runSchemaMigration(
+    db,
+    "0047_workspace_membership_permissions",
+    "Let a workspace membership carry Organisation admin permissions",
+    () => {
+      ensureColumn(db, "workspace_memberships", "permissions_json", "TEXT");
+    },
+    { atomic: true },
+  );  runSchemaMigration(
+    db,
+    "0048_energyiq_access_roles",
+    "Let a super admin define roles and hand them out per Organisation",
+    () => {
+      ensureColumn(db, "workspace_memberships", "role_id", "TEXT");
+      initializeEnergyIqAccessRoleSchema(db);
+      // Earlier builds stored an "Organisation admin" flag on the membership itself; those become ordinary roles.
+      db.exec(`
+        UPDATE workspace_memberships
+        SET role = 'member',
+            role_id = CASE WHEN permissions_json LIKE '%"managePeople":true%' THEN '${ENERGYIQ_ORGANISATION_ADMIN_ROLE_ID}' ELSE NULL END
+        WHERE role = 'org_admin'
+      `);
+    },
+    { atomic: true },
+  );  runSchemaMigration(
+    db,
+    "0049_energyiq_live_connection_role_area",
+    "Add a Live connection area to roles and let the seeded Organisation admin run the whole client",
+    () => {
+      upgradeSeededOrganisationAdminRole(db);
+    },
+    { atomic: true },
+  );
 };
 
 const initializeSchemaMigrationTable = (db: DatabaseSync): void => {
@@ -4844,6 +4885,7 @@ const initializeAuthSchema = (db: DatabaseSync): void => {
     );
   `);
   ensureColumn(db, "workspaces", "disabled_at", "TEXT");
+  ensureColumn(db, "workspace_memberships", "permissions_json", "TEXT");
 };
 
 const initializeSessionBranchSchema = (db: DatabaseSync): void => {
@@ -5333,6 +5375,7 @@ const mapWorkspaceMembershipRow = (row: unknown): Optional<WorkspaceMembershipRe
     workspace_id: requiredString(row, "workspace_id"),
     user_id: requiredString(row, "user_id"),
     role: requiredString(row, "role") as WorkspaceMembershipRecord["role"],
+    ...(typeof row.role_id === "string" && row.role_id ? { role_id: row.role_id } : {}),
     created_at: requiredString(row, "created_at")
   };
 };

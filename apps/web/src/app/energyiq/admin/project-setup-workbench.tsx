@@ -448,12 +448,12 @@ export function EnergyIqAdminWorkbench({
           {notice ? <StatusMessage tone={validation?.blocking ? "warning" : "success"}>{notice}</StatusMessage> : null}
           {section === "models" ? <AdminModels /> : null}
           {section === "task-history" ? <AdminTaskHistory key={`${access?.user.id}:${access?.activeWorkspaceId}`} /> : null}
-          {section === "organisations" || section === "users" ? (
+          {section === "organisations" || section === "users" || section === "roles" ? (
             <AdminAccessPages initialView={section} />
           ) : null}
-          {section !== "task-history" && section !== "models" && section !== "organisations" && section !== "users" && loading && !setupMatchesSelection ? <LoadingPanel /> : null}
+          {section !== "task-history" && section !== "models" && section !== "organisations" && section !== "users" && section !== "roles" && loading && !setupMatchesSelection ? <LoadingPanel /> : null}
           {/* Background refreshes keep the section mounted so in-progress results (e.g. an import summary) survive. */}
-          {section !== "task-history" && section !== "models" && section !== "organisations" && section !== "users" && setupMatchesSelection && document && setup ? renderAdminSection({
+          {section !== "task-history" && section !== "models" && section !== "organisations" && section !== "users" && section !== "roles" && setupMatchesSelection && document && setup ? renderAdminSection({
             section,
             projects,
             selectedProject,
@@ -2853,6 +2853,7 @@ function adminSectionMeta(section: AdminSection, projectName?: string): { title:
     overview: { title: "Overview", description: "Delivery priorities and platform operations across the current Workspace." },
     organisations: { title: "Organisations", description: "Customer organisations and Workspace ownership." },
     users: { title: "Users", description: "Accounts, membership and Project access." },
+    roles: { title: "Role access", description: "Create roles and choose what each can read and change." },
     "project-overview": { title: "Project status & publishing", description: `${project} · delivery status, blockers and next action.` },
     basics: { title: "Project basics", description: `${project} · identity, timezone and stable Project scope.` },
     structure: { title: "Structure", description: `${project} · define meaningful Tiers and Nodes from the lowest scope upward.` },

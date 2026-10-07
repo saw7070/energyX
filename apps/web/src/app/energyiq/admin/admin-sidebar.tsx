@@ -8,6 +8,7 @@ export type AdminSection =
   | "overview"
   | "organisations"
   | "users"
+  | "roles"
   | "project-overview"
   | "basics"
   | "structure"
@@ -61,6 +62,7 @@ type NavigationItem = {
 const accessItems: NavigationItem[] = [
   { id: "organisations", label: "Organisations", icon: "building", available: true },
   { id: "users", label: "Users", icon: "user", available: true },
+  { id: "roles", label: "Role access", icon: "settings", available: true },
 ];
 
 const projectItems: NavigationItem[] = [
@@ -337,7 +339,7 @@ function labelForSection(section: AdminSection): string {
 export function isAdminSection(value: string | null): value is AdminSection {
   if (!value) return false;
   return [
-    "overview", "organisations", "users", "project-overview", "basics", "structure",
+    "overview", "organisations", "users", "roles", "project-overview", "basics", "structure",
     "data-sources", "meter-mapping", "operational-policies", "data-map", "templates", "ai-analysis", "knowledge", "methods", "assets",
     "task-history", "runs", "conversations", "usage", "traces", "harness", "models", "skills", "tools", "mcp", "report-agent",
   ].includes(value);

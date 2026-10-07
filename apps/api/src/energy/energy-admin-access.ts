@@ -1,4 +1,12 @@
-import type { EnergyIqRole, MetadataStore, UserRecord, WorkspaceRecord } from "@datafoundry/metadata";
+import {
+  ENERGYIQ_VIEWER_ROLE_ID,
+  type EnergyIqAccessRoleRecord,
+  type EnergyIqRole,
+  type EnergyIqRolePermissions,
+  type MetadataStore,
+  type UserRecord,
+  type WorkspaceRecord
+} from "@datafoundry/metadata";
 import { randomUUID } from "node:crypto";
 
 import { AuthError, type AuthService } from "../auth/service.js";
@@ -28,9 +36,21 @@ export type EnergyAdminUserDto = {
   status: "pending" | "active" | "disabled";
   organisationIds: string[];
   organisations: Array<{ id: string; name: string }>;
+  /** The access role this user holds in each of their Organisations. */
+  organisationRoles: Record<string, { roleId: string; roleName: string }>;
   projectIds: string[];
   lastLoginAt?: string;
   createdAt: string;
+};
+
+export type EnergyAdminRoleDto = {
+  id: string;
+  name: string;
+  description: string;
+  builtin: boolean;
+  permissions: EnergyIqRolePermissions;
+  /** How many people hold this role, so a role in use is not deleted by accident. */
+  assignedCount: number;
 };
 
 export class EnergyAdminAccessService {
@@ -143,6 +163,39 @@ export class EnergyAdminAccessService {
     return { organisations: this.listOrganisations() };
   }
 
+  listRoles(): EnergyAdminRoleDto[] {
+    return this.metadataStore.energyIq.roles.list().map((role) => this.roleDto(role));
+  }
+
+  createRole(input: { actorUserId: string; name: string; description?: string; permissions: unknown }): EnergyAdminRoleDto {
+    const role = this.roleChange(() => this.metadataStore.energyIq.roles.create({
+      id: `role-${randomUUID().slice(0, 12)}`,
+      name: input.name,
+      ...(input.description !== undefined ? { description: input.description } : {}),
+      permissions: input.permissions
+    }));
+    this.audit("energyiq.role_created", input.actorUserId, { roleId: role.id, name: role.name, permissions: role.permissions });
+    return this.roleDto(role);
+  }
+
+  updateRole(input: { actorUserId: string; id: string; name: string; description?: string; permissions: unknown }): EnergyAdminRoleDto {
+    const role = this.roleChange(() => this.metadataStore.energyIq.roles.update({
+      id: input.id,
+      name: input.name,
+      ...(input.description !== undefined ? { description: input.description } : {}),
+      permissions: input.permissions
+    }));
+    this.audit("energyiq.role_updated", input.actorUserId, { roleId: role.id, name: role.name, permissions: role.permissions });
+    return this.roleDto(role);
+  }
+
+  deleteRole(input: { actorUserId: string; id: string }): { roles: EnergyAdminRoleDto[] } {
+    const role = this.roleChange(() => this.metadataStore.energyIq.roles.require(input.id));
+    this.roleChange(() => this.metadataStore.energyIq.roles.delete(input.id));
+    this.audit("energyiq.role_deleted", input.actorUserId, { roleId: role.id, name: role.name });
+    return { roles: this.listRoles() };
+  }
+
   listUsers(): EnergyAdminUserDto[] {
     return this.metadataStore.users.list().map((user) => this.userDto(user));
   }
@@ -153,6 +206,8 @@ export class EnergyAdminAccessService {
     email: string;
     organisationIds: string[];
     role: EnergyIqRole;
+    /** Organisation id -> role id. Organisations left out keep their current role, or Viewer when new. */
+    organisationRoles?: Record<string, string>;
   }): Promise<{ invitationUrl?: string; user: EnergyAdminUserDto }> {
     const organisationIds = this.validateMemberships(input.organisationIds, input.role);
     const invitation = await this.authService.inviteUser({
@@ -161,11 +216,12 @@ export class EnergyAdminAccessService {
       ...(input.displayName ? { displayName: input.displayName } : {})
     });
     this.metadataStore.energyIq.upsertUserRole({ user_id: invitation.user.id, role: input.role });
-    this.replaceCustomerMemberships(invitation.user.id, organisationIds);
+    this.replaceCustomerMemberships(invitation.user.id, organisationIds, input.role, input.organisationRoles);
     this.audit("energyiq.user_access_assigned", input.actorUserId, {
       targetUserId: invitation.user.id,
       organisationIds,
-      role: input.role
+      role: input.role,
+      organisationRoles: input.organisationRoles ?? null
     });
     return {
       user: this.userDto(this.metadataStore.users.getById({ user_id: invitation.user.id })),
@@ -199,6 +255,7 @@ export class EnergyAdminAccessService {
     organisationIds: string[];
     role: EnergyIqRole;
     userId: string;
+    organisationRoles?: Record<string, string>;
   }): EnergyAdminUserDto {
     const current = this.metadataStore.users.getById({ user_id: input.userId });
     if (current.id === input.actorUserId && (input.disabled || input.role !== "admin")) {
@@ -210,7 +267,7 @@ export class EnergyAdminAccessService {
       display_name: requireName(input.displayName, "Display name")
     });
     this.metadataStore.energyIq.upsertUserRole({ user_id: current.id, role: input.role });
-    this.replaceCustomerMemberships(current.id, organisationIds);
+    this.replaceCustomerMemberships(current.id, organisationIds, input.role, input.organisationRoles);
     this.metadataStore.users.setDisabled({ user_id: current.id, disabled: input.disabled });
     if (input.disabled) {
       this.metadataStore.authSessions.revokeByUser({ user_id: current.id });
@@ -219,7 +276,8 @@ export class EnergyAdminAccessService {
       targetUserId: current.id,
       disabled: input.disabled,
       organisationIds,
-      role: input.role
+      role: input.role,
+      organisationRoles: input.organisationRoles ?? null
     });
     return this.userDto(this.metadataStore.users.getById({ user_id: current.id }));
   }
@@ -248,6 +306,11 @@ export class EnergyAdminAccessService {
         is_admin: false
       }).map((project) => project.id)
     );
+    const organisationRoles = Object.fromEntries(organisations.map((organisation) => {
+      const roleId = this.metadataStore.workspaceMemberships.find({ workspace_id: organisation.id, user_id: user.id })?.role_id
+        ?? ENERGYIQ_VIEWER_ROLE_ID;
+      return [organisation.id, { roleId, roleName: this.metadataStore.energyIq.roles.find(roleId)?.name ?? "Unknown role" }];
+    }));
     const storedRole = this.metadataStore.energyIq.findUserRole(user.id)?.role ?? "user";
     const lastLoginAt = this.metadataStore.authSessions.latestSeenAt({ user_id: user.id });
     return {
@@ -262,6 +325,7 @@ export class EnergyAdminAccessService {
           : "pending",
       organisationIds: organisations.map((organisation) => organisation.id),
       organisations,
+      organisationRoles,
       projectIds,
       ...(lastLoginAt ? { lastLoginAt } : {}),
       createdAt: user.created_at
@@ -282,19 +346,61 @@ export class EnergyAdminAccessService {
     return ids;
   }
 
-  private replaceCustomerMemberships(userId: string, organisationIds: string[]): void {
+  /**
+   * Makes the user's customer Organisations exactly `organisationIds`, each with an access role. A role that is not
+   * named keeps what the person already has, or Viewer for a new member. Super admins hold no per-Organisation role.
+   */
+  private replaceCustomerMemberships(
+    userId: string,
+    organisationIds: string[],
+    role: EnergyIqRole,
+    roles: Record<string, string> = {}
+  ): void {
     const requested = new Set(organisationIds);
+    for (const [organisationId, roleId] of Object.entries(roles)) {
+      if (!requested.has(organisationId)) continue;
+      if (!this.metadataStore.energyIq.roles.find(roleId)) throw new AuthError(400, "BAD_REQUEST", "That role no longer exists.");
+    }
     for (const workspace of this.metadataStore.workspaces.listByUser({ user_id: userId })) {
       if (workspace.kind === "customer" && !requested.has(workspace.id)) {
         this.metadataStore.workspaceMemberships.remove({ workspace_id: workspace.id, user_id: userId });
       }
     }
     for (const workspaceId of requested) {
+      const existing = this.metadataStore.workspaceMemberships.find({ workspace_id: workspaceId, user_id: userId });
+      if (existing?.role === "owner") continue;
+      const chosen = role === "admin" ? undefined : roles[workspaceId];
       this.metadataStore.workspaceMemberships.upsert({
         workspace_id: workspaceId,
         user_id: userId,
-        role: "member"
+        role: "member",
+        ...(chosen !== undefined ? { role_id: chosen === ENERGYIQ_VIEWER_ROLE_ID ? null : chosen } : {})
       });
+    }
+  }
+
+  private roleDto(role: EnergyIqAccessRoleRecord): EnergyAdminRoleDto {
+    return {
+      id: role.id,
+      name: role.name,
+      description: role.description,
+      builtin: role.builtin,
+      permissions: role.permissions,
+      assignedCount: this.metadataStore.energyIq.roles.countAssignments(role.id)
+    };
+  }
+
+  private roleChange<T>(action: () => T): T {
+    try {
+      return action();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (message.startsWith("ENERGYIQ_ROLE_NOT_FOUND")) throw new AuthError(404, "RESOURCE_NOT_FOUND", "Role not found.");
+      if (message === "ENERGYIQ_ROLE_NAME_REQUIRED") throw new AuthError(400, "BAD_REQUEST", "Give the role a name.");
+      if (message === "ENERGYIQ_ROLE_NAME_TAKEN") throw new AuthError(409, "CONFLICT", "A role with that name already exists.");
+      if (message === "ENERGYIQ_ROLE_BUILTIN") throw new AuthError(409, "CONFLICT", "Built-in roles cannot be changed or deleted.");
+      if (message === "ENERGYIQ_ROLE_IN_USE") throw new AuthError(409, "CONFLICT", "Someone still holds this role. Change their role first.");
+      throw error;
     }
   }
 

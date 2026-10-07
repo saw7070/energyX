@@ -270,3 +270,30 @@ it("labels all-history scheduled reports with the issue period rather than the d
   const data = ((await call()).body as any).data;
   expect(data.reports.find((item: any) => item.id === run.id)).toMatchObject({ period: issue, title: "Scheduled Energy Report — 7 September 2026 to 13 September 2026" });
 });
+
+it("lets anyone who may read notes see them on the light context action, and only a notes writer change them", async () => {
+  const { metadata, service, settings, context } = setup();
+  const send = (segments: string[], method: string, body?: unknown) => {
+    const req = Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))]) as IncomingMessage;
+    req.method = method;
+    return handleReportApi(req, segments, context);
+  };
+  // A Viewer reads the notes but cannot save anything.
+  expect(((await send(["project", "context"], "GET")).body as any).data.contextNotes).toBe("PRIVATE_ATTACHMENT_CONTEXT");
+  const edit = { contextNotes: "New notes", fileRefIds: [], useProjectData: true, skill: "HACKED_SKILL", revision: 1, frequency: "daily", localHour: 5, scheduledPrompt: "HACKED_PROMPT" };
+  expect((await send(["project", "settings"], "PUT", edit)).status).not.toBe(200);
+  // A role with notes write may change the notes, and nothing else about the project's report settings.
+  const role = metadata.energyIq.roles.create({ id: "notes-writer", name: "Notes writer", permissions: { reports: "write", notes: "write" } });
+  metadata.workspaceMemberships.upsert({ workspace_id: "workspace", user_id: "reader", role: "member", role_id: role.id });
+  const saved = await send(["project", "settings"], "PUT", edit);
+  expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+  const stored = service.store.settings("project")!;
+  expect(stored.contextNotes).toBe("New notes");
+  expect(stored.skill).toBe(settings.skill);
+  expect(stored.scheduledPrompt).toBe(settings.scheduledPrompt);
+  expect(stored.frequency).toBe(settings.frequency);
+  // A role with notes read only gets nothing from the full report state, but nothing is lost for the writer.
+  const full = ((await send(["project"], "GET")).body as any).data.settings;
+  expect(full.contextNotes).toBe("New notes");
+  expect(full.skill).toBe("");
+});

@@ -15,6 +15,7 @@ import { EnergyIqReportTimePolicyStore } from "./energyiq-report-time-policy-sto
 import { EnergyIqOverviewDefinitionStore } from "./energyiq-overview-definition-store.js";
 import { EnergyIqSourceSyncStore } from "./energyiq-source-sync-store.js";
 import { EnergyIqLiveConnectorStore } from "./energyiq-live-connector-store.js";
+import { EnergyIqAccessRoleStore } from "./energyiq-access-role-store.js";
 
 import {
   EnergyIqProjectSetupStore,
@@ -339,6 +340,7 @@ export class EnergyIqStore {
   readonly reportTimePolicies: EnergyIqReportTimePolicyStore;
   readonly sourceSync: EnergyIqSourceSyncStore;
   readonly liveConnectors: EnergyIqLiveConnectorStore;
+  readonly roles: EnergyIqAccessRoleStore;
 
   constructor(private readonly db: DatabaseSync) {
     this.metrics = new EnergyIqMetricStore(db);
@@ -356,6 +358,7 @@ export class EnergyIqStore {
     this.reportTimePolicies = new EnergyIqReportTimePolicyStore(db);
     this.sourceSync = new EnergyIqSourceSyncStore(db);
     this.liveConnectors = new EnergyIqLiveConnectorStore(db);
+    this.roles = new EnergyIqAccessRoleStore(db);
   }
 
   upsertUserRole(input: { user_id: string; role: EnergyIqRole }): EnergyIqUserRoleRecord {

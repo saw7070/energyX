@@ -34,6 +34,22 @@ it("groups meters by location and shows school terms only from the selected proj
   } finally { await act(async()=>root.unmount()); vi.unstubAllGlobals(); vi.restoreAllMocks(); }
 });
 
+it("shows a read-only Facility with every tab but no way to edit, upload or ask the advisor to change it", async () => {
+  vi.stubGlobal("React", React); globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const host = document.createElement("div"); const root = createRoot(host);
+  const setup = { project: { has_unpublished_changes: true }, draft: { document: { project: { name: "Campus", timezone: "Asia/Singapore" }, tiers: [{id:"building",alias:"Building"}], nodes: [{ id:"a",name:"Block A",tier_definition_id:"building",area_sqm:100,occupant_count:20 }], meter_mapping: { rows: [{id:"m",display_name:"Meter 03",presentation:{device_name:"Cooling",circuit_name:"L1P17"},scope_id:"a",resource:"electricity",category:"aircon",aggregation_usage:"excluded",meter_role:"component"}], virtual_meters:[] } } } } as unknown as EnergyProjectSetupDto;
+  const policies = { published: {business_calendar_version:null,tariff_schedule_version:null}, pending:{business_calendar_version:null,tariff_schedule_version:null},tariffRevisions:[],operatingCalendarRevisions:[] } as unknown as EnergyOperationalPolicyConfigurationDto;
+  try {
+    await act(async()=>root.render(<ProjectConfigurationView readOnly setup={setup} notes="" policies={policies} projectId="campus" />));
+    const tabs = Array.from(host.querySelectorAll("nav button")).map(button => button.textContent ?? "");
+    for (const name of ["Floor layout", "Devices", "Data availability", "Project notes", "Operating hours", "Holidays", "Electricity rate"]) expect(tabs.some(tab => tab.startsWith(name))).toBe(true);
+    // Nothing prompts the reader to add or change anything.
+    expect(host.textContent).not.toMatch(/Add rate|Add notes/);
+    const click = async (name:string) => { await act(async()=>Array.from(host.querySelectorAll("button")).find(button=>button.textContent?.startsWith(name))!.click()); expect(host.querySelector('a[href*="configure=1"]')).toBeNull(); expect(host.querySelector("button.edit, [class*='edit']")).toBeNull(); };
+    for (const name of ["Floor layout", "Project notes", "Operating hours", "Holidays", "Electricity rate"]) await click(name);
+  } finally { await act(async()=>root.unmount()); vi.unstubAllGlobals(); vi.restoreAllMocks(); }
+});
+
 it("lets publishers edit hours and holidays on the page and saves a pending calendar version", async () => {
   vi.stubGlobal("React", React); globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);

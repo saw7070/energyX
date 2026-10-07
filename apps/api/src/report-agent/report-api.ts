@@ -1,3 +1,4 @@
+import { can, resolveEnergyPermissions } from "../energy/energy-permissions.js";
 import { reportSkillCatalog, resolveReportSkillSelection, saveReportSkill, saveReportSkillSchema, skillSelectionSchema } from "./report-skill-catalog.js";
 import { createErrorResult, createSuccessResult } from "@datafoundry/contracts";
 import type { IncomingMessage } from "node:http";
@@ -42,6 +43,11 @@ export async function handleReportApi(request: IncomingMessage, segments: string
       frequency: "off", localHour: 3, scheduledPrompt: "",
     } satisfies ReportSettings;
     const settings = canManageProject ? storedSettings : { ...storedSettings, fileRefIds: [] };
+    // Project notes follow the person's role, not only project management: anyone with notes read gets them from the
+    // light "context" action; the full report state carries them only for people who may edit them.
+    const rolePermissions = resolveEnergyPermissions(context.metadataStore, context.metadataStore.users.getById({ user_id: context.userId }), context.workspaceId);
+    const canReadNotes = canManageProject || can(rolePermissions, "notes", "read");
+    const canWriteNotes = canManageProject || can(rolePermissions, "notes", "write");
     const action = segments[1];
     // Stop remains available to the owner after revocation; new work does not.
     if (request.method !== "GET" && !(action === "runs" && segments[3] === "stop") && !canChat) throw new Error("REPORT_EXECUTION_FORBIDDEN");
@@ -49,22 +55,23 @@ export async function handleReportApi(request: IncomingMessage, segments: string
     // Anyone in the workspace may ask the advisor for their own report; only project managers change what the
     // project itself uses: its saved skills, its notes and its automatic schedule.
     if (request.method !== "GET" && !canManageProject
-      && (action === "settings" || (action === "skills" && request.method === "POST"))) throw new Error("REPORT_SETTINGS_FORBIDDEN");
+      && ((action === "settings" && !canWriteNotes) || (action === "skills" && request.method === "POST"))) throw new Error("REPORT_SETTINGS_FORBIDDEN");
     if (segments.length === 1 && request.method === "GET") {
       const availablePeriod = await availableReportPeriod(context.metadataStore, context.fileAssetService, settings, context.userId);
       return ok({ canManageProject, canChat,
         // A reader may ask the advisor, but the project's own notes, methods and schedule stay with its managers.
-        settings: canManageProject ? settings : { ...settings, contextNotes: "", fileRefIds: [], skill: "", skillRefs: [], styleSkill: undefined, scheduledPrompt: "", skillUsage: undefined, skillSourceRunId: undefined, skillSourceSessionId: undefined },
+        settings: canManageProject ? settings : { ...settings, contextNotes: canWriteNotes ? settings.contextNotes : "", fileRefIds: [], skill: "", skillRefs: [], styleSkill: undefined, scheduledPrompt: "", skillUsage: undefined, skillSourceRunId: undefined, skillSourceSessionId: undefined },
         skills: canManageProject ? reportSkillCatalog(context, settings, canManageProject) : [], projectData: await readReportProjectData(context.metadataStore, context.userId, context.workspaceId, projectId), periodOptions: { defaultPeriod: latestReportPeriod(availablePeriod), calendarToday: presetReportPeriod("previous-day").toExclusive, availablePeriod,
         availablePeriodReason: availablePeriod ? null : "Available dates could not be determined from the current project snapshot and selected CSV files. Check data access and CSV timestamp columns (interval_start/end_utc, interval_start/end_sgt, interval_start/end, timestamp, datetime, date or event_time)." }, dataSummary: service.dataSummary(projectId, context.userId), sessions: service.store.sessions(projectId, context.userId), runs: service.store.list(projectId).filter(run => run.actorUserId === context.userId && !run.actionEstimate && !run.actionProgress).map(({ settings: snapshot, ...run }) => ({ ...run, skillUsage: snapshot.skillUsage ?? [] })),
         files: canManageProject ? context.fileAssetService.listRefs({ user_id: context.userId, workspace_id: context.workspaceId, limit: 100 }).map(({ ref, asset }) => ({ id: ref.id, filename: ref.filename, bytes: asset.size_bytes })) : [],
       });
     }
     // Just the project notes and report schedule, for pages (Facility, Overview) that do not need report
-    // history, files, skills or available report periods, which are slow to build.
+    // history, files, skills or available report periods, which are slow to build. Anyone who can open the
+    // project may read its notes (the Facility page shows them read-only); only managers can change them.
     if (action === "context" && segments.length === 2 && request.method === "GET") {
       return ok({
-        contextNotes: canManageProject ? settings.contextNotes : "",
+        contextNotes: canReadNotes ? settings.contextNotes : "",
         revision: settings.revision,
         settings: { frequency: settings.frequency, localHour: settings.localHour, timezone: settings.timezone },
       });
@@ -113,7 +120,13 @@ export async function handleReportApi(request: IncomingMessage, segments: string
       }
     }
     if (action === "settings" && segments.length === 2 && request.method === "PUT") {
-      if (!canManageProject) throw new Error("REPORT_ADMIN_REQUIRED");
+      if (!canManageProject) {
+        // Someone allowed to write notes may change the notes and nothing else about the project's report settings.
+        if (!canWriteNotes) throw new Error("REPORT_ADMIN_REQUIRED");
+        const notes = settingsSchema.parse(await readBody(request)).contextNotes;
+        // The settings keep their original owner, so a notes edit never changes who the automatic reports run as.
+        return ok(service.store.saveSettings({ ...storedSettings, contextNotes: notes, timezone: project.timezone }));
+      }
       const body = settingsSchema.parse(await readBody(request));
       for (const id of body.fileRefIds) context.fileAssetService.getRef({ user_id: context.userId, workspace_id: context.workspaceId, id });
       return ok(service.store.saveSettings({ ...settings, ...body, schedulePermissionIssue: undefined, actorUserId: context.userId, timezone: project.timezone }));

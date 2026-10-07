@@ -90,9 +90,48 @@ export type EnergyAdminUserDto = {
   status: "pending" | "active" | "disabled";
   organisationIds: string[];
   organisations: Array<{ id: string; name: string }>;
+  /** The access role this user holds in each of their Organisations. */
+  organisationRoles: Record<string, { roleId: string; roleName: string }>;
   projectIds: string[];
   lastLoginAt?: string;
   createdAt: string;
+};
+
+export type EnergyPermissionArea = "reports" | "facility" | "hours_rate" | "notes" | "live_connection" | "people";
+export type EnergyPermissionLevel = "none" | "read" | "write";
+export type EnergyRolePermissionsDto = Record<EnergyPermissionArea, EnergyPermissionLevel>;
+
+export type EnergyAdminRoleDto = {
+  id: string;
+  name: string;
+  description: string;
+  builtin: boolean;
+  permissions: EnergyRolePermissionsDto;
+  assignedCount: number;
+};
+
+export type EnergyTeamMemberDto = {
+  id: string;
+  displayName?: string;
+  email?: string;
+  status: "pending" | "active" | "disabled";
+  roleName: string;
+  canChange: boolean;
+  lastLoginAt?: string;
+};
+
+export type EnergyTeamRoleDto = {
+  id: string;
+  name: string;
+  description: string;
+  permissions: EnergyRolePermissionsDto;
+  memberCount: number;
+};
+
+export type EnergyTeamDto = {
+  organisation: { id: string; name: string };
+  members: EnergyTeamMemberDto[];
+  roles: EnergyTeamRoleDto[];
 };
 
 export type EnergyProjectDto = {
@@ -101,7 +140,7 @@ export type EnergyProjectDto = {
   name: string;
   status: "draft" | "published" | "archived";
   timezone: string;
-  capabilities?: { readReports: boolean; readExplorer: boolean; readProjectInformation: boolean; readOwnHistory: boolean; createReport: boolean; manageSkills: boolean; manageAutomation: boolean; editConfiguration: boolean; publishConfiguration: boolean };
+  capabilities?: { readReports: boolean; readExplorer: boolean; readProjectInformation: boolean; readOwnHistory: boolean; createReport: boolean; manageSkills: boolean; manageAutomation: boolean; editConfiguration: boolean; editFacility?: boolean; editHoursRate?: boolean; editNotes?: boolean; manageLiveConnection?: boolean; publishConfiguration: boolean };
   /** Where readings come from: a live meter connection, uploaded files, or nothing yet. */
   dataSource?: "live" | "upload" | "none";
 };
@@ -421,6 +460,9 @@ export type EnergyAccessContextDto = {
   };
   activeWorkspaceId: string;
   workspaces: EnergyWorkspaceDto[];
+  /** What this person's role allows in the active Organisation. */
+  permissions?: EnergyRolePermissionsDto;
+  team?: { canManagePeople: boolean };
   projects: EnergyProjectDto[];
 };
 

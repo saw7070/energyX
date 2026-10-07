@@ -3,7 +3,6 @@ import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { configApi, type EnergyOperationalPolicyConfigurationDto, type EnergyProjectSetupDto } from "../../../lib/config-api";
-import { PublishedProjectInformation } from "../_components/project-information";
 import { useEnergyIqAccess } from "../_components/energyiq-access";
 import { ReportProjectGate } from "../_components/report-project-gate";
 import { ReportSettingsButton } from "../_components/report-settings-dialog";
@@ -18,10 +17,16 @@ import { LiveConnectionPanel } from "../_components/live-connection-panel";
 function ProjectPage({ projectId }: { projectId: string }) {
   const { access } = useEnergyIqAccess();
   const project = access?.projects.find(p => p.id === projectId);
-  return (project?.capabilities?.editConfiguration ?? access?.role === "admin") ? <Configuration projectId={projectId} canPublish={project?.capabilities?.publishConfiguration ?? access?.role === "admin"} /> : <PublishedProjectInformation projectId={projectId} />;
+  const admin = access?.role === "admin";
+  const caps = project?.capabilities;
+  // What this person's role lets them change. Everyone sees the same Facility screen; the rest is read-only.
+  const can = { facility: caps?.editFacility ?? admin, hours: caps?.editHoursRate ?? admin, notes: caps?.editNotes ?? admin, live: caps?.manageLiveConnection ?? admin };
+  // The editor loads the saved draft, which only people who can change the setup, hours or notes may read.
+  const readOnly = !(can.facility || can.hours || can.notes);
+  return <Configuration projectId={projectId} readOnly={readOnly} canEditFacility={!!can.facility} canEditHours={!!can.hours} canEditNotes={!!can.notes} canConnect={!!can.live} isAdmin={!!admin} />;
 }
 const TABS = new Set(["structure", "devices", "availability", "context", "policies", "holidays", "tariff"]);
-function Configuration({ projectId, canPublish }: { projectId: string; canPublish: boolean }) {
+function Configuration({ projectId, readOnly, canEditFacility, canEditHours, canEditNotes, canConnect, isAdmin }: { projectId: string; readOnly: boolean; canEditFacility: boolean; canEditHours: boolean; canEditNotes: boolean; canConnect: boolean; isAdmin: boolean }) {
   const t = useMessages(facilityPageMessages);
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -40,28 +45,28 @@ function Configuration({ projectId, canPublish }: { projectId: string; canPublis
     let cancelled = false;
     setFailed(false);
     Promise.all([
-      configApi.getEnergyProjectSetup(projectId),
+      readOnly ? configApi.getEnergyFacilityView(projectId).then(view => view.setup) : configApi.getEnergyProjectSetup(projectId),
       // Only the notes are shown here; the full advisor state (history, files, skills) is much slower to build.
       configApi.reportAgentRequest<{ contextNotes: string }>(projectId, "context"),
-      configApi.getEnergyOperationalPolicies(projectId).catch(() => null),
+      (readOnly ? configApi.getEnergyFacilityView(projectId).then(view => view.policies) : configApi.getEnergyOperationalPolicies(projectId)).catch(() => null),
     ]).then(([setup, report, policies]) => { if (!cancelled) setData({ setup, notes: report.contextNotes, policies }); })
       .catch(() => { if (!cancelled) setFailed(true); });
     return () => { cancelled = true; };
-  }, [projectId, refresh]);
+  }, [projectId, refresh, readOnly]);
   return <section className="space-y-6">
     <header className={styles.pageHeader}>
-      <div className={styles.pageHeading}><h1>{t("title")}</h1><p>{t(canPublish ? "introPublish" : "introReview")}</p></div>
+      <div className={styles.pageHeading}><h1>{t("title")}</h1><p>{t(readOnly ? "introReview" : "introPublish")}</p></div>
       <div className={styles.toolbar}>
-        {canPublish && <button onClick={() => setUploading(true)}><EnergyIcon name="attach" aria-hidden="true" />{t("uploadData")}</button>}
-        {canPublish && <button onClick={() => setConnecting(true)}><EnergyIcon name="bolt" aria-hidden="true" />{t("liveConnection")}</button>}
-        <ReportSettingsButton projectId={projectId} mode="project" onClose={()=>setRefresh(value=>value+1)} /><button onClick={() => setRefresh(value => value + 1)}>{t("refresh")}</button>
-        <Link className={`${styles.advisorAction} focus-visible:ring-2 focus-visible:ring-primary`} href={`/energyiq/reports?${new URLSearchParams({ projectId, sessionId: "new", configure: "1" })}`}><EnergyIcon name="ask" aria-hidden="true" />{t("editWithAdvisor")}</Link>
+        {canEditFacility && <button onClick={() => setUploading(true)}><EnergyIcon name="attach" aria-hidden="true" />{t("uploadData")}</button>}
+        {canConnect && <button onClick={() => setConnecting(true)}><EnergyIcon name="bolt" aria-hidden="true" />{t("liveConnection")}</button>}
+        {isAdmin && <ReportSettingsButton projectId={projectId} mode="project" onClose={()=>setRefresh(value=>value+1)} />}<button onClick={() => setRefresh(value => value + 1)}>{t("refresh")}</button>
+        <Link className={`${styles.advisorAction} focus-visible:ring-2 focus-visible:ring-primary`} href={`/energyiq/reports?${new URLSearchParams({ projectId, sessionId: "new", ...(isAdmin ? { configure: "1" } : {}) })}`}><EnergyIcon name="ask" aria-hidden="true" />{t("editWithAdvisor")}</Link>
       </div>
     </header>
     {uploading && <FacilityDialog id="upload-data" title={t("uploadTitle")} intro={t("uploadIntro")} onClose={() => setUploading(false)}><SmartImportPanel projectId={projectId} onChanged={() => setRefresh(value => value + 1)} /></FacilityDialog>}
     {connecting && <FacilityDialog id="live-connection" title={t("liveTitle")} intro={t("liveIntro")} onClose={() => setConnecting(false)}><LiveConnectionPanel projectId={projectId} onChanged={() => setRefresh(value => value + 1)} /></FacilityDialog>}
     {failed ? <p role="alert">{t("loadFailed")}</p> : !data ? <p role="status">{t("loading")}</p> : <>
-      <ProjectConfigurationView initialTab={initialTab} onTabChange={(tab, extra) => router.replace(`/energyiq/project-configuration?${new URLSearchParams({ projectId, tab, ...extra })}`, { scroll: false })} onPolicyChange={() => setRefresh(value => value + 1)} projectId={projectId} canEditPolicies={canPublish} canEditSetup setup={data.setup} notes={data.notes} policies={data.policies} />
+      <ProjectConfigurationView initialTab={initialTab} onTabChange={(tab, extra) => router.replace(`/energyiq/project-configuration?${new URLSearchParams({ projectId, tab, ...extra })}`, { scroll: false })} onPolicyChange={() => setRefresh(value => value + 1)} projectId={projectId} canEditPolicies={canEditHours} canEditSetup={canEditFacility} canEditNotes={canEditNotes} advisorEdit={isAdmin} readOnly={readOnly} setup={data.setup} notes={data.notes} policies={data.policies} />
     </>}
   </section>;
 }

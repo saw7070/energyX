@@ -59,6 +59,8 @@ const en = {
   "nav.askAdvisor.hint": "Ask questions about your energy data or request a report",
   "nav.guidelines": "Advisor guidelines",
   "nav.guidelines.hint": "Instructions the advisor follows when preparing reports",
+  "nav.team": "Team",
+  "nav.team.hint": "Invite or remove people who can view this client",
   "nav.history": "Conversation history",
   "nav.history.hint": "Earlier questions and answers about this project",
 
@@ -209,6 +211,8 @@ const zhHans: Messages = {
   "nav.askAdvisor.hint": "询问能源数据相关问题或请求生成报告",
   "nav.guidelines": "顾问指引",
   "nav.guidelines.hint": "顾问准备报告时遵循的说明",
+  "nav.team": "团队",
+  "nav.team.hint": "邀请或移除可查看此客户的人员",
   "nav.history": "对话记录",
   "nav.history.hint": "关于此项目的过往问答",
 
@@ -357,6 +361,8 @@ const ms: Messages = {
   "nav.askAdvisor.hint": "Tanya tentang data tenaga anda atau minta laporan",
   "nav.guidelines": "Garis panduan penasihat",
   "nav.guidelines.hint": "Arahan yang diikuti penasihat semasa menyediakan laporan",
+  "nav.team": "Pasukan",
+  "nav.team.hint": "Jemput atau buang orang yang boleh melihat pelanggan ini",
   "nav.history": "Sejarah perbualan",
   "nav.history.hint": "Soalan dan jawapan terdahulu tentang projek ini",
 

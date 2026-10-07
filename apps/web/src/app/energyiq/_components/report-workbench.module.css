@@ -1068,6 +1068,79 @@
 .settingsFooter { position:sticky; bottom:0; z-index:1; display:flex; justify-content:flex-end; margin:20px -28px 0; padding:14px 28px; border-top:1px solid #e1e7e2; background:#fffffff2; backdrop-filter:blur(6px); }
 @media(max-width:767px) { .settingsDialog .settings { padding:16px 16px 0; } .settingsDialog .setupGroup { padding:18px 16px; } .settingsFooter { margin:16px -16px 0; padding:12px 16px; } .documentUse span { display:none; } }
 
+/* Advisor first screen: a calmer hero, clearer starting points, numbered guidance and a stronger message box. */
+.chatWorkbench .messages:has(> .welcome) {
+  display: flex;
+  flex-direction: column;
+  padding-top: 20px;
+  padding-bottom: 12px;
+  background: radial-gradient(900px 340px at 50% 0, #e8f3ed 0%, #f3f5f2 72%);
+}
+/* Centred when there is room, top-aligned (never clipped) when the window is short. */
+.chatWorkbench .welcome { width: 100%; max-width: 900px; margin: auto; padding: 4px 0 20px; }
+.chatWorkbench .welcome .welcomeMark {
+  width: 52px; height: 52px; border-radius: 17px;
+  background: linear-gradient(145deg, #f4fbf7, #d4ebdd);
+  box-shadow: 0 0 0 7px #e3f2ea99, 0 12px 28px #1f6b5024;
+}
+.chatWorkbench .welcome .welcomeMark svg { width: 25px; height: 25px; }
+.chatWorkbench .welcome h2 { margin: 20px auto 8px; font-size: clamp(26px, 2.4vw, 32px); font-weight: 700; letter-spacing: -.032em; color: #14201a; }
+.chatWorkbench .welcome > p { max-width: 54ch; font-size: 15.5px; line-height: 1.65; color: #596560; }
+
+.chatWorkbench .starterGrid { gap: 14px; margin-top: 26px; }
+.chatWorkbench .starterGrid button {
+  position: relative; gap: 4px; padding: 16px 18px 15px; border: 1px solid #dfe7e0; border-radius: 16px;
+  background: linear-gradient(180deg, #fff, #fafcfa); box-shadow: 0 1px 2px #1a28170a;
+  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+.chatWorkbench .starterGrid button::after {
+  content: "→"; position: absolute; top: 17px; right: 18px; font-size: 16px; color: #1f6b50;
+  opacity: 0; transform: translateX(-5px); transition: opacity .16s ease, transform .16s ease;
+}
+.chatWorkbench .starterGrid button:hover, .chatWorkbench .starterGrid button:focus-visible {
+  border-color: #8fbca4; box-shadow: 0 10px 26px #1a281714; transform: translateY(-2px);
+}
+.chatWorkbench .starterGrid button:hover::after, .chatWorkbench .starterGrid button:focus-visible::after { opacity: 1; transform: none; }
+.chatWorkbench .starterIcon { width: 38px; height: 38px; margin-bottom: 9px; border-radius: 12px; background: linear-gradient(145deg, #ecf6f0, #d8eee2); color: #17604b; }
+.chatWorkbench .starterGrid strong { font-size: 14.5px; letter-spacing: -.01em; }
+.chatWorkbench .starterGrid small { font-size: 12.5px; }
+
+.chatWorkbench .welcome .tips { margin-top: 20px; padding: 16px 24px 16px; border: 1px solid #dfe7e0; border-radius: 18px; background: #fbfdfb; box-shadow: 0 1px 2px #1a28170a; }
+.chatWorkbench .welcome .tips h3 { font-size: 11.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: #5d6a63; }
+.chatWorkbench .welcome .tips ul { counter-reset: tip; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin-top: 12px; }
+.chatWorkbench .welcome .tips li { display: grid; grid-template-columns: 22px minmax(0, 1fr); column-gap: 9px; align-content: start; counter-increment: tip; padding: 0 20px 0 0; font-size: 12.75px; line-height: 1.55; color: #66726b; }
+.chatWorkbench .welcome .tips li + li { padding-left: 20px; border-left: 1px solid #e4ebe5; }
+.chatWorkbench .welcome .tips li::before {
+  content: counter(tip); grid-column: 1; grid-row: 1; display: grid; place-items: center; width: 22px; height: 22px;
+  border-radius: 50%; background: #dcebe2; color: #17604b; font-size: 11.5px; font-weight: 700;
+}
+.chatWorkbench .welcome .tips li strong { grid-column: 2; grid-row: 1; align-self: center; margin-bottom: 0; font-size: 13.25px; }
+.chatWorkbench .welcome .tips li span { grid-column: 2; grid-row: 2; margin-top: 3px; }
+.chatWorkbench .welcome .tips { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 16px; align-items: center; }
+.chatWorkbench .welcome .tips > h3, .chatWorkbench .welcome .tips > ul { grid-column: 1 / -1; }
+.chatWorkbench .welcome .tips > p, .chatWorkbench .welcome .tips > .tipExamples { margin: 14px 0 0; padding-top: 12px; border-top: 1px solid #e8eee9; }
+.chatWorkbench .welcome .tips > p { font-size: 12px; font-weight: 600; letter-spacing: .02em; color: #5d6a63; }
+.chatWorkbench .welcome .tips > .tipExamples { gap: 8px; }
+.chatWorkbench .tipExamples button { padding: 8px 14px; border: 1px solid #d3dfd6; background: #fff; font-size: 12.75px; box-shadow: 0 1px 1px #1a28170a; }
+.chatWorkbench .tipExamples button:hover { border-color: #8fbca4; background: #eef6f1; transform: translateY(-1px); }
+
+.chatWorkbench .composerCard { border-color: #d6e0d8; border-radius: 22px; background: #fff; box-shadow: 0 2px 4px #1a28170a, 0 18px 44px #1a281716; }
+.chatWorkbench .composerCard:focus-within { border-color: #7fb096; box-shadow: 0 2px 4px #1a28170a, 0 18px 44px #1a281718, 0 0 0 4px #1f6b5017; }
+.chatWorkbench .composerCard .analysisRange { padding: 10px 16px; border-radius: 22px 22px 0 0; background: #f8fbf8; }
+.chatWorkbench .composerCard .composer { padding: 12px 16px 12px; }
+.chatWorkbench .composerCard .composer textarea { font-size: 15.5px; line-height: 1.6; }
+.chatWorkbench .composer .sendAction { width: 40px; height: 40px; min-height: 40px; background: #176b59; box-shadow: 0 4px 10px #176b5933; transition: background .15s ease, box-shadow .15s ease, transform .15s ease; }
+.chatWorkbench .composer .sendAction:hover:not(:disabled) { background: #115444; transform: translateY(-1px); }
+.chatWorkbench .composer .sendAction:disabled { background: #cfe0d6; box-shadow: none; opacity: 1; }
+.chatWorkbench .composerNote { margin-top: 10px; }
+
+@media (max-width: 760px) {
+  .chatWorkbench .welcome .tips { display: block; }
+  .chatWorkbench .welcome .tips > .tipExamples { margin-top: 0; padding-top: 10px; border-top: 0; }
+  .chatWorkbench .welcome .tips ul { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .chatWorkbench .welcome .tips li, .chatWorkbench .welcome .tips li + li { padding: 0; border-left: 0; }
+}
+
 /* energyiq-dark-theme:start — generated by scripts/energyiq-dark-theme.mjs; do not edit by hand */
 :global(:where(html[data-energyiq-theme="dark"])) .workbench { background:var(--color-surface,#191919); }
 :global(:where(html[data-energyiq-theme="dark"])) .header { border-bottom:1px solid var(--color-border,#333437); }
@@ -1445,4 +1518,31 @@
 :global(:where(html[data-energyiq-theme="dark"])) .uploadBox:hover, :global(:where(html[data-energyiq-theme="dark"])) .uploadBox:focus-within { border-color:#2f7a5b; background:#1a1e1c; }
 :global(:where(html[data-energyiq-theme="dark"])) .uploadBox small { color:#9ba69f; }
 :global(:where(html[data-energyiq-theme="dark"])) .settingsFooter { border-top:1px solid #313632; background:#191919f2; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .messages:has(> .welcome) { background:radial-gradient(900px 340px at 50% 0, #19211d 0%, #1d1e1c 72%); }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .welcome .welcomeMark { border-radius:17px; background:linear-gradient(145deg, #181d1a, #16281e); box-shadow:0 0 0 7px #01080499, 0 12px 28px #1f6b503a; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .welcome h2 { color:#c8d8cf; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .welcome > p { color:#a3b1ab; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .starterGrid button { border:1px solid #313731; border-radius:16px; background:linear-gradient(180deg, #191919, #1a1b1a); box-shadow:0 1px 2px #1a281710; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .starterGrid button::after { color:#79c2a3; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .starterGrid button:hover, :global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .starterGrid button:focus-visible { border-color:#2a4c3b; box-shadow:0 10px 26px #1a281720; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .starterIcon { border-radius:12px; background:linear-gradient(145deg, #19201c, #16271e); color:#81c6ad; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .welcome .tips { border:1px solid #313731; border-radius:18px; background:#191b19; box-shadow:0 1px 2px #1a281710; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .welcome .tips h3 { color:#a1afa7; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .welcome .tips li { color:#9eaaa3; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .welcome .tips li + li { border-left:1px solid #303531; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .welcome .tips li::before { border-radius:50%; background:#1b2620; color:#81c6ad; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .welcome .tips > p, :global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .welcome .tips > .tipExamples { border-top:1px solid #303430; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .welcome .tips > p { color:#a1afa7; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .tipExamples button { border:1px solid #313a33; background:#191919; box-shadow:0 1px 1px #1a281710; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .tipExamples button:hover { border-color:#2a4c3b; background:#1a1f1c; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .composerCard { border-color:#313933; border-radius:22px; background:#191919; box-shadow:0 2px 4px #1a281710, 0 18px 44px #1a281723; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .composerCard:focus-within { border-color:#2e503f; box-shadow:0 2px 4px #1a281710, 0 18px 44px #1a281726, 0 0 0 4px #1f6b5025; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .composerCard .analysisRange { border-radius:22px 22px 0 0; background:#1a1c1a; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .composer .sendAction { background:#176b59; box-shadow:0 4px 10px #176b5952; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .composer .sendAction:hover:not(:disabled) { background:#115444; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .composer .sendAction:disabled { background:#1e2b24; box-shadow:none; }
+@media (max-width: 760px) {
+  :global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .welcome .tips > .tipExamples { border-top:0; }
+  :global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .welcome .tips li, :global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .welcome .tips li + li { border-left:0; }
+}
 /* energyiq-dark-theme:end */

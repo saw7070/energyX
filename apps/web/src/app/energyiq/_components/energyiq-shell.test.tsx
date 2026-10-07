@@ -171,6 +171,22 @@ describe("EnergyX Shell Project navigation", () => {
     await act(async () => trigger?.click());
     expect(document.querySelector("[role='listbox']")?.textContent).not.toContain("First report");
   });
+  it("shows a viewer every Facility tab, but no Team link", async () => {
+    navigation.pathname = "/energyiq/project-configuration"; navigation.search = "projectId=project-a";
+    mockedAccess.access = { ...mockedAccess.access!, role: "user" };
+    mockedAccess.activeProject = { ...project("project-a", "Project A"), capabilities: { readReports: true, readExplorer: true, readProjectInformation: true, readOwnHistory: true, createReport: true, manageSkills: false, manageAutomation: false, editConfiguration: false, publishConfiguration: false } };
+    await act(async () => root.render(<EnergyIqShell><div>Page</div></EnergyIqShell>));
+    expect(Array.from(container.querySelectorAll("#nav-group-site-profile a")).map(link => link.getAttribute("aria-label"))).toEqual(["Floor layout", "Devices", "Data availability", "Project notes", "Operating hours", "Holidays", "Electricity rate"]);
+    expect(container.querySelector('a[href^="/energyiq/team"]')).toBeNull();
+  });
+  it("shows the Team link only to an Organisation admin who may manage people", async () => {
+    mockedAccess.access = { ...mockedAccess.access!, role: "user", team: { canManagePeople: true } };
+    await act(async () => root.render(<EnergyIqShell><div>Page</div></EnergyIqShell>));
+    expect(container.querySelector('a[aria-label="Team"]')?.getAttribute("href")).toContain("/energyiq/team");
+    mockedAccess.access = { ...mockedAccess.access!, role: "admin", team: { canManagePeople: true } };
+    await act(async () => root.render(<EnergyIqShell><div>Page</div></EnergyIqShell>));
+    expect(container.querySelector('a[aria-label="Team"]')).toBeNull();
+  });
   it("switches the Overview Project in access state and the URL together", async () => {
     await act(async () => {
       root.render(<EnergyIqShell><div>Overview</div></EnergyIqShell>);

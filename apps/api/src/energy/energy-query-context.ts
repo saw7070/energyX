@@ -1,5 +1,6 @@
 import { resolveEnergyProjectCapabilities, type EnergyProjectCapabilities } from "./energy-project-capabilities.js";
 import { ensureEnergyIqUserRole, resolveEnergyIqUserRole } from "./energy-user-role.js";
+import { can, resolveEnergyPermissions } from "./energy-permissions.js";
 export { ensureEnergyIqUserRole } from "./energy-user-role.js";
 import type {
   EnergyIqMeterMappingDraft,
@@ -7,11 +8,12 @@ import type {
   EnergyIqProjectSetupDocument,
   EnergyIqProjectRecord,
   EnergyIqRole,
+  EnergyIqRolePermissions,
   MetadataStore,
   UserRecord,
   WorkspaceRecord
 } from "@datafoundry/metadata";
-import { energyIqPublishedMeterRoutingRevisionId } from "@datafoundry/metadata";
+import { energyIqPublishedMeterRoutingRevisionId, NO_PERMISSIONS } from "@datafoundry/metadata";
 
 export type EnergyResource = "electricity" | "water";
 export type EnergyPeriod = "Yesterday" | "Last 7 days" | "Last 30 days" | "Previous week" | "Previous month" | "Custom";
@@ -30,6 +32,10 @@ export type EnergyAccessContext = {
     kind: WorkspaceRecord["kind"];
     disabled: boolean;
   }>;
+  /** What this person's role allows in the active Organisation. Super admins hold everything. */
+  permissions: EnergyIqRolePermissions;
+  /** Shortcut for "People: write", used to show the Team page. */
+  team: { canManagePeople: boolean };
   projects: Array<{
     id: string;
     workspaceId: string;
@@ -135,6 +141,8 @@ export const resolveEnergyAccessContext = (input: {
       },
       activeWorkspaceId: "",
       workspaces: [],
+      permissions: NO_PERMISSIONS,
+      team: { canManagePeople: false },
       projects: []
     };
   }
@@ -144,6 +152,7 @@ export const resolveEnergyAccessContext = (input: {
   if (!activeWorkspace) {
     throw new Error("ENERGYIQ_WORKSPACE_FORBIDDEN");
   }
+  const activePermissions = resolveEnergyPermissions(input.metadataStore, input.user, activeWorkspace.id, input.env);
   const projects = input.metadataStore.energyIq.listVisibleProjects({
     user_id: input.user.id,
     workspace_id: activeWorkspace.id,
@@ -163,6 +172,8 @@ export const resolveEnergyAccessContext = (input: {
       kind: workspace.kind,
       disabled: Boolean(workspace.disabled_at)
     })),
+    permissions: activePermissions,
+    team: { canManagePeople: can(activePermissions, "people", "write") },
     projects: projects.map((project) => ({
       id: project.id,
       workspaceId: project.workspace_id,

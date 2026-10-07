@@ -21,6 +21,9 @@ import type {
   EnergyLiveReadingsDto,
   EnergyAdminOrganisationDto,
   EnergyAdminUserDto,
+  EnergyAdminRoleDto,
+  EnergyRolePermissionsDto,
+  EnergyTeamDto,
   EnergyAdditionalInsightFeedbackDto,
   EnergyAdditionalInsightCommentDto,
   EnergyAdditionalInsightEvaluationSummaryDto,
@@ -394,6 +397,11 @@ export const configApi = {
     return requestEnvelope<T>(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/information`);
   },
 
+  /** The Facility as it is live today, for people who may look but not change it. Never includes drafts. */
+  getEnergyFacilityView(projectId: string): Promise<{ setup: EnergyProjectSetupDto; policies: EnergyOperationalPolicyConfigurationDto | null }> {
+    return requestEnvelope(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/facility`);
+  },
+
   getEnergyProjectMeterHealth(projectId: string): Promise<EnergyMeterHealthDto> {
     return requestEnvelope<EnergyMeterHealthDto>(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/meter-health`);
   },
@@ -464,6 +472,22 @@ export const configApi = {
     return requestEnvelope(`/api/v1/energy/admin/organisations/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 
+  listEnergyAdminRoles(): Promise<{ roles: EnergyAdminRoleDto[] }> {
+    return requestEnvelope("/api/v1/energy/admin/roles");
+  },
+
+  createEnergyAdminRole(body: { name: string; description?: string; permissions: EnergyRolePermissionsDto }): Promise<EnergyAdminRoleDto> {
+    return requestEnvelope("/api/v1/energy/admin/roles", { method: "POST", body: JSON.stringify(body) });
+  },
+
+  updateEnergyAdminRole(id: string, body: { name: string; description?: string; permissions: EnergyRolePermissionsDto }): Promise<EnergyAdminRoleDto> {
+    return requestEnvelope(`/api/v1/energy/admin/roles/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) });
+  },
+
+  deleteEnergyAdminRole(id: string): Promise<{ roles: EnergyAdminRoleDto[] }> {
+    return requestEnvelope(`/api/v1/energy/admin/roles/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+
   listEnergyAdminUsers(): Promise<{ users: EnergyAdminUserDto[] }> {
     return requestEnvelope("/api/v1/energy/admin/users");
   },
@@ -473,6 +497,7 @@ export const configApi = {
     email: string;
     organisationIds: string[];
     role: "user" | "admin";
+    organisationRoles?: Record<string, string>;
   }): Promise<{ invitationUrl?: string; user: EnergyAdminUserDto }> {
     return requestEnvelope("/api/v1/energy/admin/users", {
       method: "POST",
@@ -487,6 +512,7 @@ export const configApi = {
       displayName: string;
       organisationIds: string[];
       role: "user" | "admin";
+      organisationRoles?: Record<string, string>;
     },
   ): Promise<EnergyAdminUserDto> {
     return requestEnvelope(`/api/v1/energy/admin/users/${encodeURIComponent(id)}`, {
@@ -500,6 +526,29 @@ export const configApi = {
       method: "POST",
       body: JSON.stringify({}),
     });
+  },
+
+  /** People in the active Organisation. Only for platform admins and Organisation admins who manage people. */
+  getEnergyTeam(): Promise<EnergyTeamDto> {
+    return requestEnvelope("/api/v1/energy/team");
+  },
+
+  inviteEnergyTeamUser(body: {
+    displayName?: string;
+    email: string;
+  }): Promise<{ invitationUrl?: string; team: EnergyTeamDto }> {
+    return requestEnvelope("/api/v1/energy/team/users", { method: "POST", body: JSON.stringify(body) });
+  },
+
+  resendEnergyTeamInvitation(userId: string): Promise<{ invitationUrl?: string; team: EnergyTeamDto }> {
+    return requestEnvelope(`/api/v1/energy/team/users/${encodeURIComponent(userId)}/resend-invitation`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  },
+
+  removeEnergyTeamUser(userId: string): Promise<{ team: EnergyTeamDto }> {
+    return requestEnvelope(`/api/v1/energy/team/users/${encodeURIComponent(userId)}`, { method: "DELETE" });
   },
 
   getEnergyProjectHierarchy(projectId: string): Promise<EnergyProjectHierarchyDto> {

@@ -28,6 +28,7 @@ const navigation: Array<NavigationItem | NavigationGroup> = [
   { href: "/energyiq/key-points", label: "nav.overview", icon: "spark", description: "nav.overview.hint" },
   { href: "/energyiq/analysis", label: "nav.analysis", icon: "analysis", description: "nav.analysis.hint" },
   { href: "/energyiq/library", label: "nav.reports", icon: "document", description: "nav.reports.hint" },
+  { href: "/energyiq/team", label: "nav.team", icon: "user", description: "nav.team.hint" },
   { id: "site-profile", label: "nav.facility", icon: "building", description: "nav.facility.hint", items: [
     { href: SITE_PROFILE, tab: "structure", label: "nav.floorLayout", icon: "floor", description: "nav.floorLayout.hint" },
     { href: SITE_PROFILE, tab: "devices", label: "nav.devices", icon: "meter", description: "nav.devices.hint" },
@@ -198,16 +199,16 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
     if (activeProject?.status === "draft" && ["/energyiq/overview", "/energyiq/ai"].includes(path) && publishedProjects[0]) return `${path}?${new URLSearchParams({ projectId: publishedProjects[0].id })}`;
     return path;
   };
-  const canEditSiteProfile = activeProject?.capabilities?.editConfiguration ?? access?.role === "admin";
   // Hide what this account cannot use and adapt labels before grouping, so a one-item group renders as a plain link.
   const visibleItem = (item: NavigationItem): NavigationItem | null => {
+    // Platform admins manage people from the admin pages; only Organisation admins get this page in the portal.
+    if (item.href === "/energyiq/team" && !(((access?.permissions?.people ?? "none") !== "none" || access?.team?.canManagePeople) && access?.role !== "admin")) return null;
     if (item.href === "/energyiq/skills" && !(activeProject?.capabilities?.manageSkills ?? access?.role === "admin")) return null;
     if (item.href === "/energyiq/reports" && !(activeProject?.capabilities?.createReport ?? access?.role === "admin")) return { ...item, label: "nav.history", description: "nav.history.hint" };
     return item;
   };
   const entries = navigation.flatMap((entry): Array<NavigationItem | NavigationGroup> => {
     if (!isGroup(entry)) return [visibleItem(entry)].filter((item): item is NavigationItem => !!item);
-    if (entry.id === "site-profile" && !canEditSiteProfile) return [{ href: SITE_PROFILE, label: entry.label, icon: entry.icon, description: entry.description }];
     const items = entry.items.map(visibleItem).filter((item): item is NavigationItem => !!item);
     return items.length > 1 ? [{ ...entry, items }] : items.map(item => ({ ...item, icon: entry.icon }));
   });
