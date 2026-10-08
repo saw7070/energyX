@@ -33,8 +33,10 @@ export function AdminAccessPages({ initialView }: AdminAccessPagesProps) {
     | { kind: "move"; project: MovableProject }
     | { kind: "deleteProject"; project: MovableProject }
     | { kind: "deleteOrganisation"; organisation: EnergyAdminOrganisationDto }
+    | { kind: "deleteRole"; role: EnergyAdminRoleDto }
     | null
   >(null);
+  const [deletingRole, setDeletingRole] = useState(false);
   const [invitationUrl, setInvitationUrl] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -107,16 +109,7 @@ export function AdminAccessPages({ initialView }: AdminAccessPagesProps) {
           roles={roles}
           onCreate={() => setDialog({ kind: "role" })}
           onEdit={(role) => setDialog({ kind: "role", role })}
-          onDelete={async (role) => {
-            if (!window.confirm(`Delete the role "${role.name}"?`)) return;
-            setError(null);
-            try {
-              await configApi.deleteEnergyAdminRole(role.id);
-              await finishMutation(`The role "${role.name}" was deleted.`);
-            } catch (reason) {
-              setError(messageFrom(reason, "Failed to delete role"));
-            }
-          }}
+          onDelete={(role) => setDialog({ kind: "deleteRole", role })}
         />
       ) : (
         <UsersView
@@ -174,6 +167,30 @@ export function AdminAccessPages({ initialView }: AdminAccessPagesProps) {
           organisation={dialog.organisation}
           onClose={() => setDialog(null)}
           onDeleted={async () => finishMutation(`${dialog.organisation.name} was deleted.`)}
+        />
+      ) : null}
+      {dialog?.kind === "deleteRole" ? (
+        <ConfirmDialog
+          danger
+          busy={deletingRole}
+          title="Delete this role?"
+          message={`"${dialog.role.name}" will be removed from Role access. Nobody holds it, so no one loses access.`}
+          confirmLabel={deletingRole ? "Deleting…" : "Delete role"}
+          onCancel={() => setDialog(null)}
+          onConfirm={async () => {
+            const role = dialog.role;
+            setDeletingRole(true);
+            setError(null);
+            try {
+              await configApi.deleteEnergyAdminRole(role.id);
+              await finishMutation(`The role "${role.name}" was deleted.`);
+            } catch (reason) {
+              setDialog(null);
+              setError(messageFrom(reason, "Failed to delete role"));
+            } finally {
+              setDeletingRole(false);
+            }
+          }}
         />
       ) : null}
       {dialog?.kind === "user" ? (
@@ -587,14 +604,27 @@ function UserDialog({
   const [disabled, setDisabled] = useState(user?.status === "disabled");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  // Only a change that hands out platform-wide access, or locks someone out, needs a second look.
+  const disabling = disabled && user?.status !== "disabled";
+  const promoting = role === "admin" && user?.role !== "admin";
+  const who = displayName.trim() || email.trim() || "This person";
 
-  const submit = async (event: FormEvent) => {
+  const submit = (event: FormEvent) => {
     event.preventDefault();
     if (role === "user" && organisationIds.length === 0) {
       setError("Select at least one Organisation for a customer user.");
       return;
     }
-    if ((role === "admin" || disabled) && !window.confirm("This changes platform access. Continue?")) return;
+    if (disabling || promoting) {
+      setConfirming(true);
+      return;
+    }
+    void save();
+  };
+
+  const save = async () => {
+    setConfirming(false);
     const chosenRoles = Object.fromEntries(organisationIds.map((id) => [id, organisationRoles[id] ?? VIEWER_ROLE_ID]));
     setSaving(true);
     setError(null);
@@ -632,7 +662,19 @@ function UserDialog({
 
   return (
     <AccessDialog title={user ? "Edit user" : "Invite user"} onClose={onClose}>
-      <form onSubmit={(event) => void submit(event)} className="space-y-4">
+      {confirming ? (
+        <ConfirmDialog
+          danger
+          title={disabling ? "Disable this account?" : "Give super admin access?"}
+          message={disabling
+            ? `${who} is signed out everywhere straight away and can't sign in again until you turn the account back on. Their history is kept.`
+            : `${who} will be able to open every client and change every setting, including who else has access.`}
+          confirmLabel={disabling ? "Disable account" : "Make super admin"}
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => void save()}
+        />
+      ) : null}
+      <form onSubmit={submit} className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Name"><input autoFocus value={displayName} onChange={(event) => setDisplayName(event.target.value)} className={inputClass} required /></Field>
           <Field label="Email"><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} className={inputClass} required disabled={Boolean(user)} /></Field>
@@ -784,7 +826,7 @@ export function RolesView({
   roles: EnergyAdminRoleDto[];
   onCreate: () => void;
   onEdit: (role: EnergyAdminRoleDto) => void;
-  onDelete: (role: EnergyAdminRoleDto) => Promise<void>;
+  onDelete: (role: EnergyAdminRoleDto) => void;
 }) {
   return (
     <section className="overflow-hidden rounded-xl border border-border bg-surface">
@@ -996,6 +1038,42 @@ function AccessSectionHeader({ title, description, actionLabel, onAction }: { ti
 
 function AccessDialog({ title, subtitle, wide, children, onClose }: { title: string; subtitle?: string; wide?: boolean; children: React.ReactNode; onClose: () => void }) {
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4" role="dialog" aria-modal="true" aria-label={title}><div className={["max-h-[92vh] w-full overflow-auto rounded-xl border border-border bg-surface shadow-2xl", wide ? "max-w-3xl" : "max-w-2xl"].join(" ")}><header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4"><div><h2 className="text-base font-semibold">{title}</h2>{subtitle ? <p className="mt-0.5 text-xs text-muted">{subtitle}</p> : null}</div><button type="button" onClick={onClose} className="rounded-lg p-2 text-muted hover:bg-surface-subtle" aria-label="Close dialog">×</button></header><div className="p-5">{children}</div></div></div>;
+}
+
+/** Asks before a change that is hard to take back. Sits above any open dialog; Escape or Cancel backs out. */
+export function ConfirmDialog({ title, message, confirmLabel, danger, busy, onCancel, onConfirm }: {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  danger?: boolean;
+  busy?: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onCancel(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" role="alertdialog" aria-modal="true" aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message">
+      <div className="w-full max-w-md rounded-xl border border-border bg-surface p-5 shadow-2xl">
+        <div className="flex items-start gap-3">
+          <span className={["flex h-9 w-9 shrink-0 items-center justify-center rounded-full", danger ? "bg-rose-50 text-rose-700" : "bg-surface-subtle text-muted"].join(" ")} aria-hidden="true">
+            <EnergyIcon name={danger ? "alert" : "info"} />
+          </span>
+          <div>
+            <h2 id="confirm-dialog-title" className="text-base font-semibold">{title}</h2>
+            <p id="confirm-dialog-message" className="mt-1.5 text-sm leading-relaxed text-muted">{message}</p>
+          </div>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" autoFocus onClick={onCancel} disabled={busy} className={secondaryButton}>Cancel</button>
+          <button type="button" onClick={onConfirm} disabled={busy} className={danger ? dangerSolidButton : primaryButton}>{confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function DialogActions({ onClose, saving, submitLabel }: { onClose: () => void; saving: boolean; submitLabel: string }) {

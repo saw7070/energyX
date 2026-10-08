@@ -3,8 +3,8 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import { configApi, type EnergyAdminRoleDto } from "../../../lib/config-api";
-import { RoleDialog, RolesView } from "./admin-access-pages";
+import { configApi, type EnergyAdminOrganisationDto, type EnergyAdminRoleDto, type EnergyAdminUserDto } from "../../../lib/config-api";
+import { AdminAccessPages, RoleDialog, RolesView } from "./admin-access-pages";
 
 beforeEach(() => { vi.stubGlobal("React", React); globalThis.IS_REACT_ACT_ENVIRONMENT = true; });
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); document.body.innerHTML = ""; });
@@ -75,5 +75,68 @@ it("starts from a preset, explains the chosen level in plain words, summarises t
     permissions: { reports: "write", facility: "write", hours_rate: "write", notes: "write", live_connection: "none", people: "read" },
   }));
   expect(saved).toHaveBeenCalledOnce();
+  await act(async () => root.unmount());
+});
+
+const organisation: EnergyAdminOrganisationDto = { id: "org-elite", name: "Elite IOT", status: "active", userCount: 1, projectCount: 1, projects: [], createdAt: "2026-10-01T00:00:00.000Z" };
+const viewer: EnergyAdminUserDto = {
+  id: "u1", displayName: "Mei", email: "mei@example.test", role: "user", status: "active", organisationIds: ["org-elite"],
+  organisations: [{ id: "org-elite", name: "Elite IOT" }], organisationRoles: { "org-elite": { roleId: "role-viewer", roleName: "Viewer" } },
+  projectIds: [], createdAt: "2026-10-01T00:00:00.000Z",
+};
+const mockAccessLists = () => {
+  vi.spyOn(configApi, "listEnergyAdminOrganisations").mockResolvedValue({ organisations: [organisation] });
+  vi.spyOn(configApi, "listEnergyAdminUsers").mockResolvedValue({ users: [viewer] });
+  vi.spyOn(configApi, "listEnergyAdminRoles").mockResolvedValue({ roles: [role({ id: "role-viewer", name: "Viewer", builtin: true })] });
+};
+
+it("asks in the page, not a browser pop-up, before locking someone out, and saves only once confirmed", async () => {
+  mockAccessLists();
+  const browserConfirm = vi.spyOn(window, "confirm");
+  const update = vi.spyOn(configApi, "updateEnergyAdminUser").mockResolvedValue({ ...viewer, status: "disabled" });
+  const { host, root } = await mount(<AdminAccessPages initialView="users" />);
+  await clickButton(host, (button) => button.textContent === "Edit");
+  const disable = Array.from(host.querySelectorAll("label")).find((label) => label.textContent?.includes("Disable this account"))!.querySelector("input")!;
+  await act(async () => disable.click());
+  const submit = async () => act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+
+  await submit();
+  const dialog = () => host.querySelector('[role="alertdialog"]');
+  expect(dialog()!.textContent).toContain("Disable this account?");
+  expect(dialog()!.textContent).toContain("Mei is signed out everywhere");
+  expect(update).not.toHaveBeenCalled();
+  await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+  expect(dialog()).toBeNull();
+  expect(update).not.toHaveBeenCalled();
+
+  await submit();
+  await clickButton(dialog() as HTMLElement, (button) => button.textContent === "Disable account");
+  expect(update).toHaveBeenCalledWith("u1", expect.objectContaining({ disabled: true }));
+  expect(browserConfirm).not.toHaveBeenCalled();
+  await act(async () => root.unmount());
+});
+
+it("saves an ordinary edit straight away, without asking", async () => {
+  mockAccessLists();
+  const update = vi.spyOn(configApi, "updateEnergyAdminUser").mockResolvedValue(viewer);
+  const { host, root } = await mount(<AdminAccessPages initialView="users" />);
+  await clickButton(host, (button) => button.textContent === "Edit");
+  await act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(host.querySelector('[role="alertdialog"]')).toBeNull();
+  expect(update).toHaveBeenCalledOnce();
+  await act(async () => root.unmount());
+});
+
+it("confirms deleting a role in the page before deleting it", async () => {
+  mockAccessLists();
+  vi.spyOn(configApi, "listEnergyAdminRoles").mockResolvedValue({ roles: [role({ name: "Night shift" })] });
+  const remove = vi.spyOn(configApi, "deleteEnergyAdminRole").mockResolvedValue(undefined as never);
+  const { host, root } = await mount(<AdminAccessPages initialView="roles" />);
+  await clickButton(host, (button) => button.textContent === "Delete");
+  const dialog = host.querySelector('[role="alertdialog"]') as HTMLElement;
+  expect(dialog.textContent).toContain('"Night shift" will be removed');
+  expect(remove).not.toHaveBeenCalled();
+  await clickButton(dialog, (button) => button.textContent === "Delete role");
+  expect(remove).toHaveBeenCalledWith("r1");
   await act(async () => root.unmount());
 });
