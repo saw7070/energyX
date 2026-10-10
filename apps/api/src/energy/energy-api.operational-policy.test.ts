@@ -356,6 +356,78 @@ describe("EnergyIQ operational policy Admin interface", () => {
   });
 });
 
+describe("Creating a project where the site is", () => {
+  it("records the country and state, keeps peak pricing on its first rate, and refuses an unknown country before creating anything", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-api-project-region-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const context = {
+        metadataStore: metadata,
+        dataGateway: new LocalDataGateway(metadata),
+        userId: "dev-user",
+        workspaceId: NGEE_ANN_WORKSPACE_ID,
+      } as Required<ConfigApiContext>;
+      const before = metadata.energyIq.listProjectsByWorkspace(NGEE_ANN_WORKSPACE_ID).length;
+      const refused = await handleEnergyApiRequest(request("POST", { name: "Somewhere", region: { country: "TH" } }), ["projects"], context);
+      expect(refused.status).toBeGreaterThanOrEqual(400);
+      expect(metadata.energyIq.listProjectsByWorkspace(NGEE_ANN_WORKSPACE_ID)).toHaveLength(before);
+
+      const created = await handleEnergyApiRequest(
+        request("POST", { name: "KL office", timezone: "Asia/Kuala_Lumpur", region: { country: "MY", state: "kul" } }),
+        ["projects"],
+        context,
+      );
+      expect(created.status).toBe(201);
+      const project = (created.body as { data: { project: { id: string; region?: unknown; timezone: string } } }).data.project;
+      expect(project).toMatchObject({ timezone: "Asia/Kuala_Lumpur", region: { country: "MY", state: "KUL" } });
+
+      const rate = await handleEnergyApiRequest(
+        request("POST", {
+          entries: [{
+            owner: { kind: "project" },
+            effectiveFrom: "2020-01-01T00:00:00+08:00",
+            currency: "MYR",
+            ratePerKwh: 0.5175,
+            timeOfUse: { peakRatePerKwh: 0.5584, peakWindows: [{ days: ["monday", "tuesday", "wednesday", "thursday", "friday"], from: "14:00", to: "22:00" }], holidaysOffPeak: true },
+            fixedCharges: [{ label: "Retail charge", amount: 20, unit: "per_month" }],
+            plan: { id: "my-tnb-lv-tou", label: "TNB Low voltage – Time of Use" },
+          }],
+        }),
+        ["projects", project.id, "operational-policies", "tariff"],
+        context,
+        { selectCurrentOverviewPeriod: async () => { throw new Error("NOT_USED"); }, prewarmAnalysisContextPackage: vi.fn().mockResolvedValue({ status: "not_ready" }) as never },
+      );
+      expect(rate.status).toBe(201);
+      const hours = await handleEnergyApiRequest(
+        request("POST", {
+          entries: [{
+            owner: { kind: "project" },
+            effectiveFrom: "2020-01-01",
+            weekly: { monday: [{ from: "09:00", to: "18:00" }], tuesday: [], wednesday: [], thursday: [], friday: [], saturday: [], sunday: [] },
+            exceptions: [{ date: "2026-08-31", operating: [], label: "National Day", classification: "public_holiday" }],
+          }],
+        }),
+        ["projects", project.id, "operational-policies", "calendar"],
+        context,
+        { selectCurrentOverviewPeriod: async () => { throw new Error("NOT_USED"); }, prewarmAnalysisContextPackage: vi.fn().mockResolvedValue({ status: "not_ready" }) as never },
+      );
+      expect(hours.status).toBe(201);
+      const revision = (rate.body as { data: { revision: { entries: Array<Record<string, unknown>> } } }).data.revision;
+      expect(revision.entries[0]).toMatchObject({
+        currency: "MYR",
+        rate_per_kwh: 0.5175,
+        time_of_use: { peak_rate_per_kwh: 0.5584, holidays_off_peak: true },
+        fixed_charges: [{ label: "Retail charge", amount: 20, unit: "per_month" }],
+        plan: { id: "my-tnb-lv-tou" },
+      });
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 const request = (method: "GET" | "POST", body?: unknown): IncomingMessage => {
   const stream = new PassThrough();
   Object.assign(stream, {

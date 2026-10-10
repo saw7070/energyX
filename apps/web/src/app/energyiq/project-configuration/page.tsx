@@ -25,7 +25,7 @@ function ProjectPage({ projectId }: { projectId: string }) {
   const readOnly = !(can.facility || can.hours || can.notes);
   return <Configuration projectId={projectId} readOnly={readOnly} canEditFacility={!!can.facility} canEditHours={!!can.hours} canEditNotes={!!can.notes} canConnect={!!can.live} isAdmin={!!admin} />;
 }
-const TABS = new Set(["structure", "devices", "availability", "context", "policies", "holidays", "tariff"]);
+const TABS = new Set(["structure", "devices", "availability", "context", "policies", "holidays", "tariff", "targets"]);
 function Configuration({ projectId, readOnly, canEditFacility, canEditHours, canEditNotes, canConnect, isAdmin }: { projectId: string; readOnly: boolean; canEditFacility: boolean; canEditHours: boolean; canEditNotes: boolean; canConnect: boolean; isAdmin: boolean }) {
   const t = useMessages(facilityPageMessages);
   const router = useRouter();

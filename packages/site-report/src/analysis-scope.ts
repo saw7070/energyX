@@ -25,7 +25,7 @@ export type AnalysisSource = {
   childScopes: Array<{ nodeId: string; name: string }>;
   circuits: Array<{ meterNodeId: string; name: string; category: string; meterRole: string; usageKwh: number; includedInOfficialTotal?: boolean | undefined; scopeId?: string | undefined }>;
   cost:
-    | { status: "available"; amount: number; currency: string; allocations: Array<{ ratePerKwh: number; rateBasis?: "tax_inclusive" | "tax_exclusive" | undefined }> }
+    | { status: "available"; amount: number; currency: string; allocations: Array<{ ratePerKwh: number; rateBasis?: "tax_inclusive" | "tax_exclusive" | undefined; period?: "peak" | "off_peak" | undefined; usageKwh?: number; cost?: number }> }
     | { status: "unavailable" };
 };
 
@@ -111,6 +111,12 @@ export function toScope(analysis: AnalysisSource, locations: Map<string, string>
   const cost = analysis.cost.status === "available" ? analysis.cost : null;
   const basis = cost?.allocations[0]?.rateBasis;
   const rates = [...new Set(cost?.allocations.map(item => item.ratePerKwh) ?? [])];
+  // Time-of-use rates price peak and off-peak hours apart; keep what peak hours cost so the story can say so.
+  const peakAllocations = cost?.allocations.filter(item => item.period === "peak") ?? [];
+  const peak = peakAllocations.length ? {
+    cost: peakAllocations.reduce((sum, item) => sum + (item.cost ?? 0), 0),
+    usageKwh: peakAllocations.reduce((sum, item) => sum + (item.usageKwh ?? 0), 0),
+  } : null;
   const total = trends.find(item => item.id === "__scope__") ?? null;
   const dates = analysisScopeDates(analysis);
   const expected = total ? total.expectedMinutesPerHour * 24 * dates.length : 0;
@@ -124,7 +130,7 @@ export function toScope(analysis: AnalysisSource, locations: Map<string, string>
     usageKwh: analysis.summary.validIntervalCount > 0 ? analysis.summary.usageKwh : null,
     peakKw: analysis.summary.validIntervalCount > 0 ? analysis.summary.peakKw : null,
     peakAt: analysis.summary.peakAt ? scopeLocalDate(analysis.summary.peakAt, analysis.context.timezone) : null,
-    cost: cost ? { amount: cost.amount, currency: cost.currency, note: `${rates.join(" / ")} ${cost.currency}/kWh${basis === "tax_inclusive" ? " incl. tax" : basis === "tax_exclusive" ? " before tax" : ""}`, rates, basis: basis ?? null } : null,
+    cost: cost ? { amount: cost.amount, currency: cost.currency, note: `${rates.join(" / ")} ${cost.currency}/kWh${basis === "tax_inclusive" ? " incl. tax" : basis === "tax_exclusive" ? " before tax" : ""}`, rates, basis: basis ?? null, ...(peak ? { peak } : {}) } : null,
     typeTotals, coverage: total && expected > 0 ? Math.min(100, total.cells.reduce((sum, cell) => sum + cell[3], 0) / expected * 100) : null,
   };
 }

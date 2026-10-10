@@ -1,9 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
-import nodemailer from "nodemailer";
 import { readEnergyMeterDataHealth } from "@datafoundry/data-gateway";
 import type { MetadataStore } from "@datafoundry/metadata";
 
 import { loadPasswordAuthConfig } from "../auth/config.js";
+import { createMailDelivery } from "../email/mail-delivery.js";
 import { withEnergyProjectPublicationReadLock } from "./energy-project-materialization.js";
 import { resolveEnergyPublishedMeterPoints } from "./energy-query-context.js";
 import { readSiteAlerts } from "./energy-site-alerts.js";
@@ -153,17 +153,8 @@ export const createEnergyAlertEmailer = (input: {
 }): EnergyAlertEmailer => {
   const env = input.env ?? process.env;
   const config = loadPasswordAuthConfig(env);
-  const smtp = config.smtp;
-  const send = input.send ?? (smtp?.host && smtp.from
-    ? async (message: { to: string[]; subject: string; text: string }) => {
-      await nodemailer.createTransport({
-        host: smtp.host,
-        port: smtp.port,
-        secure: smtp.secure,
-        ...(smtp.user ? { auth: { user: smtp.user, pass: smtp.password ?? "" } } : {}),
-      }).sendMail({ from: smtp.from, to: message.to, subject: message.subject, text: message.text });
-    }
-    : undefined);
+  const delivery = input.send ? undefined : createMailDelivery(env);
+  const send = input.send ?? (delivery && delivery.mode !== "off" ? delivery.send : undefined);
   const readMeters = input.readMeters ?? ((projectId: string) => readProjectMeterHealth(input.metadataStore, projectId));
   let timer: NodeJS.Timeout | undefined;
   let running: Promise<void> | undefined;

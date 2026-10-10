@@ -40,7 +40,7 @@
 .hint { padding:6px 20px 10px; font-size:11.5px; color:#7a8a80; }
 @media (prefers-reduced-motion:reduce) { .groups section,.dropZone { transition:none; } }
 /* Move confirmation modal, stacked over the picker. */
-.moveModal { width:min(440px,calc(100vw - 32px)); margin:auto; padding:0; border:1px solid #d8dfd8; border-radius:16px; background:#fff; color:#24352b; box-shadow:0 24px 64px -16px rgba(23,37,29,.35); }
+.moveModal { width:min(480px,calc(100vw - 32px)); margin:auto; padding:0; border:1px solid #d8dfd8; border-radius:16px; background:#fff; color:#24352b; box-shadow:0 24px 64px -16px rgba(23,37,29,.35); }
 .moveModal::backdrop { background:#17251d4d; }
 .moveModal form { padding:20px 22px 18px; }
 .moveModal header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0; }
@@ -54,12 +54,26 @@
 .moveRoute .moveDestination { border-color:#b8d0c1; background:#eef6f0; }
 .moveModal .moveArrow { width:14px; height:14px; color:#7a8a80; }
 .moveField { display:block; margin-top:16px; }
+/* Heading shared by the client and project admin dialogs: an icon tile, the title and a one-line explanation. */
+.moveModal header.actionHead { align-items:flex-start; gap:14px; }
+.actionIcon { display:inline-flex; flex:none; align-items:center; justify-content:center; width:40px; height:40px; border-radius:12px; background:#e6f1ea; color:#176b59; }
+.actionIcon svg { width:20px; height:20px; }
+.actionIconDanger { background:#fdecea; color:#c4321f; }
+.actionTitle { flex:1; min-width:0; padding-top:2px; }
+.actionTitle p { margin-top:4px; font-size:13px; line-height:1.5; color:#59695e; }
+.fieldHint { display:flex; justify-content:space-between; gap:12px; margin-top:6px; font-size:11.5px; color:#7a8a80; }
+.fieldHint span:last-child { flex:none; font-variant-numeric:tabular-nums; }
+.nextSteps { margin-top:16px; padding:12px 14px; border:1px solid #e1e6e0; border-radius:10px; background:#f7f9f6; }
+.nextSteps strong { display:block; font-size:12px; font-weight:600; color:#3c4a42; }
+.nextSteps ul { margin-top:8px; display:grid; gap:6px; }
+.nextSteps li { display:flex; align-items:center; gap:8px; font-size:12.5px; color:#3c4a42; }
+.nextSteps li svg { flex:none; width:14px; height:14px; color:#176b59; }
 .moveField span { display:block; margin-bottom:6px; font-size:12px; font-weight:500; }
 .moveField input { width:100%; height:40px; padding:0 12px; border:1px solid #c9d4cc; border-radius:8px; font-size:14px; outline:none; }
 .moveField input:focus { border-color:#176b59; box-shadow:0 0 0 3px rgba(23,107,89,.15); }
 .moveBody { margin-top:14px; font-size:13px; line-height:1.5; color:#59695e; }
 .moveError { margin-top:12px; padding:8px 10px; border:1px solid #f3c7c7; border-radius:8px; background:#fdf2f2; font-size:12.5px; color:#9b2c2c; }
-.moveModal footer { display:flex; justify-content:flex-end; gap:8px; margin-top:20px; padding:0; border:0; }
+.moveModal footer { display:flex; justify-content:flex-end; gap:8px; margin:20px -22px 0; padding:14px 22px 0; border:0; border-top:1px solid #e8ece7; }
 .moveModal footer .moveSecondary,.moveModal footer .movePrimary { display:inline-flex; align-items:center; width:auto; min-height:0; height:38px; padding:0 14px; border-radius:8px; font-size:13px; font-weight:600; transition:background 140ms; }
 .moveModal footer .moveSecondary { border:1px solid #d8dfd8; background:#fff; }
 .moveModal footer .moveSecondary:hover { background:#f3f6f2; }
@@ -169,11 +183,19 @@
 :global(:where(html[data-energyiq-theme="dark"])) .moveRoute small { color:#98a89e; }
 :global(:where(html[data-energyiq-theme="dark"])) .moveRoute .moveDestination { border-color:#2e4236; background:#1a201b; }
 :global(:where(html[data-energyiq-theme="dark"])) .moveModal .moveArrow { color:#90a196; }
+:global(:where(html[data-energyiq-theme="dark"])) .actionIcon { border-radius:12px; background:#1a221d; color:#75c1ac; }
+:global(:where(html[data-energyiq-theme="dark"])) .actionIconDanger { background:#271c1a; color:#e88978; }
+:global(:where(html[data-energyiq-theme="dark"])) .actionTitle p { color:#a0b1a5; }
+:global(:where(html[data-energyiq-theme="dark"])) .fieldHint { color:#90a196; }
+:global(:where(html[data-energyiq-theme="dark"])) .nextSteps { border:1px solid #323632; border-radius:10px; background:#1b1c1a; }
+:global(:where(html[data-energyiq-theme="dark"])) .nextSteps strong { color:#b0c0b6; }
+:global(:where(html[data-energyiq-theme="dark"])) .nextSteps li { color:#b0c0b6; }
+:global(:where(html[data-energyiq-theme="dark"])) .nextSteps li svg { color:#75c1ac; }
 :global(:where(html[data-energyiq-theme="dark"])) .moveField input { border:1px solid #343d37; border-radius:8px; outline:none; }
 :global(:where(html[data-energyiq-theme="dark"])) .moveField input:focus { border-color:#176b59; box-shadow:0 0 0 3px #176b593d; }
 :global(:where(html[data-energyiq-theme="dark"])) .moveBody { color:#a0b1a5; }
 :global(:where(html[data-energyiq-theme="dark"])) .moveError { border:1px solid #512f30; border-radius:8px; background:#231b1b; color:#f4928a; }
-:global(:where(html[data-energyiq-theme="dark"])) .moveModal footer { border:0; }
+:global(:where(html[data-energyiq-theme="dark"])) .moveModal footer { border:0; border-top:1px solid #313430; }
 :global(:where(html[data-energyiq-theme="dark"])) .moveModal footer .moveSecondary, :global(:where(html[data-energyiq-theme="dark"])) .moveModal footer .movePrimary { border-radius:8px; }
 :global(:where(html[data-energyiq-theme="dark"])) .moveModal footer .moveSecondary { border:1px solid #333933; background:#191919; }
 :global(:where(html[data-energyiq-theme="dark"])) .moveModal footer .moveSecondary:hover { background:#1c1e1b; }

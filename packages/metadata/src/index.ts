@@ -54,10 +54,13 @@ import { initializeEnergyIqReportTimePolicySchema } from "./energyiq-report-time
 import { initializeEnergyIqSourceSyncSchema } from "./energyiq-source-sync-store.js";
 import { initializeEnergyIqLiveConnectorSchema } from "./energyiq-live-connector-store.js";
 import { ENERGYIQ_ORGANISATION_ADMIN_ROLE_ID, initializeEnergyIqAccessRoleSchema, upgradeSeededOrganisationAdminRole } from "./energyiq-access-role-store.js";
+import { initializeEnergyIqTargetsSchema } from "./energyiq-targets-store.js";
 import { recordSchemaMigration, runSchemaMigration } from "./schema-migration.js";
 
 export * from "./config-store.js";
 export * from "./energyiq-store.js";
+export * from "./energyiq-carbon.js";
+export * from "./energyiq-targets-store.js";
 export * from "./energyiq-import-readiness.js";
 export * from "./energyiq-saved-analysis-store.js";
 export * from "./energyiq-scope-metadata-resolver.js";
@@ -1361,6 +1364,9 @@ export class WorkspaceMembershipRepository {
   }
 }
 
+/** Makes % and _ match themselves in a LIKE pattern used with ESCAPE '\\'. */
+const escapeLike = (value: string): string => value.replace(/[\\%_]/gu, (character) => `\\${character}`);
+
 export class AuthAuditEventRepository {
   constructor(private readonly db: DatabaseSync) {}
 
@@ -1389,6 +1395,50 @@ export class AuthAuditEventRepository {
       now
     );
     return this.get({ id: input.id });
+  }
+
+  /**
+   * Audit events newest first, for the admin audit history. `before` is the cursor returned with the previous page;
+   * `categories` are event-type prefixes such as "auth." or "energyiq."; `search` matches the email or event type.
+   */
+  list(input: {
+    from?: string;
+    to?: string;
+    categories?: string[];
+    eventTypes?: string[];
+    search?: string;
+    limit?: number;
+    before?: string;
+  } = {}): { events: AuthAuditEventRecord[]; next?: string } {
+    const where: string[] = [];
+    const params: string[] = [];
+    if (input.from) { where.push("created_at >= ?"); params.push(input.from); }
+    if (input.to) { where.push("created_at < ?"); params.push(input.to); }
+    const types = (input.eventTypes ?? []).filter(Boolean);
+    const prefixes = (input.categories ?? []).filter(Boolean);
+    if (types.length || prefixes.length) {
+      where.push(`(${[...types.map(() => "event_type = ?"), ...prefixes.map(() => "event_type LIKE ? ESCAPE '\\'")].join(" OR ")})`);
+      params.push(...types, ...prefixes.map((prefix) => `${escapeLike(prefix)}%`));
+    }
+    if (input.search?.trim()) {
+      const term = `%${escapeLike(input.search.trim().toLowerCase())}%`;
+      where.push("(lower(coalesce(email, '')) LIKE ? ESCAPE '\\' OR event_type LIKE ? ESCAPE '\\' OR lower(coalesce(metadata_json, '')) LIKE ? ESCAPE '\\')");
+      params.push(term, term, term);
+    }
+    if (input.before) {
+      const [createdAt, id] = input.before.split("|");
+      if (createdAt && id) { where.push("(created_at < ? OR (created_at = ? AND id < ?))"); params.push(createdAt, createdAt, id); }
+    }
+    const limit = Math.max(1, Math.min(500, Math.floor(input.limit ?? 100)));
+    const rows = this.db.prepare(`
+      SELECT * FROM auth_audit_events
+      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+      ORDER BY created_at DESC, id DESC
+      LIMIT ?
+    `).all(...params, limit + 1);
+    const events = rows.slice(0, limit).map((row) => mapAuthAuditEventRow(row)).filter((event): event is AuthAuditEventRecord => Boolean(event));
+    const last = events.at(-1);
+    return { events, ...(rows.length > limit && last ? { next: `${last.created_at}|${last.id}` } : {}) };
   }
 
   get(input: { id: string }): AuthAuditEventRecord {
@@ -4637,6 +4687,24 @@ const runMigrations = (db: DatabaseSync): void => {
     },
     { atomic: true },
   );
+  runSchemaMigration(
+    db,
+    "0050_energyiq_project_region",
+    "Record which country (and Malaysian state) each project's site is in",
+    () => {
+      ensureColumn(db, "energyiq_projects", "region_json", "TEXT");
+    },
+    { atomic: true },
+  );
+  runSchemaMigration(
+    db,
+    "0051_energyiq_targets_and_report_schedules",
+    "Add site budgets, carbon factors, overnight checks, their alerts, and scheduled report emails",
+    () => {
+      initializeEnergyIqTargetsSchema(db);
+    },
+    { atomic: true },
+  );
 };
 
 const initializeSchemaMigrationTable = (db: DatabaseSync): void => {
@@ -4874,6 +4942,8 @@ const initializeAuthSchema = (db: DatabaseSync): void => {
     );
     CREATE INDEX IF NOT EXISTS idx_auth_audit_events_user
       ON auth_audit_events(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_auth_audit_events_time
+      ON auth_audit_events(created_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS idx_auth_audit_events_email
       ON auth_audit_events(email, created_at DESC);
 

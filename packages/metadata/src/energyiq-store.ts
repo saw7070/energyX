@@ -16,6 +16,7 @@ import { EnergyIqOverviewDefinitionStore } from "./energyiq-overview-definition-
 import { EnergyIqSourceSyncStore } from "./energyiq-source-sync-store.js";
 import { EnergyIqLiveConnectorStore } from "./energyiq-live-connector-store.js";
 import { EnergyIqAccessRoleStore } from "./energyiq-access-role-store.js";
+import { EnergyIqTargetsStore } from "./energyiq-targets-store.js";
 
 import {
   EnergyIqProjectSetupStore,
@@ -35,6 +36,13 @@ export type EnergyIqUserRoleRecord = {
   updated_at: string;
 };
 
+/** Where a site is. It decides the money, tax, time zone and public holidays a new project starts from. */
+export type EnergyIqProjectRegion = {
+  country: "SG" | "MY";
+  /** Malaysian state or federal territory code, e.g. "SGR"; public holidays differ by state. */
+  state?: string;
+};
+
 export type EnergyIqProjectRecord = {
   id: string;
   workspace_id: string;
@@ -50,6 +58,7 @@ export type EnergyIqProjectRecord = {
   delivery_stage: EnergyIqDeliveryStage;
   root_scope_id: string;
   has_unpublished_changes: boolean;
+  region?: EnergyIqProjectRegion;
   created_at: string;
   updated_at: string;
 };
@@ -341,6 +350,7 @@ export class EnergyIqStore {
   readonly sourceSync: EnergyIqSourceSyncStore;
   readonly liveConnectors: EnergyIqLiveConnectorStore;
   readonly roles: EnergyIqAccessRoleStore;
+  readonly targets: EnergyIqTargetsStore;
 
   constructor(private readonly db: DatabaseSync) {
     this.metrics = new EnergyIqMetricStore(db);
@@ -359,6 +369,7 @@ export class EnergyIqStore {
     this.sourceSync = new EnergyIqSourceSyncStore(db);
     this.liveConnectors = new EnergyIqLiveConnectorStore(db);
     this.roles = new EnergyIqAccessRoleStore(db);
+    this.targets = new EnergyIqTargetsStore(db);
   }
 
   upsertUserRole(input: { user_id: string; role: EnergyIqRole }): EnergyIqUserRoleRecord {
@@ -446,6 +457,15 @@ export class EnergyIqStore {
       now
     );
     return this.getProject(input.id);
+  }
+
+  /** Records where the site is, or forgets it with null. Kept apart from upsertProject so setup saves never clear it. */
+  setProjectRegion(projectId: string, region: EnergyIqProjectRegion | null): EnergyIqProjectRecord {
+    this.getProject(projectId);
+    const value = region === null ? null : JSON.stringify(normalizeProjectRegion(region));
+    this.db.prepare("UPDATE energyiq_projects SET region_json = ?, updated_at = ? WHERE id = ?")
+      .run(value, new Date().toISOString(), projectId);
+    return this.getProject(projectId);
   }
 
   getProject(projectId: string): EnergyIqProjectRecord {
@@ -1045,9 +1065,26 @@ const mapProject = (row: Record<string, unknown>): EnergyIqProjectRecord => ({
   delivery_stage: requiredString(row, "delivery_stage") as EnergyIqDeliveryStage,
   root_scope_id: requiredString(row, "root_scope_id"),
   has_unpublished_changes: Number(row.has_unpublished_changes) === 1,
+  ...regionFromColumn(row.region_json),
   created_at: requiredString(row, "created_at"),
   updated_at: requiredString(row, "updated_at")
 });
+
+export const normalizeProjectRegion = (region: EnergyIqProjectRegion): EnergyIqProjectRegion => {
+  if (region.country !== "SG" && region.country !== "MY") throw new Error("ENERGYIQ_PROJECT_REGION_COUNTRY_INVALID");
+  const state = typeof region.state === "string" ? region.state.trim().toUpperCase() : "";
+  if (state && (region.country !== "MY" || !/^[A-Z]{3}$/.test(state))) throw new Error("ENERGYIQ_PROJECT_REGION_STATE_INVALID");
+  return { country: region.country, ...(state ? { state } : {}) };
+};
+
+const regionFromColumn = (value: unknown): { region?: EnergyIqProjectRegion } => {
+  if (typeof value !== "string" || !value) return {};
+  try {
+    return { region: normalizeProjectRegion(JSON.parse(value) as EnergyIqProjectRegion) };
+  } catch {
+    return {};
+  }
+};
 
 const mapProjectNode = (row: Record<string, unknown>): EnergyIqProjectNodeRecord => {
   const parentId = optionalString(row, "parent_id");

@@ -26,6 +26,7 @@ import {
 } from "@datafoundry/data-gateway";
 import { resolveDataAvailabilityPeriod, summariseDataAvailability } from "./energy-data-availability.js";
 import { readOfflineMeters } from "./energy-live-status.js";
+import { normalizeProjectRegion, type EnergyIqProjectRegion, type MetadataStore } from "@datafoundry/metadata";
 import type {
   EnergyIqPermissionArea,
   EnergyIqAcademicCalendarPeriod,
@@ -362,6 +363,12 @@ export const handleEnergyApiRequest = async (
 ): Promise<ConfigApiResponse> => {
   try {
     const user = context.metadataStore.users.getById({ user_id: context.userId });
+    if (segments[0] === "portfolio" || segments[0] === "report-schedules"
+      || (segments[0] === "projects" && segments[2] === "targets")) {
+      const { handlePortfolioApi } = await import("./energy-portfolio-api.js");
+      const response = await handlePortfolioApi(request, segments, context, user, { readJsonBody });
+      if (response) return response;
+    }
     if (segments[0] === "report-actions") {
       const { handleActionApi } = await import("../report-agent/action-api.js");
       return handleActionApi(request, segments.slice(1), context);
@@ -422,6 +429,9 @@ export const handleEnergyApiRequest = async (
         return handleReportApi(request, segments.slice(2), context);
       }
       requireEnergyAdmin(context, user);
+      if (segments[1] === "audit" && segments.length === 2 && request.method === "GET") {
+        return auditHistoryResponse(context.metadataStore, new URL(request.url ?? "/", "http://localhost").searchParams);
+      }
       const service = new EnergyAdminAccessService(context.metadataStore, context.authService);
       if (segments[1] === "organisations" && segments.length === 2 && request.method === "GET") {
         return { status: 200, body: createSuccessResult({ organisations: service.listOrganisations() }) };
@@ -1314,8 +1324,9 @@ export const handleEnergyApiRequest = async (
       const body = requireRecord(await readJsonBody(request));
       const name = requireNonEmptyString(body.name, "ENERGYIQ_PROJECT_NAME_REQUIRED");
       const timezone = optionalString(body.timezone) ?? "Asia/Singapore";
+      const region = parseProjectRegion(body.region);
       const projectId = optionalString(body.id) ?? `energy-project-${randomUUID().slice(0, 8)}`;
-      const project = context.metadataStore.energyIq.upsertProject({
+      context.metadataStore.energyIq.upsertProject({
         id: projectId,
         workspace_id: access.activeWorkspaceId,
         name,
@@ -1323,6 +1334,9 @@ export const handleEnergyApiRequest = async (
         timezone,
         root_scope_id: `${projectId}-project`
       });
+      const project = region
+        ? context.metadataStore.energyIq.setProjectRegion(projectId, region)
+        : context.metadataStore.energyIq.getProject(projectId);
       context.metadataStore.energyIq.upsertProjectAccess({
         project_id: projectId,
         user_id: user.id,
@@ -3053,7 +3067,12 @@ export const toEnergyApiErrorResponse = (error: unknown): ConfigApiResponse => {
     || message.startsWith("ENERGYIQ_OPERATING_")
     || message === "ENERGYIQ_METRIC_REVISION_NOT_FOUND"
     || message === "ENERGYIQ_ANALYSIS_WINDOW_AMBIGUOUS"
-    || message === "ENERGYIQ_RULE_REVISION_NOT_FOUND";
+    || message === "ENERGYIQ_RULE_REVISION_NOT_FOUND"
+    || message.startsWith("ENERGYIQ_PORTFOLIO_")
+    || message.startsWith("ENERGYIQ_BUDGET_")
+    || message.startsWith("ENERGYIQ_EMISSION_FACTOR_")
+    || message.startsWith("ENERGYIQ_OVERNIGHT_")
+    || message.startsWith("ENERGYIQ_REPORT_SCHEDULE_");
   const code: AppErrorCode = forbidden
     ? "FORBIDDEN"
     : notFound
@@ -4802,8 +4821,160 @@ const parseTariffScheduleEntries = (value: unknown): EnergyIqTariffScheduleEntry
           rate_pct: taxRatePct as number,
         },
       } : {}),
+      ...parseTariffTimeOfUse(entry.timeOfUse, index),
+      ...parseTariffFixedCharges(entry.fixedCharges, index),
+      ...parseTariffPlan(entry.plan, index),
     };
   });
+};
+
+const AUDIT_CATEGORIES: Record<string, { categories?: string[]; eventTypes?: string[] }> = {
+  "sign-in": { categories: ["auth."] },
+  access: { categories: ["energyiq.user_", "energyiq.team_", "energyiq.role_", "energyiq.organisation_"] },
+  projects: { categories: ["energyiq.project_", "energyiq.electricity_rate", "energyiq.hours_", "energyiq.policy_", "energyiq.setup_",
+    "energyiq.changes_made_live", "energyiq.data_import", "energyiq.live_connection", "energyiq.locations_", "energyiq.analysis_rules",
+    "energyiq.overview_layout", "energyiq.budget_carbon", "energyiq.report_"] },
+};
+
+/** The platform audit history for super admins: a page of events as JSON, or every matching event as a CSV file. */
+const auditHistoryResponse = (metadataStore: MetadataStore, params: URLSearchParams): ConfigApiResponse => {
+  const category = AUDIT_CATEGORIES[params.get("category") ?? ""] ?? {};
+  const filter = {
+    ...(params.get("from") ? { from: params.get("from")! } : {}),
+    ...(params.get("to") ? { to: params.get("to")! } : {}),
+    ...category,
+    ...(params.get("search") ? { search: params.get("search")! } : {}),
+  };
+  const projectNames = new Map<string, string>();
+  const workspaceNames = new Map<string, string>();
+  const userEmails = new Map<string, string | undefined>();
+  const emailOf = (userId: string) => {
+    if (!userEmails.has(userId)) {
+      try { userEmails.set(userId, metadataStore.users.getById({ user_id: userId }).email ?? undefined); } catch { userEmails.set(userId, undefined); }
+    }
+    return userEmails.get(userId);
+  };
+  const describe = (event: { metadata_json?: string }) => {
+    let metadata: Record<string, unknown> = {};
+    try { metadata = event.metadata_json ? JSON.parse(event.metadata_json) as Record<string, unknown> : {}; } catch { metadata = {}; }
+    const projectId = typeof metadata.projectId === "string" ? metadata.projectId : undefined;
+    const workspaceId = typeof metadata.workspaceId === "string" ? metadata.workspaceId
+      : typeof metadata.organisationId === "string" ? metadata.organisationId
+        : typeof metadata.toWorkspaceId === "string" ? metadata.toWorkspaceId
+          : Array.isArray(metadata.organisationIds) && typeof metadata.organisationIds[0] === "string" ? metadata.organisationIds[0] : undefined;
+    // Who or what the change was made to, when it was not the actor themselves.
+    const target = typeof metadata.targetUserId === "string" ? emailOf(metadata.targetUserId) ?? metadata.targetUserId
+      : typeof metadata.email === "string" ? metadata.email
+        : typeof metadata.name === "string" ? metadata.name : undefined;
+    if (projectId && !projectNames.has(projectId)) {
+      try { projectNames.set(projectId, metadataStore.energyIq.getProject(projectId).name); } catch { projectNames.set(projectId, projectId); }
+    }
+    if (workspaceId && !workspaceNames.has(workspaceId)) {
+      try { workspaceNames.set(workspaceId, metadataStore.workspaces.get({ id: workspaceId }).name); } catch { workspaceNames.set(workspaceId, workspaceId); }
+    }
+    return {
+      ...(projectId ? { project: projectNames.get(projectId)! } : {}),
+      ...(workspaceId ? { organisation: workspaceNames.get(workspaceId)! } : {}),
+      ...(typeof metadata.action === "string" ? { action: metadata.action } : {}),
+      ...(target ? { target } : {}),
+      details: metadata,
+    };
+  };
+  const shape = (event: ReturnType<MetadataStore["authAuditEvents"]["get"]>) => ({
+    id: event.id,
+    at: event.created_at,
+    type: event.event_type,
+    ...((event.email ?? (event.user_id ? emailOf(event.user_id) : undefined)) ? { email: event.email ?? emailOf(event.user_id!)! } : {}),
+    ...(event.ip_address ? { ip: event.ip_address } : {}),
+    ...describe(event),
+  });
+  if (params.get("format") === "csv") {
+    const rows: string[][] = [["When (UTC)", "Who", "What", "Affected", "Organisation", "Project", "IP address", "Details"]];
+    let before: string | undefined;
+    for (let page = 0; page < 20; page += 1) {
+      const result = metadataStore.authAuditEvents.list({ ...filter, limit: 500, ...(before ? { before } : {}) });
+      for (const event of result.events.map(shape)) {
+        rows.push([event.at, event.email ?? "", event.type, event.target ?? "", event.organisation ?? "", event.project ?? "", event.ip ?? "", event.action ?? JSON.stringify(event.details)]);
+      }
+      if (!result.next) break;
+      before = result.next;
+    }
+    const cell = (value: string) => /[",\n]/u.test(value) ? `"${value.replace(/"/gu, '""')}"` : value;
+    return {
+      status: 200,
+      headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": "attachment; filename=\"audit-history.csv\"" },
+      body: Buffer.from(`\ufeff${rows.map((row) => row.map(cell).join(",")).join("\r\n")}\r\n`, "utf8"),
+    };
+  }
+  const limit = Number(params.get("limit") ?? 100);
+  const result = metadataStore.authAuditEvents.list({
+    ...filter,
+    limit: Number.isFinite(limit) ? limit : 100,
+    ...(params.get("before") ? { before: params.get("before")! } : {}),
+  });
+  return { status: 200, body: createSuccessResult({ events: result.events.map(shape), ...(result.next ? { next: result.next } : {}) }) };
+};
+
+/** Where a new site is: { country: "SG" | "MY", state? }. Checked before anything is created. */
+const parseProjectRegion = (value: unknown): EnergyIqProjectRegion | undefined => {
+  if (value === undefined || value === null) return undefined;
+  const region = requireRecord(value, "ENERGYIQ_PROJECT_REGION_INVALID");
+  const state = optionalString(region.state);
+  return normalizeProjectRegion({
+    country: region.country as EnergyIqProjectRegion["country"],
+    ...(state ? { state } : {}),
+  });
+};
+
+/** Peak hours and price; the entry's own rate is then the off-peak price. The store checks the details. */
+const parseTariffTimeOfUse = (value: unknown, index: number): Pick<EnergyIqTariffScheduleEntry, "time_of_use"> => {
+  if (value === undefined || value === null) return {};
+  const timeOfUse = requireRecord(value, `ENERGYIQ_TARIFF_TIME_OF_USE_INVALID:${index}`);
+  if (!Array.isArray(timeOfUse.peakWindows)) throw new Error(`ENERGYIQ_TARIFF_PEAK_WINDOWS_REQUIRED:${index}`);
+  return {
+    time_of_use: {
+      peak_rate_per_kwh: requirePositiveNumber(timeOfUse.peakRatePerKwh, `ENERGYIQ_TARIFF_PEAK_RATE_INVALID:${index}`),
+      peak_windows: timeOfUse.peakWindows.map((candidate) => {
+        const window = requireRecord(candidate, `ENERGYIQ_TARIFF_PEAK_WINDOW_INVALID:${index}`);
+        if (!Array.isArray(window.days)) throw new Error(`ENERGYIQ_TARIFF_PEAK_DAYS_INVALID:${index}`);
+        return {
+          days: window.days as EnergyIqOperatingDay[],
+          from: requireNonEmptyString(window.from, `ENERGYIQ_TARIFF_PEAK_WINDOW_INVALID:${index}`),
+          to: requireNonEmptyString(window.to, `ENERGYIQ_TARIFF_PEAK_WINDOW_INVALID:${index}`),
+        };
+      }),
+      holidays_off_peak: timeOfUse.holidaysOffPeak === true,
+    },
+  };
+};
+
+const parseTariffFixedCharges = (value: unknown, index: number): Pick<EnergyIqTariffScheduleEntry, "fixed_charges"> => {
+  if (value === undefined || value === null) return {};
+  if (!Array.isArray(value)) throw new Error(`ENERGYIQ_TARIFF_FIXED_CHARGE_INVALID:${index}`);
+  if (value.length === 0) return {};
+  return {
+    fixed_charges: value.map((candidate) => {
+      const charge = requireRecord(candidate, `ENERGYIQ_TARIFF_FIXED_CHARGE_INVALID:${index}`);
+      return {
+        label: requireNonEmptyString(charge.label, `ENERGYIQ_TARIFF_FIXED_CHARGE_INVALID:${index}`),
+        amount: typeof charge.amount === "number" ? charge.amount : Number.NaN,
+        unit: charge.unit as "per_month" | "per_kw_month",
+      };
+    }),
+  };
+};
+
+const parseTariffPlan = (value: unknown, index: number): Pick<EnergyIqTariffScheduleEntry, "plan"> => {
+  if (value === undefined || value === null) return {};
+  const plan = requireRecord(value, `ENERGYIQ_TARIFF_PLAN_INVALID:${index}`);
+  const source = optionalString(plan.source);
+  return {
+    plan: {
+      id: requireNonEmptyString(plan.id, `ENERGYIQ_TARIFF_PLAN_INVALID:${index}`),
+      label: requireNonEmptyString(plan.label, `ENERGYIQ_TARIFF_PLAN_INVALID:${index}`),
+      ...(source ? { source } : {}),
+    },
+  };
 };
 
 const OPERATING_POLICY_DAYS: EnergyIqOperatingDay[] = [

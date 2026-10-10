@@ -24,7 +24,7 @@ async function renderIn(locale: string) {
 it("shows the Facility tabs and floor layout frame in the reader's language, leaving site names as recorded", async () => {
   const zh = await renderIn("zh-Hans");
   const tabs = Array.from(zh.host.querySelectorAll("nav button span")).map(tab => tab.textContent);
-  expect(tabs).toEqual(["楼层布局", "设备", "数据可用率", "项目备注", "营业时间", "假期", "电价"]);
+  expect(tabs).toEqual(["楼层布局", "设备", "数据可用率", "项目备注", "营业时间", "假期", "电价", "预算与碳排放"]);
   // Publishing wording changes often; check it follows the language rather than its exact text.
   const zhText = translatorFor(projectConfigurationMessages, "zh-Hans");
   expect(zh.host.textContent).toContain(zhText("unpublished"));
@@ -33,7 +33,7 @@ it("shows the Facility tabs and floor layout frame in the reader's language, lea
   await zh.unmount();
 
   const ms = await renderIn("ms");
-  expect(Array.from(ms.host.querySelectorAll("nav button span")).map(tab => tab.textContent)).toEqual(["Susun atur lantai", "Peranti", "Ketersediaan data", "Nota projek", "Waktu operasi", "Cuti", "Kadar elektrik"]);
+  expect(Array.from(ms.host.querySelectorAll("nav button span")).map(tab => tab.textContent)).toEqual(["Susun atur lantai", "Peranti", "Ketersediaan data", "Nota projek", "Waktu operasi", "Cuti", "Kadar elektrik", "Bajet & karbon"]);
   expect(ms.host.querySelector("nav")?.getAttribute("aria-label")).toBe("Bahagian konfigurasi");
   await ms.unmount();
 });

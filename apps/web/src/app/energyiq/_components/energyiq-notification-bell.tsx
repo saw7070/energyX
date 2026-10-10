@@ -8,6 +8,7 @@ import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { intlLocale } from "./energyiq-messages";
 import { friendlyErrorMessages } from "./friendly-error-messages";
 import { meterHealth, stoppedMeters } from "./meter-health-notice";
+import { withCurrency } from "./money";
 import { notificationMessages } from "./notification-messages";
 
 type Notice = { actionId: string; title: string; runId: string };
@@ -126,6 +127,30 @@ export function EnergyIqNotificationBell({ projectId }: { projectId: string }) {
           : tn("meters.detailMany", { names: stopped.slice(0, 3).map((meter) => meter.name).join(", ") + (stopped.length > 3 ? "…" : ""), when: when(first.lastReadingAt!) }),
         href: `/energyiq/project-configuration?${new URLSearchParams({ projectId, tab: "devices" })}`,
       });
+    }
+    for (const alert of alerts?.targets ?? []) {
+      const details = alert.details;
+      if (alert.kind === "budget") {
+        const currency = String(details.currency ?? "");
+        const onMoney = typeof details.forecastCost === "number";
+        const amount = (value: unknown) => onMoney
+          ? withCurrency(currency, Number(value ?? 0).toLocaleString(intlLocale(locale), { maximumFractionDigits: 0 }))
+          : `${Number(value ?? 0).toLocaleString(intlLocale(locale), { maximumFractionDigits: 0 })} kWh`;
+        const month = new Intl.DateTimeFormat(intlLocale(locale), { month: "long", timeZone: "UTC" }).format(new Date(`${String(details.month ?? "2000-01")}-01T00:00:00Z`));
+        list.push({
+          key: alert.key, readKey: alert.key, tone: "warning",
+          title: tn(details.status === "over" ? "budget.over" : "budget.at-risk", { month }),
+          detail: tn("budget.detail", { forecast: amount(onMoney ? details.forecastCost : details.forecastKwh), budget: amount(onMoney ? details.budgetAmount : details.budgetKwh) }),
+          href: `/energyiq/project-configuration?${new URLSearchParams({ projectId, tab: "targets" })}`,
+        });
+      } else {
+        list.push({
+          key: alert.key, readKey: alert.key, tone: "warning",
+          title: tn("overnight.title"),
+          detail: tn("overnight.detail", { date: day(String(details.night ?? "")), kw: Number(details.nightKw ?? 0), pct: Number(details.abovePct ?? 0) }),
+          href: `/energyiq/analysis?${new URLSearchParams({ projectId })}`,
+        });
+      }
     }
     for (const report of alerts?.reports ?? []) {
       const last = lastDay(report.toExclusive);

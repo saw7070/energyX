@@ -58,6 +58,14 @@ import type {
   EnergyTemplateRevisionDto,
   EnergyProjectHierarchyDto,
   EnergyProjectRecordDto,
+  EnergyProjectRegionDto,
+  EnergyAuditEventDto,
+  EnergyAuditFilterDto,
+  EnergyPortfolioDto,
+  EnergyProjectTargetsDto,
+  EnergyProjectTargetsInputDto,
+  EnergyReportScheduleInputDto,
+  EnergyReportSchedulesDto,
   EnergyProjectSetupDocumentDto,
   EnergyProjectSetupDraftDto,
   EnergyProjectSetupDto,
@@ -312,6 +320,37 @@ export const configApi = {
   getEnergyProjectAlerts(projectId: string): Promise<EnergyProjectAlertsDto> {
     return requestEnvelope<EnergyProjectAlertsDto>(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/alerts`);
   },
+  getEnergyPortfolio(period: { from: string; to: string }): Promise<EnergyPortfolioDto> {
+    return requestEnvelope<EnergyPortfolioDto>(`/api/v1/energy/portfolio?${new URLSearchParams(period).toString()}`);
+  },
+  /** The portfolio as a PDF, or as a monthly carbon (Scope 2) CSV for sustainability reporting. */
+  async downloadEnergyPortfolio(kind: "pdf" | "carbon.csv", period: { from: string; to: string }): Promise<{ blob: Blob; filename: string }> {
+    const response = await requestRaw(`/api/v1/energy/portfolio/${kind}?${new URLSearchParams(period).toString()}`);
+    const disposition = response.headers.get("Content-Disposition") ?? "";
+    const filename = /filename="([^"]+)"/u.exec(disposition)?.[1] ?? (kind === "pdf" ? "energyx-portfolio.pdf" : "energyx-carbon-scope2.csv");
+    return { blob: await response.blob(), filename };
+  },
+  getEnergyProjectTargets(projectId: string, options: { status?: boolean } = {}): Promise<EnergyProjectTargetsDto> {
+    return requestEnvelope<EnergyProjectTargetsDto>(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/targets${options.status ? "?status=1" : ""}`);
+  },
+  updateEnergyProjectTargets(projectId: string, body: EnergyProjectTargetsInputDto): Promise<EnergyProjectTargetsDto> {
+    return requestEnvelope<EnergyProjectTargetsDto>(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/targets`, { method: "PUT", body: JSON.stringify(body) });
+  },
+  listEnergyReportSchedules(): Promise<EnergyReportSchedulesDto> {
+    return requestEnvelope<EnergyReportSchedulesDto>("/api/v1/energy/report-schedules");
+  },
+  createEnergyReportSchedule(body: EnergyReportScheduleInputDto): Promise<EnergyReportSchedulesDto> {
+    return requestEnvelope<EnergyReportSchedulesDto>("/api/v1/energy/report-schedules", { method: "POST", body: JSON.stringify(body) });
+  },
+  updateEnergyReportSchedule(id: string, body: Partial<EnergyReportScheduleInputDto>): Promise<EnergyReportSchedulesDto> {
+    return requestEnvelope<EnergyReportSchedulesDto>(`/api/v1/energy/report-schedules/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(body) });
+  },
+  deleteEnergyReportSchedule(id: string): Promise<EnergyReportSchedulesDto> {
+    return requestEnvelope<EnergyReportSchedulesDto>(`/api/v1/energy/report-schedules/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+  sendEnergyReportScheduleNow(id: string): Promise<EnergyReportSchedulesDto & { outcome: { status: "sent" | "failed" | "skipped"; recipientCount: number; error?: string } }> {
+    return requestEnvelope(`/api/v1/energy/report-schedules/${encodeURIComponent(id)}/send`, { method: "POST" });
+  },
   markEnergyProjectAlertRead(projectId: string, key: string): Promise<{ read: boolean }> {
     return requestEnvelope(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/alerts/read`, { method: "POST", body: JSON.stringify({ key }) });
   },
@@ -476,6 +515,17 @@ export const configApi = {
     return requestEnvelope("/api/v1/energy/admin/roles");
   },
 
+  /** The platform audit history (super admins only), newest first; pass the returned `next` as `before` for more. */
+  listEnergyAuditEvents(filter: EnergyAuditFilterDto & { before?: string; limit?: number } = {}): Promise<{ events: EnergyAuditEventDto[]; next?: string }> {
+    return requestEnvelope(`/api/v1/energy/admin/audit?${auditQuery(filter)}`);
+  },
+
+  /** Every audit event matching the filter, as a CSV file that opens in Excel. */
+  async downloadEnergyAuditEvents(filter: EnergyAuditFilterDto = {}): Promise<{ blob: Blob; filename: string }> {
+    const response = await requestRaw(`/api/v1/energy/admin/audit?${auditQuery({ ...filter, format: "csv" })}`);
+    return { blob: await response.blob(), filename: "audit-history.csv" };
+  },
+
   createEnergyAdminRole(body: { name: string; description?: string; permissions: EnergyRolePermissionsDto }): Promise<EnergyAdminRoleDto> {
     return requestEnvelope("/api/v1/energy/admin/roles", { method: "POST", body: JSON.stringify(body) });
   },
@@ -566,6 +616,7 @@ export const configApi = {
   createEnergyProject(body: {
     name: string;
     timezone?: string;
+    region?: EnergyProjectRegionDto;
   }): Promise<{ project: EnergyProjectRecordDto; draft: EnergyProjectSetupDraftDto }> {
     return requestEnvelope("/api/v1/energy/projects", {
       method: "POST",
@@ -1774,3 +1825,9 @@ export function normalizeTraceDagDto(
 }
 
 export { ConfigApiError } from "./types";
+
+const auditQuery = (filter: EnergyAuditFilterDto & { before?: string; limit?: number; format?: "csv" }): string => {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filter)) if (value !== undefined && value !== "") params.set(key, String(value));
+  return params.toString();
+};

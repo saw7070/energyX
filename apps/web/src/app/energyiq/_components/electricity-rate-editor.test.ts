@@ -61,3 +61,41 @@ describe("rateEntriesForSave checks in other languages", () => {
     expect(() => rateEntriesForSave([draft({ key: "a", from: "2026-07-01", to: "2026-10-01" }), draft({ key: "b", from: "2026-10-01" })], TZ, "ms")).toThrow("Tempoh kadar 1 dan 2 bertindih. Setiap hari hanya boleh ada satu kadar.");
   });
 });
+
+describe("time-of-use rates", () => {
+  const touRevision = {
+    version_id: "tariff-tou", project_id: "kl", published_by: "dev-user", published_at: "2026-10-01T00:00:00.000Z",
+    entries: [{
+      id: "tou", owner: { kind: "project" as const }, effective_from: "2019-12-31T16:00:00.000Z", currency: "MYR", rate_per_kwh: 0.5175,
+      time_of_use: { peak_rate_per_kwh: 0.5584, peak_windows: [{ days: ["monday", "tuesday", "wednesday", "thursday", "friday"] as const, from: "14:00", to: "22:00" }], holidays_off_peak: true },
+      fixed_charges: [{ label: "Retail charge", amount: 20, unit: "per_month" as const }],
+      plan: { id: "my-tnb-lv-tou", label: "TNB Low voltage – Time of Use" },
+    }],
+  } as unknown as Parameters<typeof rateDraftsFromRevision>[0];
+
+  it("keeps peak hours, fixed charges and the tariff name when a rate is edited and saved", () => {
+    const [draft] = rateDraftsFromRevision(touRevision, "Asia/Kuala_Lumpur");
+    expect(draft!.peak).toEqual({ rate: "0.5584", days: ["monday", "tuesday", "wednesday", "thursday", "friday"], from: "14:00", to: "22:00", holidaysOffPeak: true });
+    const [entry] = rateEntriesForSave([{ ...draft!, rate: "0.52" }], "Asia/Kuala_Lumpur");
+    expect(entry).toMatchObject({
+      currency: "MYR", ratePerKwh: 0.52,
+      timeOfUse: { peakRatePerKwh: 0.5584, peakWindows: [{ days: ["monday", "tuesday", "wednesday", "thursday", "friday"], from: "14:00", to: "22:00" }], holidaysOffPeak: true },
+      fixedCharges: [{ label: "Retail charge", amount: 20, unit: "per_month" }],
+      plan: { id: "my-tnb-lv-tou" },
+    });
+    expect(entry).not.toHaveProperty("rateBasis");
+  });
+
+  it("starts a new period with the same peak hours but a blank peak price, and checks it", () => {
+    const drafts = rateDraftsFromRevision(touRevision, "Asia/Kuala_Lumpur");
+    const next = nextRateDraft(drafts, "next");
+    expect(next.peak).toMatchObject({ rate: "", from: "14:00", to: "22:00" });
+    expect(next.plan).toBeUndefined();
+    expect(() => rateEntriesForSave([{ ...next, from: "2027-01-01", rate: "0.5" }], "Asia/Kuala_Lumpur")).toThrow("peak price");
+  });
+
+  it("starts a brand-new Malaysian rate in ringgit without SST", () => {
+    expect(rateDraftsFromRevision(undefined, "Asia/Kuala_Lumpur", { country: "MY", state: "SGR" })[0]).toMatchObject({ currency: "MYR", basis: "" });
+    expect(rateDraftsFromRevision(undefined, "Asia/Singapore")[0]).toMatchObject({ currency: "SGD", basis: "tax_exclusive", taxName: "GST" });
+  });
+});

@@ -214,9 +214,8 @@ function headerString(value: string | string[] | undefined): string | undefined 
 }
 
 function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
+  // Cross-origin headers, when the caller is allowed, are set once per request in http-security.ts.
   response.writeHead(statusCode, {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Credentials": "true",
     "Content-Type": "application/json; charset=utf-8"
   });
   response.end(JSON.stringify(body));

@@ -1,12 +1,13 @@
 "use client";
 import { useState } from "react";
-import { configApi, type EnergyTariffScheduleEntryInputDto, type EnergyTariffScheduleRevisionDto } from "../../../lib/config-api";
+import { configApi, type EnergyOperatingDayDto, type EnergyProjectRegionDto, type EnergyTariffFixedChargeDto, type EnergyTariffPlanDto, type EnergyTariffScheduleEntryInputDto, type EnergyTariffScheduleRevisionDto } from "../../../lib/config-api";
 import type { EnergySelectOption } from "./energy-select";
 import { localDay, ratePeriod } from "./electricity-rate-view";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { intlLocale, translatorFor, type EnergyIqLocale, type Translate } from "./energyiq-messages";
 import { dateRange } from "./operating-hours-view";
 import { electricityRateMessages } from "./operating-policy-messages";
+import { withCurrency } from "./money";
 import styles from "./project-configuration-view.module.css";
 
 /** One rate period as a person reads it off the bill: local calendar days, end day included. */
@@ -20,7 +21,21 @@ export type RateDraft = {
   basis: "" | "tax_exclusive" | "tax_inclusive";
   taxName: string;
   taxPct: string;
+  /** Time-of-use: `rate` is then the off-peak price. */
+  peak?: { rate: string; days: EnergyOperatingDayDto[]; from: string; to: string; holidaysOffPeak: boolean };
+  /** Carried through edits untouched, so saving a period never drops them. */
+  fixedCharges?: EnergyTariffFixedChargeDto[];
+  plan?: EnergyTariffPlanDto;
 };
+
+const WEEK: EnergyOperatingDayDto[] = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+
+/** The currency and tax a brand-new rate starts with: the site's own country, or Singapore's for older projects. */
+export function rateDefaults(region?: EnergyProjectRegionDto): Pick<RateDraft, "currency" | "basis" | "taxName" | "taxPct"> {
+  return region?.country === "MY"
+    ? { currency: "MYR", basis: "", taxName: "SST", taxPct: "8" }
+    : { currency: "SGD", basis: "tax_exclusive", taxName: "GST", taxPct: "9" };
+}
 
 const DAY_MS = 86_400_000;
 export const addDays = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY_MS).toISOString().slice(0, 10);
@@ -40,8 +55,8 @@ export function zonedMidnight(date: string, timeZone: string): string {
   return `${date}T00:00:00${sign}${pad(minutes / 60)}:${pad(Math.abs(minutes) % 60)}`;
 }
 
-export function rateDraftsFromRevision(revision: EnergyTariffScheduleRevisionDto | undefined, timeZone: string): RateDraft[] {
-  if (!revision?.entries.length) return [{ key: "rate-new-1", owner: "project", from: "", to: "", currency: "SGD", rate: "", basis: "tax_exclusive", taxName: "GST", taxPct: "9" }];
+export function rateDraftsFromRevision(revision: EnergyTariffScheduleRevisionDto | undefined, timeZone: string, region?: EnergyProjectRegionDto): RateDraft[] {
+  if (!revision?.entries.length) return [{ key: "rate-new-1", owner: "project", from: "", to: "", rate: "", ...rateDefaults(region) }];
   return [...revision.entries].sort((a, b) => a.effective_from.localeCompare(b.effective_from)).map(entry => {
     const period = ratePeriod(entry, timeZone);
     return {
@@ -54,6 +69,17 @@ export function rateDraftsFromRevision(revision: EnergyTariffScheduleRevisionDto
       basis: entry.rate_basis ?? "",
       taxName: entry.tax?.name ?? "GST",
       taxPct: entry.tax ? String(entry.tax.rate_pct) : "9",
+      ...(entry.time_of_use ? {
+        peak: {
+          rate: String(entry.time_of_use.peak_rate_per_kwh),
+          days: entry.time_of_use.peak_windows[0]?.days ?? [],
+          from: entry.time_of_use.peak_windows[0]?.from ?? "14:00",
+          to: entry.time_of_use.peak_windows[0]?.to ?? "22:00",
+          holidaysOffPeak: entry.time_of_use.holidays_off_peak,
+        },
+      } : {}),
+      ...(entry.fixed_charges?.length ? { fixedCharges: entry.fixed_charges } : {}),
+      ...(entry.plan ? { plan: entry.plan } : {}),
     };
   });
 }
@@ -61,7 +87,13 @@ export function rateDraftsFromRevision(revision: EnergyTariffScheduleRevisionDto
 /** A new period that starts the day after the latest one ends, keeping its currency, tax and location. */
 export function nextRateDraft(drafts: RateDraft[], key: string): RateDraft {
   const last = [...drafts].sort((a, b) => (a.to || a.from).localeCompare(b.to || b.from)).at(-1);
-  return { key, owner: last?.owner ?? "project", from: last?.to ? addDays(last.to, 1) : "", to: "", currency: last?.currency ?? "SGD", rate: "", basis: last?.basis ?? "tax_exclusive", taxName: last?.taxName ?? "GST", taxPct: last?.taxPct ?? "9" };
+  return {
+    key, owner: last?.owner ?? "project", from: last?.to ? addDays(last.to, 1) : "", to: "", currency: last?.currency ?? "SGD", rate: "",
+    basis: last?.basis ?? "tax_exclusive", taxName: last?.taxName ?? "GST", taxPct: last?.taxPct ?? "9",
+    // A new period keeps the same peak hours and fixed charges; its prices are typed afresh.
+    ...(last?.peak ? { peak: { ...last.peak, rate: "" } } : {}),
+    ...(last?.fixedCharges ? { fixedCharges: last.fixedCharges } : {}),
+  };
 }
 
 /** Checks the periods in plain words and converts them to what the server stores (instants, end exclusive). */
@@ -76,6 +108,10 @@ export function rateEntriesForSave(drafts: RateDraft[], timeZone: string, locale
     if (!draft.rate.trim() || !Number.isFinite(rate) || rate <= 0) throw new Error(t("error.price", { number }));
     const tax = Number(draft.taxPct);
     if (draft.basis && (!draft.taxPct.trim() || !Number.isFinite(tax) || tax < 0 || tax > 100)) throw new Error(t("error.tax", { number, tax: draft.taxName || t("error.taxFallback") }));
+    if (draft.peak) {
+      const peak = Number(draft.peak.rate);
+      if (!draft.peak.rate.trim() || !Number.isFinite(peak) || peak <= 0 || !draft.peak.days.length || draft.peak.to <= draft.peak.from) throw new Error(t("error.peak", { number }));
+    }
   });
   const numbered = drafts.map((draft, index) => ({ draft, number: index + 1 }));
   for (const owner of new Set(drafts.map(draft => draft.owner))) {
@@ -93,10 +129,19 @@ export function rateEntriesForSave(drafts: RateDraft[], timeZone: string, locale
     currency: draft.currency.trim().toUpperCase() || "SGD",
     ratePerKwh: Number(draft.rate),
     ...(draft.basis ? { rateBasis: draft.basis, tax: { name: draft.taxName.trim() || "GST", ratePct: Number(draft.taxPct) } } : {}),
+    ...(draft.peak ? {
+      timeOfUse: {
+        peakRatePerKwh: Number(draft.peak.rate),
+        peakWindows: [{ days: WEEK.filter(day => draft.peak!.days.includes(day)), from: draft.peak.from, to: draft.peak.to }],
+        holidaysOffPeak: draft.peak.holidaysOffPeak,
+      },
+    } : {}),
+    ...(draft.fixedCharges?.length ? { fixedCharges: draft.fixedCharges } : {}),
+    ...(draft.plan ? { plan: draft.plan } : {}),
   }));
 }
 
-const money = (currency: string, value: number, digits: number, locale: EnergyIqLocale) => `${currency} ${value.toLocaleString(intlLocale(locale), { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+const money = (currency: string, value: number, digits: number, locale: EnergyIqLocale) => withCurrency(currency, value.toLocaleString(intlLocale(locale), { minimumFractionDigits: digits, maximumFractionDigits: digits }));
 function pricePreview(draft: RateDraft, t: Translate<keyof typeof electricityRateMessages.en>, locale: EnergyIqLocale): string {
   const rate = Number(draft.rate), tax = Number(draft.taxPct);
   if (!draft.rate.trim() || !Number.isFinite(rate) || rate <= 0) return t("preview.enterPrice");
@@ -109,11 +154,11 @@ function pricePreview(draft: RateDraft, t: Translate<keyof typeof electricityRat
 }
 
 /** Edits the electricity rate on the page; saving makes the new rate live across the app. */
-export function ElectricityRateEditor({ projectId, revision, timezone, scopeOptions, addNext = false, onSaved, onCancel }: {
-  projectId: string; revision?: EnergyTariffScheduleRevisionDto; timezone: string; scopeOptions: EnergySelectOption[]; addNext?: boolean; onSaved: () => void; onCancel: () => void;
+export function ElectricityRateEditor({ projectId, revision, timezone, region, scopeOptions, addNext = false, onSaved, onCancel }: {
+  projectId: string; revision?: EnergyTariffScheduleRevisionDto; timezone: string; region?: EnergyProjectRegionDto; scopeOptions: EnergySelectOption[]; addNext?: boolean; onSaved: () => void; onCancel: () => void;
 }) {
   const [drafts, setDrafts] = useState<RateDraft[]>(() => {
-    const initial = rateDraftsFromRevision(revision, timezone);
+    const initial = rateDraftsFromRevision(revision, timezone, region);
     return addNext && revision?.entries.length ? [...initial, nextRateDraft(initial, "rate-new-1")] : initial;
   });
   const [counter, setCounter] = useState(2);
@@ -143,7 +188,8 @@ export function ElectricityRateEditor({ projectId, revision, timezone, scopeOpti
         <div className={styles.rateEditorGrid}>
           <label><span>{t("startDate")}</span><input type="date" value={draft.from} onChange={event => update(draft.key, { from: event.target.value })} /></label>
           <label><span>{t("endDate")}</span><input type="date" value={draft.to} min={draft.from || undefined} onChange={event => update(draft.key, { to: event.target.value })} /><small>{t("endDateHint")}</small></label>
-          <label><span>{t("pricePerKwh")}</span><div className={styles.rateEditorMoney}><b>{draft.currency}</b><input type="number" inputMode="decimal" step="0.0001" min="0" placeholder="0.3191" value={draft.rate} onChange={event => update(draft.key, { rate: event.target.value })} /></div></label>
+          {draft.peak && <label><span>{t("peakPrice")}</span><div className={styles.rateEditorMoney}><b>{draft.currency}</b><input type="number" inputMode="decimal" step="0.0001" min="0" value={draft.peak.rate} onChange={event => update(draft.key, { peak: { ...draft.peak!, rate: event.target.value } })} /></div></label>}
+          <label><span>{draft.peak ? t("offPeakPrice") : t("pricePerKwh")}</span><div className={styles.rateEditorMoney}><b>{draft.currency}</b><input type="number" inputMode="decimal" step="0.0001" min="0" placeholder="0.3191" value={draft.rate} onChange={event => update(draft.key, { rate: event.target.value })} /></div></label>
           <label><span>{t("billBasis")}</span><select value={draft.basis} onChange={event => update(draft.key, { basis: event.target.value as RateDraft["basis"] })}>
             <option value="tax_exclusive">{t("basis.before", { tax })}</option>
             <option value="tax_inclusive">{t("basis.including", { tax })}</option>
@@ -152,6 +198,17 @@ export function ElectricityRateEditor({ projectId, revision, timezone, scopeOpti
           {draft.basis && <label><span>{t("taxRate", { tax })}</span><div className={styles.rateEditorMoney}><input type="number" inputMode="decimal" step="0.1" min="0" max="100" value={draft.taxPct} onChange={event => update(draft.key, { taxPct: event.target.value })} /><b>%</b></div></label>}
           {scopeOptions.length > 1 && <label><span>{t("appliesTo")}</span><select value={draft.owner} onChange={event => update(draft.key, { owner: event.target.value })}>{scopeOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
         </div>
+        <label className={styles.rateEditorPeak}><input type="checkbox" checked={Boolean(draft.peak)} onChange={event => update(draft.key, { peak: event.target.checked ? { rate: "", days: WEEK.slice(0, 5), from: "14:00", to: "22:00", holidaysOffPeak: true } : undefined })} />{t("hasPeak")}</label>
+        {draft.peak && <div className={styles.rateEditorPeakHours}>
+          <span>{t("peakHours")}</span>
+          <div className={styles.rateEditorDays}>{WEEK.map(day => <button key={day} type="button" aria-pressed={draft.peak!.days.includes(day)}
+            onClick={() => update(draft.key, { peak: { ...draft.peak!, days: draft.peak!.days.includes(day) ? draft.peak!.days.filter(item => item !== day) : WEEK.filter(item => item === day || draft.peak!.days.includes(item)) } })}>{t(`dayShort.${day}`)}</button>)}</div>
+          <div className={styles.rateEditorGrid}>
+            <label><span>{t("peakStart")}</span><input type="time" step={900} value={draft.peak.from} onChange={event => update(draft.key, { peak: { ...draft.peak!, from: event.target.value } })} /></label>
+            <label><span>{t("peakEnd")}</span><input type="time" step={900} value={draft.peak.to} onChange={event => update(draft.key, { peak: { ...draft.peak!, to: event.target.value } })} /></label>
+          </div>
+          <label className={styles.rateEditorPeak}><input type="checkbox" checked={draft.peak.holidaysOffPeak} onChange={event => update(draft.key, { peak: { ...draft.peak!, holidaysOffPeak: event.target.checked } })} />{t("holidaysOffPeak")}</label>
+        </div>}
         <p className={styles.rateEditorPreview}>{pricePreview(draft, t, locale)}</p>
       </fieldset>;
     })}

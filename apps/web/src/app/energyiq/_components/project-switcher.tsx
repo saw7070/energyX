@@ -250,6 +250,8 @@ function AdminActionModal({ action, onCancel, onConfirm }: {
     deleteCustomer: { title: t("project.customerDeleteTitle", { customer: name }), body: t("project.customerDeleteBody"), submit: t("project.customerDeleteSubmit"), danger: true },
     createCustomer: { title: t("project.customerCreateTitle"), body: "", submit: t("project.customerCreateSubmit"), danger: false },
   }[action.kind];
+  const icon = action.kind === "createCustomer" ? "building" as const : copy.danger ? "alert" as const : "document" as const;
+  const creating = action.kind === "createCustomer";
   const needsText = action.kind === "deleteProject" || action.kind === "createCustomer";
   const ready = action.kind === "deleteProject" ? typed.trim() === name.trim() : action.kind === "createCustomer" ? typed.trim().length > 0 : true;
   useEffect(() => {
@@ -265,9 +267,21 @@ function AdminActionModal({ action, onCancel, onConfirm }: {
   };
   return <dialog ref={modal} aria-labelledby="admin-action-title" className={styles.moveModal} onCancel={event => { event.preventDefault(); if (!saving) onCancel(); }}>
     <form onSubmit={event => void submit(event)}>
-      <header><h2 id="admin-action-title">{copy.title}</h2><button type="button" aria-label={t("project.moveCancel")} disabled={saving} onClick={onCancel}><EnergyIcon name="close" /></button></header>
+      <header className={styles.actionHead}>
+        <span className={copy.danger ? `${styles.actionIcon} ${styles.actionIconDanger}` : styles.actionIcon} aria-hidden="true"><EnergyIcon name={icon} /></span>
+        <div className={styles.actionTitle}><h2 id="admin-action-title">{copy.title}</h2>{creating && <p>{t("project.customerCreateIntro")}</p>}</div>
+        <button type="button" aria-label={t("project.moveCancel")} disabled={saving} onClick={onCancel}><EnergyIcon name="close" /></button>
+      </header>
       {copy.body && <p className={copy.danger ? styles.dangerNote : styles.moveBody}>{copy.body}</p>}
-      {needsText && <label className={styles.moveField}><span>{action.kind === "deleteProject" ? t("project.deleteConfirmLabel", { project: name }) : t("project.customerNameLabel")}</span><input value={typed} disabled={saving} maxLength={120} autoComplete="off" onChange={event => setTyped(event.target.value)} /></label>}
+      {needsText && <label className={styles.moveField}>
+        <span>{action.kind === "deleteProject" ? t("project.deleteConfirmLabel", { project: name }) : t("project.customerNameLabel")}</span>
+        <input value={typed} disabled={saving} maxLength={120} autoComplete="off" {...(creating ? { placeholder: t("project.customerNamePlaceholder") } : {})} onChange={event => setTyped(event.target.value)} />
+        {creating && <small className={styles.fieldHint}><span>{t("project.customerNameHint")}</span><span>{typed.length}/120</span></small>}
+      </label>}
+      {creating && <div className={styles.nextSteps}>
+        <strong>{t("project.customerCreateNext")}</strong>
+        <ul>{(["project.customerPerkProjects", "project.customerPerkPeople"] as const).map(key => <li key={key}><EnergyIcon name="check" />{t(key)}</li>)}</ul>
+      </div>}
       {error && <p role="alert" className={styles.moveError}>{error}</p>}
       <footer><button type="button" className={styles.moveSecondary} disabled={saving} onClick={onCancel}>{t("project.moveCancel")}</button><button type="submit" className={copy.danger ? styles.moveDanger : styles.movePrimary} disabled={saving || !ready}>{saving ? t("project.working") : copy.submit}</button></footer>
     </form>

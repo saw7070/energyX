@@ -1,0 +1,6 @@
+# How to report a security problem with EnergyX.
+# Fill in the contact before publishing (same address as COMPANY.securityEmail in src/app/legal/company.ts).
+Contact: mailto:security@example.com
+Expires: 2027-10-09T00:00:00.000Z
+Preferred-Languages: en, ms, zh
+Policy: https://energyiq.hima.sg/legal/security

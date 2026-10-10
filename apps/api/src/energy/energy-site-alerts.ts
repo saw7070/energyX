@@ -2,8 +2,8 @@ import type { DatabaseSync } from "node:sqlite";
 import type { MetadataStore } from "@datafoundry/metadata";
 
 /**
- * What the notification bell tells a site's readers besides action results: automatic reports that are ready, and,
- * for administrators, a daily live update that did not finish. Stopped meters come from the meter-health read the
+ * What the notification bell tells a site's readers besides action results: automatic reports that are ready, budget
+ * and overnight-use alerts, and, for administrators, a daily live update that did not finish. Stopped meters come from the meter-health read the
  * pages already make. Each alert has a key; a reader who opens or dismisses it does not see that key again.
  */
 export type SiteAlertReport = {
@@ -21,15 +21,24 @@ export type SiteAlertSync = {
   reason: "ip-blocked" | "sign-in" | "other";
 };
 
+/** A budget heading over (or gone over), or a night of unusual use, raised by the daily site check. */
+export type SiteAlertTarget = {
+  key: string;
+  kind: "budget" | "overnight";
+  createdAt: string;
+  details: Record<string, unknown>;
+};
+
 export type SiteAlerts = {
   reports: SiteAlertReport[];
+  targets: SiteAlertTarget[];
   sync?: SiteAlertSync;
   readKeys: string[];
 };
 
 /** Only recent reports are news; older ones live in Reports. */
 const REPORT_NEWS_MS = 14 * 24 * 60 * 60_000;
-const KEY_PATTERN = /^(?:meters|report|sync):[\w:.\-]{1,200}$/u;
+const KEY_PATTERN = /^(?:meters|report|sync|offline|budget|overnight):[\w:.,@\-]{1,400}$/u;
 
 type ReportRunLike = {
   id: string;
@@ -81,7 +90,11 @@ export const readSiteAlerts = (input: {
       sync = { key: `sync:${state.last_failure_at}`, failedAt: state.last_failure_at, reason: syncReason(state.last_error_code) };
     }
   }
-  return { reports, ...(sync ? { sync } : {}), readKeys: readKeys(input.metadataStore.db, input.userId, input.projectId) };
+  const targets = input.includeReports
+    ? input.metadataStore.energyIq.targets.listRecentAlerts(input.projectId, new Date(now - REPORT_NEWS_MS).toISOString(), 5)
+      .map((alert): SiteAlertTarget => ({ key: alert.key, kind: alert.kind, createdAt: alert.createdAt, details: alert.payload }))
+    : [];
+  return { reports, targets, ...(sync ? { sync } : {}), readKeys: readKeys(input.metadataStore.db, input.userId, input.projectId) };
 };
 
 export const markSiteAlertRead = (input: { db: DatabaseSync; userId: string; projectId: string; key: unknown; now?: number }): void => {

@@ -25,6 +25,7 @@ import { EnergyFlow } from "./energy-flow";
 import { analysisCsvFilename, analysisHourlyCsv } from "./analysis-export";
 import { downloadText } from "./explorer-export";
 import { breakdownSpaces } from "./site-total";
+import { currencyMark } from "./money";
 
 // Layout of the approved NetZero analysis page on a light surface: white panels, slate borders.
 const PANEL = "rounded-xl border border-slate-200 bg-white shadow-sm";
@@ -47,7 +48,6 @@ const slash = (date: string) => `${date.slice(5, 7)}/${date.slice(8, 10)}`;
 const hh = (hour: number) => `${String(hour).padStart(2, "0")}:00`;
 const period = (dates: string[], locale: EnergyIqLocale = "en") => !dates.length ? "—"
   : locale === "en" ? `${shortDate(dates[0]!)} – ${shortDate(dates.at(-1)!)} ${dates.at(-1)!.slice(0, 4)}` : formatPeriod(dates[0]!, dates.at(-1)!, locale);
-const currencyMark = (currency: string) => currency === "SGD" ? "S$" : currency;
 const money = (amount: number, currency: string) => `${currency} ${amount.toLocaleString("en-SG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const seriesKwh = (series: TrendSeries | null | undefined) => (series?.cells ?? []).reduce((sum, cell) => sum + (cell[2] ?? 0), 0);
 const cellKwh = (series: TrendSeries | null | undefined, date: string, hour: number) => series?.cells.find(cell => cell[0] === date && cell[1] === hour)?.[2] ?? null;

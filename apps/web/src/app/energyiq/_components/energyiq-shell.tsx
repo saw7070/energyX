@@ -25,6 +25,7 @@ type NavigationItem = { href: string; label: EnergyIqMessageKey; icon: EnergyIco
 type NavigationGroup = { id: string; label: EnergyIqMessageKey; icon: EnergyIconName; description: EnergyIqMessageKey; items: NavigationItem[] };
 const SITE_PROFILE = "/energyiq/project-configuration";
 const navigation: Array<NavigationItem | NavigationGroup> = [
+  { href: "/energyiq/portfolio", label: "nav.portfolio", icon: "portfolio", description: "nav.portfolio.hint" },
   { href: "/energyiq/key-points", label: "nav.overview", icon: "spark", description: "nav.overview.hint" },
   { href: "/energyiq/analysis", label: "nav.analysis", icon: "analysis", description: "nav.analysis.hint" },
   { href: "/energyiq/library", label: "nav.reports", icon: "document", description: "nav.reports.hint" },
@@ -37,6 +38,7 @@ const navigation: Array<NavigationItem | NavigationGroup> = [
     { href: SITE_PROFILE, tab: "policies", label: "nav.operatingHours", icon: "clock", description: "nav.operatingHours.hint" },
     { href: SITE_PROFILE, tab: "holidays", label: "nav.holidays", icon: "calendar", description: "nav.holidays.hint" },
     { href: SITE_PROFILE, tab: "tariff", label: "nav.electricityRate", icon: "bolt", description: "nav.electricityRate.hint" },
+    { href: SITE_PROFILE, tab: "targets", label: "nav.targets", icon: "target", description: "nav.targets.hint" },
   ] },
   { id: "ai", label: "nav.advisor", icon: "ask", description: "nav.advisor.hint", items: [
     { href: "/energyiq/reports", label: "nav.askAdvisor", icon: "ask", description: "nav.askAdvisor.hint" },

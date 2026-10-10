@@ -80,6 +80,7 @@ import {
   connectPolicyMcpClient,
   type PolicyMcpClientConfig
 } from "./policy-mcp-middleware.js";
+import { recordEnergyChange } from "./energy/energy-change-audit.js";
 import { sessionTitleDto } from "./session-title.js";
 import {
   createSessionBranch,
@@ -189,7 +190,16 @@ const routeConfigRequest = async (
     return handleMeRequest(request, context);
   }
   if (root === "energy") {
-    return handleEnergyApiRequest(request, segments.slice(1), context);
+    const response = await handleEnergyApiRequest(request, segments.slice(1), context);
+    recordEnergyChange({
+      metadataStore: context.metadataStore,
+      request,
+      segments: segments.slice(1),
+      userId: context.userId,
+      workspaceId: context.workspaceId,
+      status: response.status,
+    });
+    return response;
   }
   if (root === "report-models") {
     return handleReportModelsRequest(request, segments.slice(1), context);

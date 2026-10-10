@@ -18,6 +18,7 @@ import type {
   EnergyTemplateRenderPlan,
 } from "./energy-template-render-plan";
 import { EnergyIcon } from "./icons";
+import { withCurrency } from "./money";
 
 export type EnergyTemplateRenderAdvisory = {
   kind: "partial" | "stale" | "unsupported";
@@ -649,9 +650,7 @@ function formatNumber(value: number, digits: number): string {
 }
 
 function formatCurrencyAmount(amount: number, currency: string, digits: number): string {
-  const code = currency.trim().toUpperCase();
-  const value = formatNumber(amount, digits);
-  return code === "SGD" ? `S$${value}` : `${code} ${value}`;
+  return withCurrency(currency, formatNumber(amount, digits));
 }
 
 function formatAnalysisTimestamp(value: string, timeZone: string): string {

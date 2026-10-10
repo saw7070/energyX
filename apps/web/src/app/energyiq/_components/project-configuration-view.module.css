@@ -134,6 +134,12 @@
 .rateEditorMoney input:first-child { border-radius:8px 0 0 8px; }
 .rateEditorMoney b + input { border-radius:0 8px 8px 0; }
 .rateEditorPreview { margin-top:12px; font-size:13px; color:#3c7457; font-weight:500; }
+.rateEditorPeak { display:flex; align-items:center; gap:8px; margin-top:12px; font-size:13px; color:#202822; }
+.rateEditorPeakHours { margin-top:10px; padding:12px; border:1px solid #e3e7e0; border-radius:10px; background:#f7f9f6; }
+.rateEditorPeakHours > span { display:block; margin-bottom:8px; font-size:12px; font-weight:600; color:#3c4a42; }
+.rateEditorDays { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+.rateEditorDays button { min-width:44px; padding:5px 8px; border:1px solid #d0dbd2; border-radius:8px; background:#fff; font-size:12px; font-weight:500; color:#5d6a62; }
+.rateEditorDays button[aria-pressed="true"] { border-color:#263d30; background:#263d30; color:#fff; }
 .rateEditorAdd { justify-self:start; padding:8px 14px; border:1px dashed #9cbfa9; border-radius:8px; color:#1d513a; font-size:13px; font-weight:600; }
 .rateEditorAdd:hover { background:#eef3ed; }
 .inlineForm { display:grid; gap:14px; padding:16px; border:1px solid #d0dbd2; border-radius:10px; background:#f7f9f6; margin-bottom:18px; }
@@ -281,6 +287,11 @@
 :global(:where(html[data-energyiq-theme="dark"])) .rateEditorMoney input:first-child { border-radius:8px 0 0 8px; }
 :global(:where(html[data-energyiq-theme="dark"])) .rateEditorMoney b + input { border-radius:0 8px 8px 0; }
 :global(:where(html[data-energyiq-theme="dark"])) .rateEditorPreview { color:#80ba9a; }
+:global(:where(html[data-energyiq-theme="dark"])) .rateEditorPeak { color:#c6d1c9; }
+:global(:where(html[data-energyiq-theme="dark"])) .rateEditorPeakHours { border:1px solid #333630; border-radius:10px; background:#1b1c1a; }
+:global(:where(html[data-energyiq-theme="dark"])) .rateEditorPeakHours > span { color:#b0c0b6; }
+:global(:where(html[data-energyiq-theme="dark"])) .rateEditorDays button { border:1px solid #323b34; border-radius:8px; background:#191919; color:#a1afa6; }
+:global(:where(html[data-energyiq-theme="dark"])) .rateEditorDays button[aria-pressed="true"] { border-color:#263d30; background:#263d30; color:#fff; }
 :global(:where(html[data-energyiq-theme="dark"])) .rateEditorAdd { border:1px dashed #2b4a38; border-radius:8px; color:#94caae; }
 :global(:where(html[data-energyiq-theme="dark"])) .rateEditorAdd:hover { background:#1c201c; }
 :global(:where(html[data-energyiq-theme="dark"])) .inlineForm { border:1px solid #323b34; border-radius:10px; background:#1b1c1a; }

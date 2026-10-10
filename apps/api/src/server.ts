@@ -217,6 +217,9 @@ import {
 import { createTuyaOpenApiClientFor, createTuyaOpenApiClientFromEnv, type TuyaOpenApiClient } from "./energy/tuya-openapi-client.js";
 import { createEnergyLiveReadingsPoller } from "./energy/energy-live-readings.js";
 import { createEnergyAlertEmailer } from "./energy/energy-alert-emails.js";
+import { createEnergyReportDeliveryWorker } from "./energy/energy-report-delivery.js";
+import { createEnergyTargetsMonitor } from "./energy/energy-targets-monitor.js";
+import { applyApiSecurityHeaders } from "./http-security.js";
 import { repairMovedProjectFactDigests } from "./energy/energy-project-move.js";
 import { resolveEnergyTuyaProjectConnector } from "./energy/energy-tuya-connector.js";
 import type { ConfigApiContext } from "./routes/types.js";
@@ -1204,6 +1207,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
 
   const server = createHttpServer(async (request, response) => {
     try {
+      applyApiSecurityHeaders(request, response);
       const requestUrl = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
 
       if (request.method === "GET" && requestUrl.pathname === "/healthz") {
@@ -1276,10 +1280,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
       });
       if (configResponse) {
         if (Buffer.isBuffer(configResponse.body)) {
-          response.writeHead(configResponse.status, {
-            "Access-Control-Allow-Origin": "*",
-            ...configResponse.headers
-          });
+          response.writeHead(configResponse.status, configResponse.headers ?? {});
           response.end(configResponse.body);
         } else {
           sendJson(response, configResponse.status, configResponse.body, configResponse.headers);
@@ -1466,6 +1467,11 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
   // Emails site owners about stopped meters and failed daily updates; off unless ENERGYIQ_ALERT_EMAILS_ENABLED=true.
   const alertEmailer = createEnergyAlertEmailer({ metadataStore });
   alertEmailer.start();
+  // Daily budget and overnight-use checks per site, and scheduled report emails; each can be turned off by env.
+  const targetsMonitor = createEnergyTargetsMonitor({ metadataStore, fallbackReaderUserId: tuyaSyncActorUserId });
+  targetsMonitor.start();
+  const reportEmails = createEnergyReportDeliveryWorker({ metadataStore });
+  reportEmails.start();
   reportService?.start();
 
   gracefulServerClosers.set(server, bindGracefulServerLifecycle({
@@ -1475,6 +1481,8 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
       await liveConnectionScheduler.stop();
       await liveReadingsPoller.stop();
       alertEmailer.stop();
+      targetsMonitor.stop();
+      reportEmails.stop();
       registerEnergyLiveConnectionScheduler(undefined);
       await reportService?.stop();
       metadataStore.close();
@@ -3209,9 +3217,9 @@ export class DataFoundryAgUiAgent extends AbstractAgent {
 const isCopilotKitPath = (pathname: string): boolean =>
   pathname === COPILOTKIT_PATH || pathname.startsWith(`${COPILOTKIT_PATH}/`);
 
+// Only an allowed origin (see http-security.ts) gets Access-Control-Allow-Origin, set when the request arrived.
 const sendCorsPreflight = (response: ServerResponse): void => {
   response.writeHead(204, {
-    "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization, Idempotency-Key, If-Match, X-CSRF-Token, X-Dev-Token, X-Workspace-Id",
     "Access-Control-Max-Age": "86400"
@@ -3349,7 +3357,6 @@ const sendJson = (
   headers: Record<string, string> = {},
 ): void => {
   response.writeHead(statusCode, {
-    "Access-Control-Allow-Origin": "*",
     "Content-Type": "application/json; charset=utf-8",
     ...headers,
   });

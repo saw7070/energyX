@@ -657,7 +657,9 @@
 .librarySchedule svg { width: 15px; height: 15px; color: #2f7a5b; }
 .librarySchedule strong { color: #17563f; font-weight: 700; }
 .lengthFilter { display: inline-flex; align-items: center; gap: 8px; color: #4d5c53; font-size: 13px; font-weight: 600; }
-.lengthFilter select { min-height: 36px; padding: 0 10px; border: 1px solid #dde4de; border-radius: 10px; background: #fff; color: #1d3a2d; font: inherit; font-weight: 600; }
+.lengthFilter select { appearance:none; -webkit-appearance:none; min-height: 36px; padding: 0 36px 0 12px; border: 1px solid #dde4de; border-radius: 10px; background-color: #fff; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%23586b5e' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 12px center; background-size:12px 12px; color: #1d3a2d; font: inherit; font-weight: 600; cursor:pointer; }
+.lengthFilter select:hover { border-color: #b9c8bd; }
+.lengthFilter select:focus-visible { outline: none; border-color: #176b59; box-shadow: 0 0 0 3px rgba(23,107,89,.15); }
 /* Automatic reports arrive on a schedule; custom ones are answers people asked for. */
 .reportFilters { display: inline-flex; padding: 3px; border: 1px solid #dde4de; border-radius: 999px; background: #f4f7f4; }
 .reportFilters button { display: inline-flex; align-items: center; gap: 7px; min-height: 32px; padding: 0 14px; border-radius: 999px; color: #4d5c53; font-size: 13px; font-weight: 600; }
@@ -1308,7 +1310,9 @@
 :global(:where(html[data-energyiq-theme="dark"])) .librarySchedule svg { color:#72bb99; }
 :global(:where(html[data-energyiq-theme="dark"])) .librarySchedule strong { color:#8cc9ad; }
 :global(:where(html[data-energyiq-theme="dark"])) .lengthFilter { color:#a6b7ad; }
-:global(:where(html[data-energyiq-theme="dark"])) .lengthFilter select { border:1px solid #323733; border-radius:10px; background:#191919; color:#aecfbe; }
+:global(:where(html[data-energyiq-theme="dark"])) .lengthFilter select { border:1px solid #323733; border-radius:10px; background-color:#191919; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%23586b5e' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); color:#aecfbe; }
+:global(:where(html[data-energyiq-theme="dark"])) .lengthFilter select:hover { border-color:#354239; }
+:global(:where(html[data-energyiq-theme="dark"])) .lengthFilter select:focus-visible { outline:none; border-color:#176b59; box-shadow:0 0 0 3px #176b593d; }
 :global(:where(html[data-energyiq-theme="dark"])) .reportFilters { border:1px solid #323733; border-radius:999px; background:#1b1e1b; }
 :global(:where(html[data-energyiq-theme="dark"])) .reportFilters button { border-radius:999px; color:#a6b7ad; }
 :global(:where(html[data-energyiq-theme="dark"])) .reportFilters button span { border-radius:999px; background:#1f231f; color:#a0b0a5; }

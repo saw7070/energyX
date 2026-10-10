@@ -13,7 +13,7 @@
     "@copilotkit/react-core": "1.60.1",
     "@datafoundry/contracts": "0.2.0",
     "@datafoundry/site-report": "0.2.0",
-    "next": "^15.5.19",
+    "next": "^15.5.27",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "react-markdown": "^10.1.0",

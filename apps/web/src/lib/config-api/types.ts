@@ -162,7 +162,33 @@ export type EnergyProjectRecordDto = {
   delivery_stage: EnergyDeliveryStage;
   root_scope_id: string;
   has_unpublished_changes: boolean;
+  region?: EnergyProjectRegionDto;
 };
+
+/** One entry of the platform audit history: who did what, when, where from, and to which organisation or project. */
+export type EnergyAuditEventDto = {
+  id: string;
+  at: string;
+  type: string;
+  email?: string;
+  ip?: string;
+  organisation?: string;
+  project?: string;
+  /** Who or what the change was made to, e.g. the user whose access changed. */
+  target?: string;
+  action?: string;
+  details: Record<string, unknown>;
+};
+
+export type EnergyAuditFilterDto = {
+  from?: string;
+  to?: string;
+  category?: "" | "sign-in" | "access" | "projects";
+  search?: string;
+};
+
+/** Where a site is: decides its money, tax, time zone and public holidays. State is a Malaysian state code. */
+export type EnergyProjectRegionDto = { country: "SG" | "MY"; state?: string };
 
 export type EnergyTierDefinitionDto = {
   id: string;
@@ -406,8 +432,135 @@ export type EnergyLiveReadingsDto = {
 /** The bell's site alerts: automatic reports that are ready and, for administrators, a failed daily live update. */
 export type EnergyProjectAlertsDto = {
   reports: Array<{ key: string; reportId: string; cadence: "daily" | "weekly" | "monthly" | "other"; from: string; toExclusive: string; finishedAt: string }>;
+  /** Budget and overnight-use alerts from the daily site check. */
+  targets?: Array<{ key: string; kind: "budget" | "overnight"; createdAt: string; details: Record<string, unknown> }>;
   sync?: { key: string; failedAt: string; reason: "ip-blocked" | "sign-in" | "other" };
   readKeys: string[];
+};
+
+/** Location-based Scope 2: kg CO2e per kWh drawn from the grid. */
+export type EnergyCarbonFactorDto = {
+  basis: "grid" | "custom";
+  grid?: "SG" | "MY-PENINSULAR" | "MY-SABAH" | "MY-SARAWAK";
+  kgCo2ePerKwh: number;
+  year: number;
+  source: string;
+  provisional?: boolean;
+};
+
+export type EnergyBudgetDto = { monthlyAmount: number; currency: "SGD" | "MYR"; monthlyKwh?: number };
+
+export type EnergyBudgetStatusDto = {
+  month: string;
+  dataThrough?: string;
+  daysInMonth: number;
+  actualKwh: number;
+  forecastKwh: number;
+  actualCost?: number;
+  forecastCost?: number;
+  currency: string;
+  budgetAmount: number;
+  budgetKwh?: number;
+  status: "on-track" | "at-risk" | "over" | "no-data";
+  costNote?: "tariff-unavailable" | "currency-differs";
+};
+
+export type EnergyOvernightFindingDto = { night: string; nightKw: number; usualKw: number; abovePct: number; extraKwh: number; nightsCompared: number };
+
+export type EnergyProjectTargetsDto = {
+  projectId: string;
+  budget?: EnergyBudgetDto;
+  carbon: EnergyCarbonFactorDto;
+  gridCarbon: EnergyCarbonFactorDto;
+  overnight: { enabled: boolean; thresholdPct: number };
+  currency: "SGD" | "MYR";
+  canEdit: boolean;
+  updatedAt?: string;
+  status?: { budget?: EnergyBudgetStatusDto; overnight?: EnergyOvernightFindingDto };
+};
+
+export type EnergyProjectTargetsInputDto = {
+  budget?: EnergyBudgetDto | null;
+  carbon?: { kgCo2ePerKwh: number; year?: number; source?: string } | null;
+  overnight?: { enabled?: boolean; thresholdPct?: number };
+};
+
+export type EnergyPortfolioSiteDto = {
+  projectId: string;
+  name: string;
+  country?: "SG" | "MY";
+  state?: string;
+  timezone: string;
+  status: "ok" | "unavailable";
+  reason?: string;
+  usageKwh: number;
+  averageDailyKwh: number;
+  peakKw: number;
+  peakAt?: string;
+  previousUsageKwh: number;
+  changePct: number | null;
+  cost?: { amount: number; currency: string };
+  costReason?: string;
+  afterHoursKwh?: number;
+  afterHoursSharePct?: number;
+  carbonKg: number;
+  carbonFactor: EnergyCarbonFactorDto;
+  coveragePct: number;
+  dataStatus: "complete" | "partial" | "unavailable";
+  lastSeenAt?: string;
+  floorAreaSqm?: number;
+  kwhPerSqm?: number;
+  budget?: EnergyBudgetStatusDto;
+};
+
+export type EnergyPortfolioDto = {
+  workspaceId: string;
+  workspaceName: string;
+  period: { from: string; to: string };
+  generatedAt: string;
+  sites: EnergyPortfolioSiteDto[];
+  totals: {
+    usageKwh: number;
+    previousUsageKwh: number;
+    carbonKg: number;
+    costByCurrency: Record<string, number>;
+    sitesWithData: number;
+    sitesOverBudget: number;
+    sitesAtRisk: number;
+  };
+};
+
+export type EnergyReportScheduleDto = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  frequency: "weekly" | "monthly";
+  projectIds: string[];
+  recipientUserIds: string[];
+  localHour: number;
+  timezone: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastDelivery?: { periodKey: string; status: "sent" | "failed" | "skipped"; attempts: number; recipientCount: number; lastError?: string; updatedAt: string };
+  nextPeriod: { from: string; to: string; key: string; dueDate: string };
+};
+
+export type EnergyReportSchedulesDto = {
+  schedules: EnergyReportScheduleDto[];
+  team: Array<{ userId: string; email: string; name?: string; canReadReports: boolean }>;
+  sites: Array<{ id: string; name: string }>;
+  defaultTimezone: string;
+  emailMode: "smtp" | "test" | "off";
+};
+
+export type EnergyReportScheduleInputDto = {
+  name: string;
+  frequency: "weekly" | "monthly";
+  projectIds: string[];
+  recipientUserIds: string[];
+  localHour: number;
+  enabled?: boolean;
 };
 
 /** Data availability for a period: each meter's share of readings received, against the contract target. */
@@ -1237,6 +1390,7 @@ export type EnergyScopeAnalysisDto = {
     allocations: Array<{
       from: string;
       to: string;
+      period?: "peak" | "off_peak";
       ratePerKwh: number;
       rateBasis?: "tax_inclusive" | "tax_exclusive";
       tax?: { name: string; ratePct: number };
@@ -1326,6 +1480,18 @@ export type EnergyCalendarExceptionClassificationDto =
   | "special_closure"
   | "special_operating_day";
 
+/** Peak and off-peak pricing: rate_per_kwh is the off-peak price, peak_rate_per_kwh applies in the peak windows. */
+export type EnergyTariffTimeOfUseDto = {
+  peak_rate_per_kwh: number;
+  peak_windows: Array<{ days: EnergyOperatingDayDto[]; from: string; to: string }>;
+  holidays_off_peak: boolean;
+};
+
+/** A monthly or per-kW charge kept for reference; cost figures do not include it. */
+export type EnergyTariffFixedChargeDto = { label: string; amount: number; unit: "per_month" | "per_kw_month" };
+
+export type EnergyTariffPlanDto = { id: string; label: string; source?: string };
+
 export type EnergyTariffScheduleEntryDto = {
   id: string;
   owner: EnergyOperationalPolicyOwnerDto;
@@ -1335,6 +1501,9 @@ export type EnergyTariffScheduleEntryDto = {
   rate_per_kwh: number;
   rate_basis?: "tax_inclusive" | "tax_exclusive";
   tax?: { name: string; rate_pct: number };
+  time_of_use?: EnergyTariffTimeOfUseDto;
+  fixed_charges?: EnergyTariffFixedChargeDto[];
+  plan?: EnergyTariffPlanDto;
 };
 
 export type EnergyTariffScheduleRevisionDto = {
@@ -1391,9 +1560,13 @@ export type EnergyTariffScheduleEntryInputDto = {
   effectiveFrom: string;
   effectiveTo?: string;
   currency: string;
+  /** The off-peak price when timeOfUse is given. */
   ratePerKwh: number;
   rateBasis?: "tax_inclusive" | "tax_exclusive";
   tax?: { name: string; ratePct: number };
+  timeOfUse?: { peakRatePerKwh: number; peakWindows: Array<{ days: EnergyOperatingDayDto[]; from: string; to: string }>; holidaysOffPeak: boolean };
+  fixedCharges?: EnergyTariffFixedChargeDto[];
+  plan?: EnergyTariffPlanDto;
 };
 
 export type EnergyOperatingCalendarEntryInputDto = {

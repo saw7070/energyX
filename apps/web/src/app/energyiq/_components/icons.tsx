@@ -35,7 +35,9 @@ export type EnergyIconName =
   | "more"
   | "settings"
   | "sidebar"
-  | "user";
+  | "user"
+  | "portfolio"
+  | "target";
 
 export function EnergyIcon({
   name,
@@ -118,6 +120,23 @@ export function EnergyIcon({
       return (
         <svg {...common}>
           <path d="M4 21V4h11v17M15 9h5v12M8 8h3M8 12h3M8 16h3M18 13h.01M18 17h.01" />
+        </svg>
+      );
+    case "portfolio":
+      return (
+        <svg {...common}>
+          <rect x="3" y="3" width="7" height="8" rx="1.5" />
+          <rect x="14" y="3" width="7" height="5" rx="1.5" />
+          <rect x="14" y="12" width="7" height="9" rx="1.5" />
+          <rect x="3" y="15" width="7" height="6" rx="1.5" />
+        </svg>
+      );
+    case "target":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="8.5" />
+          <circle cx="12" cy="12" r="4.5" />
+          <path d="M12 12h.01" />
         </svg>
       );
     case "floor":

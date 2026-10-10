@@ -94,6 +94,25 @@ export function rateOn(date: string, tariff: EnergyTariffScheduleRevisionDto | n
   return tariff?.entries.find(entry => localDate(entry.effective_from, timeZone) <= date && (!entry.effective_to || date < localDate(entry.effective_to, timeZone))) ?? null;
 }
 
+const WEEKDAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] as const;
+const minutesOf = (time: string) => { const [hour, minute] = time.split(":").map(Number); return (hour ?? 0) * 60 + (minute ?? 0); };
+
+/**
+ * The price of an average kWh on a date. With peak and off-peak prices, the day's energy is taken as spread evenly
+ * over its hours, so a weekday with 8 peak hours pays a third of its energy at the peak price; public holidays that
+ * are off-peak pay the off-peak price all day. An estimate, like the rest of the forecast.
+ */
+export function dayPriceOn(entry: NonNullable<ReturnType<typeof rateOn>>, date: string, isPublicHoliday: boolean): number {
+  const timeOfUse = entry.time_of_use;
+  if (!timeOfUse || (isPublicHoliday && timeOfUse.holidays_off_peak)) return entry.rate_per_kwh;
+  const weekday = WEEKDAY_NAMES[new Date(`${date}T00:00:00Z`).getUTCDay()]!;
+  const peakMinutes = timeOfUse.peak_windows
+    .filter(window => window.days.includes(weekday))
+    .reduce((sum, window) => sum + Math.max(0, minutesOf(window.to) - minutesOf(window.from)), 0);
+  const share = Math.min(1, peakMinutes / (24 * 60));
+  return entry.rate_per_kwh + (timeOfUse.peak_rate_per_kwh - entry.rate_per_kwh) * share;
+}
+
 /**
  * Next month's energy and cost: each day of the month counted as a normal open or closed day, using the published
  * operating hours, holidays and closures, priced with the saved electricity rate.
@@ -139,7 +158,8 @@ export function forecastNextMonth({ history, revision, tariff, timeZone, today }
     if (!entry) { missingRateFrom ??= date; continue; }
     currency = entry.currency; beforeTax = entry.rate_basis === "tax_exclusive";
     if (entry.tax) { taxName = entry.tax.name; taxPct = entry.tax.rate_pct; }
-    cost.low += day.low * entry.rate_per_kwh; cost.mid += day.kwh * entry.rate_per_kwh; cost.high += day.high * entry.rate_per_kwh;
+    const price = dayPriceOn(entry, date, context.kind === "public_holiday");
+    cost.low += day.low * price; cost.mid += day.kwh * price; cost.high += day.high * price;
   }
   return {
     month, days: expected, openDays, closedDays, named, typical,

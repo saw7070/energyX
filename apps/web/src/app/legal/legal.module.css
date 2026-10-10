@@ -1,0 +1,37 @@
+/* Public legal and trust pages: plain, readable, printable. */
+.page { min-height:100vh; background:#f6f8f5; color:#1f2a23; }
+.top { display:flex; align-items:center; justify-content:space-between; gap:16px; max-width:1040px; margin:0 auto; padding:20px 24px; }
+.brand { display:inline-flex; align-items:center; gap:8px; font-size:16px; font-weight:700; color:#173a2b; }
+.brand span { display:inline-flex; width:28px; height:28px; align-items:center; justify-content:center; border-radius:8px; background:#176b59; color:#fff; font-size:14px; }
+.signIn { font-size:13px; font-weight:600; color:#176b59; }
+.layout { display:grid; grid-template-columns:220px minmax(0,1fr); gap:32px; max-width:1040px; margin:0 auto; padding:8px 24px 64px; }
+.nav { position:sticky; top:24px; align-self:start; display:flex; flex-direction:column; gap:2px; }
+.nav a { padding:8px 12px; border-radius:8px; font-size:14px; color:#4d5a52; }
+.nav a:hover { background:#eaf0e9; color:#1f2a23; }
+.nav a[aria-current="page"] { background:#e2ede5; color:#173a2b; font-weight:600; }
+.doc { padding:36px 40px; border:1px solid #e1e6e0; border-radius:16px; background:#fff; }
+.doc h1 { font-size:28px; font-weight:700; letter-spacing:-.015em; }
+.summary { margin-top:8px; font-size:15px; line-height:1.6; color:#4d5a52; }
+.meta { margin-top:12px; font-size:12px; color:#7a8a80; }
+.doc h2 { margin-top:28px; font-size:17px; font-weight:600; }
+.doc p { margin-top:10px; font-size:14.5px; line-height:1.7; color:#2c3830; }
+.doc ul { margin-top:10px; padding-left:20px; list-style:disc; }
+.doc li { margin-top:6px; font-size:14.5px; line-height:1.65; color:#2c3830; }
+.blank { padding:1px 6px; border-radius:6px; background:#fdf1cf; color:#7a5310; font-weight:600; font-size:.92em; }
+.draft { margin-top:16px; padding:10px 14px; border:1px solid #f1dfae; border-radius:10px; background:#fdf8e8; font-size:13px; line-height:1.5; color:#6d4d0f; }
+.cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:14px; margin-top:20px; }
+.card { display:block; padding:18px; border:1px solid #e1e6e0; border-radius:14px; background:#fff; }
+.card:hover { border-color:#b8d0c1; }
+.card strong { display:block; font-size:16px; font-weight:600; color:#173a2b; }
+.card span { display:block; margin-top:6px; font-size:13px; line-height:1.55; color:#4d5a52; }
+.foot { max-width:1040px; margin:0 auto; padding:0 24px 32px; font-size:12px; color:#7a8a80; }
+@media (max-width:760px) {
+  .layout { grid-template-columns:minmax(0,1fr); }
+  .nav { position:static; flex-direction:row; flex-wrap:wrap; }
+  .doc { padding:24px 20px; }
+}
+@media print {
+  .top, .nav, .foot { display:none; }
+  .layout { display:block; padding:0; }
+  .doc { border:0; padding:0; }
+}

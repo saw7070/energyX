@@ -7,6 +7,7 @@ import { EnergyIcon } from "./icons";
 import { dateRange } from "./operating-hours-view";
 import { electricityRateMessages } from "./operating-policy-messages";
 import styles from "./operating-hours-view.module.css";
+import { withCurrency } from "./money";
 
 type Status = "published" | "draft" | "saved";
 const DAY_MS = 86_400_000;
@@ -28,7 +29,17 @@ export function withTax(entry: Pick<EnergyTariffScheduleEntryDto, "rate_per_kwh"
   if (entry.rate_basis === "tax_inclusive") return { beforeTax: entry.tax ? entry.rate_per_kwh / (1 + entry.tax.rate_pct / 100) : null, afterTax: entry.rate_per_kwh, note: tax ? t("note.including", tax) : t("note.includingTax") };
   return { beforeTax: null, afterTax: null, note: t("note.notStated") };
 }
-const money = (currency: string, value: number, digits = 4, locale: EnergyIqLocale = "en") => `${currency} ${value.toLocaleString(intlLocale(locale), { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+/** "Peak hours: Mon–Fri, 14:00–22:00 · public holidays off-peak", from consecutive days as a range. */
+function peakHoursText(timeOfUse: NonNullable<EnergyTariffScheduleEntryDto["time_of_use"]>, t: ReturnType<typeof translatorFor<keyof typeof electricityRateMessages.en>>): string {
+  return timeOfUse.peak_windows.map(window => {
+    const days = window.days.map(day => t(`dayShort.${day}`));
+    const order = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+    const consecutive = window.days.every((day, index) => index === 0 || order.indexOf(day) === order.indexOf(window.days[index - 1]!) + 1);
+    const dayText = consecutive && days.length > 2 ? `${days[0]}–${days.at(-1)}` : days.join(", ");
+    return t("peakWhen", { days: dayText, from: window.from, to: window.to });
+  }).join(" · ") + (timeOfUse.holidays_off_peak ? ` · ${t("holidaysOff")}` : "");
+}
+const money = (currency: string, value: number, digits = 4, locale: EnergyIqLocale = "en") => withCurrency(currency, value.toLocaleString(intlLocale(locale), { minimumFractionDigits: digits, maximumFractionDigits: digits }));
 
 export function ElectricityRateView({ revision, status, action, ownerName, timezone, onAddNext }: {
   revision: EnergyTariffScheduleRevisionDto; status: Status; action?: ReactNode; ownerName: (owner: EnergyTariffScheduleEntryDto["owner"]) => string; timezone: string; onAddNext?: () => void;
@@ -57,7 +68,11 @@ export function ElectricityRateView({ revision, status, action, ownerName, timez
 
     <div className={styles.rateHero}>
       <span>{state(period) === "current" ? t("currentRate") : t("latestRate")}</span>
-      <strong>{cost(entry.rate_per_kwh)}<small> {t("perKwhUnit")}</small></strong>
+      {entry.time_of_use
+        ? <strong>{t("peakOffPeak", { peak: cost(entry.time_of_use.peak_rate_per_kwh), offPeak: cost(entry.rate_per_kwh) })}<small> {t("perKwhUnit")}</small></strong>
+        : <strong>{cost(entry.rate_per_kwh)}<small> {t("perKwhUnit")}</small></strong>}
+      {entry.time_of_use && <p>{peakHoursText(entry.time_of_use, t)}</p>}
+      {entry.plan && <p>{t("plan", { plan: entry.plan.label })}</p>}
       <p>{price.note}{price.afterTax !== null && entry.rate_basis === "tax_exclusive" ? ` · ${t("priceWithTax", { price: cost(price.afterTax), tax: entry.tax!.name })}` : ""}{price.beforeTax !== null && entry.rate_basis === "tax_inclusive" ? ` · ${t("priceBeforeTax", { price: cost(price.beforeTax), tax: entry.tax!.name })}` : ""}</p>
     </div>
 
@@ -66,6 +81,12 @@ export function ElectricityRateView({ revision, status, action, ownerName, timez
       <div className={styles.tile}><span>{t("inEffect")}</span><strong>{period.text}</strong><small>{daysLeft === null ? t("noEndDate") : daysLeft < 0 ? t(daysLeft === -1 ? "endedAgo.one" : "endedAgo.other", { count: -daysLeft }) : daysLeft === 0 ? t("endsToday") : t(daysLeft === 1 ? "endsIn.one" : "endsIn.other", { count: daysLeft })}</small></div>
       <div className={styles.tile}><span>{t("exampleCost")}</span><strong>{t("example", { kwh: example.toLocaleString(intlLocale(locale)), price: cost(entry.rate_per_kwh * example, 2) })}</strong><small>{price.afterTax !== null && entry.rate_basis === "tax_exclusive" ? t("exampleWithTax", { price: cost(price.afterTax * example, 2), tax: entry.tax!.name }) : price.note}</small></div>
     </div>
+
+    {entry.fixed_charges?.length ? <section className={styles.special} aria-label={t("fixedTitle")}>
+      <header><div><h4>{t("fixedTitle")}</h4></div></header>
+      <ul>{entry.fixed_charges.map(charge => <li key={charge.label}><span className={styles.what}><strong>{charge.label}</strong>
+        <small>{t(`fixed.${charge.unit}`, { amount: money(entry.currency, charge.amount, 2, locale) })}</small></span></li>)}</ul>
+    </section> : null}
 
     {daysLeft !== null && daysLeft <= 30 && <div className={styles.alert} role="note"><EnergyIcon name="alert" /><p><strong>{t("noRateAfter", { date: dateRange(last.to!, last.to!, locale) })}</strong> {t("addNextHint")}</p>{onAddNext && <button type="button" className={styles.alertAction} onClick={onAddNext}>{t("addNextRate")}</button>}</div>}
 
@@ -76,7 +97,9 @@ export function ElectricityRateView({ revision, status, action, ownerName, timez
         const tax = withTax(item, locale);
         return <li key={item.id} className={tag === "current" ? styles.current : undefined}>
           <span className={styles.when}>{range.text}</span>
-          <span className={styles.what}><strong>{t("perKwh", { price: money(item.currency, item.rate_per_kwh, 4, locale) })}</strong><small>{tax.note} · {ownerName(item.owner)} · {t(`state.${tag}`)}</small></span>
+          <span className={styles.what}><strong>{item.time_of_use
+            ? t("peakOffPeak", { peak: money(item.currency, item.time_of_use.peak_rate_per_kwh, 4, locale), offPeak: money(item.currency, item.rate_per_kwh, 4, locale) })
+            : t("perKwh", { price: money(item.currency, item.rate_per_kwh, 4, locale) })}</strong><small>{tax.note} · {ownerName(item.owner)} · {t(`state.${tag}`)}</small></span>
         </li>;
       })}</ul>
     </section>

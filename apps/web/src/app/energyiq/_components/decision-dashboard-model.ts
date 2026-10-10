@@ -1,4 +1,5 @@
 import type { EnergyScopeAnalysisDto } from "../../../lib/config-api";
+import { withCurrency } from "./money";
 
 export type DashboardInsight = {
   id: string;
@@ -183,9 +184,7 @@ function buildOperatingMix(
 }
 
 function formatCurrencyAmount(amount: number, currency: string, digits: number): string {
-  const code = currency.trim().toUpperCase();
-  const value = formatNumber(amount, digits);
-  return code === "SGD" ? `S$${value}` : `${code} ${value}`;
+  return withCurrency(currency, formatNumber(amount, digits));
 }
 
 function buildTimeProfile(

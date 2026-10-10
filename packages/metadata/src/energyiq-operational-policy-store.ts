@@ -4,6 +4,27 @@ export type EnergyIqPolicyOwner =
   | { kind: "project" }
   | { kind: "scope"; scope_id: string };
 
+/**
+ * Time-of-use pricing: rate_per_kwh is the off-peak price and peak_rate_per_kwh applies inside the peak windows,
+ * which are local times at the site. Public holidays in the operating calendar are off-peak all day when
+ * holidays_off_peak is set.
+ */
+export type EnergyIqTariffTimeOfUse = {
+  peak_rate_per_kwh: number;
+  peak_windows: Array<{ days: EnergyIqOperatingDay[]; from: string; to: string }>;
+  holidays_off_peak: boolean;
+};
+
+/** A charge that is not per kWh, kept with the rate for reference. Cost figures do not include it. */
+export type EnergyIqTariffFixedCharge = {
+  label: string;
+  amount: number;
+  unit: "per_month" | "per_kw_month";
+};
+
+/** The published tariff a rate was taken from, e.g. "TNB Low voltage, Time of Use". */
+export type EnergyIqTariffPlan = { id: string; label: string; source?: string };
+
 export type EnergyIqTariffScheduleEntry = {
   id: string;
   owner: EnergyIqPolicyOwner;
@@ -13,6 +34,9 @@ export type EnergyIqTariffScheduleEntry = {
   rate_per_kwh: number;
   rate_basis?: "tax_inclusive" | "tax_exclusive";
   tax?: { name: string; rate_pct: number };
+  time_of_use?: EnergyIqTariffTimeOfUse;
+  fixed_charges?: EnergyIqTariffFixedCharge[];
+  plan?: EnergyIqTariffPlan;
 };
 
 export type EnergyIqTariffScheduleRevision = {
@@ -163,6 +187,8 @@ export type EnergyIqTariffEvaluation =
       allocations: Array<{
         from: string;
         to: string;
+        /** Present for time-of-use rates: which part of the day this usage and price belong to. */
+        period?: "peak" | "off_peak";
         rate_per_kwh: number;
         rate_basis?: "tax_inclusive" | "tax_exclusive";
         tax?: { name: string; rate_pct: number };
@@ -696,6 +722,13 @@ export class EnergyIqOperationalPolicyStore {
         period,
         intervals,
         versionId: versions.tariff_schedule_version,
+        timezone: requiredString(this.requireProject(input.project_id), "timezone"),
+        publicHolidays: () => this.publicHolidayDates({
+          projectId: input.project_id,
+          scopeLineage,
+          period,
+          versionId: versions.business_calendar_version,
+        }),
       }),
       operating: this.evaluateOperating({
         projectId: input.project_id,
@@ -707,12 +740,40 @@ export class EnergyIqOperationalPolicyStore {
     };
   }
 
+  /** Local dates the operating calendar marks as public holidays. Dates it does not cover simply are not holidays. */
+  private publicHolidayDates(input: {
+    projectId: string;
+    scopeLineage: string[];
+    period: { fromMs: number; toMs: number };
+    versionId: string | undefined;
+  }): Set<string> {
+    if (!input.versionId) return new Set();
+    const row = this.db.prepare(`
+      SELECT * FROM energyiq_operating_calendar_revisions
+      WHERE version_id = ? AND project_id = ?
+    `).get(input.versionId, input.projectId);
+    if (!isRecord(row)) return new Set();
+    const revision = mapOperatingCalendarRevision(row);
+    const dates = new Set<string>();
+    const firstDate = localDateAtInstant(input.period.fromMs, revision.timezone);
+    const lastDate = localDateAtInstant(input.period.toMs - 1, revision.timezone);
+    for (const date of localDateRange(firstDate, lastDate)) {
+      const entry = resolveOperatingCalendarEntryForDate({ entries: revision.entries, scopeLineage: input.scopeLineage, date });
+      if (entry?.exceptions?.some((exception) => exception.date === date && exception.classification === "public_holiday")) {
+        dates.add(date);
+      }
+    }
+    return dates;
+  }
+
   private evaluateTariff(input: {
     projectId: string;
     scopeLineage: string[];
     period: { fromMs: number; toMs: number };
     intervals: EnergyIqAnalysisInterval[];
     versionId: string | undefined;
+    timezone: string;
+    publicHolidays: () => Set<string>;
   }): EnergyIqTariffEvaluation {
     if (!input.versionId) {
       return unavailable(
@@ -761,30 +822,51 @@ export class EnergyIqOperationalPolicyStore {
       );
     }
 
-    const allocations = segments.map((segment) => {
+    let holidays: Set<string> | undefined;
+    const allocations = segments.flatMap((segment) => {
+      const timeOfUse = segment.entry.time_of_use;
+      const peakWindows = timeOfUse
+        ? resolvePeakWindows({
+            timeOfUse,
+            fromMs: segment.fromMs,
+            toMs: segment.toMs,
+            timezone: input.timezone,
+            holidays: timeOfUse.holidays_off_peak ? (holidays ??= input.publicHolidays()) : new Set(),
+          })
+        : [];
       let usage = 0;
+      let peakUsage = 0;
       for (const interval of input.intervals) {
         const intervalFrom = Date.parse(interval.start);
         const intervalTo = Date.parse(interval.end_exclusive);
-        const overlapMs = Math.max(0, Math.min(segment.toMs, intervalTo) - Math.max(segment.fromMs, intervalFrom));
-        if (overlapMs > 0) {
-          usage += interval.usage_kwh * (overlapMs / (intervalTo - intervalFrom));
-        }
+        const overlapFrom = Math.max(segment.fromMs, intervalFrom);
+        const overlapTo = Math.min(segment.toMs, intervalTo);
+        if (overlapTo <= overlapFrom) continue;
+        const share = interval.usage_kwh / (intervalTo - intervalFrom);
+        usage += share * (overlapTo - overlapFrom);
+        if (timeOfUse) peakUsage += share * overlapWithWindows(peakWindows, overlapFrom, overlapTo);
       }
-      const roundedUsage = round(usage);
-      const taxRates = deriveTaxRates(segment.entry);
-      return {
-        from: new Date(segment.fromMs).toISOString(),
-        to: new Date(segment.toMs).toISOString(),
-        rate_per_kwh: segment.entry.rate_per_kwh,
-        ...(segment.entry.rate_basis ? {
-          rate_basis: segment.entry.rate_basis,
-          tax: segment.entry.tax,
-          ...taxRates,
-        } : {}),
-        usage_kwh: roundedUsage,
-        cost: round(roundedUsage * segment.entry.rate_per_kwh),
+      const allocation = (rate: number, usageKwh: number, period?: "peak" | "off_peak") => {
+        const roundedUsage = round(usageKwh);
+        return {
+          from: new Date(segment.fromMs).toISOString(),
+          to: new Date(segment.toMs).toISOString(),
+          ...(period ? { period } : {}),
+          rate_per_kwh: rate,
+          ...(segment.entry.rate_basis ? {
+            rate_basis: segment.entry.rate_basis,
+            tax: segment.entry.tax,
+            ...deriveTaxRates(segment.entry, rate),
+          } : {}),
+          usage_kwh: roundedUsage,
+          cost: round(roundedUsage * rate),
+        };
       };
+      if (!timeOfUse) return [allocation(segment.entry.rate_per_kwh, usage)];
+      return [
+        allocation(timeOfUse.peak_rate_per_kwh, peakUsage, "peak"),
+        allocation(segment.entry.rate_per_kwh, Math.max(0, usage - peakUsage), "off_peak"),
+      ];
     });
 
     return {
@@ -997,14 +1079,26 @@ const canonicalizeTariffEntries = (entries: EnergyIqTariffScheduleEntry[]): Ener
     if (!/^[A-Z]{3}$/.test(currency)) {
       throw new Error(`ENERGYIQ_TARIFF_CURRENCY_INVALID:${entry.id}`);
     }
+    const { time_of_use: timeOfUse, fixed_charges: fixedCharges, plan, ...rest } = entry;
     return {
-      ...entry,
+      ...rest,
       id: requiredText(entry.id, "tariff entry id"),
       owner: canonicalizeOwner(entry.owner),
       effective_from: new Date(fromMs).toISOString(),
       ...(toMs !== undefined ? { effective_to: new Date(toMs).toISOString() } : {}),
       currency,
       ...(entry.rate_basis && tax ? { rate_basis: entry.rate_basis, tax } : {}),
+      ...(timeOfUse === undefined ? {} : { time_of_use: canonicalizeTimeOfUse(timeOfUse, entry.id) }),
+      ...(fixedCharges === undefined || fixedCharges.length === 0
+        ? {}
+        : { fixed_charges: fixedCharges.map((charge, index) => canonicalizeFixedCharge(charge, `${entry.id}:${index}`)) }),
+      ...(plan === undefined ? {} : {
+        plan: {
+          id: requiredText(plan.id, `tariff:${entry.id}:plan:id`),
+          label: requiredText(plan.label, `tariff:${entry.id}:plan:label`),
+          ...(plan.source?.trim() ? { source: plan.source.trim() } : {}),
+        },
+      }),
     };
   });
 
@@ -1216,6 +1310,97 @@ const resolveTariffSegments = (input: {
   return segments;
 };
 
+const canonicalizeTimeOfUse = (value: EnergyIqTariffTimeOfUse, entryId: string): EnergyIqTariffTimeOfUse => {
+  if (!isRecord(value)) throw new Error(`ENERGYIQ_TARIFF_TIME_OF_USE_INVALID:${entryId}`);
+  if (!Number.isFinite(value.peak_rate_per_kwh) || value.peak_rate_per_kwh < 0) {
+    throw new Error(`ENERGYIQ_TARIFF_PEAK_RATE_INVALID:${entryId}`);
+  }
+  if (!Array.isArray(value.peak_windows) || value.peak_windows.length === 0) {
+    throw new Error(`ENERGYIQ_TARIFF_PEAK_WINDOWS_REQUIRED:${entryId}`);
+  }
+  const peakWindows = value.peak_windows.map((window, index) => {
+    const field = `tariff:${entryId}:peak_windows:${index}`;
+    if (!Array.isArray(window.days) || window.days.length === 0
+      || window.days.some((day) => !OPERATING_DAYS.includes(day))) {
+      throw new Error(`ENERGYIQ_TARIFF_PEAK_DAYS_INVALID:${entryId}`);
+    }
+    const fromMinutes = parseLocalTime(window.from, `${field}:from`);
+    const toMinutes = parseLocalTime(window.to, `${field}:to`, true);
+    if (toMinutes <= fromMinutes) throw new Error(`ENERGYIQ_TARIFF_PEAK_WINDOW_INVALID:${entryId}`);
+    return {
+      days: OPERATING_DAYS.filter((day) => window.days.includes(day)),
+      from: formatMinutes(fromMinutes),
+      to: formatMinutes(toMinutes),
+    };
+  });
+  return {
+    peak_rate_per_kwh: value.peak_rate_per_kwh,
+    peak_windows: peakWindows,
+    holidays_off_peak: value.holidays_off_peak === true,
+  };
+};
+
+const canonicalizeFixedCharge = (value: EnergyIqTariffFixedCharge, field: string): EnergyIqTariffFixedCharge => {
+  if (!isRecord(value) || !Number.isFinite(value.amount) || value.amount < 0
+    || (value.unit !== "per_month" && value.unit !== "per_kw_month")) {
+    throw new Error(`ENERGYIQ_TARIFF_FIXED_CHARGE_INVALID:${field}`);
+  }
+  return { label: requiredText(value.label, `tariff:${field}:label`), amount: value.amount, unit: value.unit };
+};
+
+/** The peak windows inside [fromMs, toMs) as instants, sorted and merged. Holidays in `holidays` have none. */
+const resolvePeakWindows = (input: {
+  timeOfUse: EnergyIqTariffTimeOfUse;
+  fromMs: number;
+  toMs: number;
+  timezone: string;
+  holidays: Set<string>;
+}): EffectiveOperatingWindow[] => {
+  const windows: EffectiveOperatingWindow[] = [];
+  const firstDate = localDateAtInstant(input.fromMs, input.timezone);
+  const lastDate = localDateAtInstant(input.toMs - 1, input.timezone);
+  for (const date of localDateRange(firstDate, lastDate)) {
+    if (input.holidays.has(date)) continue;
+    const day = dayAtLocalDate(date);
+    for (const window of input.timeOfUse.peak_windows) {
+      if (!window.days.includes(day)) continue;
+      const fromMs = localDateTimeToInstant(date, window.from, input.timezone);
+      const toMs = window.to === "24:00"
+        ? localDateTimeToInstant(addLocalDays(date, 1), "00:00", input.timezone)
+        : localDateTimeToInstant(date, window.to, input.timezone);
+      const clippedFrom = Math.max(fromMs, input.fromMs);
+      const clippedTo = Math.min(toMs, input.toMs);
+      if (clippedTo > clippedFrom) windows.push({ fromMs: clippedFrom, toMs: clippedTo });
+    }
+  }
+  windows.sort((left, right) => left.fromMs - right.fromMs);
+  const merged: EffectiveOperatingWindow[] = [];
+  for (const window of windows) {
+    const last = merged[merged.length - 1];
+    if (last && window.fromMs <= last.toMs) last.toMs = Math.max(last.toMs, window.toMs);
+    else merged.push({ ...window });
+  }
+  return merged;
+};
+
+/** Milliseconds of [fromMs, toMs) that fall inside the sorted, non-overlapping windows. */
+const overlapWithWindows = (windows: EffectiveOperatingWindow[], fromMs: number, toMs: number): number => {
+  let low = 0;
+  let high = windows.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if ((windows[middle] as EffectiveOperatingWindow).toMs <= fromMs) low = middle + 1;
+    else high = middle;
+  }
+  let total = 0;
+  for (let index = low; index < windows.length; index += 1) {
+    const window = windows[index] as EffectiveOperatingWindow;
+    if (window.fromMs >= toMs) break;
+    total += Math.max(0, Math.min(window.toMs, toMs) - Math.max(window.fromMs, fromMs));
+  }
+  return total;
+};
+
 const resolveOperatingWindows = (input: {
   revision: EnergyIqOperatingCalendarRevision;
   scopeLineage: string[];
@@ -1278,7 +1463,7 @@ const resolveOperatingCalendarExceptions = (input: {
   return exceptions;
 };
 
-const deriveTaxRates = (entry: EnergyIqTariffScheduleEntry): {
+const deriveTaxRates = (entry: EnergyIqTariffScheduleEntry, rate = entry.rate_per_kwh): {
   tax_inclusive_rate_per_kwh: number;
   tax_exclusive_rate_per_kwh: number;
 } | undefined => {
@@ -1286,12 +1471,12 @@ const deriveTaxRates = (entry: EnergyIqTariffScheduleEntry): {
   const multiplier = 1 + entry.tax.rate_pct / 100;
   return entry.rate_basis === "tax_inclusive"
     ? {
-        tax_inclusive_rate_per_kwh: entry.rate_per_kwh,
-        tax_exclusive_rate_per_kwh: round(entry.rate_per_kwh / multiplier),
+        tax_inclusive_rate_per_kwh: rate,
+        tax_exclusive_rate_per_kwh: round(rate / multiplier),
       }
     : {
-        tax_inclusive_rate_per_kwh: round(entry.rate_per_kwh * multiplier),
-        tax_exclusive_rate_per_kwh: entry.rate_per_kwh,
+        tax_inclusive_rate_per_kwh: round(rate * multiplier),
+        tax_exclusive_rate_per_kwh: rate,
       };
 };
 

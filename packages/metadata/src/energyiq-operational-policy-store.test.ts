@@ -131,6 +131,138 @@ describe("EnergyIqOperationalPolicyStore", () => {
     }
   });
 
+  it("prices time-of-use rates by local peak hours, keeping weekends and calendar public holidays off-peak", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-time-of-use-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      metadata.workspaces.upsert({ id: "workspace-my", owner_user_id: "dev-user", name: "Malaysia client", kind: "customer" });
+      metadata.energyIq.upsertProject({
+        id: "project-my", workspace_id: "workspace-my", name: "KL office", status: "published",
+        timezone: "Asia/Kuala_Lumpur", root_scope_id: "project-my-root",
+      });
+      metadata.energyIq.upsertProjectNode({ id: "project-my-root", project_id: "project-my", name: "KL office", node_type: "project" });
+      const revision = metadata.energyIq.operationalPolicy.publishTariffSchedule({
+        version_id: "tariff-tou",
+        project_id: "project-my",
+        published_by: "dev-user",
+        activate: true,
+        entries: [{
+          id: "tnb-lv-tou",
+          owner: { kind: "project" },
+          effective_from: "2026-01-01T00:00:00+08:00",
+          currency: "myr",
+          rate_per_kwh: 0.4808,
+          time_of_use: {
+            peak_rate_per_kwh: 0.5217,
+            peak_windows: [{ days: ["friday", "monday", "tuesday", "wednesday", "thursday"], from: "14:00", to: "22:00" }],
+            holidays_off_peak: true,
+          },
+          fixed_charges: [{ label: "Retail charge", amount: 20, unit: "per_month" }],
+          plan: { id: "my-tnb-lv-tou", label: "TNB Low voltage, Time of Use", source: "TNB RP4 schedule" },
+        }],
+      });
+      // Monday 31 August is National Day.
+      metadata.energyIq.operationalPolicy.publishOperatingCalendar({
+        version_id: "calendar-my",
+        project_id: "project-my",
+        published_by: "dev-user",
+        activate: true,
+        entries: [{
+          id: "office-hours",
+          owner: { kind: "project" },
+          effective_from: "2026-08-01",
+          weekly: operatingWeek("09:00", "18:00"),
+          exceptions: [{ date: "2026-08-31", operating: [], label: "National Day", classification: "public_holiday" }],
+        }],
+      });
+
+      const intervals = [
+        // Friday 13:00–15:00: one hour off-peak, one hour peak.
+        { start: "2026-08-28T13:00:00+08:00", end_exclusive: "2026-08-28T15:00:00+08:00", usage_kwh: 4 },
+        // Saturday afternoon: weekend, off-peak.
+        { start: "2026-08-29T15:00:00+08:00", end_exclusive: "2026-08-29T16:00:00+08:00", usage_kwh: 2 },
+        // National Day afternoon: public holiday, off-peak.
+        { start: "2026-08-31T15:00:00+08:00", end_exclusive: "2026-08-31T16:00:00+08:00", usage_kwh: 2 },
+        // Tuesday 21:30–22:30: half peak, half off-peak.
+        { start: "2026-09-01T21:30:00+08:00", end_exclusive: "2026-09-01T22:30:00+08:00", usage_kwh: 2 },
+      ];
+      const evaluate = () => metadata.energyIq.operationalPolicy.evaluateAnalysisPolicy({
+        project_id: "project-my",
+        scope_id: "project-my-root",
+        period: { from: "2026-08-28T00:00:00+08:00", to: "2026-09-02T00:00:00+08:00" },
+        intervals,
+        policy_source: { mode: "active" },
+      });
+
+      expect(revision.entries[0]).toMatchObject({
+        currency: "MYR",
+        time_of_use: { peak_windows: [{ days: ["monday", "tuesday", "wednesday", "thursday", "friday"], from: "14:00", to: "22:00" }] },
+        fixed_charges: [{ label: "Retail charge", amount: 20, unit: "per_month" }],
+        plan: { id: "my-tnb-lv-tou", label: "TNB Low voltage, Time of Use", source: "TNB RP4 schedule" },
+      });
+      expect(evaluate().tariff).toEqual({
+        status: "available",
+        currency: "MYR",
+        tariff_schedule_version: "tariff-tou",
+        total_cost: 4.9307,
+        allocations: [
+          { from: "2026-08-27T16:00:00.000Z", to: "2026-09-01T16:00:00.000Z", period: "peak", rate_per_kwh: 0.5217, usage_kwh: 3, cost: 1.5651 },
+          { from: "2026-08-27T16:00:00.000Z", to: "2026-09-01T16:00:00.000Z", period: "off_peak", rate_per_kwh: 0.4808, usage_kwh: 7, cost: 3.3656 },
+        ],
+      });
+
+      // Without holidays_off_peak the holiday afternoon is an ordinary Monday peak hour.
+      metadata.energyIq.operationalPolicy.publishTariffSchedule({
+        version_id: "tariff-tou-no-holidays",
+        project_id: "project-my",
+        published_by: "dev-user",
+        activate: true,
+        entries: [{
+          id: "tnb-lv-tou",
+          owner: { kind: "project" },
+          effective_from: "2026-01-01T00:00:00+08:00",
+          currency: "MYR",
+          rate_per_kwh: 0.4808,
+          time_of_use: { peak_rate_per_kwh: 0.5217, peak_windows: [{ days: ["monday", "tuesday", "wednesday", "thursday", "friday"], from: "14:00", to: "22:00" }], holidays_off_peak: false },
+        }],
+      });
+      const result = evaluate().tariff;
+      expect(result.status === "available" && result.allocations.map((allocation) => [allocation.period, allocation.usage_kwh]))
+        .toEqual([["peak", 5], ["off_peak", 5]]);
+
+      expect(() => metadata.energyIq.operationalPolicy.publishTariffSchedule({
+        version_id: "tariff-bad",
+        project_id: "project-my",
+        published_by: "dev-user",
+        entries: [{
+          id: "bad", owner: { kind: "project" }, effective_from: "2026-01-01T00:00:00+08:00", currency: "MYR", rate_per_kwh: 0.48,
+          time_of_use: { peak_rate_per_kwh: 0.52, peak_windows: [{ days: ["monday"], from: "22:00", to: "14:00" }], holidays_off_peak: true },
+        }],
+      })).toThrow("ENERGYIQ_TARIFF_PEAK_WINDOW_INVALID");
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("remembers where a project is without setup saves forgetting it", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-project-region-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      metadata.workspaces.upsert({ id: "workspace-r", owner_user_id: "dev-user", name: "Client", kind: "customer" });
+      metadata.energyIq.upsertProject({ id: "site", workspace_id: "workspace-r", name: "Site", status: "draft", timezone: "Asia/Kuala_Lumpur" });
+      expect(metadata.energyIq.getProject("site").region).toBeUndefined();
+      expect(metadata.energyIq.setProjectRegion("site", { country: "MY", state: "sgr" }).region).toEqual({ country: "MY", state: "SGR" });
+      metadata.energyIq.upsertProject({ id: "site", workspace_id: "workspace-r", name: "Site renamed", status: "draft", timezone: "Asia/Kuala_Lumpur" });
+      expect(metadata.energyIq.getProject("site").region).toEqual({ country: "MY", state: "SGR" });
+      expect(() => metadata.energyIq.setProjectRegion("site", { country: "SG", state: "SGR" })).toThrow("ENERGYIQ_PROJECT_REGION_STATE_INVALID");
+      expect(metadata.energyIq.setProjectRegion("site", null).region).toBeUndefined();
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("classifies Operating and Standby usage in the Project timezone with Scope inheritance and calendar exceptions", () => {
     const root = mkdtempSync(join(tmpdir(), "energyiq-operating-calendar-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });

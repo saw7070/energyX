@@ -21,6 +21,7 @@ import { DayPicker } from "./day-picker";
 import { dayKindLabel, type DayKind as CalendarDayKind } from "./day-context";
 import { TypeHint } from "./type-hint";
 import { siteBreakdown, UNMETERED_KEY } from "./site-total";
+import { withCurrency } from "./money";
 
 // The forecast's three colours: what really happened (green), next month's working days (blue) and its closed
 // days (pale blue, striped like the after-hours band in step 2), so past, working and closed never look alike.
@@ -74,7 +75,7 @@ export function DecisionSummary(props: StoryInput) {
   const t = useMessages(storyMessages);
   const story = useMemo(() => buildStory({ data: storyData, days, anomalies, floor, rate }, locale), [storyData, days, anomalies, floor, rate, locale]);
   const { data } = props;
-  const money = (amount: number | null) => amount == null || !story.currency ? "—" : `${story.currency} ${Math.round(amount).toLocaleString("en-SG")}`;
+  const money = (amount: number | null) => amount == null || !story.currency ? "—" : withCurrency(story.currency, Math.round(amount).toLocaleString("en-SG"));
   const first = story.plan.find(item => item.counted);
   // Health check can send the reader to one day, hour by hour, in step 2.
   const [inspectDay, setInspectDay] = useState<{ date: string; at: number } | null>(null);
@@ -95,6 +96,13 @@ export function DecisionSummary(props: StoryInput) {
             ? rich(t("summary.headlineCost", { days: dates.length }), { name: data.projectName, cost: <Strong>{money(story.periodCost)}</Strong>, closed: <Strong tone="amber">{money(story.closedCost)} ({num(story.closedShare * 100, 0)}%)</Strong> })
             : rich(t("summary.headlineKwh", { days: dates.length }), { name: data.projectName, kwh: <Strong>{num(story.split.total, 0)} kWh</Strong>, share: <Strong tone="amber">{num(story.closedShare * 100, 0)}%</Strong> })}
         </h2>
+        {story.periodCost != null && story.project.cost?.peak && story.project.cost.amount > 0 && story.project.usageKwh
+          ? <p className="mt-2 max-w-3xl text-sm text-slate-600">{t("summary.peak", {
+              cost: money(story.project.cost.peak.cost),
+              costShare: num(story.project.cost.peak.cost / story.project.cost.amount * 100, 0),
+              kwhShare: num(story.project.cost.peak.usageKwh / story.project.usageKwh * 100, 0),
+            })}</p>
+          : null}
       </div>
       <div className="mt-5 grid gap-px border-y border-slate-200 bg-slate-200/70 md:grid-cols-3">
         <Step index={1} label={t(story.periodCost != null ? "step.spent" : "step.used", { days: dates.length })} value={story.periodCost != null ? money(story.periodCost) : `${num(story.split.total, 0)} kWh`}

@@ -665,6 +665,8 @@ export type EnergyScopeAnalysis = {
     allocations: Array<{
       from: string;
       to: string;
+      /** Time-of-use rates split each period into peak and off-peak usage, each at its own price. */
+      period?: "peak" | "off_peak";
       ratePerKwh: number;
       rateBasis?: "tax_inclusive" | "tax_exclusive";
       tax?: { name: string; ratePct: number };
@@ -1323,7 +1325,32 @@ export const executeEnergyOverviewHeadlineProjection = async (input: {
   metadataStore: MetadataStore;
   context: EnergyQueryContext;
   databasePath?: string;
-}): Promise<EnergyOverviewHeadlineProjection> => {
+}): Promise<EnergyOverviewHeadlineProjection> => (await readOverviewHeadlineWithPolicy(input)).headline;
+
+/**
+ * The Overview headline plus what the portfolio, budgets and overnight checks need from the same official read:
+ * the after-hours split against the release-pinned hours, and the official intervals behind the total.
+ */
+export type EnergySiteFiguresProjection = {
+  headline: EnergyOverviewHeadlineProjection;
+  offHours: EnergyScopeAnalysis["offHours"];
+  intervals: EnergyIqAnalysisInterval[];
+};
+
+export const executeEnergySiteFiguresProjection = async (input: {
+  metadataStore: MetadataStore;
+  context: EnergyQueryContext;
+  databasePath?: string;
+}): Promise<EnergySiteFiguresProjection> => {
+  const { headline, operating, intervals } = await readOverviewHeadlineWithPolicy(input);
+  return { headline, offHours: mapOperatingEvaluation(operating, headline.summary.usageKwh), intervals };
+};
+
+const readOverviewHeadlineWithPolicy = async (input: {
+  metadataStore: MetadataStore;
+  context: EnergyQueryContext;
+  databasePath?: string;
+}): Promise<{ headline: EnergyOverviewHeadlineProjection; operating: EnergyIqOperatingEvaluation; intervals: EnergyIqAnalysisInterval[] }> => {
   const publishedMeterRoute = resolveEnergyPublishedMeterRoute({
     metadataStore: input.metadataStore,
     projectId: input.context.projectId,
@@ -1357,7 +1384,7 @@ export const executeEnergyOverviewHeadlineProjection = async (input: {
     scopeId: input.context.scopeId,
     intervals: read.intervals,
   });
-  return buildEnergyOverviewHeadlineProjection({
+  const headline = buildEnergyOverviewHeadlineProjection({
     from: input.context.from,
     to: input.context.to,
     usageKwh: read.usageKwh,
@@ -1376,6 +1403,7 @@ export const executeEnergyOverviewHeadlineProjection = async (input: {
     cost: mapTariffEvaluation(operationalPolicy.tariff),
     immediateChildScopeCount: hierarchy.filter((node) => node.parent_id === selectedNode.id).length,
   });
+  return { headline, operating: operationalPolicy.operating, intervals: read.intervals };
 };
 
 export type EnergyDailyTotalsProjection = {
@@ -3321,6 +3349,7 @@ const mapTariffEvaluation = (
       allocations: evaluation.allocations.map((allocation) => ({
         from: allocation.from,
         to: allocation.to,
+        ...(allocation.period ? { period: allocation.period } : {}),
         ratePerKwh: allocation.rate_per_kwh,
         ...(allocation.rate_basis ? { rateBasis: allocation.rate_basis } : {}),
         ...(allocation.tax ? {
@@ -3866,6 +3895,12 @@ const dailyEstimatedCost = (input: {
     Date.parse(allocation.from) <= Date.parse(input.from)
     && Date.parse(allocation.to) >= Date.parse(input.to),
   );
+  if (coveringAllocations.some((allocation) => allocation.period)) {
+    return {
+      status: "unavailable",
+      reason: "Peak and off-peak prices both apply within the day; the period total prices each hour.",
+    };
+  }
   if (coveringAllocations.length !== 1) {
     return {
       status: "unavailable",

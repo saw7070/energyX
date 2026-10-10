@@ -87,7 +87,9 @@ describe("reports library and energy advisor in other languages", () => {
   it("asks for a new project name in Malay", async () => {
     await render("ms", <CreateProjectDialog workspaceName="School FM" onCreated={async () => {}} onClose={() => {}} />);
     expect(container.querySelector("dialog")?.getAttribute("aria-label")).toBe("Cipta projek");
-    expect(container.textContent).toContain("Dicipta dalam School FM · waktu Singapura.");
+    expect(container.textContent).toContain("Di manakah tapak ini?");
+    expect(container.textContent).toContain("Singapura");
+    expect(container.textContent).toContain("Malaysia");
     expect(container.querySelector("input")?.getAttribute("placeholder")).toBe("Contohnya, Harbour Office");
   });
 });

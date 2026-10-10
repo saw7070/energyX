@@ -176,7 +176,7 @@ describe("EnergyX Shell Project navigation", () => {
     mockedAccess.access = { ...mockedAccess.access!, role: "user" };
     mockedAccess.activeProject = { ...project("project-a", "Project A"), capabilities: { readReports: true, readExplorer: true, readProjectInformation: true, readOwnHistory: true, createReport: true, manageSkills: false, manageAutomation: false, editConfiguration: false, publishConfiguration: false } };
     await act(async () => root.render(<EnergyIqShell><div>Page</div></EnergyIqShell>));
-    expect(Array.from(container.querySelectorAll("#nav-group-site-profile a")).map(link => link.getAttribute("aria-label"))).toEqual(["Floor layout", "Devices", "Data availability", "Project notes", "Operating hours", "Holidays", "Electricity rate"]);
+    expect(Array.from(container.querySelectorAll("#nav-group-site-profile a")).map(link => link.getAttribute("aria-label"))).toEqual(["Floor layout", "Devices", "Data availability", "Project notes", "Operating hours", "Holidays", "Electricity rate", "Budget & carbon"]);
     expect(container.querySelector('a[href^="/energyiq/team"]')).toBeNull();
   });
   it("shows the Team link only to an Organisation admin who may manage people", async () => {
@@ -235,7 +235,7 @@ describe("EnergyX Shell Project navigation", () => {
     const current = container.querySelector('a[aria-current="page"]');
     expect(current?.getAttribute("aria-label")).toBe("Holidays");
     expect(current?.getAttribute("href")).toBe("/energyiq/project-configuration?projectId=project-a&tab=holidays");
-    expect(Array.from(container.querySelectorAll("#nav-group-site-profile a")).map(link => link.getAttribute("aria-label"))).toEqual(["Floor layout", "Devices", "Data availability", "Project notes", "Operating hours", "Holidays", "Electricity rate"]);
+    expect(Array.from(container.querySelectorAll("#nav-group-site-profile a")).map(link => link.getAttribute("aria-label"))).toEqual(["Floor layout", "Devices", "Data availability", "Project notes", "Operating hours", "Holidays", "Electricity rate", "Budget & carbon"]);
     const ai = container.querySelector<HTMLButtonElement>('button[aria-controls="nav-group-ai"]');
     expect(ai?.getAttribute("aria-expanded")).toBe("false");
     await act(async () => ai?.click());

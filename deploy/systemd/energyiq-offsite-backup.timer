@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily encrypted offsite copy, after the 02:15 Shared Storage backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 Asia/Shanghai
+AccuracySec=1min
+Persistent=true
+Unit=energyiq-offsite-backup.service
+
+[Install]
+WantedBy=timers.target

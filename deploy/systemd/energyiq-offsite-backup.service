@@ -1,0 +1,31 @@
+[Unit]
+Description=EnergyIQ encrypted offsite copy of the newest Shared Storage backup
+After=energyiq-shared-storage-backup.service network-online.target
+Wants=network-online.target
+AssertPathExists=/etc/energyiq/offsite.env
+AssertPathExists=/etc/energyiq/backup-encryption.key
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/local/libexec/energyiq/offsite-backup.sh upload --config /etc/energyiq/offsite.env
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+CPUWeight=10
+IOWeight=10
+NoNewPrivileges=true
+PrivateDevices=true
+ProtectControlGroups=true
+# The aliyun CLI reads its profile from /root/.aliyun.
+ProtectHome=read-only
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadOnlyPaths=/var/backups/energyiq/managed-daily /etc/energyiq
+StateDirectory=energyiq
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+TimeoutStartSec=45min

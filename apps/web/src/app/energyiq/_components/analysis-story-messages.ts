@@ -4,6 +4,7 @@ import { defineMessages } from "./energyiq-messages";
 export const storyMessages = defineMessages({
   "summary.eyebrow": "The short version",
   "summary.headlineCost": "{name} spent {cost} on electricity in {days} days. {closed} of it was used after working hours.",
+  "summary.peak": "Peak hours cost {cost}: {costShare}% of the bill for {kwhShare}% of the electricity. Moving use out of peak hours lowers the bill.",
   "summary.headlineKwh": "{name} used {kwh} in {days} days, {share} of it after working hours.",
   "step.spent": "Spent in {days} days",
   "step.used": "Used in {days} days",
@@ -176,6 +177,7 @@ export const storyMessages = defineMessages({
   "zh-Hans": {
     "summary.eyebrow": "简要结论",
     "summary.headlineCost": "{name}在 {days} 天内花了 {cost} 电费，其中 {closed} 用在非营业时间。",
+    "summary.peak": "高峰时段花了 {cost}：占电费的 {costShare}%，用电量的 {kwhShare}%。把用电移出高峰时段可以降低电费。",
     "summary.headlineKwh": "{name}在 {days} 天内用电 {kwh}，其中 {share} 用在非营业时间。",
     "step.spent": "{days} 天的电费",
     "step.used": "{days} 天的用电量",
@@ -348,6 +350,7 @@ export const storyMessages = defineMessages({
   ms: {
     "summary.eyebrow": "Ringkasnya",
     "summary.headlineCost": "{name} membelanjakan {cost} untuk elektrik dalam {days} hari. {closed} daripadanya digunakan selepas waktu bekerja.",
+    "summary.peak": "Waktu puncak menelan kos {cost}: {costShare}% daripada bil untuk {kwhShare}% daripada elektrik. Mengalihkan penggunaan keluar dari waktu puncak menurunkan bil.",
     "summary.headlineKwh": "{name} menggunakan {kwh} dalam {days} hari, {share} daripadanya selepas waktu bekerja.",
     "step.spent": "Dibelanjakan dalam {days} hari",
     "step.used": "{days} hari penggunaan",

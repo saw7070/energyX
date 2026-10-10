@@ -27,16 +27,24 @@ const data: AnalysisData = {
 };
 
 describe("DecisionSummary", () => {
+  it("says what peak hours cost when the rate has peak and off-peak prices", () => {
+    // Ringgit time-of-use: RM 40 of the RM 100 bill was in peak hours, using 300 of 1,000 kWh.
+    const touProject = { ...project, usageKwh: 1000, cost: { amount: 100, currency: "MYR", note: "", peak: { cost: 40, usageKwh: 300 } } };
+    const touData = { ...data, current: { ...data.current, project: touProject } };
+    const markup = renderToStaticMarkup(<DecisionSummary data={touData} days={scopeDays(touProject, data.holidays)} anomalies={[]} floor={null} rate={0.1} />).replace(/<!-- -->/g, "");
+    expect(markup).toContain("Peak hours cost RM40: 40% of the bill for 30% of the electricity.");
+  });
+
   it("tells the story in money: what was spent, how much while closed, what stays on and what to switch off", () => {
     const markup = renderToStaticMarkup(<DecisionSummary data={data} days={scopeDays(project, data.holidays)} anomalies={[]} floor={null} rate={0.3} />).replace(/<!-- -->/g, "");
     // 5 × 9 open hours at 6 kWh; every other hour at 2 kWh.
     const closedKwh = usage - 5 * 9 * 6;
-    expect(markup).toContain(`Office spent <span class="font-semibold text-slate-900">SGD ${Math.round(usage * 0.3)}</span>`);
-    expect(markup).toContain(`SGD ${Math.round(closedKwh * 0.3)} (${Math.round(closedKwh / usage * 100)}%)`);
+    expect(markup).toContain(`Office spent <span class="font-semibold text-slate-900">S$${Math.round(usage * 0.3)}</span>`);
+    expect(markup).toContain(`S$${Math.round(closedKwh * 0.3)} (${Math.round(closedKwh / usage * 100)}%)`);
     expect(markup).toContain("Switch off Lobby TV after working hours");
     // 123 of 168 hours a week are closed: 123 / 168 × 8,760 = 6,414 hours a year; 1 kW × 6,414 h × SGD 0.30 = SGD 1,924.
     expect(markup).toContain("power after working hours × 6,414 such hours a year × SGD 0.30/kWh");
-    expect(markup).toContain("Up to SGD 1,924");
+    expect(markup).toContain("Up to S$1,924");
     expect(markup).toContain("Checks — not counted in the total");
     expect(markup).toContain("Operating hours are <span class=\"font-medium text-slate-900\">09:00–18:00</span>");
     expect(markup).toContain("Health check");

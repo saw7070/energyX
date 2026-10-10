@@ -90,6 +90,7 @@ import {
   sourceLabelsAcrossImportBatches,
   tiersTopDown,
 } from "./project-setup-model";
+import { AuditHistory } from "./audit-history";
 
 type AccessState = ReturnType<typeof useEnergyIqAccess>;
 const ReportAgentPanel = dynamic(() => import("./report-agent-panel").then((module) => module.ReportAgentPanel));
@@ -451,9 +452,10 @@ export function EnergyIqAdminWorkbench({
           {section === "organisations" || section === "users" || section === "roles" ? (
             <AdminAccessPages initialView={section} />
           ) : null}
-          {section !== "task-history" && section !== "models" && section !== "organisations" && section !== "users" && section !== "roles" && loading && !setupMatchesSelection ? <LoadingPanel /> : null}
+          {section === "audit" ? <AuditHistory /> : null}
+          {section !== "task-history" && section !== "models" && section !== "organisations" && section !== "users" && section !== "roles" && section !== "audit" && loading && !setupMatchesSelection ? <LoadingPanel /> : null}
           {/* Background refreshes keep the section mounted so in-progress results (e.g. an import summary) survive. */}
-          {section !== "task-history" && section !== "models" && section !== "organisations" && section !== "users" && section !== "roles" && setupMatchesSelection && document && setup ? renderAdminSection({
+          {section !== "task-history" && section !== "models" && section !== "organisations" && section !== "users" && section !== "roles" && section !== "audit" && setupMatchesSelection && document && setup ? renderAdminSection({
             section,
             projects,
             selectedProject,
@@ -2854,6 +2856,7 @@ function adminSectionMeta(section: AdminSection, projectName?: string): { title:
     organisations: { title: "Organisations", description: "Customer organisations and Workspace ownership." },
     users: { title: "Users", description: "Accounts, membership and Project access." },
     roles: { title: "Role access", description: "Create roles and choose what each can read and change." },
+    audit: { title: "Audit history", description: "Who signed in, changed access or changed a project, and when." },
     "project-overview": { title: "Project status & publishing", description: `${project} · delivery status, blockers and next action.` },
     basics: { title: "Project basics", description: `${project} · identity, timezone and stable Project scope.` },
     structure: { title: "Structure", description: `${project} · define meaningful Tiers and Nodes from the lowest scope upward.` },

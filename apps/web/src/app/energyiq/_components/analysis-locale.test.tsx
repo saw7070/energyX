@@ -98,7 +98,7 @@ describe("Analysis page in other languages", () => {
   it("tells the decision summary in Chinese, with the money in the right place in each sentence", async () => {
     const page = await render("zh-Hans", <DecisionSummary data={data} days={scopeDays(project, data.holidays)} anomalies={[]} floor={null} rate={0.3} />);
     // 246 kWh of 516 was used while closed: SGD 74 of SGD 155.
-    expect(page.text()).toContain("Office在 7 天内花了 SGD 155 电费，其中 SGD 74 (48%) 用在非营业时间。");
+    expect(page.text()).toContain("Office在 7 天内花了 S$155 电费，其中 S$74 (48%) 用在非营业时间。");
     for (const text of ["简要结论", "1 · 钱花在哪里", "按区域", "按用电类型", "营业时间为 09:00–18:00。", "非营业时间关闭 Lobby TV", "每年 6,414 个非营业小时 × SGD 0.30/kWh", "健康检查", "节省计划", "单日", "核实事项——不计入总数"]) expect(page.text()).toContain(text);
     expect(page.host.querySelector('[aria-label="“插座与设备用电”是什么意思？"]')).not.toBeNull();
     expect(page.host.querySelector('nav[aria-label="本页内容"]')).not.toBeNull();
@@ -110,7 +110,7 @@ describe("Analysis page in other languages", () => {
     mock.load.mockResolvedValue(data);
     const ms = await render("ms", <AnalysisView projectId="office" />);
     expect(ms.host.querySelector("h1")?.textContent).toBe("Analisis");
-    for (const text of ["Gambaran keseluruhan / Analisis", "4 minggu terkini", "Guna", "Office membelanjakan SGD 155 untuk elektrik dalam 7 hari.", "Ke mana wang dibelanjakan", "Analisis terperinci", "Ringkasan eksekutif", "Trend jumlah harian", "Sorotan utama"]) expect(ms.text()).toContain(text);
+    for (const text of ["Gambaran keseluruhan / Analisis", "4 minggu terkini", "Guna", "Office membelanjakan S$155 untuk elektrik dalam 7 hari.", "Ke mana wang dibelanjakan", "Analisis terperinci", "Ringkasan eksekutif", "Trend jumlah harian", "Sorotan utama"]) expect(ms.text()).toContain(text);
     expect(ms.host.querySelector('input[aria-label="Dari"]')).not.toBeNull();
     await ms.unmount();
 

@@ -7,6 +7,7 @@ import { forecastNextMonth, localDate, type Forecast } from "./forecast-model";
 import { forecastMessages } from "./forecast-messages";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { intlLocale } from "./energyiq-messages";
+import { withCurrency } from "./money";
 
 /** One line on Overview: what next month should use, with a link to the full estimate on Analysis. */
 export function ForecastLine({ projectId, className }: { projectId: string; className?: string }) {
@@ -40,6 +41,6 @@ export function ForecastLine({ projectId, className }: { projectId: string; clas
   if (!forecast) return null;
   const month = new Intl.DateTimeFormat(intlLocale(locale), { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${forecast.month.from}T00:00:00Z`));
   const number = (value: number) => Math.round(value).toLocaleString(intlLocale(locale));
-  const cost = forecast.cost ? t("takeawayCost", { cost: `${forecast.cost.currency} ${number(forecast.cost.mid)}` }) : "";
+  const cost = forecast.cost ? t("takeawayCost", { cost: withCurrency(forecast.cost.currency, number(forecast.cost.mid)) }) : "";
   return <p className={className}>{t("takeaway", { month, kwh: number(forecast.kwh.mid), cost })} <Link href={`/energyiq/analysis?${new URLSearchParams({ projectId, section: "story-ahead" })}`}>{t("seeAhead")} →</Link></p>;
 }

@@ -14,7 +14,7 @@ export type ScopeData = {
   total: TrendSeries | null; types: Partial<Record<AnalysisCategory, TrendSeries>>; meters: ScopeMeter[];
   usageKwh: number | null; peakKw: number | null; peakAt: string | null;
   /** `note` is the rate in English (the site report reads it); `rates` and `basis` let the page word it in the reader's language. */
-  cost: { amount: number; currency: string; note: string; rates?: number[]; basis?: string | null } | null;
+  cost: { amount: number; currency: string; note: string; rates?: number[]; basis?: string | null; peak?: { cost: number; usageKwh: number } } | null;
   typeTotals: Partial<Record<AnalysisCategory, number>>; coverage: number | null;
 };
 export type LoadedPeriod = { project: ScopeData; spaces: ScopeData[] };

@@ -60,15 +60,15 @@ describe("Facility policy pages in other languages", () => {
 
   it("shows the electricity rate and its editor in Chinese", async () => {
     await render(<ElectricityRateView revision={tariff} status="published" ownerName={owner} timezone="Asia/Singapore" onAddNext={() => undefined} />, "zh-Hans");
-    expect(host.textContent).toContain("当前电价SGD 0.3191 /kWh未含 9% GST · 含 GST 为 SGD 0.3478/kWh");
+    expect(host.textContent).toContain("当前电价S$0.3191 /kWh未含 9% GST · 含 GST 为 S$0.3478/kWh");
     expect(host.textContent).toContain("生效期间2026年7月1日至9月30日8 天后结束");
-    expect(host.textContent).toContain("1,000 kWh ≈ SGD 319.10");
+    expect(host.textContent).toContain("1,000 kWh ≈ S$319.10");
     expect(host.textContent).toContain("2026年9月30日周三之后尚未设定电价。");
     expect(host.querySelector('section[aria-label="电价时段"]')).not.toBeNull();
     await act(async () => root.render(<EnergyIqLocaleProvider><ElectricityRateEditor projectId="office" revision={tariff} timezone="Asia/Singapore" scopeOptions={[]} addNext onSaved={() => undefined} onCancel={() => undefined} /></EnergyIqLocaleProvider>));
     expect(texts("legend")).toEqual(["电价时段 1当前", "电价时段 2即将生效"]);
     expect(texts("option").slice(0, 3)).toEqual(["未含 GST", "已含 GST", "电费单上未注明"]);
-    expect(host.textContent).toContain("含 9% GST 为 SGD 0.3478/kWh · 1,000 kWh ≈ SGD 319.10");
+    expect(host.textContent).toContain("含 9% GST 为 S$0.3478/kWh · 1,000 kWh ≈ S$319.10");
     await act(async () => Array.from(host.querySelectorAll("button")).find(button => button.textContent === "保存电价")!.click());
     expect(host.querySelector('[role="alert"]')?.textContent).toBe("电价时段 2 需要填写大于 0 的每 kWh 价格。");
   });

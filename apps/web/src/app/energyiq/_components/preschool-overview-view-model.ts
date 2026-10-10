@@ -1,4 +1,5 @@
 import type { EnergyProjectAnalysisSnapshotDto } from "../../../lib/config-api";
+import { currencyMark } from "./money";
 
 export type PreschoolOverviewCentre = {
   id: string;
@@ -1836,7 +1837,8 @@ function formatNumber(value: number, maximumFractionDigits: number): string {
 }
 
 function currencySymbol(currency: string): string {
-  return currency === "SGD" ? "S$" : `${currency} `;
+  const mark = currencyMark(currency);
+  return mark === currency.trim().toUpperCase() ? `${mark} ` : mark;
 }
 
 function toCustomerCircuitName(nodeId: string, value: string | null | undefined): string | null {

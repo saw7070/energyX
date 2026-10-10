@@ -69,7 +69,7 @@
     "build:tui": "npm --workspace @datafoundry/tui run build",
     "smoke:api": "node scripts/smoke-copilotkit.mjs",
     "deploy:energyiq:release": "node scripts/energyiq/deploy-release.mjs",
-    "test:energyiq:backup": "node --test scripts/energyiq/backup-shared-storage.test.mjs scripts/energyiq/build-release-artifact.test.mjs scripts/energyiq/deploy-release.test.mjs",
+    "test:energyiq:backup": "node --test scripts/energyiq/backup-shared-storage.test.mjs scripts/energyiq/offsite-backup.test.mjs scripts/energyiq/build-release-artifact.test.mjs scripts/energyiq/deploy-release.test.mjs",
     "smoke:copilotkit": "node scripts/smoke-copilotkit.mjs",
     "smoke:copilotkit-run": "npm run build && node scripts/smoke-copilotkit-run.mjs",
     "smoke:api-context": "npm run build && node scripts/smoke-copilotkit-context.mjs",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EnergyOperatingCalendarRevisionDto, EnergyTariffScheduleRevisionDto } from "../../../lib/config-api";
-import { datesIn, forecastNextMonth, nextMonth, rateOn, typicalDays, type HistoryDay } from "./forecast-model";
+import { datesIn, dayPriceOn, forecastNextMonth, nextMonth, rateOn, typicalDays, type HistoryDay } from "./forecast-model";
 
 const weekday = [{ from: "09:00", to: "18:00" }];
 const revision = {
@@ -145,5 +145,18 @@ describe("when readings are incomplete", () => {
   });
   it("still gives nothing when no day has any readings", () => {
     expect(forecastNextMonth({ history: [{ date: "2026-09-14", kwh: null, complete: false }], revision, tariff, timeZone: "Asia/Singapore", today: "2026-09-23" })).toBeNull();
+  });
+});
+
+describe("forecast price with peak and off-peak hours", () => {
+  const entry = {
+    id: "tou", owner: { kind: "project" as const }, effective_from: "2020-01-01T00:00:00+08:00", currency: "MYR", rate_per_kwh: 0.48,
+    time_of_use: { peak_rate_per_kwh: 0.6, peak_windows: [{ days: ["monday", "tuesday", "wednesday", "thursday", "friday"] as Array<"monday" | "tuesday" | "wednesday" | "thursday" | "friday">, from: "14:00", to: "22:00" }], holidays_off_peak: true },
+  };
+  it("prices a weekday a third at peak, and weekends and off-peak holidays at the off-peak price", () => {
+    expect(dayPriceOn(entry, "2026-11-04", false)).toBeCloseTo(0.48 + 0.12 / 3, 6);
+    expect(dayPriceOn(entry, "2026-11-07", false)).toBe(0.48);
+    expect(dayPriceOn(entry, "2026-11-09", true)).toBe(0.48);
+    expect(dayPriceOn({ ...entry, time_of_use: undefined }, "2026-11-04", false)).toBe(0.48);
   });
 });

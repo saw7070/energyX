@@ -594,7 +594,9 @@ export function PasswordAuthShell({
           </div>
           {children}
         </section>
-        <p className="text-center text-xs text-muted-light">© {year} EnergyX</p>
+        <p className="text-center text-xs text-muted-light">
+          © {year} EnergyX · <a href="/legal/privacy" className="hover:text-muted hover:underline">Privacy</a> · <a href="/legal/terms" className="hover:text-muted hover:underline">Terms</a> · <a href="/legal/security" className="hover:text-muted hover:underline">Security</a>
+        </p>
       </div>
     </main>
   );
