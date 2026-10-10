@@ -37,7 +37,9 @@ export type EnergyIconName =
   | "sidebar"
   | "user"
   | "portfolio"
-  | "target";
+  | "target"
+  | "leaf"
+  | "wallet";
 
 export function EnergyIcon({
   name,
@@ -129,6 +131,21 @@ export function EnergyIcon({
           <rect x="14" y="3" width="7" height="5" rx="1.5" />
           <rect x="14" y="12" width="7" height="9" rx="1.5" />
           <rect x="3" y="15" width="7" height="6" rx="1.5" />
+        </svg>
+      );
+    case "leaf":
+      return (
+        <svg {...common}>
+          <path d="M5 19c0-8 5-13 15-14-1 10-6 15-14 15" />
+          <path d="M5 19c3-4 6-7 10-9" />
+        </svg>
+      );
+    case "wallet":
+      return (
+        <svg {...common}>
+          <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18v4" />
+          <rect x="4" y="7" width="16" height="12" rx="2.5" />
+          <path d="M16 13h.01" />
         </svg>
       );
     case "target":

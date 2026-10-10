@@ -6,6 +6,7 @@ import { configApi, type EnergyBudgetStatusDto, type EnergyProjectTargetsDto, ty
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { intlLocale } from "./energyiq-messages";
 import { friendlyErrorMessage } from "./friendly-error";
+import { EnergyIcon, type EnergyIconName } from "./icons";
 import { withCurrency } from "./money";
 import { siteTargetsMessages } from "./site-targets-messages";
 import styles from "./site-targets.module.css";
@@ -49,7 +50,7 @@ export function SiteTargets({ projectId }: { projectId: string }) {
     }
   };
 
-  if (!targets) return <section className={styles.panel}>{error ? <p role="alert" className={styles.error}>{error}</p> : <p role="status" className={styles.muted}>{t("loading")}</p>}</section>;
+  if (!targets) return <section className={styles.panel}>{error ? <p role="alert" className={styles.error}>{error}</p> : <p role="status" className={styles.loading}>{t("loading")}</p>}</section>;
   return <SiteTargetsView targets={targets} busy={busy} error={error} notice={notice} onSave={save} />;
 }
 
@@ -64,23 +65,49 @@ export function SiteTargetsView({ targets, busy, error, notice, onSave }: {
   return (
     <section className={styles.panel} aria-label={t("title")}>
       <header className={styles.header}>
-        <h3>{t("title")}</h3>
-        <p>{t("intro")}</p>
-        {!targets.canEdit && <p className={styles.muted}>{t("readOnly")}</p>}
+        <div>
+          <h3>{t("title")}</h3>
+          <p>{t("intro")}</p>
+        </div>
+        {!targets.canEdit && <span className={styles.readOnly}><EnergyIcon name="info" className="h-4 w-4" />{t("readOnly")}</span>}
       </header>
-      {error && <p role="alert" className={styles.error}>{error}</p>}
-      {notice && <p role="status" className={styles.notice}>{notice}</p>}
-      <BudgetCard targets={targets} busy={busy} onSave={onSave} />
-      <CarbonCard targets={targets} busy={busy} onSave={onSave} />
-      <OvernightCard targets={targets} busy={busy} onSave={onSave} />
+      {error && <p role="alert" className={styles.error}><EnergyIcon name="alert" className="h-4 w-4" />{error}</p>}
+      {notice && <p role="status" className={styles.notice}><EnergyIcon name="check" className="h-4 w-4" />{notice}</p>}
+      <div className={styles.layout}>
+        <BudgetCard targets={targets} busy={busy} onSave={onSave} />
+        <div className={styles.side}>
+          <CarbonCard targets={targets} busy={busy} onSave={onSave} />
+          <OvernightCard targets={targets} busy={busy} onSave={onSave} />
+        </div>
+      </div>
     </section>
   );
 }
 
 type CardProps = { targets: EnergyProjectTargetsDto; busy: boolean; onSave: (body: EnergyProjectTargetsInputDto) => Promise<boolean> };
 
-function Card({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
-  return <section className={styles.card}><header className={styles.cardHeader}><h4>{title}</h4>{action}</header>{children}</section>;
+function Card({ icon, tone, title, subtitle, action, children, className }: {
+  icon: EnergyIconName;
+  tone: "green" | "teal" | "indigo";
+  title: string;
+  subtitle?: string | undefined;
+  action?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={`${styles.card} ${className ?? ""}`}>
+      <header className={styles.cardHeader}>
+        <span className={`${styles.icon} ${styles[tone]}`} aria-hidden="true"><EnergyIcon name={icon} className="h-[18px] w-[18px]" /></span>
+        <div className={styles.cardTitle}>
+          <h4>{title}</h4>
+          {subtitle && <p>{subtitle}</p>}
+        </div>
+        {action && <div className={styles.cardAction}>{action}</div>}
+      </header>
+      {children}
+    </section>
+  );
 }
 
 function BudgetCard({ targets, busy, onSave }: CardProps) {
@@ -102,20 +129,27 @@ function BudgetCard({ targets, busy, onSave }: CardProps) {
     const ok = await onSave({ budget: { monthlyAmount: Number(amount), currency, ...(kwh.trim() ? { monthlyKwh: Number(kwh) } : {}) } });
     if (ok) setEditing(false);
   };
-  const action = targets.canEdit && !editing
-    ? <button type="button" className={styles.link} onClick={start}>{targets.budget ? t("edit") : t("budgetAdd")}</button>
+  const subtitle = targets.budget
+    ? targets.budget.monthlyKwh
+      ? t("budgetPerMonthKwh", { amount: money(targets.budget.monthlyAmount), kwh: number(targets.budget.monthlyKwh) })
+      : t("budgetPerMonth", { amount: money(targets.budget.monthlyAmount) })
+    : undefined;
+  const action = targets.canEdit && !editing && targets.budget
+    ? <button type="button" className={styles.ghost} onClick={start}>{t("edit")}</button>
     : undefined;
   return (
-    <Card title={t("budgetTitle")} action={action}>
+    <Card icon="wallet" tone="green" title={t("budgetTitle")} subtitle={subtitle} action={action} className={styles.budgetCard}>
       {editing ? (
         <form className={styles.form} onSubmit={event => void submit(event)}>
-          <label className={styles.field}><span>{t("budgetAmount")}</span>
-            <span className={styles.money}><b>{withCurrency(currency, "").trim()}</b><input inputMode="decimal" required value={amount} onChange={event => setAmount(event.target.value)} aria-label={t("budgetAmount")} /></span>
-          </label>
-          <label className={styles.field}><span>{t("budgetKwh")}</span>
-            <input inputMode="decimal" value={kwh} onChange={event => setKwh(event.target.value)} aria-label={t("budgetKwh")} />
-            <small>{t("budgetKwhHint")}</small>
-          </label>
+          <div className={styles.grid}>
+            <label className={styles.field}><span>{t("budgetAmount")}</span>
+              <span className={styles.money}><b>{withCurrency(currency, "").trim()}</b><input inputMode="decimal" required autoFocus value={amount} onChange={event => setAmount(event.target.value)} aria-label={t("budgetAmount")} placeholder="0" /></span>
+            </label>
+            <label className={styles.field}><span>{t("budgetKwh")}</span>
+              <span className={styles.money}><input inputMode="decimal" value={kwh} onChange={event => setKwh(event.target.value)} aria-label={t("budgetKwh")} placeholder="—" /><b className={styles.suffix}>kWh</b></span>
+            </label>
+          </div>
+          <small className={styles.hint}>{t("budgetKwhHint")}</small>
           <div className={styles.actions}>
             {targets.budget && <button type="button" className={styles.danger} disabled={busy} onClick={() => void onSave({ budget: null }).then(ok => ok && setEditing(false))}>{t("budgetRemove")}</button>}
             <button type="button" className={styles.secondary} onClick={() => setEditing(false)}>{t("cancel")}</button>
@@ -123,13 +157,15 @@ function BudgetCard({ targets, busy, onSave }: CardProps) {
           </div>
         </form>
       ) : targets.budget ? (
-        <>
-          <p className={styles.value}>{targets.budget.monthlyKwh
-            ? t("budgetPerMonthKwh", { amount: money(targets.budget.monthlyAmount), kwh: number(targets.budget.monthlyKwh) })
-            : t("budgetPerMonth", { amount: money(targets.budget.monthlyAmount) })}</p>
-          {targets.status?.budget && <BudgetStatus status={targets.status.budget} />}
-        </>
-      ) : <p className={styles.muted}>{t("budgetNone")}</p>}
+        targets.status?.budget ? <BudgetStatus status={targets.status.budget} /> : null
+      ) : (
+        <div className={styles.empty}>
+          <span className={styles.emptyIcon} aria-hidden="true"><EnergyIcon name="wallet" className="h-6 w-6" /></span>
+          <strong>{t("budgetEmptyTitle")}</strong>
+          <p>{t("budgetNone")}</p>
+          {targets.canEdit && <button type="button" className={styles.primary} onClick={start}><EnergyIcon name="plus" className="h-4 w-4" />{t("budgetAdd")}</button>}
+        </div>
+      )}
     </Card>
   );
 }
@@ -140,27 +176,38 @@ export function BudgetStatus({ status }: { status: EnergyBudgetStatusDto }) {
   const money = (value: number) => withCurrency(status.currency, value.toLocaleString(intlLocale(locale), { maximumFractionDigits: 0 }));
   const number = (value: number) => value.toLocaleString(intlLocale(locale), { maximumFractionDigits: 0 });
   const month = new Date(`${status.month}-01T00:00:00Z`).toLocaleDateString(intlLocale(locale), { timeZone: "UTC", month: "long", year: "numeric" });
-  if (status.status === "no-data") return <p className={styles.muted}>{t("budgetNoData")}</p>;
+  if (status.status === "no-data") return <p className={styles.quiet}>{t("budgetNoData")}</p>;
   const onMoney = status.actualCost !== undefined && status.forecastCost !== undefined;
   const target = onMoney ? status.budgetAmount : status.budgetKwh ?? 0;
   const actual = onMoney ? status.actualCost! : status.actualKwh;
   const forecast = onMoney ? status.forecastCost! : status.forecastKwh;
+  const show = (value: number) => onMoney ? money(value) : `${number(value)} kWh`;
   const scale = Math.max(target, forecast, actual, 1);
+  const left = target - actual;
   return (
     <div className={styles.status}>
       <div className={styles.statusLine}>
         <strong>{t("budgetMonth", { month })}</strong>
         <span className={`${styles.badge} ${styles[status.status]}`}>{t(`status.${status.status}`)}</span>
       </div>
-      <p>{onMoney ? t("budgetSpent", { spent: money(actual), budget: money(target) }) : t("budgetUsed", { used: number(actual), budget: number(target) })}</p>
-      <div className={styles.bar} aria-hidden="true">
-        <span className={styles.barForecast} style={{ width: `${(forecast / scale) * 100}%` }} />
-        <span className={styles.barActual} style={{ width: `${(actual / scale) * 100}%` }} />
+      <dl className={styles.figures}>
+        <div><dt>{onMoney ? t("budgetSpentLabel") : t("budgetUsedLabel")}</dt><dd>{show(actual)}</dd></div>
+        <div><dt>{t("budgetForecastLabel")}</dt><dd className={forecast > target ? styles.warnText : undefined}>{show(forecast)}</dd></div>
+        <div><dt>{left >= 0 ? t("budgetLeftLabel") : t("budgetOverLabel")}</dt><dd className={left < 0 ? styles.badText : undefined}>{show(Math.abs(left))}</dd></div>
+      </dl>
+      <div className={styles.bar} role="img" aria-label={onMoney ? t("budgetSpent", { spent: money(actual), budget: money(target) }) : t("budgetUsed", { used: number(actual), budget: number(target) })}>
+        <span className={`${styles.barForecast} ${styles[status.status]}`} style={{ width: `${(forecast / scale) * 100}%` }} />
+        <span className={`${styles.barActual} ${styles[status.status]}`} style={{ width: `${(actual / scale) * 100}%` }} />
         <span className={styles.barBudget} style={{ left: `${(target / scale) * 100}%` }} />
       </div>
-      <p>{t("budgetForecast", { value: onMoney ? money(forecast) : `${number(forecast)} kWh` })}</p>
-      {status.dataThrough && <small className={styles.muted}>{t("budgetDataThrough", { date: new Date(`${status.dataThrough}T00:00:00Z`).toLocaleDateString(intlLocale(locale), { timeZone: "UTC", day: "numeric", month: "short" }) })}</small>}
-      {status.costNote && <small className={styles.muted}>{t(status.costNote === "currency-differs" ? "budgetCurrencyDiffers" : "budgetTariffMissing")}</small>}
+      <div className={styles.legend} aria-hidden="true">
+        <span><i className={`${styles.swatch} ${styles[status.status]}`} />{t("legendSpent")}</span>
+        <span><i className={`${styles.swatch} ${styles.swatchLight} ${styles[status.status]}`} />{t("legendForecast")}</span>
+        <span><i className={styles.marker} />{t("legendBudget")} {show(target)}</span>
+      </div>
+      <p className={styles.srOnly}>{onMoney ? t("budgetSpent", { spent: money(actual), budget: money(target) }) : t("budgetUsed", { used: number(actual), budget: number(target) })}. {t("budgetForecast", { value: show(forecast) })}</p>
+      {status.dataThrough && <small className={styles.hint}>{t("budgetDataThrough", { date: new Date(`${status.dataThrough}T00:00:00Z`).toLocaleDateString(intlLocale(locale), { timeZone: "UTC", day: "numeric", month: "short" }) })}</small>}
+      {status.costNote && <small className={styles.hint}>{t(status.costNote === "currency-differs" ? "budgetCurrencyDiffers" : "budgetTariffMissing")}</small>}
     </div>
   );
 }
@@ -184,32 +231,39 @@ function CarbonCard({ targets, busy, onSave }: CardProps) {
     if (ok) setEditing(false);
   };
   return (
-    <Card title={t("carbonTitle")} action={targets.canEdit && !editing ? <button type="button" className={styles.link} onClick={start}>{t("edit")}</button> : undefined}>
-      <p className={styles.muted}>{t("carbonBody")}</p>
+    <Card icon="leaf" tone="teal" title={t("carbonTitle")} action={targets.canEdit && !editing ? <button type="button" className={styles.ghost} onClick={start}>{t("edit")}</button> : undefined}>
       {editing ? (
         <form className={styles.form} onSubmit={event => void submit(event)}>
           <div className={styles.grid}>
-            <label className={styles.field}><span>{t("carbonEditFactor")}</span><input inputMode="decimal" required value={factor} onChange={event => setFactor(event.target.value)} aria-label={t("carbonEditFactor")} /></label>
+            <label className={styles.field}><span>{t("carbonEditFactor")}</span><input inputMode="decimal" required autoFocus value={factor} onChange={event => setFactor(event.target.value)} aria-label={t("carbonEditFactor")} /></label>
             <label className={styles.field}><span>{t("carbonEditYear")}</span><input inputMode="numeric" value={year} onChange={event => setYear(event.target.value)} aria-label={t("carbonEditYear")} /></label>
           </div>
           <label className={styles.field}><span>{t("carbonEditSource")}</span><input value={source} maxLength={200} onChange={event => setSource(event.target.value)} aria-label={t("carbonEditSource")} /><small>{t("carbonEditSourceHint")}</small></label>
-          <small className={styles.muted}>{t("carbonEditHint")}</small>
+          <small className={styles.hint}>{t("carbonEditHint")}</small>
           <div className={styles.actions}>
             <button type="button" className={styles.secondary} onClick={() => setEditing(false)}>{t("cancel")}</button>
             <button type="submit" className={styles.primary} disabled={busy || !(Number(factor) >= 0) || factor.trim() === ""}>{t("save")}</button>
           </div>
         </form>
       ) : (
-        <div className={styles.factor}>
-          <p className={styles.value}>{t("carbonFactor", { factor: carbon.kgCo2ePerKwh })}</p>
-          <p className={styles.muted}>
-            <span className={styles.tag}>{carbon.basis === "grid" ? t("carbonOfficial") : t("carbonCustom")}</span>
-            {" "}{carbon.source} · {carbon.year}{carbon.provisional ? ` (${t("carbonProvisional")})` : ""}
+        <>
+          <div className={styles.factor}>
+            <span className={styles.factorValue} aria-label={t("carbonFactor", { factor: carbon.kgCo2ePerKwh })}>{carbon.kgCo2ePerKwh}</span>
+            <span className={styles.factorUnit} aria-hidden="true">{t("carbonUnit")}</span>
+          </div>
+          <p className={styles.source}>
+            <span className={`${styles.tag} ${carbon.basis === "grid" ? styles.tagOfficial : styles.tagCustom}`}>{carbon.basis === "grid" ? t("carbonOfficial") : t("carbonCustom")}</span>
+            <span>{carbon.source} · {carbon.year}{carbon.provisional ? ` (${t("carbonProvisional")})` : ""}</span>
           </p>
+          <div className={styles.formula}>
+            <strong>{t("carbonHowTitle")}</strong>
+            <span>{t("carbonFormula", { factor: carbon.kgCo2ePerKwh })}</span>
+            <small>{t("carbonBody")}</small>
+          </div>
           {carbon.basis === "custom" && targets.canEdit && (
-            <button type="button" className={styles.link} disabled={busy} onClick={() => void onSave({ carbon: null })}>{t("carbonUseOfficial", { factor: targets.gridCarbon.kgCo2ePerKwh })}</button>
+            <button type="button" className={styles.ghost} disabled={busy} onClick={() => void onSave({ carbon: null })}>{t("carbonUseOfficial", { factor: targets.gridCarbon.kgCo2ePerKwh })}</button>
           )}
-        </div>
+        </>
       )}
     </Card>
   );
@@ -219,33 +273,38 @@ function OvernightCard({ targets, busy, onSave }: CardProps) {
   const t = useMessages(siteTargetsMessages);
   const { locale } = useEnergyIqLocale();
   const finding = targets.status?.overnight;
+  const enabled = targets.overnight.enabled;
   const thresholds = THRESHOLDS.includes(targets.overnight.thresholdPct) ? THRESHOLDS : [...THRESHOLDS, targets.overnight.thresholdPct].sort((a, b) => a - b);
+  const toggle = (
+    <button type="button" role="switch" aria-checked={enabled} aria-label={t("overnightSwitch")} className={styles.switch} disabled={!targets.canEdit || busy}
+      onClick={() => void onSave({ overnight: { enabled: !enabled } })}>
+      <span />
+    </button>
+  );
   return (
-    <Card title={t("overnightTitle")}>
-      <p className={styles.muted}>{t("overnightBody")}</p>
-      <div className={styles.overnight}>
-        <div role="radiogroup" aria-label={t("overnightTitle")} className={styles.segmented}>
-          {[true, false].map(enabled => (
-            <button key={String(enabled)} type="button" role="radio" aria-checked={targets.overnight.enabled === enabled} disabled={!targets.canEdit || busy}
-              onClick={() => targets.overnight.enabled !== enabled && void onSave({ overnight: { enabled } })}>
-              {enabled ? t("overnightOn") : t("overnightOff")}
-            </button>
+    <Card icon="moon" tone="indigo" title={t("overnightTitle")} subtitle={enabled ? t("overnightThreshold", { pct: targets.overnight.thresholdPct }) : t("overnightOff")} action={toggle}>
+      <p className={styles.quiet}>{t("overnightBody")}</p>
+      {enabled ? (
+        <>
+          <div className={styles.sensitivity}>
+            <span>{t("overnightSensitivity")}</span>
+            <div role="radiogroup" aria-label={t("overnightSensitivity")} className={styles.chips}>
+              {thresholds.map(pct => (
+                <button key={pct} type="button" role="radio" aria-checked={targets.overnight.thresholdPct === pct} disabled={!targets.canEdit || busy}
+                  onClick={() => targets.overnight.thresholdPct !== pct && void onSave({ overnight: { thresholdPct: pct } })}>{pct}%</button>
+              ))}
+            </div>
+          </div>
+          {targets.status && (finding ? (
+            <p className={`${styles.callout} ${styles.calloutWarn}`}><EnergyIcon name="alert" className="h-4 w-4 shrink-0" />{t("overnightLast", {
+              date: new Date(`${finding.night}T00:00:00Z`).toLocaleDateString(intlLocale(locale), { timeZone: "UTC", weekday: "short", day: "numeric", month: "short" }),
+              kw: finding.nightKw, usual: finding.usualKw, pct: finding.abovePct,
+            })}</p>
+          ) : (
+            <p className={`${styles.callout} ${styles.calloutOk}`}><EnergyIcon name="check" className="h-4 w-4 shrink-0" />{t("overnightClear")}</p>
           ))}
-        </div>
-        {targets.overnight.enabled && (targets.canEdit
-          ? <label className={styles.inline}><span>{t("overnightSensitivity")}</span>
-              <select value={targets.overnight.thresholdPct} disabled={busy} onChange={event => void onSave({ overnight: { thresholdPct: Number(event.target.value) } })} aria-label={t("overnightSensitivity")}>
-                {thresholds.map(pct => <option key={pct} value={pct}>{pct}%</option>)}
-              </select>
-            </label>
-          : <span className={styles.muted}>{t("overnightThreshold", { pct: targets.overnight.thresholdPct })}</span>)}
-      </div>
-      {targets.overnight.enabled && targets.status && (finding
-        ? <p className={styles.warning}>{t("overnightLast", {
-            date: new Date(`${finding.night}T00:00:00Z`).toLocaleDateString(intlLocale(locale), { timeZone: "UTC", weekday: "short", day: "numeric", month: "short" }),
-            kw: finding.nightKw, usual: finding.usualKw, pct: finding.abovePct,
-          })}</p>
-        : <p className={styles.muted}>{t("overnightClear")}</p>)}
+        </>
+      ) : <p className={`${styles.callout} ${styles.calloutOff}`}>{t("overnightPaused")}</p>}
     </Card>
   );
 }

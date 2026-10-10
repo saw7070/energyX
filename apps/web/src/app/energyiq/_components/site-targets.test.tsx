@@ -33,7 +33,9 @@ it("shows where the budget stands, the official carbon factor and last night's w
   expect(host.textContent).toContain("Heading over");
   expect(host.textContent).toContain("RM1,100 spent of RM3,000");
   expect(host.textContent).toContain("Forecast for the month: RM3,575");
-  expect(host.textContent).toContain("0.74 kg CO2e per kWh");
+  expect(host.querySelector('[aria-label="0.74 kg CO2e per kWh"]')).not.toBeNull();
+  expect(host.textContent).toContain("Electricity used (kWh) × 0.74 = Scope 2 emissions (kg CO2e)");
+  expect(host.textContent).toContain("Left in budget");
   expect(host.textContent).toContain("Official grid figure");
   expect(host.textContent).toContain("(provisional)");
   expect(host.textContent).toContain("3.5 kW against a usual 2 kW (75% above)");
@@ -52,7 +54,7 @@ it("shows where the budget stands, the official carbon factor and last night's w
   expect(onSave).toHaveBeenCalledWith({ budget: { monthlyAmount: 3200, currency: "MYR", monthlyKwh: 12000 } });
 
   // Turning the overnight check off saves straight away.
-  await act(async () => button("Off").click());
+  await act(async () => (host.querySelector('button[role="switch"]') as HTMLButtonElement).click());
   expect(onSave).toHaveBeenLastCalledWith({ overnight: { enabled: false } });
   await act(async () => root.unmount());
 });
@@ -65,6 +67,6 @@ it("is read-only for people who cannot change hours and rates", async () => {
   expect(host.textContent).toContain("Only people allowed to change this site's hours and rate");
   expect(host.textContent).toContain("No budget set.");
   expect(Array.from(host.querySelectorAll("button")).some(candidate => candidate.textContent === "Edit" || candidate.textContent === "Set a budget")).toBe(false);
-  expect((Array.from(host.querySelectorAll("button")).find(candidate => candidate.textContent === "Off") as HTMLButtonElement).disabled).toBe(true);
+  expect((host.querySelector('button[role="switch"]') as HTMLButtonElement).disabled).toBe(true);
   await act(async () => root.unmount());
 });
