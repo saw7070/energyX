@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { COMPANY } from "./company";
@@ -10,8 +11,13 @@ export const metadata = { title: "Trust center" };
 
 const TOP_LINKS = ["privacy", "security", "ai-use", "service-levels"];
 
-export default function LegalLayout({ children }: { children: ReactNode }) {
+/** The API's session cookie (apps/api/src/auth/cookies.ts); its presence is enough to offer the way back into the app. */
+const SESSION_COOKIE = "df_session";
+
+export default async function LegalLayout({ children }: { children: ReactNode }) {
   const company = COMPANY.name || "EnergyX";
+  // Signed-in readers go back to the app; everyone else is offered sign-in. An expired session simply lands on sign-in.
+  const signedIn = (await cookies()).has(SESSION_COOKIE) || process.env.NEXT_PUBLIC_DATAFOUNDRY_AUTH_MODE === "dev";
   return <div className={styles.page}>
     <header className={styles.top}>
       <div className={styles.topInner}>
@@ -27,7 +33,9 @@ export default function LegalLayout({ children }: { children: ReactNode }) {
             return document ? <Link key={id} href={`/legal/${id}`}>{document.title.replace(/ policy| overview/u, "")}</Link> : null;
           })}
         </nav>
-        <Link href="/login" className={styles.signIn}>Sign in <LegalIcon name="arrow" width={15} height={15} /></Link>
+        {signedIn
+          ? <Link href="/energyiq" className={styles.signIn}>Open EnergyX <LegalIcon name="arrow" width={15} height={15} /></Link>
+          : <Link href="/login" className={styles.signIn}>Sign in <LegalIcon name="arrow" width={15} height={15} /></Link>}
       </div>
     </header>
     {children}
