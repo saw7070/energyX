@@ -1,17 +1,62 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { COMPANY } from "./company";
+import { LEGAL_DOCUMENTS } from "./documents";
+import { LegalIcon } from "./legal-icons";
+import { LegalText } from "./LegalText";
 import styles from "./legal.module.css";
 
-export const metadata = { title: "Legal & security" };
+export const metadata = { title: "Trust center" };
+
+const TOP_LINKS = ["privacy", "security", "ai-use", "service-levels"];
 
 export default function LegalLayout({ children }: { children: ReactNode }) {
+  const company = COMPANY.name || "EnergyX";
   return <div className={styles.page}>
     <header className={styles.top}>
-      <Link href="/legal" className={styles.brand}><span aria-hidden="true">X</span>EnergyX · Legal &amp; security</Link>
-      <Link href="/login" className={styles.signIn}>Sign in →</Link>
+      <div className={styles.topInner}>
+        <Link href="/legal" className={styles.brand}>
+          <span className={styles.logo} aria-hidden="true">X</span>
+          <span>EnergyX</span>
+          <span className={styles.brandDivider} aria-hidden="true" />
+          <span className={styles.brandSub}>Trust center</span>
+        </Link>
+        <nav className={styles.topNav} aria-label="Trust center">
+          {TOP_LINKS.map(id => {
+            const document = LEGAL_DOCUMENTS.find(item => item.id === id);
+            return document ? <Link key={id} href={`/legal/${id}`}>{document.title.replace(/ policy| overview/u, "")}</Link> : null;
+          })}
+        </nav>
+        <Link href="/login" className={styles.signIn}>Sign in <LegalIcon name="arrow" width={15} height={15} /></Link>
+      </div>
     </header>
     {children}
-    <footer className={styles.foot}>© {new Date().getFullYear()} {COMPANY.name || "EnergyX"}</footer>
+    <footer className={styles.foot}>
+      <div className={styles.footInner}>
+        <div className={styles.footBrand}>
+          <span className={styles.logo} aria-hidden="true">X</span>
+          <p>Energy analytics for buildings in Singapore and Malaysia, from metered readings you can trust.</p>
+        </div>
+        <div>
+          <h2>Policies</h2>
+          {LEGAL_DOCUMENTS.filter(item => ["privacy", "terms", "data-processing", "ai-use"].includes(item.id)).map(item => <Link key={item.id} href={`/legal/${item.id}`}>{item.title}</Link>)}
+        </div>
+        <div>
+          <h2>Security</h2>
+          <Link href="/legal/security">Security overview</Link>
+          <Link href="/legal/service-levels">Service levels</Link>
+          <a href="/.well-known/security.txt">security.txt</a>
+        </div>
+        <div>
+          <h2>Contact</h2>
+          <span><LegalText text="{contactEmail}" /></span>
+          <span className={styles.footMuted}>Security: <LegalText text="{securityEmail}" /></span>
+        </div>
+      </div>
+      <div className={styles.footBar}>
+        <span>© {new Date().getFullYear()} {company}</span>
+        <span>Hosted on Alibaba Cloud · Built for PDPA in Singapore and Malaysia</span>
+      </div>
+    </footer>
   </div>;
 }
