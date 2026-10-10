@@ -1,5 +1,6 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
+import { AiAnswerNote } from "./ai-answer-note";
 import { ReportActionPanel } from "./report-action-panel";
 import { ReportThumbnail as Thumbnail } from "./report-thumbnail";
 import { OPEN_REPORT } from "./report-navigation";
@@ -156,7 +157,7 @@ function ProjectLibrary({ projectId, view }: { projectId: string; view: "reports
       {editing && <ReportSkillVersionDialog canManageProject={library.canManageProject === true} projectId={projectId} skills={library.skills.filter((skill): skill is Skill & ReportSkillOption => !!skill.id && skill.revision !== undefined)} initial={editing as ReportSkillOption} content={editing.content} onClose={()=>setEditing(null)} onSaved={()=>{setRevision(value=>value+1);setNotice(t("skillVersionSaved"));}} />}
       {skillsTab === "tools" && <section aria-label={t("availableTools")} className="mt-8"><h2 className="mb-3 font-semibold">{t("availableTools")}</h2>{!library.tools.length ? <p className={styles.muted}>{t("noTools")}</p> : <ul className="divide-y divide-border">{library.tools.map(tool => <li key={tool.name} className="py-3 text-sm"><strong>{tool.name}</strong><p className="mt-1 text-muted">{tool.description}</p></li>)}</ul>}</section>}
     </>}
-    </div></div>{file && <ReportFilePreview actions={library?.canUseActions === true && library.reports.some(item=>item.id===file.id) ? <ReportActionPanel key={`${projectId}:${file.id}`} projectId={projectId} reportId={file.id} /> : undefined} notice={library?.reports.find(item=>item.id===file.id)?.source === "site" ? t("siteReportNotice") : library?.reports.find(item=>item.id===file.id)?.canDiscuss === false ? t("sharedReportNotice") : undefined} onDiscuss={library?.canChat && library.reports.some(item=>item.id===file.id && item.canDiscuss !== false) ? ()=>{router.push(`/energyiq/reports?${new URLSearchParams({projectId,sessionId:"new",reportId:file.id})}`);} : undefined} file={file} onClose={closeReport} />}</div>;
+    </div></div>{file && <ReportFilePreview actions={library?.canUseActions === true && library.reports.some(item=>item.id===file.id) ? <ReportActionPanel key={`${projectId}:${file.id}`} projectId={projectId} reportId={file.id} /> : undefined} aiNote={library?.reports.some(item=>item.id===file.id && item.source !== "site") ? <AiAnswerNote compact targetKind="report" targetId={file.id} projectId={projectId} /> : undefined} notice={library?.reports.find(item=>item.id===file.id)?.source === "site" ? t("siteReportNotice") : library?.reports.find(item=>item.id===file.id)?.canDiscuss === false ? t("sharedReportNotice") : undefined} onDiscuss={library?.canChat && library.reports.some(item=>item.id===file.id && item.canDiscuss !== false) ? ()=>{router.push(`/energyiq/reports?${new URLSearchParams({projectId,sessionId:"new",reportId:file.id})}`);} : undefined} file={file} onClose={closeReport} />}</div>;
 }
 
 /** Read the display description without treating the whole document as YAML; empty when the Skill has none. */

@@ -1,4 +1,5 @@
 import { ActionProgressDrafts } from "./action-progress-drafts.js";
+import { assertAiAllowed, finishAiRequest, recordAiRequest } from "../energy/energy-ai-governance.js";
 import { insightMaintenanceContext } from "./insight-maintenance.js";
 import { computeKeyPointMetrics } from "./key-point-metrics.js";
 import { registerReportActions } from "./action-registration.js";
@@ -198,6 +199,8 @@ export class ReportService {
       try {
         const due = dueReportPeriods(now, settings.timezone, settings.frequency, settings.localHour);
         if (!due.length) continue;
+        // An organisation with AI off or over its monthly limit gets no automatic AI reports until that changes.
+        if (this.options.metadata.energyIq?.ai.check(settings.workspaceId, now).allowed === false) continue;
         (this.options.authorizeProject ?? authorizeReportProject)(this.options.metadata, settings.actorUserId, settings.workspaceId, settings.projectId);
         const runSettings = this.options.resolveScheduledSkills?.(settings) ?? resolveReportSkillSelection(settings, [...requiredReportSkills(settings.projectId), ...defaultReportSkills(settings)]);
         const available = await (this.options.availablePeriod ?? availableReportPeriod)(this.options.metadata, this.options.files, settings, settings.actorUserId);
@@ -320,7 +323,11 @@ export class ReportService {
         const group = toolGroups.find(group => group.tools.some(tool => tool.name === name));
         return group ? group.executeTool(name, args) : { ok: false, code: "TOOL_UNKNOWN" };
       } } : {};
-      const result = await this.options.harness({ directory, runId: run.id, prompt: (canManage ? "" : "You are serving a project member. Configuration tools are unavailable; answer questions and create reports without changing shared project settings.\n") + (actionTools ? ACTION_CHAT_INSTRUCTIONS : "") + reportPrompt(run), signal: controller.signal, ...runTools,
+      // Each run is one AI request for the organisation: refused when AI is off or the month's limit is used up.
+      const aiRequest = { metadataStore: this.options.metadata, workspaceId: run.workspaceId, projectId: run.projectId, userId: run.actorUserId, feature: reportAiFeature(run) };
+      assertAiAllowed(aiRequest);
+      const aiTicket = recordAiRequest(aiRequest);
+      const result = await this.options.harness({ directory, runId: run.id, workspaceId: run.workspaceId, onUsage: usage => finishAiRequest(this.options.metadata, aiTicket, usage), prompt: (canManage ? "" : "You are serving a project member. Configuration tools are unavailable; answer questions and create reports without changing shared project settings.\n") + (actionTools ? ACTION_CHAT_INSTRUCTIONS : "") + reportPrompt(run), signal: controller.signal, ...runTools,
         ...(previous && !run.actionExtraction && !run.actionFeedback ? { previousStateDirectory: join(this.runDirectory(previous.id), "state") } : {}),
         onEvent: event => this.store.event(run.id, event),
       });
@@ -553,3 +560,8 @@ export function assertReportMeterNames(directory: string): void {
   const config = JSON.parse(readFileSync(path, "utf8"));
   if (config.meterNamingReadiness?.ready === false) throw new Error("REPORT_METER_NAMES_REQUIRED");
 }
+
+/** What a report-agent run counts as in AI usage. */
+const reportAiFeature = (run: ReportRun): "advisor" | "report" | "actions" | "other" =>
+  run.actionFeedback || run.actionEstimate || run.actionExtraction || run.actionProgress ? "actions"
+    : run.kind === "chat" ? "advisor" : run.kind === "skill" ? "other" : "report";

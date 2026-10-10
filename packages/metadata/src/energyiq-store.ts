@@ -17,6 +17,7 @@ import { EnergyIqSourceSyncStore } from "./energyiq-source-sync-store.js";
 import { EnergyIqLiveConnectorStore } from "./energyiq-live-connector-store.js";
 import { EnergyIqAccessRoleStore } from "./energyiq-access-role-store.js";
 import { EnergyIqTargetsStore } from "./energyiq-targets-store.js";
+import { EnergyIqAiGovernanceStore } from "./energyiq-ai-governance-store.js";
 
 import {
   EnergyIqProjectSetupStore,
@@ -351,6 +352,7 @@ export class EnergyIqStore {
   readonly liveConnectors: EnergyIqLiveConnectorStore;
   readonly roles: EnergyIqAccessRoleStore;
   readonly targets: EnergyIqTargetsStore;
+  readonly ai: EnergyIqAiGovernanceStore;
 
   constructor(private readonly db: DatabaseSync) {
     this.metrics = new EnergyIqMetricStore(db);
@@ -370,6 +372,7 @@ export class EnergyIqStore {
     this.liveConnectors = new EnergyIqLiveConnectorStore(db);
     this.roles = new EnergyIqAccessRoleStore(db);
     this.targets = new EnergyIqTargetsStore(db);
+    this.ai = new EnergyIqAiGovernanceStore(db);
   }
 
   upsertUserRole(input: { user_id: string; role: EnergyIqRole }): EnergyIqUserRoleRecord {

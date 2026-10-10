@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { AiAnswerNote } from "./ai-answer-note";
 
 import {
   configApi,
@@ -126,6 +127,7 @@ export function NgeeAnnProjectAiSlots({
       ) : (
         <div className="mt-5 space-y-5">
           <KeyFindings unit={model.keyFindings} />
+          <AiAnswerNote compact targetKind="overview" targetId={`${snapshot.context.projectId}:${snapshot.dataSnapshot.id}:key-findings`} projectId={snapshot.context.projectId} />
           <div className="grid gap-4 xl:grid-cols-2" aria-label="Ngee Ann Section interpretations">
             {sections.map(([sectionId, label]) => (
               <SectionInterpretation key={sectionId} label={label} unit={model.sections[sectionId] ?? { status: "missing" }} />

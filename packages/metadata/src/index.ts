@@ -55,12 +55,14 @@ import { initializeEnergyIqSourceSyncSchema } from "./energyiq-source-sync-store
 import { initializeEnergyIqLiveConnectorSchema } from "./energyiq-live-connector-store.js";
 import { ENERGYIQ_ORGANISATION_ADMIN_ROLE_ID, initializeEnergyIqAccessRoleSchema, upgradeSeededOrganisationAdminRole } from "./energyiq-access-role-store.js";
 import { initializeEnergyIqTargetsSchema } from "./energyiq-targets-store.js";
+import { initializeEnergyIqAiGovernanceSchema } from "./energyiq-ai-governance-store.js";
 import { recordSchemaMigration, runSchemaMigration } from "./schema-migration.js";
 
 export * from "./config-store.js";
 export * from "./energyiq-store.js";
 export * from "./energyiq-carbon.js";
 export * from "./energyiq-targets-store.js";
+export * from "./energyiq-ai-governance-store.js";
 export * from "./energyiq-import-readiness.js";
 export * from "./energyiq-saved-analysis-store.js";
 export * from "./energyiq-scope-metadata-resolver.js";
@@ -4702,6 +4704,15 @@ const runMigrations = (db: DatabaseSync): void => {
     "Add site budgets, carbon factors, overnight checks, their alerts, and scheduled report emails",
     () => {
       initializeEnergyIqTargetsSchema(db);
+    },
+    { atomic: true },
+  );
+  runSchemaMigration(
+    db,
+    "0052_energyiq_ai_governance",
+    "Add per-organisation AI settings, AI usage records and AI answer feedback",
+    () => {
+      initializeEnergyIqAiGovernanceSchema(db);
     },
     { atomic: true },
   );

@@ -197,6 +197,13 @@ export class ConfigResourceRepository {
     `).all(input.workspace_id, input.user_id, input.kind).map(mapRequiredConfigResource);
   }
 
+  /** Every resource of one kind in a workspace, whoever created it (for platform-wide choices such as AI models). */
+  listAllOfKind(input: { workspace_id: string; kind: ConfigResourceKind }): ConfigResourceRecord[] {
+    return this.db.prepare(`
+      SELECT * FROM config_resources WHERE workspace_id = ? AND kind = ? ORDER BY updated_at DESC
+    `).all(input.workspace_id, input.kind).map(mapRequiredConfigResource);
+  }
+
   /** Delete one configuration resource. Builtin skill packages remain protected. */
   delete(input: { id: string; workspace_id: string; user_id: string; kind: ConfigResourceKind }): void {
     const current = this.get(input);

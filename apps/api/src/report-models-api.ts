@@ -21,7 +21,8 @@ export function reportModelEndpoint(value: unknown): string {
 function fingerprint(r: ConfigResourceRecord): string {
   return createHash("sha256").update(JSON.stringify([r.payload.modelName, r.payload.baseUrl, r.secret_ref, ...(r.payload.apiProtocol ? [r.payload.apiProtocol] : [])])).digest("hex");
 }
-function compatible(r: ConfigResourceRecord): boolean {
+/** A model that passed the report connection test and is still enabled: the only kind a client may be given. */
+export function compatible(r: ConfigResourceRecord): boolean {
   return r.status === "connected" && r.default_enabled && !r.payload.fallbackProfileId && r.payload.reportPiTest === fingerprint(r);
 }
 function dto(r: ConfigResourceRecord) {

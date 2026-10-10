@@ -183,7 +183,7 @@ export type EnergyAuditEventDto = {
 export type EnergyAuditFilterDto = {
   from?: string;
   to?: string;
-  category?: "" | "sign-in" | "access" | "projects";
+  category?: "" | "sign-in" | "access" | "projects" | "ai";
   search?: string;
 };
 
@@ -4544,4 +4544,34 @@ export type ArtifactVersionDto = {
   fileId?: string;
   downloadUrl?: string;
   createdAt: string;
+};
+
+/** An organisation's AI status as its own people see it. */
+export type EnergyAiOrganisationDto = {
+  enabled: boolean;
+  monthlyRequestLimit?: number;
+  usedThisMonth: number;
+  blockedThisMonth: number;
+  model: string;
+  canToggle: boolean;
+};
+
+export type EnergyAiModelOptionDto = { id: string; name: string; modelName: string; host: string; label: string };
+
+export type EnergyAdminAiDto = {
+  monthStart: string;
+  platformModel: string | null;
+  models: EnergyAiModelOptionDto[];
+  organisations: Array<{
+    id: string;
+    name: string;
+    disabled: boolean;
+    settings: { workspaceId: string; enabled: boolean; modelProfileId?: string; monthlyRequestLimit?: number; updatedAt?: string; updatedBy?: string };
+    usage: { requests: number; blocked: number; inputTokens: number; outputTokens: number; byFeature: Record<string, number>; helpful: number; notHelpful: number };
+  }>;
+};
+
+export type EnergyAdminAiActivityDto = {
+  usage: Array<{ id: string; feature: string; status: "allowed" | "blocked-disabled" | "blocked-limit"; model?: string; inputTokens?: number; outputTokens?: number; createdAt: string; project?: string; user?: string }>;
+  feedback: Array<{ id: string; targetKind: string; targetId: string; rating: "up" | "down"; comment?: string; createdAt: string; project?: string; user?: string }>;
 };

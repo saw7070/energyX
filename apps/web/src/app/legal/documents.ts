@@ -205,7 +205,7 @@ export const LEGAL_DOCUMENTS: LegalDocument[] = [
         "Browser protections on every page: Content Security Policy, clickjacking protection, no content-type guessing, strict referrer policy.",
         "Cross-site request forgery protection on every change; cookies are HttpOnly and SameSite.",
         "The API accepts browser requests only from the EnergyX site itself.",
-        "AI-generated report pages run in a locked-down sandbox.",
+        "AI-generated report pages run in a locked-down sandbox. AI can be switched off per organisation, limited per month, and every AI request is recorded in the audit history (see our AI use policy).",
         "Automated tests run on every change; releases are checked before they go live and roll back on their own if checks fail.",
       ]] },
       { heading: "Backups and continuity", blocks: [
@@ -216,6 +216,55 @@ export const LEGAL_DOCUMENTS: LegalDocument[] = [
       ] },
       { heading: "Reporting a security issue", blocks: [
         "Email {securityEmail}. We acknowledge reports within 2 working days and keep you informed until the issue is resolved.",
+      ] },
+    ],
+  },
+  {
+    id: "ai-use",
+    title: "AI use policy",
+    summary: "Where EnergyX uses AI, how answers are kept to your real figures, the controls your organisation has, and what data AI providers receive.",
+    sections: [
+      { heading: "Where EnergyX uses AI", blocks: [
+        "AI helps people understand their energy data. It is used in these places:",
+        [
+          "The energy advisor, which answers questions and writes reports about your sites.",
+          "Summaries and insights on a site's Overview page.",
+          "Suggested actions, such as equipment to check or schedules to change.",
+        ],
+        "Everything else in EnergyX (readings, totals, costs, carbon figures, budgets and alerts) is calculated directly from your data without AI.",
+      ] },
+      { heading: "Keeping answers to your real figures", blocks: [[
+        "The AI works only from your organisation's own published readings and settings, and is told not to recalculate or invent values.",
+        "When the evidence for an answer is missing, it says so instead of guessing. It will not quote electricity prices, carbon figures or forecasts that are not set up in EnergyX.",
+        "Suggested actions must point to the part of the report they come from, or they are not shown.",
+        "New AI analysis methods are reviewed and approved by EnergyX administrators before customers see them.",
+      ]] },
+      { heading: "People stay in charge", blocks: [
+        "Everything the AI writes is marked \"AI-generated\". AI output can be wrong or incomplete: check it before acting on it, and have a qualified person review any decision that affects safety, equipment or significant cost. EnergyX's AI does not control equipment.",
+        "Each AI answer has a \"helpful / not helpful\" button. We review this feedback to improve the service.",
+      ] },
+      { heading: "Your organisation's controls", blocks: [[
+        "Your organisation's administrators can switch AI off at any time; the rest of EnergyX keeps working.",
+        "EnergyX sets which approved AI provider and model your organisation's data is sent to, and changes it at your request.",
+        "A monthly limit on AI requests can be set for your organisation, after which AI pauses until the next month or until the limit is raised.",
+        "Each AI request is recorded in the audit history (who made it, when and for which site), and EnergyX's administrators can see which model handled it and how much it used.",
+        "Inside your organisation, roles decide who may use the advisor.",
+      ]] },
+      { heading: "What AI providers receive", blocks: [
+        "To answer a question, EnergyX sends the AI provider the question and the energy figures, site details and notes needed to answer it. Passwords, sign-in details and connection keys are never sent. Providers are listed in our Privacy policy and process data under contract as our sub-processors.",
+        "We use providers' business services and choose options that stop them from using your data to train their models wherever the provider offers this. Some providers process data outside Singapore and Malaysia; see the Privacy policy for how such transfers are protected.",
+        "Avoid typing personal data about individuals into the advisor; it is not needed for energy analysis.",
+      ] },
+      { heading: "Records we keep", blocks: [
+        "For each AI request we keep who asked, when, for which organisation and site, the model used and how much it was used. We keep a fingerprint of the full request, not its text, so we can prove what was sent without storing it twice. Reports and conversations you save stay in your organisation's library until you delete them or your subscription ends.",
+      ] },
+      { heading: "Not allowed", blocks: [[
+        "Using the advisor to make decisions about individual people, such as staff performance.",
+        "Trying to make the AI reveal other organisations' data, its instructions, or connection keys.",
+        "Presenting AI output as a professional engineering certification or an audited emissions statement.",
+      ]] },
+      { heading: "Questions", blocks: [
+        "Questions about how EnergyX uses AI: {contactEmail}.",
       ] },
     ],
   },

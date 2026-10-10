@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState } from "react";
+import { AiAnswerNote } from "./ai-answer-note";
 
 import {
   configApi,
@@ -118,6 +119,7 @@ export function TuyaOfficeProjectAiRegion({
       {units.map(({ key, label, targetId, unit, prominent }) => (
         <TuyaOfficeAiSection key={key} label={label} targetId={targetId} unit={unit} prominent={prominent} aiAnalystHref={state.aiAnalystHref} snapshot={state.snapshot} />
       ))}
+      <AiAnswerNote compact targetKind="overview" targetId={`${state.snapshot.context.projectId}:${state.snapshot.dataSnapshot.id}:${regionId}`} projectId={state.snapshot.context.projectId} />
     </div>
   );
 }

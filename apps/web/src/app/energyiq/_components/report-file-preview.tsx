@@ -31,12 +31,15 @@ export function ReportFilePreview({
   onClose,
   onDiscuss,
   notice,
+  aiNote,
   actions,
 }: {
   file: PreviewFile;
   onClose: () => void;
   onDiscuss?: () => void;
   notice?: string;
+  /** Shown under the header for files the AI wrote: the "AI-generated" label and feedback. */
+  aiNote?: ReactNode;
   actions?: ReactNode;
 }) {
   const t = useMessages(previewMessages);
@@ -246,6 +249,7 @@ export function ReportFilePreview({
             {notice}
           </p>
         )}
+        {aiNote}
       </header>
       <div
         className={`${styles.previewWorkspace} ${split ? styles.previewSplit : ""}`}

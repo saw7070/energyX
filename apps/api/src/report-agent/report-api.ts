@@ -141,6 +141,9 @@ export async function handleReportApi(request: IncomingMessage, segments: string
     }
     if (action === "runs" && segments.length === 2 && request.method === "POST") {
       const body = runSchema.parse(await readBody(request));
+      // Say straight away when AI is off for the organisation or its monthly limit is used up.
+      const aiCheck = context.metadataStore.energyIq.ai.check(context.metadataStore.energyIq.getProject(projectId).workspace_id);
+      if (!aiCheck.allowed) throw new Error(aiCheck.reason === "disabled" ? "ENERGYIQ_AI_DISABLED" : "ENERGYIQ_AI_LIMIT_REACHED");
       if (!settings.revision && canManageProject) throw new Error("REPORT_SETTINGS_REQUIRED");
       if (body.kind === "skill" && !body.parentRunId) {
         if (!body.sessionId) throw new Error("REPORT_SKILL_SOURCE_REQUIRED");

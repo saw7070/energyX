@@ -217,6 +217,7 @@ import {
 import { createTuyaOpenApiClientFor, createTuyaOpenApiClientFromEnv, type TuyaOpenApiClient } from "./energy/tuya-openapi-client.js";
 import { createEnergyLiveReadingsPoller } from "./energy/energy-live-readings.js";
 import { createEnergyAlertEmailer } from "./energy/energy-alert-emails.js";
+import { assertAiAllowed, finishAiRequest, recordAiRequest } from "./energy/energy-ai-governance.js";
 import { createEnergyReportDeliveryWorker } from "./energy/energy-report-delivery.js";
 import { createEnergyTargetsMonitor } from "./energy/energy-targets-monitor.js";
 import { applyApiSecurityHeaders } from "./http-security.js";
@@ -752,7 +753,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
     },
     harness: (process.env.ENERGYIQ_REPORT_AGENT_HARNESS ?? "pi") === "pi" ? createPiReportHarness({
       image: process.env.ENERGYIQ_REPORT_AGENT_IMAGE ?? "energyiq-report-agent:pi-review-20260913",
-      model: () => resolvePiReportModel(metadataStore),
+      model: (workspaceId) => resolvePiReportModel(metadataStore, workspaceId),
     }) : async () => { throw new Error("REPORT_HARNESS_NOT_CONFIGURED"); },
   }) : undefined;
   if (reportService) registerReportService(metadataStore, reportService);
@@ -2065,6 +2066,9 @@ export class DataFoundryAgUiAgent extends AbstractAgent {
         let selectedSkills;
         let skillSelection;
         let energyQueryContext;
+        let aiWorkspaceId: string = this.input.workspaceId;
+        let aiProjectId: string | undefined;
+        const aiFeature = this.input.overviewAiStage ? "overview" as const : "advisor" as const;
         let energySessionFork;
         let energySessionForkProvenance: EnergySessionForkProvenance | undefined;
         let energyAnalysisWorkspace: EnergyIqAnalysisWorkspace | undefined;
@@ -2370,6 +2374,21 @@ export class DataFoundryAgUiAgent extends AbstractAgent {
             // persists its validated canonical answer.
             throw new Error("TRUSTED_ENERGY_TEXT_VALIDATED_EXECUTOR_REQUIRED");
           }
+          // AI governance: refuse before any model is set up when AI is off for the organisation or over its
+          // monthly limit. A resumed interaction finishes the request already counted.
+          aiWorkspaceId = energyQueryContext?.workspaceId
+            ?? this.input.trustedEnergySessionScope?.workspaceId
+            ?? this.input.workspaceId;
+          aiProjectId = energyQueryContext?.projectId ?? this.input.trustedEnergySessionScope?.projectId;
+          if (!interactionResume) {
+            assertAiAllowed({
+              metadataStore: this.input.metadataStore,
+              workspaceId: aiWorkspaceId,
+              projectId: aiProjectId,
+              userId: this.input.user.id,
+              feature: aiFeature,
+            });
+          }
           ({
             effectiveRunConfig,
             mcpRuntime,
@@ -2509,6 +2528,15 @@ export class DataFoundryAgUiAgent extends AbstractAgent {
         });
         energyPreparationTrace?.record("run-claimed");
         const { isResume, selectedDatasourceId } = identity;
+        // Counted once the run is really starting: a reconnect replay or a resumed interaction is not a new request.
+        const aiTicket = isResume || interactionResume ? undefined : recordAiRequest({
+          metadataStore: this.input.metadataStore,
+          workspaceId: aiWorkspaceId,
+          projectId: aiProjectId,
+          userId: this.input.user.id,
+          feature: aiFeature,
+          model: modelProvider.model_name,
+        });
         let checkpointResumeSeed: CheckpointResumeSeed | undefined;
         try {
           checkpointResumeSeed = resolveCheckpointResumeSeed({
@@ -2654,6 +2682,14 @@ export class DataFoundryAgUiAgent extends AbstractAgent {
         const emit = (event: BaseEvent): void => {
           eventPipeline.emit(event);
           energyPreparationTrace?.observeRuntimeEvent(event);
+          // Each completed model step reports its tokens; add them to this request's usage record.
+          if (aiTicket && event.type === EventType.CUSTOM && event.name === "token_usage" && isServerRecord(event.value)) {
+            finishAiRequest(this.input.metadataStore, aiTicket, {
+              ...(typeof event.value.model === "string" ? { model: event.value.model } : {}),
+              inputTokens: Number(event.value.input_tokens ?? 0) || 0,
+              outputTokens: Number(event.value.output_tokens ?? 0) || 0,
+            });
+          }
         };
         // Replayed journal entries are delivery recovery, not fresh model output.
         // Bypass the live latency observer so a prior process cannot consume the

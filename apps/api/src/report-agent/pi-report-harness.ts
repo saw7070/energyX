@@ -7,14 +7,28 @@ import { promisify } from "node:util";
 import { createInterface } from "node:readline";
 import { existsSync, mkdirSync, lstatSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
-import type { MetadataStore } from "@datafoundry/metadata";
+import type { ConfigResourceRecord, MetadataStore } from "@datafoundry/metadata";
+import { compatible } from "../report-models-api.js";
 import { resolveWorkspaceDefaultModelProfileSnapshot } from "../workspace-model-profile-resolver.js";
 import { reportModelProtocol, reportModelRequest, ReportModelStream, type ReportModelProtocol } from "../report-model-transport.js";
 import type { ReportHarness } from "./report-harness.js";
 
 export type PiReportModel = { apiProtocol?: ReportModelProtocol; model: string; baseUrl: string; apiKey: string; contextWindow?: number; maxTokens?: number };
-export function resolvePiReportModel(metadata: MetadataStore): PiReportModel {
-  const profile = resolveWorkspaceDefaultModelProfileSnapshot(metadata).profiles[0];
+/**
+ * The model a report run uses: the one an administrator chose for the run's organisation, otherwise the platform
+ * default. A chosen model that is no longer usable stops the run rather than quietly sending the organisation's data
+ * to a different provider.
+ */
+export function resolvePiReportModel(metadata: MetadataStore, workspaceId?: string): PiReportModel {
+  const chosenId = workspaceId ? metadata.energyIq?.ai.getSettings(workspaceId).modelProfileId : undefined;
+  let profile: { resource: ConfigResourceRecord; ownerWorkspaceId: string; ownerUserId: string } | undefined;
+  if (chosenId) {
+    const resource = metadata.configResources.listAllOfKind({ workspace_id: "default", kind: "model-profile" }).find((candidate) => candidate.id === chosenId);
+    if (!resource || !compatible(resource)) throw new Error("ENERGYIQ_AI_MODEL_UNAVAILABLE");
+    profile = { resource, ownerWorkspaceId: resource.workspace_id, ownerUserId: resource.user_id };
+  } else {
+    profile = resolveWorkspaceDefaultModelProfileSnapshot(metadata).profiles[0];
+  }
   if (!profile) throw new Error("REPORT_MODEL_NOT_CONFIGURED");
   const payload = profile.resource.payload;
   const url = new URL(String(payload.baseUrl ?? payload.base_url ?? ""));
@@ -51,9 +65,9 @@ export function validateWorkerTree(root: string, limit = 100 * 1024 * 1024): voi
   };
   walk(root, 0);
 }
-export function createPiReportHarness(options: { image: string; model: () => PiReportModel; timeoutMs?: number; fetch?: typeof fetch }): ReportHarness {
-  return async ({ directory, runId, prompt, signal, previousStateDirectory, onEvent, tools = [], executeTool }) => {
-    const model = options.model();
+export function createPiReportHarness(options: { image: string; model: (workspaceId?: string) => PiReportModel; timeoutMs?: number; fetch?: typeof fetch }): ReportHarness {
+  return async ({ directory, runId, prompt, signal, previousStateDirectory, onEvent, tools = [], executeTool, workspaceId, onUsage }) => {
+    const model = options.model(workspaceId);
     const name = `energyiq-report-${runId}`;
     const controller = new AbortController();
     const abort = () => controller.abort();
@@ -122,7 +136,8 @@ export function createPiReportHarness(options: { image: string; model: () => PiR
               if (!response.ok) { await response.body?.cancel(); send({ type: "response", id: message.id, status: 502, contentType: "application/json", body: '{"error":"REPORT_MODEL_REQUEST_FAILED"}' }); }
               else {
                 let size = 0; const chunks: Uint8Array[] = [];
-                const parser = new ReportModelStream(reportModelProtocol(model.apiProtocol));
+                const usage = { inputTokens: 0, outputTokens: 0 };
+                const parser = new ReportModelStream(reportModelProtocol(model.apiProtocol), (data) => addUsage(usage, data));
                 const streaming = message.body.stream === true;
                 if (streaming) send({ type: "response_start", id: message.id, contentType: response.headers.get("content-type") ?? "text/event-stream" });
                 const reader = response.body?.getReader();
@@ -135,6 +150,8 @@ export function createPiReportHarness(options: { image: string; model: () => PiR
                 } finally { reader.releaseLock(); }
                 const body = Buffer.concat(chunks).toString("utf8");
                 if (streaming) parser.finish();
+                else { try { addUsage(usage, JSON.parse(body)); } catch { /* A body that is not JSON carries no usage. */ } }
+                if (usage.inputTokens || usage.outputTokens) onUsage?.({ model: model.model, ...usage });
                 if (streaming) send({ type: "response_end", id: message.id });
                 else send({ type: "response", id: message.id, status: 200, contentType: response.headers.get("content-type") ?? "text/event-stream", body });
               }
@@ -183,4 +200,14 @@ function packFiles(root: string, area: string): Array<{ area: string; path: stri
     else files.push({ area, path: relative, content: readFileSync(join(root, relative)).toString("base64") });
   } };
   walk(""); return files;
+}
+
+/** Token counts as OpenAI-style (usage.prompt_tokens / completion_tokens) or Anthropic (input_tokens / output_tokens) report them. */
+function addUsage(total: { inputTokens: number; outputTokens: number }, data: any): void {
+  const usage = data?.usage ?? data?.message?.usage;
+  if (!usage || typeof usage !== "object") return;
+  const input = Number(usage.prompt_tokens ?? usage.input_tokens ?? 0);
+  const output = Number(usage.completion_tokens ?? usage.output_tokens ?? 0);
+  if (Number.isFinite(input)) total.inputTokens += input;
+  if (Number.isFinite(output)) total.outputTokens += output;
 }

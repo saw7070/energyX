@@ -11,6 +11,7 @@ import {
   type EnergyTeamRoleDto,
 } from "../../../lib/config-api";
 import { useEnergyIqAccess } from "../_components/energyiq-access";
+import { OrganisationAiCard } from "./organisation-ai-card";
 import { friendlyErrorMessage } from "../_components/friendly-error";
 import { EnergyIcon, type EnergyIconName } from "../_components/icons";
 import styles from "../_components/project-configuration-view.module.css";
@@ -119,7 +120,8 @@ export function EnergyIqTeam() {
 
   // Same page padding the Facility page gets from the project gate.
   return (
-    <div className="min-w-0 p-4 sm:p-6">
+    <div className="min-w-0 space-y-4 p-4 sm:p-6">
+      <OrganisationAiCard workspaceId={workspaceId} />
       <TeamView
         organisationName={team?.organisation.name}
         members={team?.members ?? null}

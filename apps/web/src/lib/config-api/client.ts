@@ -61,6 +61,9 @@ import type {
   EnergyProjectRegionDto,
   EnergyAuditEventDto,
   EnergyAuditFilterDto,
+  EnergyAdminAiActivityDto,
+  EnergyAdminAiDto,
+  EnergyAiOrganisationDto,
   EnergyPortfolioDto,
   EnergyProjectTargetsDto,
   EnergyProjectTargetsInputDto,
@@ -319,6 +322,28 @@ export const configApi = {
   },
   getEnergyProjectAlerts(projectId: string): Promise<EnergyProjectAlertsDto> {
     return requestEnvelope<EnergyProjectAlertsDto>(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/alerts`);
+  },
+  getEnergyAiSettings(): Promise<EnergyAiOrganisationDto> {
+    return requestEnvelope<EnergyAiOrganisationDto>("/api/v1/energy/ai/settings");
+  },
+  setEnergyAiEnabled(enabled: boolean): Promise<EnergyAiOrganisationDto> {
+    return requestEnvelope<EnergyAiOrganisationDto>("/api/v1/energy/ai/settings", { method: "PUT", body: JSON.stringify({ enabled }) });
+  },
+  getEnergyAdminAi(): Promise<EnergyAdminAiDto> {
+    return requestEnvelope<EnergyAdminAiDto>("/api/v1/energy/admin/ai");
+  },
+  updateEnergyAdminAi(workspaceId: string, body: { enabled?: boolean; modelProfileId?: string | null; monthlyRequestLimit?: number | null }): Promise<EnergyAdminAiDto> {
+    return requestEnvelope<EnergyAdminAiDto>(`/api/v1/energy/admin/ai/${encodeURIComponent(workspaceId)}`, { method: "PUT", body: JSON.stringify(body) });
+  },
+  getEnergyAdminAiActivity(workspaceId: string): Promise<EnergyAdminAiActivityDto> {
+    return requestEnvelope<EnergyAdminAiActivityDto>(`/api/v1/energy/admin/ai/${encodeURIComponent(workspaceId)}/activity`);
+  },
+  /** This person's rating of one AI answer, if they gave one. */
+  getAiFeedback(targetKind: string, targetId: string): Promise<{ rating?: "up" | "down" }> {
+    return requestEnvelope(`/api/v1/energy/ai/feedback?${new URLSearchParams({ targetKind, targetId }).toString()}`);
+  },
+  sendAiFeedback(body: { targetKind: string; targetId: string; rating: "up" | "down"; projectId?: string; comment?: string }): Promise<{ rating: "up" | "down" }> {
+    return requestEnvelope("/api/v1/energy/ai/feedback", { method: "POST", body: JSON.stringify(body) });
   },
   getEnergyPortfolio(period: { from: string; to: string }): Promise<EnergyPortfolioDto> {
     return requestEnvelope<EnergyPortfolioDto>(`/api/v1/energy/portfolio?${new URLSearchParams(period).toString()}`);

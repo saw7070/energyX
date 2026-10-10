@@ -52,9 +52,12 @@ export const AUDIT_EVENT_LABELS: Record<string, string> = {
   "energyiq.budget_carbon_changed": "Changed a site's budget, carbon factor or overnight check",
   "energyiq.report_schedule_changed": "Changed a scheduled report email",
   "energyiq.report_email_sent": "Sent a scheduled report email",
+  "energyiq.ai_used": "Used AI",
+  "energyiq.ai_blocked": "AI request refused",
+  "energyiq.ai_settings_changed": "Changed AI settings",
 };
 
-const WARNINGS = new Set(["auth.login_failed", "auth.login_unverified", "auth.password_reset_requested_unknown"]);
+const WARNINGS = new Set(["energyiq.ai_blocked", "auth.login_failed", "auth.login_unverified", "auth.password_reset_requested_unknown"]);
 const PERIODS = [
   { value: "7", label: "Last 7 days" },
   { value: "30", label: "Last 30 days" },
@@ -66,7 +69,26 @@ const CATEGORIES: Array<{ value: NonNullable<EnergyAuditFilterDto["category"]>; 
   { value: "sign-in", label: "Sign-ins and accounts" },
   { value: "access", label: "People and access" },
   { value: "projects", label: "Projects and settings" },
+  { value: "ai", label: "AI use" },
 ];
+
+const AI_FEATURES: Record<string, string> = { advisor: "Advisor", report: "Report", overview: "Overview AI", insights: "AI insights", actions: "Action suggestions", other: "Other AI" };
+
+/** For AI entries, which feature and model; for a refusal, why. */
+const aiDetail = (event: EnergyAuditEventDto): string | undefined => {
+  if (!event.type.startsWith("energyiq.ai_")) return undefined;
+  const details = event.details as Record<string, unknown>;
+  if (event.type === "energyiq.ai_settings_changed") {
+    return [
+      typeof details.enabled === "boolean" ? (details.enabled ? "AI switched on" : "AI switched off") : "",
+      details.modelProfileId === null ? "model: platform default" : typeof details.modelProfileId === "string" ? "model changed" : "",
+      details.monthlyRequestLimit === null ? "no monthly limit" : typeof details.monthlyRequestLimit === "number" ? `limit ${details.monthlyRequestLimit} a month` : "",
+    ].filter(Boolean).join(" · ") || undefined;
+  }
+  const feature = typeof details.feature === "string" ? AI_FEATURES[details.feature] ?? details.feature : undefined;
+  if (event.type === "energyiq.ai_blocked") return [feature, details.reason === "limit" ? "monthly limit reached" : "AI is off"].filter(Boolean).join(" · ");
+  return [feature, typeof details.model === "string" ? details.model : ""].filter(Boolean).join(" · ") || undefined;
+};
 
 const when = (iso: string) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
 
@@ -158,6 +180,7 @@ export function AuditHistory() {
             <td className="px-4 py-2.5">
               <span className={WARNINGS.has(event.type) ? "font-medium text-rose-700" : "font-medium"}>{AUDIT_EVENT_LABELS[event.type] ?? event.type}</span>
               {event.target ? <span className="block text-xs text-muted">{event.target}</span> : null}
+              {aiDetail(event) ? <span className="block text-xs text-muted">{aiDetail(event)}</span> : null}
             </td>
             <td className="px-4 py-2.5 text-muted">{[event.organisation, event.project].filter(Boolean).join(" · ") || "—"}</td>
             <td className="whitespace-nowrap px-4 py-2.5 tabular-nums text-muted">{event.ip ?? "—"}</td>

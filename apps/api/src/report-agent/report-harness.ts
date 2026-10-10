@@ -8,4 +8,8 @@ export type ReportHarness = (input: {
   tools?: Array<{ name: string; description: string; parameters: Record<string, unknown> }>;
   executeTool?: (name: string, args: unknown) => Promise<unknown>;
   onEvent?: (event: { type: string; tool?: string; isError?: boolean; text?: string }) => void;
+  /** The organisation the run is for: its AI settings choose the model. */
+  workspaceId?: string;
+  /** Called after each model response with the tokens it used, when the provider reports them. */
+  onUsage?: (usage: { model: string; inputTokens: number; outputTokens: number }) => void;
 }) => Promise<{ answer: string; sessionId?: string }>;

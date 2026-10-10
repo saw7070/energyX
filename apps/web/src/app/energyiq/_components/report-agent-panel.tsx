@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { AiAnswerNote } from "./ai-answer-note";
 import { ReportRunProgress } from "./report-run-progress";
 import { EnergyIcon } from "./icons";
 import { EnergySelect } from "./energy-select";
@@ -335,6 +336,7 @@ function ProjectReportPanel({ referenceReportId, settingsMode, configurationFocu
 <span className="sr-only">{t("assistant")}</span>
               {visibleAnswer(run, selectedId === run.id ? events : []) && <div className={styles.answer} tabIndex={0} aria-label={t("advisorResponse")}><ReportMarkdown>{visibleAnswer(run, selectedId === run.id ? events : [])}</ReportMarkdown></div>}
               {active(run) && visibleAnswer(run, selectedId === run.id ? events : []) && <p role="status" className={styles.muted}>{t("writing")}</p>}
+              {run.status === "succeeded" && (visibleAnswer(run, selectedId === run.id ? events : []) || isReport(run)) && <AiAnswerNote targetKind={isReport(run) ? "report" : "advisor"} targetId={run.id} projectId={projectId} />}
               {run.errorCode && <div role="alert"><p>{run.errorCode === "REPORT_METER_NAMES_REQUIRED" ? t("errorMeterNames") : run.errorCode === "REPORT_REVIEW_BLOCKED" ? t("errorReviewBlocked") : runErrorKey(run.errorCode) ? tf(runErrorKey(run.errorCode)!) : t("errorGeneric")}</p>{(access?.role === "admin" || overview?.canManageProject) && <details><summary>{t("technicalDetails")}</summary><code>{run.errorCode}</code></details>}</div>}
               {run.status === "succeeded" && (run.kind === "skill" || isReport(run)) && <button className={`${styles.fileCard} ${isReport(run) ? styles.reportDelivery : ""}`} onClick={() => openRun(run)}>{isReport(run) && library?.reports.find(item=>item.id===run.id) && <div className={styles.deliveryThumbnail}><ReportThumbnail file={reportFile(projectId,library.reports.find(item=>item.id===run.id)!,locale)} /></div>}<strong>{run.kind === "skill" ? "project-skill.md" : library?.reports.find(item => item.id === run.id)?.title ?? t("energyReportFallback", { date: run.period.from })}</strong><span>{run.kind === "skill" ? t("markdownSkill") : t("htmlReport", { version: library?.reports.find(item => item.id === run.id)?.version ?? 1 })} · {t("openPreview")}</span></button>}
               {run.status === "succeeded" && run.hasSkillDraft && <><button className={styles.fileCard} onClick={()=>openSkillDraft(run)}><strong>project-skill.md</strong><span>{t("skillDraft")} · {t("openPreview")}</span></button><button className={styles.activityLink} disabled={busy} onClick={()=>void action(async()=>{const draft=await request<{content:string}>(`draft-skill/${run.id}`);setSkillDraft({content:draft.content,runId:run.id});})}>{t("reviewAndSave")}</button></>}
@@ -372,7 +374,7 @@ function ProjectReportPanel({ referenceReportId, settingsMode, configurationFocu
         </>}</div>
       </>}
     </>}
-    </div>{file && <ReportFilePreview onDiscuss={library?.canChat && library.reports.some(item=>item.id===file.id && item.canDiscuss !== false) ? ()=>{const report=library.reports.find(item=>item.id===file.id);if(report){setParentId(file.id);setFrom(report.period.from);setTo(shiftDate(report.period.toExclusive,-1));setPeriodPreset("custom");}setNotice(t("reportAdded"));promptInput.current?.focus();} : undefined} file={file} onClose={() => setFile(null)} />}
+    </div>{file && <ReportFilePreview onDiscuss={library?.canChat && library.reports.some(item=>item.id===file.id && item.canDiscuss !== false) ? ()=>{const report=library.reports.find(item=>item.id===file.id);if(report){setParentId(file.id);setFrom(report.period.from);setTo(shiftDate(report.period.toExclusive,-1));setPeriodPreset("custom");}setNotice(t("reportAdded"));promptInput.current?.focus();} : undefined} aiNote={library?.reports.some(item=>item.id===file.id) ? <AiAnswerNote compact targetKind="report" targetId={file.id} projectId={projectId} /> : undefined} file={file} onClose={() => setFile(null)} />}
   </div>;
 }
 
