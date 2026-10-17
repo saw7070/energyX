@@ -14,7 +14,7 @@ import { resolveEnergyAccessContext } from "./energy-query-context.js";
  * administrator does not have to read server logs to find out why the advisor or a site's data stopped.
  */
 export type HealthStatus = "ok" | "warning" | "problem";
-export type HealthCheck = { id: string; group: string; title: string; status: HealthStatus; detail: string; fix?: string };
+export type HealthCheck = { id: string; group: string; title: string; status: HealthStatus; detail: string; fix?: string; projectId?: string; organisation?: string; lastReadingAt?: string };
 export type SystemHealth = { checkedAt: string; checks: HealthCheck[] };
 
 const run = promisify(execFile);
@@ -72,6 +72,8 @@ export async function checkProjects(metadata: MetadataStore, userId: string, pro
   const checks: HealthCheck[] = [];
   for (const project of projects) {
     const group = project.organisation && project.organisation !== project.name ? `${project.organisation} · ${project.name}` : project.name;
+    const site = { projectId: project.id, ...(project.organisation ? { organisation: project.organisation } : {}) };
+    const before = checks.length;
     try {
       const data = await readReportProjectData(metadata, userId, project.workspaceId, project.id);
       const last = data.actualLastIntervalEnd;
@@ -79,16 +81,18 @@ export async function checkProjects(metadata: MetadataStore, userId: string, pro
         ? { id: `${project.id}:data`, group, title: "Meter data", status: "warning", detail: "No published meter data yet.", fix: "Finish setup under Admin → Project configuration and publish." }
         : data.status === "unavailable" || !last
           ? { id: `${project.id}:data`, group, title: "Meter data", status: "problem", detail: "Meter data could not be read.", fix: "Open the site's Overview or Admin → Data Sources to see what is wrong." }
-          : { id: `${project.id}:data`, group, title: "Meter data", status: now - Date.parse(last) > 7 * DAY ? "problem" : now - Date.parse(last) > 2 * DAY ? "warning" : "ok", detail: `Newest reading ${ago(last, now)} (${last.slice(0, 16).replace("T", " ")} UTC).`, ...(now - Date.parse(last) > 2 * DAY ? { fix: "Readings have stopped arriving. Check the meters' connection or upload the latest file." } : {}) });
+          : { id: `${project.id}:data`, group, title: "Meter data", status: now - Date.parse(last) > 7 * DAY ? "problem" : now - Date.parse(last) > 2 * DAY ? "warning" : "ok", detail: `Newest reading ${ago(last, now)} (${last.slice(0, 16).replace("T", " ")} UTC).`, lastReadingAt: last, ...(now - Date.parse(last) > 2 * DAY ? { fix: "Readings have stopped arriving. Check the meters' connection or upload the latest file." } : {}) });
     } catch {
       checks.push({ id: `${project.id}:data`, group, title: "Meter data", status: "warning", detail: "Could not check this site's meter data." });
     }
+    for (let index = before; index < checks.length; index++) checks[index] = { ...checks[index]!, ...site };
     const sync = metadata.energyIq.sourceSync.findState({ project_id: project.id, source_kind: "tuya" });
     if (sync) {
       const failing = !!sync.last_failure_at && (!sync.last_success_at || sync.last_failure_at > sync.last_success_at);
       checks.push(failing
         ? { id: `${project.id}:tuya`, group, title: "Live sync (Tuya)", status: "problem", detail: `Last sync failed ${ago(sync.last_failure_at!, now)}${sync.last_error_code ? ` (${sync.last_error_code.split(":").slice(0, 3).join(":")})` : ""}.`, fix: tuyaFix(sync.last_error_code) }
         : { id: `${project.id}:tuya`, group, title: "Live sync (Tuya)", status: "ok", detail: sync.last_success_at ? `Last synced ${ago(sync.last_success_at, now)}.` : "Connected; waiting for the first sync." });
+      checks[checks.length - 1] = { ...checks[checks.length - 1]!, ...site };
     }
   }
   return checks;

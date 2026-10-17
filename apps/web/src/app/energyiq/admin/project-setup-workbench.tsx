@@ -93,6 +93,7 @@ import {
 import { AuditHistory } from "./audit-history";
 import { AdminAiGovernance } from "./admin-ai";
 import { AdminSystemHealth } from "./admin-system-health";
+import { AdminOverview } from "./admin-overview";
 
 type AccessState = ReturnType<typeof useEnergyIqAccess>;
 const ReportAgentPanel = dynamic(() => import("./report-agent-panel").then((module) => module.ReportAgentPanel));
@@ -371,6 +372,13 @@ export function EnergyIqAdminWorkbench({
     || section === "meter-mapping";
   const showProjectLink = Boolean(selectedProject?.status === "published" && isProjectContext(section));
   const projectLinkTargetsOverview = section === "project-overview" || section === "templates";
+  // Sections change through the address too: opening a site in another organisation remounts the console, which then
+  // reads the section from the URL. Accepts an updater so it can stand in for setSection.
+  const navigateToSection: Dispatch<SetStateAction<AdminSection>> = (next) => {
+    const value = typeof next === "function" ? next(section) : next;
+    setSection(value);
+    if (!embedded) router.replace(`/energyiq/admin?section=${value}`, { scroll: false });
+  };
   const chooseAdminProject = (projectId: string) => {
     const nextProject = projects.find((project) => project.id === projectId);
     if (!nextProject) return;
@@ -476,7 +484,7 @@ export function EnergyIqAdminWorkbench({
             selectedNodeId,
             setSelectedNodeId,
             changeDocument,
-            setSection,
+            setSection: navigateToSection,
             publishing: saving,
             publishProjectRevision,
             onPoliciesChanged: refreshSelectedProjectState,
@@ -550,7 +558,7 @@ function renderAdminSection({
   applyLive: () => Promise<void>;
 }) {
   if (section === "overview") {
-    return <AdminOverview projects={projects} selectedProject={selectedProject} chooseAdminProject={chooseAdminProject} setSection={setSection} />;
+    return <AdminOverview projects={projects} chooseAdminProject={chooseAdminProject} setSection={setSection} />;
   }
   if (section === "report-agent") {
     return selectedProjectId ? <ReportAgentPanel key={selectedProjectId} projectId={selectedProjectId} /> : <p>Select a project first.</p>;
@@ -1752,82 +1760,6 @@ function formatRuleParameters(rule: EnergyRuleRevisionDto): string {
   return "Controlled deterministic evaluation";
 }
 
-function AdminOverview({
-  projects,
-  selectedProject,
-  chooseAdminProject,
-  setSection,
-}: {
-  projects: EnergyProjectDto[];
-  selectedProject?: EnergyProjectDto;
-  chooseAdminProject: (projectId: string) => void;
-  setSection: Dispatch<SetStateAction<AdminSection>>;
-}) {
-  const publishedCount = projects.filter((project) => project.status === "published").length;
-  const draftCount = projects.length - publishedCount;
-
-  return (
-    <div className="mx-auto max-w-6xl space-y-6">
-      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_320px]">
-        <div className="rounded-xl border border-border bg-surface p-5">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <h3 className="text-base font-semibold">What needs attention</h3>
-              <p className="mt-1 max-w-2xl text-xs leading-5 text-muted">
-                Start from delivery blockers. Operational alerts and AI usage will appear here after those services are connected.
-              </p>
-            </div>
-            <span className="rounded-full bg-step-warning/10 px-2.5 py-1 text-[10px] font-semibold text-step-warning">
-              {draftCount > 0 ? `${draftCount} draft project${draftCount === 1 ? "" : "s"}` : "Project setup active"}
-            </span>
-          </div>
-
-          <div className="mt-5 divide-y divide-border border-y border-border">
-            {projects.map((project) => (
-              <div key={project.id} className="flex flex-wrap items-center gap-3 py-3.5">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-subtle text-muted">
-                  <EnergyIcon name="building" className="h-4 w-4" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold">{project.name}</p>
-                  <p className="mt-0.5 text-[11px] capitalize text-muted">{project.status} · Project delivery</p>
-                </div>
-                <button type="button" onClick={() => {
-                  chooseAdminProject(project.id);
-                  setSection("project-overview");
-                }} className={secondaryButton}>
-                  Open project
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <aside className="rounded-xl border border-border bg-surface p-5">
-          <h3 className="text-sm font-semibold">Portfolio status</h3>
-          <dl className="mt-4 divide-y divide-border">
-            <SummaryRow label="Projects" value={String(projects.length)} />
-            <SummaryRow label="Published" value={String(publishedCount)} />
-            <SummaryRow label="Draft or changing" value={String(draftCount)} />
-          </dl>
-          <p className="mt-4 text-[11px] leading-5 text-muted">
-            Counts cover the projects available in this console. Open Runs & diagnostics to inspect available execution records; cost totals are not included here.
-          </p>
-        </aside>
-      </section>
-
-      <section className="rounded-xl border border-border bg-surface p-5">
-        <h3 className="text-sm font-semibold">Admin operating model</h3>
-        <div className="mt-4 grid gap-5 md:grid-cols-3">
-          <OperatingArea title="Accounts & access" body="Manage customer organisations, invite users and assign project access." status="Active" />
-          <OperatingArea title="Project delivery" body={`Configure ${selectedProject?.name ?? "a project"}, validate evidence, then publish it for customer use.`} status="Active" />
-          <OperatingArea title="Runs & diagnostics" body="Inspect available run records, traces and runtime configuration. Usage and cost reporting are not connected." status="Available" />
-        </div>
-      </section>
-    </div>
-  );
-}
-
 function ProjectDeliveryOverview({
   projectId,
   project,
@@ -2825,9 +2757,6 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
   return <div className="flex items-center justify-between gap-4 py-2.5"><dt className="text-xs text-muted">{label}</dt><dd className="max-w-[60%] truncate text-xs font-semibold">{value}</dd></div>;
 }
 
-function OperatingArea({ title, body, status }: { title: string; body: string; status: string }) {
-  return <div><div className="flex items-center justify-between gap-3"><h4 className="text-xs font-semibold">{title}</h4><span className="text-[10px] text-muted-light">{status}</span></div><p className="mt-2 text-xs leading-5 text-muted">{body}</p></div>;
-}
 
 function SourceOption({ title, status, description, active = false }: { title: string; status: string; description: string; active?: boolean }) {
   return <div className={["rounded-xl p-4", active ? "bg-primary-light/5" : "bg-surface-subtle"].join(" ")}><div className="flex items-center justify-between gap-3"><h4 className="text-sm font-semibold">{title}</h4><span className={active ? "text-[10px] font-semibold text-step-success" : "text-[10px] text-muted-light"}>{status}</span></div><p className="mt-2 text-xs leading-5 text-muted">{description}</p></div>;
@@ -2856,7 +2785,7 @@ function isProjectContext(section: AdminSection): boolean {
 function adminSectionMeta(section: AdminSection, projectName?: string): { title: string; description: string } {
   const project = projectName ?? "Selected project";
   const copy: Record<AdminSection, { title: string; description: string }> = {
-    overview: { title: "Overview", description: "Delivery priorities and platform operations across the current Workspace." },
+    overview: { title: "Overview", description: "How the platform is doing, what needs fixing, and every site at a glance." },
     organisations: { title: "Organisations", description: "Customer organisations and Workspace ownership." },
     users: { title: "Users", description: "Accounts, membership and Project access." },
     roles: { title: "Role access", description: "Create roles and choose what each can read and change." },

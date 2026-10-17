@@ -4579,5 +4579,5 @@ export type EnergyAdminAiActivityDto = {
 };
 
 /** Admin → System health: whether the AI advisor, email and each site's data are working. */
-export type SystemHealthCheckDto = { id: string; group: string; title: string; status: "ok" | "warning" | "problem"; detail: string; fix?: string };
+export type SystemHealthCheckDto = { id: string; group: string; title: string; status: "ok" | "warning" | "problem"; detail: string; fix?: string; projectId?: string; organisation?: string; lastReadingAt?: string };
 export type SystemHealthDto = { checkedAt: string; checks: SystemHealthCheckDto[] };
