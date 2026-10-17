@@ -377,8 +377,12 @@ export class ReportService {
       }
       if (run.actionFeedback) this.actionWakeRequested = true;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "";
+      const raw = error instanceof Error ? error.message : "";
+      // No workspace model at all is the same situation for the reader as no report model: the advisor is not set up.
+      const message = raw === "WORKSPACE_DEFAULT_MODEL_PROFILE_NOT_CONFIGURED" ? "REPORT_MODEL_NOT_CONFIGURED" : raw;
       const code = /^(REPORT_|ENERGYIQ_)[A-Z0-9_]+$/.test(message) ? message : "REPORT_GENERATION_FAILED";
+      // The reader only sees the code; keep the underlying cause in the server log for whoever runs the service.
+      if (code === "REPORT_GENERATION_FAILED") console.error(`[report-agent] run=${run.id} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
       this.store.finish({ ...run, status: "failed", errorCode: code, ...(code === "REPORT_METER_NAMES_REQUIRED" ? { answer: meterNamingQuestion(directory) } : {}) });
       if (run.actionFeedback) this.actionWakeRequested = true;
     }

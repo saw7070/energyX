@@ -19,7 +19,7 @@ export function ReportRunProgress({ run, phase, lastActivityAt, connectionLost =
   if (!active && !["failed", "interrupted", "cancelled"].includes(run.status)) return null;
   const minutes = Math.max(0, Math.floor((now - Date.parse(run.createdAt)) / 60000));
   const activityMinutes = lastActivityAt ? Math.max(0, Math.floor((now - Date.parse(lastActivityAt)) / 60000)) : null;
-  return <section className={styles.runProgress} aria-label={t("taskStatus")}>
+  return <section className={styles.runProgress} aria-label={t("taskStatus")} data-has-error={!active && run.errorCode ? "" : undefined}>
     <strong role="status">{connectionLost && active ? t("reconnecting") : run.status === "queued" ? t("waitingToStart") : phase}</strong>
     {active ? <>
       <span>{Number.isFinite(minutes) ? minutes < 1 ? t("startedRecently") : t("minutesSinceSubmission", { minutes }) : t("taskSavedShort")}{activityMinutes != null && Number.isFinite(activityMinutes) ? ` · ${activityMinutes < 1 ? t("lastActivityRecent") : t("lastActivityMinutes", { minutes: activityMinutes })}` : ""}</span>

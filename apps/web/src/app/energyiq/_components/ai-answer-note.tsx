@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, type FormEvent } from "react";
+import React, { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { configApi } from "../../../lib/config-api";
 import { defineMessages } from "./energyiq-messages";
@@ -50,8 +50,10 @@ const messages = defineMessages({
  * Marks something the AI wrote and lets the reader say whether it helped. Shown under advisor answers, AI reports and
  * AI summaries so nobody mistakes AI text for measured figures. A thumbs-down offers an optional note.
  */
-export function AiAnswerNote({ targetKind, targetId, projectId, compact = false }: {
+export function AiAnswerNote({ targetKind, targetId, projectId, compact = false, meta }: {
   targetKind: string;
+  /** Short context shown beside the label, such as the dates and time of an answer. */
+  meta?: ReactNode;
   targetId: string;
   projectId?: string | undefined;
   compact?: boolean;
@@ -96,6 +98,7 @@ export function AiAnswerNote({ targetKind, targetId, projectId, compact = false 
   return (
     <div className={`${styles.note} ${compact ? styles.compact : ""}`} data-ai-generated="true">
       <span className={styles.badge}><EnergyIcon name="spark" className="h-3.5 w-3.5" />{t("label")}</span>
+      {meta ? <span className={styles.meta}>{meta}</span> : null}
       {!compact && <span className={styles.caution}>{t("caution")}</span>}
       <span className={styles.spacer} />
       <span className={styles.question}>{status === "saved" ? t("thanks") : status === "failed" ? t("failed") : t("question")}</span>

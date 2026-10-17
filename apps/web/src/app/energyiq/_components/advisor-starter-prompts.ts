@@ -16,3 +16,11 @@ export const ADVISOR_EXAMPLE_PROMPTS = {
   afterHours: "Which equipment costs the most outside operating hours? Give the monthly cost for each and say what could be switched off.",
   compare: "Compare this period with the one before it: what changed, why, and what the difference cost.",
 } as const;
+
+/** Follow-up questions offered under a conversation. Sent to the advisor as written, like the starters. */
+export const ADVISOR_FOLLOW_UP_PROMPTS = {
+  where: "Where does most of the energy go in the selected period? Name the biggest users and what they cost per month.",
+  night: "What keeps running at night and at weekends in the selected period, and what does it cost per month?",
+  afterHours: ADVISOR_EXAMPLE_PROMPTS.afterHours,
+  compare: ADVISOR_EXAMPLE_PROMPTS.compare,
+} as const;

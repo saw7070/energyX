@@ -119,6 +119,15 @@ describe("report workspace", () => {
     expect(container.querySelector("article > div")?.textContent).toBe("You**Keep my prompt literal**");
     expect(container.querySelector("article > div:first-child strong")).toBeNull();
   });
+  it("shows the advisor's key figures as tiles and keeps the figures block out of the answer text", async () => {
+    const state = overview(); state.runs[0]!.kind = "chat";
+    state.runs[0]!.answer = 'Night use is higher than usual.\n\n```figures\n[{"label":"Night-time load","value":"48 kW","tone":"alert"},{"label":"If fixed","value":"S$1,080 a month","tone":"good"}]\n```';
+    api.reportAgentRequest.mockImplementation(async (_project, path = "") => path.includes("events") ? { events: [] } : state);
+    await act(async () => root.render(<ReportAgentPanel projectId="p1" />));
+    const tiles = [...container.querySelectorAll('[aria-label="Key figures"] li')];
+    expect(tiles.map(tile => [tile.getAttribute("data-tone"), tile.textContent])).toEqual([["alert", "Night-time load48 kW"], ["good", "If fixedS$1,080 a month"]]);
+    expect(container.querySelector('[data-safe-ai-markdown="true"]')?.textContent).not.toContain("figures");
+  });
   it("sends a discussion without dates and never requests an HTML output for chat", async () => {
     const state = overview(); state.runs[0]!.kind = "chat";
     api.reportAgentRequest.mockImplementation(async (_project,path="",init) => path === "settings" ? state.settings : path === "runs" ? { id:"run-1" } : path.includes("events") ? {events:[]} : state);

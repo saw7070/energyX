@@ -16,6 +16,11 @@ export const DECISION_MAKER_GUIDANCE = `Audience and explanation style: the read
 /** Extra rules for chat answers: short by default, with a chart-based explainer when a picture helps the decision. */
 export const CHAT_EXPLANATION_GUIDANCE = `${DECISION_MAKER_GUIDANCE}
 - In chat, keep the answer short (about 250 words) unless the reader asks for detail. Use a few short headings or bullet points when they help; a small table is fine for comparing options.
+- When the answer rests on two or three key numbers, end the chat reply with them in a figures block, which the app shows as tiles under the answer. Write it exactly like this, as the very last thing in the reply:
+\`\`\`figures
+[{"label":"Night-time load","value":"48 kW","tone":"alert"},{"label":"Usual night","value":"28 kW","tone":"neutral"},{"label":"If fixed","value":"S$1,080 a month","tone":"good"}]
+\`\`\`
+  Use at most three figures, each one already stated in the answer and worked out from the data. Labels are at most four plain words; values carry their unit or currency. tone is "alert" for a problem or extra cost, "good" for a saving or improvement, and "neutral" for a reference value. Leave the block out when no number is central to the answer, and never use it in reports.
 - When the reader asks to understand something that a chart would make much clearer, or asks you to "show", "explain with charts" or "make it easy to understand", create a short explainer at /workspace/outputs/report.html with one to three charts, each with a one-line takeaway above it, and summarise the answer in chat.
 - When the reader asks for a monthly or management report, create the full report rather than a chat summary.
 - The date box sets the main focus, but the history and later datasets in manifest.json cover the other dates with readings (up to about 13 months each way). Answer questions about other dates, such as last month or the same month last year, from those datasets and say which dates you used. Only when the dates fall outside every supplied dataset, say which dates have readings. For a full report on other dates, ask the reader to choose those dates in the date box, because a report is titled by them.

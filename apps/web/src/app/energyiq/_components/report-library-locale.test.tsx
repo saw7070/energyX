@@ -64,9 +64,9 @@ describe("reports library and energy advisor in other languages", () => {
 
   it("shows the advisor chat chrome in Chinese but sends a starter prompt as written", async () => {
     await render("zh-Hans", <ReportAgentPanel projectId="p1" initialSessionId="new" />);
-    expect(container.querySelector("h1")?.textContent).toBe("能源顾问");
-    expect(container.textContent).toContain("您想了解什么？");
-    expect(container.textContent).toContain("询问Harbour Office的用电情况");
+    expect(container.querySelector("h1")?.textContent).toBe("询问 EnergyX");
+    expect(container.textContent).toContain("推荐问题");
+    expect(container.textContent).toContain("答案来自Harbour Office的真实读数");
     expect(container.textContent).toContain("可用读数：2026年1月1日 – 9月12日");
     const input = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="报告说明"]')!;
     expect(input.getAttribute("placeholder")).toBe("提出问题、请求报告，或描述您想探索的内容…");

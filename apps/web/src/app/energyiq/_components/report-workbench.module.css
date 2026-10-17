@@ -1143,6 +1143,208 @@
   .chatWorkbench .welcome .tips li, .chatWorkbench .welcome .tips li + li { padding: 0; border-left: 0; }
 }
 
+/* Ask EnergyX: conversation column with a "Looking at" side panel, answer cards with key-figure tiles. */
+.chatWorkbench.askLayout { background: #f3f5f2; }
+.chatWorkbench.askLayout .center { background: #f3f5f2; }
+.chatWorkbench.askLayout .header { flex-shrink: 0; min-height: 0; align-items: flex-start; padding: 28px 32px 6px; background: #f3f5f2; border-bottom: 0; }
+.chatWorkbench.askLayout .header h1 { display: block; margin: 0; font-size: 30px; line-height: 1.15; font-weight: 750; letter-spacing: -.03em; color: #17201b; }
+.chatWorkbench.askLayout .askIntro { margin: 6px 0 0; font-size: 15px; line-height: 1.5; color: #4f5a54; }
+.chatWorkbench.askLayout .conversationBar { padding: 4px 32px; background: #f3f5f2; border-bottom: 0; }
+.chatWorkbench.askLayout .messages { flex: 0 1 auto; min-height: 0; padding: 20px 32px 12px; background: #f3f5f2; }
+.chatWorkbench.askLayout .turn { max-width: none; margin: 0 0 22px; }
+.chatWorkbench.askLayout .user { width: fit-content; max-width: 78%; margin-left: auto; padding: 12px 18px; border-radius: 12px; background: #1d2420; color: #ffffff; font-size: 15px; line-height: 1.55; font-weight: 500; }
+.chatWorkbench.askLayout .replyRow { display: flex; align-items: flex-start; gap: 12px; margin-top: 16px; }
+.replyAvatar { display: grid; place-items: center; flex-shrink: 0; width: 34px; height: 34px; margin-top: 2px; border-radius: 50%; background: #ece8fb; color: #6e56cf; }
+.replyAvatar svg { width: 17px; height: 17px; }
+.chatWorkbench.askLayout .reply { flex: 1; min-width: 0; margin: 0; padding: 16px 20px 12px; border: 1px solid #e3e7e2; border-radius: 14px; background: #ffffff; font-size: 15.5px; line-height: 1.65; color: #1d2420; box-shadow: 0 1px 2px #1a281708; }
+.chatWorkbench.askLayout .answer { margin: 4px 0 0; }
+.chatWorkbench.askLayout .answer > :first-child { margin-top: 0; }
+.chatWorkbench.askLayout .reply [data-ai-generated] { margin-top: 14px; padding: 10px 0 0; border-top: 1px solid #eceeeb; border-radius: 0; }
+.figureTiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin: 14px 0 0; padding: 0; list-style: none; }
+.figureTiles li { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 12px 14px; border-radius: 10px; background: #eef1ee; }
+.figureTiles span { font-size: 12.5px; font-weight: 600; line-height: 1.35; color: #4d5852; }
+.figureTiles strong { font-size: 20px; line-height: 1.3; font-weight: 700; letter-spacing: -.01em; color: #17201b; }
+.figureTiles li[data-tone=alert] { background: #fdf0e1; }
+.figureTiles li[data-tone=alert] span { color: #b4530d; }
+.figureTiles li[data-tone=good] { background: #e3f3ea; }
+.figureTiles li[data-tone=good] span { color: #146c43; }
+.followUps { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; }
+.chatWorkbench.askLayout .followUps button { min-height: 36px; padding: 7px 14px; border: 1px solid #d9d4f4; border-radius: 999px; background: #ffffff; color: #5b3fd6; font-size: 13.5px; font-weight: 600; line-height: 1.3; text-align: left; }
+.chatWorkbench.askLayout .followUps button:hover { border-color: #b9aeef; background: #f7f5fe; }
+.chatWorkbench.askLayout .composeArea { max-width: none; align-self: stretch; padding: 4px 32px 18px; background: #f3f5f2; }
+.chatWorkbench.askLayout .composerCard { max-width: none; border: 1px solid #e1e5df; border-radius: 14px; background: #ffffff; box-shadow: 0 8px 24px #1a28170f; }
+.chatWorkbench.askLayout .composerCard .composer { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 6px; padding: 8px 8px 8px 10px; border: 0; border-radius: 14px; }
+.chatWorkbench.askLayout .composerCard .composer > * { grid-column: 1 / -1; }
+.chatWorkbench.askLayout .composerCard .composer > footer { display: contents; }
+.chatWorkbench.askLayout .composerCard .composer > footer > .toolbar { grid-column: 1; grid-row: 10; display: flex; gap: 4px; }
+.chatWorkbench.askLayout .composerCard .composer > textarea { grid-column: 2; grid-row: 10; min-height: 40px; max-height: 200px; padding: 9px 4px; font-size: 15.5px; line-height: 1.45; }
+.chatWorkbench.askLayout .composerCard .composer .sendAction { grid-column: 3; grid-row: 10; width: 44px; height: 44px; min-height: 44px; border-radius: 10px; background: #176b59; color: #ffffff; }
+.chatWorkbench.askLayout .composerCard .composer .sendAction:hover { background: #115444; }
+.chatWorkbench.askLayout .composerCard .composer .sendAction:disabled { background: #176b59; opacity: .45; }
+.chatWorkbench.askLayout .composerNote { text-align: left; }
+.askRail { display: flex; flex-direction: column; gap: 12px; flex-shrink: 0; width: 310px; padding: 28px 24px 24px 0; overflow-y: auto; scrollbar-width: thin; background: #f3f5f2; }
+.railCard { padding: 18px; border: 1px solid #e3e7e2; border-radius: 14px; background: #ffffff; }
+.railCard h2, .trustCard h2 { margin: 0 0 12px; font-size: 15px; font-weight: 700; color: #17201b; }
+.railProject { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.railProject > strong { font-size: 14px; font-weight: 600; color: #1d2420; }
+.railProject .dataStatus { align-self: flex-start; font-size: 12px; color: #4f5a54; }
+.askRail .analysisRange { display: block; margin: 0 0 10px; padding: 0; border: 0; background: transparent; }
+.askRail .dateOptions > summary { width: fit-content; min-height: 32px; gap: 4px 6px; padding: 6px 12px; border-radius: 12px; background: #eef1ee; font-size: 13px; color: #1d2420; }
+.askRail .dateOptions > summary:hover { background: #e4e9e3; }
+.askRail .dateOptions > summary > span { flex-basis: auto; padding: 0; font-size: 12px; color: #4f5a54; }
+.askRail .dateOptions > summary > svg:last-child { width: 12px; margin-left: 0; transform: rotate(90deg); }
+.askRail .dateOptions[open] > summary > svg:last-child { transform: rotate(-90deg); }
+.askRail .dateOptionBody { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.askRail .rangeShortcuts { display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; color: #4f5a54; }
+.askRail .rangeShortcuts > span { flex-basis: 100%; }
+.askRail .rangeShortcuts button { padding: 4px 10px; border: 1px solid #dfe4de; border-radius: 999px; background: #ffffff; font-size: 12.5px; }
+.askRail .rangeShortcuts button[aria-pressed=true] { border-color: #176b59; background: #e3f3ea; color: #146c43; }
+.askRail .rangePicker > summary { font-size: 12.5px; color: #4f5a54; cursor: pointer; }
+.askRail .period { display: grid; gap: 8px; margin-top: 8px; }
+.askRail .period label { display: grid; gap: 4px; font-size: 12px; color: #4f5a54; }
+.askRail .dateCoverage { margin-top: 6px; font-size: 12px; color: #6a756e; }
+.railChips { display: flex; flex-wrap: wrap; gap: 6px; }
+.railChip { display: inline-flex; align-items: center; min-height: 30px; padding: 4px 12px; border-radius: 999px; background: #eef1ee; font-size: 13px; color: #1d2420; }
+.railChip[data-off] { background: #fdf0e1; color: #b4530d; }
+.trustCard { padding: 18px; border-radius: 14px; background: #f1eefc; }
+.trustCard h2 { color: #5b3fd6; }
+.trustCard p { margin: 0; font-size: 13.5px; line-height: 1.6; color: #4f5a54; }
+.askMain { display: contents; }
+.chatWorkbench.askLayout .center { flex-direction: row; }
+.chatWorkbench.askLayout .askMain { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+/* Beside a report preview the panel becomes a strip above the conversation, so the dates stay reachable. */
+.chatWorkbench.askLayout.withPreview .center { flex-direction: column; }
+.chatWorkbench.askLayout.withPreview .askRail { order: -1; width: auto; padding: 12px 16px 0; overflow: visible; }
+.chatWorkbench.askLayout.withPreview .railCard { padding: 12px 14px; }
+.chatWorkbench.askLayout.withPreview .railCard h2, .chatWorkbench.askLayout.withPreview .trustCard { display: none; }
+/* Empty conversation: a short invitation and question chips instead of large cards. */
+.chatWorkbench.askLayout .welcome { max-width: none; margin: 8px 0 0; padding: 0; text-align: left; }
+.chatWorkbench.askLayout .welcome h2 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -.015em; color: #17201b; }
+.chatWorkbench.askLayout .welcome > p { max-width: 640px; margin: 6px 0 14px; font-size: 14.5px; line-height: 1.55; color: #4f5a54; }
+.chatWorkbench.askLayout .welcome .followUps { margin: 0 0 14px; }
+.askTips { max-width: 720px; font-size: 13.5px; color: #4f5a54; }
+.askTips > summary { width: fit-content; cursor: pointer; font-weight: 600; color: #4f5a54; }
+.askTips ul { display: grid; gap: 8px; margin: 10px 0 0; padding: 14px 16px; list-style: none; border: 1px solid #e3e7e2; border-radius: 12px; background: #ffffff; line-height: 1.55; }
+.askTips strong { color: #1d2420; }
+.chatWorkbench.askLayout .welcome .recentReports { margin-top: 18px; text-align: left; }
+.chatWorkbench.askLayout .welcome .recentReports > summary { justify-content: flex-start; margin: 0; }
+.railProject .dataStatus { display: flex; flex-wrap: wrap; gap: 2px 6px; padding: 0; border-radius: 0; background: transparent; font-size: 12px; line-height: 1.5; color: #4f5a54; }
+.askRail .methodPicker { position: relative; padding: 0; font-size: 13px; }
+.askRail .methodPicker > summary { display: inline-flex; align-items: center; min-height: 30px; padding: 4px 12px; border-radius: 999px; background: #eef1ee; color: #1d2420; white-space: nowrap; list-style: none; }
+.askRail .methodPicker > summary::-webkit-details-marker { display: none; }
+.askRail .methodPicker > summary:hover { background: #e4e9e3; }
+.askRail .methodPicker[open] > summary { background: #e3f3ea; color: #146c43; }
+.askRail .methodPicker .methodOptions { position: static; width: 100%; margin-top: 8px; max-height: none; padding: 14px; border: 1px solid #dfe4de; border-radius: 14px; background: #ffffff; box-shadow: 0 12px 32px #1a281724; }
+/* Conversation picker and view switch live in the side panel, so the page header is just the title. */
+.railConversation { display: flex; flex-direction: column; gap: 8px; padding: 14px; }
+.railConversation > * { width: 100%; }
+.askRail .newConversation { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 6px 12px; border: 1px solid #dfe4de; border-radius: 10px; background: #ffffff; color: #176b59; font-size: 13px; font-weight: 600; }
+.askRail .newConversation:hover { background: #f2f5f1; }
+.askRail .newConversation svg { width: 14px; height: 14px; }
+.railViews .headerActions { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+.railViews .segmented { display: flex; flex-wrap: wrap; gap: 4px; padding: 0; border: 0; background: transparent; }
+.railViews .segmented button { padding: 6px 10px; border: 0; border-radius: 8px; background: transparent; color: #4f5a54; font-size: 13px; }
+.railViews .segmented button[aria-pressed=true] { background: #ffffff; color: #17201b; font-weight: 600; box-shadow: 0 0 0 1px #e1e5df; }
+.railViews .headerButton { width: 100%; min-height: 34px; padding: 6px 12px; border: 1px solid #dfe4de; border-radius: 10px; background: #ffffff; color: #1d2420; font-size: 13px; }
+.railViews .headerButton:hover { background: #f2f5f1; }
+/* Progress and problems read as one quiet line inside the answer card. */
+/* A failed answer already explains itself below, so the status box would only repeat it. */
+.chatWorkbench.askLayout .runProgress[data-has-error] { display: none; }
+.chatWorkbench.askLayout .runProgress { gap: 2px; margin: 0 0 8px; padding: 0; border: 0; border-radius: 0; background: transparent; font-size: 14px; color: #1d2420; }
+.chatWorkbench.askLayout .runProgress p, .chatWorkbench.askLayout .runProgress span { font-size: 12.5px; color: #6a756e; }
+.chatWorkbench.askLayout .execution { margin: 0 0 6px; border-bottom: 0; font-size: 12.5px; color: #6a756e; }
+.chatWorkbench.askLayout .execution > summary { padding: 4px 0; }
+.chatWorkbench.askLayout .reply [role=alert] { margin-top: 6px; font-size: 14px; color: #8a3b12; }
+.chatWorkbench.askLayout .reply [role=alert] details { margin-top: 4px; font-size: 12.5px; color: #6a756e; }
+.chatWorkbench.askLayout .reply .toolbar button { min-height: 32px; padding: 5px 12px; border: 1px solid #dfe4de; border-radius: 10px; background: #ffffff; font-size: 13px; }
+/* Polished empty state: the message box leads, suggestions sit below as a tidy grid. */
+.chatWorkbench.askLayout .askMain:has(.welcome) .composeArea { order: 1; padding-top: 14px; padding-bottom: 4px; }
+.chatWorkbench.askLayout .askMain:has(.welcome) .messages { order: 2; flex: 1 1 auto; padding-top: 18px; }
+.chatWorkbench.askLayout .askMain:has(.welcome) .composerCard { box-shadow: 0 1px 2px #1a28170a, 0 12px 32px #1a281712; }
+.chatWorkbench.askLayout .askMain:has(.welcome) .composerCard .composer > textarea { min-height: 52px; font-size: 16px; }
+.chatWorkbench.askLayout .askMain:has(.welcome) .composerNote { margin-top: 8px; }
+.suggestLabel { margin: 0 0 10px; font-size: 12px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: #6a756e; }
+.suggestGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+.chatWorkbench.askLayout .suggestGrid button { display: flex; align-items: flex-start; gap: 12px; min-height: 0; padding: 14px 16px; border: 1px solid #e3e7e2; border-radius: 12px; background: #ffffff; text-align: left; transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+.chatWorkbench.askLayout .suggestGrid button:hover { border-color: #b8cdbf; box-shadow: 0 6px 18px #1a281714; transform: translateY(-1px); }
+.suggestGrid button > span:last-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.suggestGrid strong { font-size: 14px; font-weight: 600; line-height: 1.35; color: #17201b; }
+.suggestGrid small { font-size: 12.5px; line-height: 1.45; color: #6a756e; }
+.suggestIcon { display: grid; place-items: center; flex-shrink: 0; width: 34px; height: 34px; border-radius: 10px; background: #e3f3ea; color: #176b59; }
+.suggestIcon svg { width: 17px; height: 17px; }
+.chatWorkbench.askLayout .welcome .askTips, .chatWorkbench.askLayout .welcome .recentReports { display: block; margin: 0 0 6px; }
+.chatWorkbench.askLayout .welcome .recentReports > summary, .askTips > summary { padding: 4px 0; font-size: 13px; font-weight: 500; color: #4f5a54; border-radius: 0; background: transparent; }
+/* Side panel: labelled rows read like a spec sheet. */
+.railRow { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; border-top: 1px solid #eef0ec; }
+.railRow:first-of-type { padding-top: 0; border-top: 0; }
+.railLabel { display: block; font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: #6a756e; }
+.railCard > h2 { margin-bottom: 14px; }
+.railProject { margin-bottom: 0; }
+.askRail .analysisRange { margin-bottom: 0; }
+.railConversation .railLabel, .railViews > .railLabel { margin-bottom: 2px; }
+.railViews { display: flex; flex-direction: column; gap: 4px; padding: 14px; }
+.railViews .headerActions { gap: 4px; }
+.railViews .segmented { flex-direction: column; gap: 2px; }
+.railViews .segmented button { width: 100%; padding: 8px 10px; text-align: left; font-size: 13.5px; color: #1d2420; }
+.railViews .segmented button:hover { background: #f2f5f1; }
+.railViews .segmented button[aria-pressed=true] { display: none; }
+.railViews .headerButton { padding: 8px 10px; border: 0; text-align: left; font-size: 13.5px; }
+@media (max-width: 1279px) { .suggestGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .suggestGrid { grid-template-columns: minmax(0, 1fr); } }
+/* Side panel date picker: one tidy card that opens into presets and custom dates. */
+.askRail .dateOptions > summary { display: grid; grid-template-columns: 18px minmax(0, 1fr) 14px; align-items: center; column-gap: 10px; row-gap: 1px; width: 100%; min-height: 0; padding: 10px 12px; border: 1px solid #e1e5df; border-radius: 10px; background: #ffffff; font-size: 13.5px; color: #17201b; transition: border-color .15s ease, background-color .15s ease; }
+.askRail .dateOptions > summary:hover { border-color: #c5d3c9; background: #fbfcfa; }
+.askRail .dateOptions[open] > summary { border-color: #176b59; box-shadow: 0 0 0 3px #176b591a; }
+.askRail .dateOptions > summary > svg:first-child { grid-column: 1; grid-row: 1 / span 2; width: 16px; height: 16px; color: #176b59; }
+.askRail .dateOptions > summary > strong { grid-column: 2; grid-row: 1; font-weight: 600; }
+.askRail .dateOptions > summary > span { grid-column: 2; grid-row: 2; padding: 0; font-size: 12px; color: #6a756e; }
+.askRail .dateOptions > summary > svg:last-child { grid-column: 3; grid-row: 1 / span 2; width: 12px; height: 12px; margin: 0; color: #6a756e; }
+.askRail .dateOptionBody { gap: 12px; margin-top: 12px; }
+.askRail .rangeShortcuts { display: flex; flex-wrap: wrap; gap: 6px; }
+.askRail .rangeShortcuts > span { flex-basis: 100%; font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: #6a756e; }
+.askRail .rangeShortcuts button { min-height: 32px; padding: 5px 12px; white-space: nowrap; border: 1px solid #e1e5df; border-radius: 8px; background: #ffffff; font-size: 12.5px; font-weight: 500; line-height: 1.2; color: #1d2420; }
+.askRail .rangeShortcuts button:hover:not(:disabled) { border-color: #c5d3c9; background: #f6f8f5; }
+.askRail .rangeShortcuts button[aria-pressed=true] { border-color: #176b59; background: #176b59; color: #ffffff; }
+.askRail .rangeShortcuts button:disabled { opacity: .45; }
+.askRail .rangePicker { border-top: 1px solid #eef0ec; }
+.askRail .rangePicker > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; padding: 10px 0 0; font-size: 13px; font-weight: 500; color: #1d2420; list-style: none; }
+.askRail .rangePicker > summary::-webkit-details-marker { display: none; }
+.askRail .rangePicker > summary > svg:first-child { display: none; }
+.askRail .rangePicker > summary > span { flex-basis: 100%; order: 3; font-size: 12px; font-weight: 400; color: #6a756e; }
+.askRail .rangePicker > summary > svg:last-child { width: 12px; height: 12px; margin-left: auto; color: #6a756e; transition: transform .15s ease; }
+.askRail .rangePicker[open] > summary > svg:last-child { transform: rotate(90deg); }
+.askRail .rangePicker > summary:hover { color: #176b59; }
+.askRail .period { gap: 10px; margin-top: 10px; }
+.askRail .period label { gap: 5px; font-size: 12px; font-weight: 500; color: #4f5a54; }
+.askRail .period input { width: 100%; height: 36px; padding: 0 10px; border: 1px solid #e1e5df; border-radius: 8px; background: #ffffff; font-size: 13px; color: #17201b; }
+.askRail .period input:focus-visible { border-color: #176b59; box-shadow: 0 0 0 3px #176b591a; }
+.askRail .dateCoverage { margin-top: 8px; font-size: 12px; line-height: 1.45; color: #6a756e; }
+/* Data & method: full-width rows with a status dot and a chevron. */
+.askRail .railChips { flex-direction: column; align-items: stretch; gap: 6px; }
+.askRail .railChip, .askRail .methodPicker > summary { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 7px 12px; border: 1px solid #e1e5df; border-radius: 10px; background: #ffffff; font-size: 13px; color: #1d2420; }
+.askRail .railChip::before { content: ""; width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: #1f9d6b; }
+.askRail .railChip[data-off] { border-color: #f3d9bd; background: #fdf6ee; color: #8a3b12; }
+.askRail .railChip[data-off]::before { background: #d9822b; }
+.askRail .methodPicker > summary::after { content: ""; width: 6px; height: 6px; margin-left: auto; border-right: 1.5px solid #6a756e; border-bottom: 1.5px solid #6a756e; transform: rotate(-45deg); transition: transform .15s ease; }
+.askRail .methodPicker[open] > summary::after { transform: rotate(45deg); }
+.askRail .methodPicker > summary:hover { border-color: #c5d3c9; background: #fbfcfa; }
+.askRail .methodPicker[open] > summary { border-color: #176b59; background: #ffffff; color: #1d2420; }
+.askRail .methodPicker .methodOptions { padding: 12px; border-radius: 10px; box-shadow: none; }
+.askRail .methodModes button[aria-pressed=true] { border-color: #176b59; background: #176b59; color: #ffffff; }
+@media (max-width: 1023px) {
+  .chatWorkbench.askLayout .center { flex-direction: column; }
+  .askRail { order: -1; width: auto; padding: 12px 16px 0; overflow: visible; }
+  .railCard { padding: 12px 14px; }
+  .railCard h2 { display: none; }
+  .trustCard { display: none; }
+  .chatWorkbench.askLayout .header { padding: 16px 16px 4px; }
+  .chatWorkbench.askLayout .header h1 { font-size: 24px; }
+  .chatWorkbench.askLayout .messages, .chatWorkbench.askLayout .composeArea { padding-left: 16px; padding-right: 16px; }
+  .chatWorkbench.askLayout .replyRow { gap: 8px; }
+  .replyAvatar { width: 28px; height: 28px; }
+  .chatWorkbench.askLayout .reply { padding: 14px 14px 10px; }
+}
+
 /* energyiq-dark-theme:start — generated by scripts/energyiq-dark-theme.mjs; do not edit by hand */
 :global(:where(html[data-energyiq-theme="dark"])) .workbench { background:var(--color-surface,#191919); }
 :global(:where(html[data-energyiq-theme="dark"])) .header { border-bottom:1px solid var(--color-border,#333437); }
@@ -1549,4 +1751,116 @@
   :global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .welcome .tips > .tipExamples { border-top:0; }
   :global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .welcome .tips li, :global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench .welcome .tips li + li { border-left:0; }
 }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout { background:#1d1e1c; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .center { background:#1d1e1c; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .header { background:#1d1e1c; border-bottom:0; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .header h1 { color:#cad6cf; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .askIntro { color:#aab6af; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .conversationBar { background:#1d1e1c; border-bottom:0; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .messages { background:#1d1e1c; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .user { border-radius:12px; background:#29302c; color:#ffffff; }
+:global(:where(html[data-energyiq-theme="dark"])) .replyAvatar { border-radius:50%; background:#221f2c; color:#a39aed; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .reply { border:1px solid #323632; border-radius:14px; background:#191919; color:#c9d3cd; box-shadow:0 1px 2px #1a28170d; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .reply [data-ai-generated] { border-top:1px solid #313331; border-radius:0; }
+:global(:where(html[data-energyiq-theme="dark"])) .figureTiles li { border-radius:10px; background:#1e201e; }
+:global(:where(html[data-energyiq-theme="dark"])) .figureTiles span { color:#abb7b0; }
+:global(:where(html[data-energyiq-theme="dark"])) .figureTiles strong { color:#cad6cf; }
+:global(:where(html[data-energyiq-theme="dark"])) .figureTiles li[data-tone=alert] { background:#261d11; }
+:global(:where(html[data-energyiq-theme="dark"])) .figureTiles li[data-tone=alert] span { color:#e18d5f; }
+:global(:where(html[data-energyiq-theme="dark"])) .figureTiles li[data-tone=good] { background:#17231d; }
+:global(:where(html[data-energyiq-theme="dark"])) .figureTiles li[data-tone=good] span { color:#75c596; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .followUps button { border:1px solid #39344d; border-radius:999px; background:#191919; color:#a3a2f6; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .followUps button:hover { border-color:#423c5a; background:#1d1c22; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .composeArea { background:#1d1e1c; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .composerCard { border:1px solid #333632; border-radius:14px; background:#191919; box-shadow:0 8px 24px #1a281718; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .composerCard .composer { border:0; border-radius:14px; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .composerCard .composer .sendAction { border-radius:10px; background:#176b59; color:#ffffff; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .composerCard .composer .sendAction:hover { background:#115444; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .composerCard .composer .sendAction:disabled { background:#176b59; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail { background:#1d1e1c; }
+:global(:where(html[data-energyiq-theme="dark"])) .railCard { border:1px solid #323632; border-radius:14px; background:#191919; }
+:global(:where(html[data-energyiq-theme="dark"])) .railCard h2, :global(:where(html[data-energyiq-theme="dark"])) .trustCard h2 { color:#cad6cf; }
+:global(:where(html[data-energyiq-theme="dark"])) .railProject > strong { color:#c9d3cd; }
+:global(:where(html[data-energyiq-theme="dark"])) .railProject .dataStatus { color:#aab6af; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .analysisRange { border:0; background:transparent; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .dateOptions > summary { border-radius:12px; background:#1e201e; color:#c9d3cd; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .dateOptions > summary:hover { background:#20241f; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .dateOptions > summary > span { color:#aab6af; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .rangeShortcuts { color:#aab6af; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .rangeShortcuts button { border:1px solid #333732; border-radius:999px; background:#191919; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .rangeShortcuts button[aria-pressed=true] { border-color:#176b59; background:#17231d; color:#75c596; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .rangePicker > summary { color:#aab6af; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .period label { color:#aab6af; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .dateCoverage { color:#9da9a1; }
+:global(:where(html[data-energyiq-theme="dark"])) .railChip { border-radius:999px; background:#1e201e; color:#c9d3cd; }
+:global(:where(html[data-energyiq-theme="dark"])) .railChip[data-off] { background:#261d11; color:#e18d5f; }
+:global(:where(html[data-energyiq-theme="dark"])) .trustCard { border-radius:14px; background:#201d27; }
+:global(:where(html[data-energyiq-theme="dark"])) .trustCard h2 { color:#a3a2f6; }
+:global(:where(html[data-energyiq-theme="dark"])) .trustCard p { color:#aab6af; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .welcome h2 { color:#cad6cf; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .welcome > p { color:#aab6af; }
+:global(:where(html[data-energyiq-theme="dark"])) .askTips { color:#aab6af; }
+:global(:where(html[data-energyiq-theme="dark"])) .askTips > summary { color:#aab6af; }
+:global(:where(html[data-energyiq-theme="dark"])) .askTips ul { border:1px solid #323632; border-radius:12px; background:#191919; }
+:global(:where(html[data-energyiq-theme="dark"])) .askTips strong { color:#c9d3cd; }
+:global(:where(html[data-energyiq-theme="dark"])) .railProject .dataStatus { border-radius:0; background:transparent; color:#aab6af; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .methodPicker > summary { border-radius:999px; background:#1e201e; color:#c9d3cd; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .methodPicker > summary:hover { background:#20241f; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .methodPicker[open] > summary { background:#17231d; color:#75c596; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .methodPicker .methodOptions { border:1px solid #333732; border-radius:14px; background:#191919; box-shadow:0 12px 32px #1a28173a; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .newConversation { border:1px solid #333732; border-radius:10px; background:#191919; color:#75c1ac; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .newConversation:hover { background:#1c1e1c; }
+:global(:where(html[data-energyiq-theme="dark"])) .railViews .segmented { border:0; background:transparent; }
+:global(:where(html[data-energyiq-theme="dark"])) .railViews .segmented button { border:0; border-radius:8px; background:transparent; color:#aab6af; }
+:global(:where(html[data-energyiq-theme="dark"])) .railViews .segmented button[aria-pressed=true] { background:#191919; color:#cad6cf; box-shadow:0 0 0 1px #050604; }
+:global(:where(html[data-energyiq-theme="dark"])) .railViews .headerButton { border:1px solid #333732; border-radius:10px; background:#191919; color:#c9d3cd; }
+:global(:where(html[data-energyiq-theme="dark"])) .railViews .headerButton:hover { background:#1c1e1c; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .runProgress { border:0; border-radius:0; background:transparent; color:#c9d3cd; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .runProgress p, :global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .runProgress span { color:#9da9a1; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .execution { border-bottom:0; color:#9da9a1; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .reply [role=alert] { color:#f29973; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .reply [role=alert] details { color:#9da9a1; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .reply .toolbar button { border:1px solid #333732; border-radius:10px; background:#191919; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .askMain:has(.welcome) .composerCard { box-shadow:0 1px 2px #1a281710, 0 12px 32px #1a28171d; }
+:global(:where(html[data-energyiq-theme="dark"])) .suggestLabel { color:#9da9a1; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .suggestGrid button { border:1px solid #323632; border-radius:12px; background:#191919; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .suggestGrid button:hover { border-color:#304237; box-shadow:0 6px 18px #1a281720; }
+:global(:where(html[data-energyiq-theme="dark"])) .suggestGrid strong { color:#cad6cf; }
+:global(:where(html[data-energyiq-theme="dark"])) .suggestGrid small { color:#9da9a1; }
+:global(:where(html[data-energyiq-theme="dark"])) .suggestIcon { border-radius:10px; background:#17231d; color:#75c1ac; }
+:global(:where(html[data-energyiq-theme="dark"])) .chatWorkbench.askLayout .welcome .recentReports > summary, :global(:where(html[data-energyiq-theme="dark"])) .askTips > summary { color:#aab6af; border-radius:0; background:transparent; }
+:global(:where(html[data-energyiq-theme="dark"])) .railRow { border-top:1px solid #31332f; }
+:global(:where(html[data-energyiq-theme="dark"])) .railRow:first-of-type { border-top:0; }
+:global(:where(html[data-energyiq-theme="dark"])) .railLabel { color:#9da9a1; }
+:global(:where(html[data-energyiq-theme="dark"])) .railViews .segmented button { color:#c9d3cd; }
+:global(:where(html[data-energyiq-theme="dark"])) .railViews .segmented button:hover { background:#1c1e1c; }
+:global(:where(html[data-energyiq-theme="dark"])) .railViews .headerButton { border:0; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .dateOptions > summary { border:1px solid #333632; border-radius:10px; background:#191919; color:#cad6cf; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .dateOptions > summary:hover { border-color:#333e36; background:#1a1b1a; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .dateOptions[open] > summary { border-color:#176b59; box-shadow:0 0 0 3px #176b592a; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .dateOptions > summary > svg:first-child { color:#75c1ac; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .dateOptions > summary > span { color:#9da9a1; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .dateOptions > summary > svg:last-child { color:#9da9a1; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .rangeShortcuts > span { color:#9da9a1; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .rangeShortcuts button { border:1px solid #333632; border-radius:8px; background:#191919; color:#c9d3cd; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .rangeShortcuts button:hover:not(:disabled) { border-color:#333e36; background:#1b1d1b; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .rangeShortcuts button[aria-pressed=true] { border-color:#176b59; background:#176b59; color:#ffffff; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .rangePicker { border-top:1px solid #31332f; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .rangePicker > summary { color:#c9d3cd; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .rangePicker > summary > span { color:#9da9a1; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .rangePicker > summary > svg:last-child { color:#9da9a1; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .rangePicker > summary:hover { color:#75c1ac; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .period label { color:#aab6af; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .period input { border:1px solid #333632; border-radius:8px; background:#191919; color:#cad6cf; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .period input:focus-visible { border-color:#176b59; box-shadow:0 0 0 3px #176b592a; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .dateCoverage { color:#9da9a1; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .railChip, :global(:where(html[data-energyiq-theme="dark"])) .askRail .methodPicker > summary { border:1px solid #333632; border-radius:10px; background:#191919; color:#c9d3cd; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .railChip::before { border-radius:50%; background:#1f9d6b; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .railChip[data-off] { border-color:#46321a; background:#201c16; color:#f29973; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .railChip[data-off]::before { background:#d9822b; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .methodPicker > summary::after { border-right:1.5px solid #6a756e; border-bottom:1.5px solid #6a756e; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .methodPicker > summary:hover { border-color:#333e36; background:#1a1b1a; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .methodPicker[open] > summary { border-color:#176b59; background:#191919; color:#c9d3cd; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .methodPicker .methodOptions { border-radius:10px; box-shadow:none; }
+:global(:where(html[data-energyiq-theme="dark"])) .askRail .methodModes button[aria-pressed=true] { border-color:#176b59; background:#176b59; color:#ffffff; }
 /* energyiq-dark-theme:end */
