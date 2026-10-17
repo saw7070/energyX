@@ -47,6 +47,8 @@ const navigation: Array<NavigationItem | NavigationGroup> = [
 ];
 const isGroup = (entry: NavigationItem | NavigationGroup): entry is NavigationGroup => "items" in entry;
 const SIDEBAR_PREFERENCE_KEY = "energyiq:sidebar-collapsed:v1";
+// Analysis and Facility keep their own page styling; every other page gets the workspace polish in energyiq-polish.css.
+const pageStyleFor = (path: string) => path.startsWith("/energyiq/analysis") ? "analysis" : path.startsWith(SITE_PROFILE) ? "facility" : "standard";
 const isReportRoute = (path: string) => ["/energyiq/key-points", "/energyiq/analysis", "/energyiq/reports", "/energyiq/actions", "/energyiq/library", "/energyiq/skills", "/energyiq/project-configuration"].includes(path);
 export function EnergyIqShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -277,7 +279,7 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
             <div className={topBar.account}><EnergyIqAccountMenu collapsed placement="down" /></div>
           </div>
         </header>
-        <main ref={pageScrollerRef} className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-y-contain print:overflow-visible">
+        <main ref={pageScrollerRef} data-energyiq-page={pageStyleFor(pathname)} className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-y-contain print:overflow-visible">
           {access?.role === "user" && access.workspaces.length === 0 ? <section className="mx-auto flex min-h-[60vh] max-w-lg flex-col items-center justify-center px-6 text-center"><h1 className="text-lg font-semibold">{t("shell.noOrganisation")}</h1><p className="mt-2 text-sm text-muted">{t("shell.noOrganisationBody")}</p></section> : children}
         </main>
       </div>

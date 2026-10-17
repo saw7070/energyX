@@ -12,13 +12,14 @@ import { ReportFilePreview, ReportMarkdown, type PreviewFile, type FileContent }
 import { methodTitle, ReportSkillVersionDialog, type ReportSkillOption } from "./report-skill-controls";
 import { preferredSkillVersion, skillVersionGroups } from "./report-skill-versions";
 import { formatPeriod, shiftDate } from "./report-period";
-import { EnergyIcon, type EnergyIconName } from "./icons";
+import { EnergyIcon } from "./icons";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { translatorFor, type EnergyIqLocale } from "./energyiq-messages";
 import { dateLocale, libraryMessages, coverageLabel } from "./report-library-messages";
 import { useFriendlyError } from "./friendly-error";
 import { nextReportRun, type ReportFrequency } from "./report-schedule";
 import styles from "./report-workbench.module.css";
+import layout from "./report-library-layout.module.css";
 import { ReportScheduleNote } from "./report-schedule-note";
 // `source` says who wrote a report: "site" reports are the ones the server writes for the whole site on the schedule
 // and the Overview shows; "advisor" reports are the ones somebody asked for.
@@ -68,12 +69,11 @@ function ProjectLibrary({ projectId, view }: { projectId: string; view: "reports
   // Category is saved as an English word; only its label is translated.
   const categoryLabel = (category?: string) => category === "analysis" ? t("categoryAnalysis") : category === "presentation" ? t("categoryPresentation") : !category || category === "other" ? t("categoryOther") : category;
   function renderSkill(skill: Skill) {
-    const icon: EnergyIconName = skill.category === "presentation" ? "document" : skill.category === "analysis" ? "analysis" : "spark";
     return <button key={`${skill.id ?? skill.name}:${skill.version}`} className={styles.skillCard} aria-label={t("openSkill", { name: skill.name })} onClick={()=>{setSelectedSkill(skill);setSkillSourceView(false);setEditing(null);setError("");}}>
-      <span className={styles.skillCardHead}><span className={styles.skillIcon} aria-hidden="true"><EnergyIcon name={icon} /></span>{skill.isDefault && <span className={styles.skillDefault}>{t("default")}</span>}</span>
+      <span className={styles.skillCardHead}><span className={layout.skillCategory}>{categoryLabel(skill.category)}</span>{skill.isDefault && <span className={styles.skillDefault}>{t("default")}</span>}</span>
       <strong title={skill.name}>{methodTitle(skill.name)}</strong>
       <p>{skillPurpose(skill.content) || t("skillPurposeFallback")}</p>
-      <span className={styles.skillMeta}><span>{categoryLabel(skill.category)}</span><span>{skill.scope === "general" ? t("scopeGeneral") : skill.scope === "personal" ? t("scopePersonal") : t("scopeProject")}</span><span>{/^v/i.test(String(skill.version)) ? skill.version : `v${skill.version}`}</span></span>
+      <span className={styles.skillMeta}><span>{/^v/i.test(String(skill.version)) ? skill.version : `v${skill.version}`}</span><span>{skill.scope === "general" ? t("scopeGeneral") : skill.scope === "personal" ? t("scopePersonal") : t("scopeProject")}</span></span>
     </button>;
   }
   const displayedSkills = skillVersionGroups(library?.skills ?? []).map(versions => preferredSkillVersion(versions)!);
@@ -101,18 +101,20 @@ function ProjectLibrary({ projectId, view }: { projectId: string; view: "reports
   const maxPage = Math.max(0,Math.ceil(shown.length/12)-1); const currentPage=Math.min(page,maxPage);
   const groups = new Map<string,Report[]>();
   for (const report of shown.slice(currentPage*12,currentPage*12+12)) { const day=dayKey(report); groups.set(day,[...(groups.get(day) ?? []),report]); }
-  return <div className={`${styles.workbench} ${file ? styles.withPreview : ""}`}><div className={styles.center}>
-    <header className={styles.header}><div><h1>{view === "reports" ? t("reportsTitle") : t("guidelinesTitle")}</h1><p>{view === "reports" ? `${projectName} · ${library ? t(latestReports === 1 ? "savedReportsOne" : "savedReportsOther", { count: latestReports }) : t("savedEnergyReports")}` : t("savedMethods")}</p></div><div className={styles.toolbar}>{view === "reports" && library?.canChat && <button className={styles.createReportAction} onClick={()=>router.push(`/energyiq/reports?${new URLSearchParams({projectId,sessionId:"new"})}`)}><EnergyIcon name="plus" />{t("createReport")}</button>}{view === "reports" && library?.canManageProject && <ReportSettingsButton projectId={projectId} mode="automation" />}<button onClick={() => setRevision(value => value + 1)}>{t("refresh")}</button></div></header>
+  return <div className={`${styles.workbench} ${file ? styles.withPreview : ""}`} data-library-view={view}><div className={styles.center}>
+    <header className={styles.header}><div>{view === "skills" && <span className={layout.eyebrow}>{t("advisorEyebrow")}</span>}<h1>{view === "reports" ? t("reportsTitle") : t("guidelinesTitle")}</h1><p className={layout.headerIntro}>{view === "reports" ? `${t("libraryIntro")} ${t("libraryIntroAutomatic")}` : t("guidelinesIntro")}</p></div><div className={styles.toolbar}>{library && view === "skills" && <div role="tablist" aria-label={t("skillsAndTools")} className={styles.innerTabs}>{(["skills","tools"] as const).map(tab=><button key={tab} role="tab" aria-selected={skillsTab===tab} onClick={()=>{setSkillsTab(tab);setFile(null);}}>{tab === "skills" ? t("tabSkills") : t("tabTools")}</button>)}</div>}<button onClick={() => setRevision(value => value + 1)}>{t("refresh")}</button>{view === "reports" && library?.canManageProject && <ReportSettingsButton projectId={projectId} mode="automation" />}{view === "reports" && library?.canChat && <button className={styles.createReportAction} onClick={()=>router.push(`/energyiq/reports?${new URLSearchParams({projectId,sessionId:"new"})}`)}><EnergyIcon name="plus" />{t("createReport")}</button>}</div></header>
     <div className={styles.libraryScroll}>
 
     {error && <p role="alert">{error}</p>}{!library && !error && <p role="status">{t("loadingLibrary")}</p>}
     {library && view === "reports" && <nav aria-label={t("reportSections")} className={styles.innerTabs}>{(["reports", ...(library.canManageProject ? ["materials", "context"] as const : [])] as const).map(tab=><button key={tab} aria-pressed={knowledgeTab===tab} onClick={()=>setKnowledgeTab(tab)}>{tab==="reports"?t("tabReports"):tab==="materials"?t("tabMaterials"):t("tabContext")}</button>)}</nav>}
     {library && view === "reports" && knowledgeTab!=="reports" && <section aria-label={t("materialsAndContext")}>{!materials ? <p role="status">{t("loadingMaterials")}</p> : knowledgeTab==="materials" ? <><h2>{t("materialsHeading")}</h2><p className={styles.muted}>{t("materialsIntro")}</p>{materials.settings.fileRefIds.length ? <ul>{materials.settings.fileRefIds.map(id=>{const item=materials.files.find(file=>file.id===id);return <li key={id} className="border-b border-border py-3">{item?.filename ?? t("fileUnavailable")}{item && <small className="ml-3">{Math.ceil(item.bytes/1024)} KB</small>}</li>;})}</ul> : <p>{t("noMaterials")}</p>}</> : <><h2>{t("contextHeading")}</h2><p className={styles.muted}>{t("contextIntro")}</p>{materials.settings.contextNotes ? <ReportMarkdown>{materials.settings.contextNotes}</ReportMarkdown> : <p>{t("noContext")}</p>}</>}</section>}
     {library && view === "reports" && knowledgeTab==="reports" && <section aria-label={t("projectReports")}>
-      <p className={styles.libraryIntro}>{t("libraryIntro")} <span>{t("libraryIntroAutomatic")}</span></p>
-      <ReportScheduleNote projectId={projectId} schedule={schedule} canSee={canSeeSchedule} />
-      <div className={styles.reportSearchTools}>
+      <div className={layout.reportsHead}>
+        <div className={layout.reportsTitle}><h2>{t("projectReports")}<span>{`${projectName} · ${t(latestReports === 1 ? "savedReportsOne" : "savedReportsOther", { count: latestReports })}`}</span></h2><ReportScheduleNote projectId={projectId} schedule={schedule} canSee={canSeeSchedule} /></div>
         <label className={styles.searchField}><EnergyIcon name="search" /><input aria-label={t("searchReports")} type="search" placeholder={t("searchPlaceholder")} value={search} onChange={e=>{setSearch(e.target.value);setPage(0);}} /></label>
+      </div>
+      <div className={styles.reportSearchTools}>
+        <span className={layout.showLabel}>{t("filterShow")}</span>
         <div className={styles.reportFilters} role="group" aria-label={t("filterLabel")}>
           {(["all","scheduled","custom"] as const).map(option=><button key={option} type="button" aria-pressed={kind===option} onClick={()=>{setKind(option);setLength("");setPage(0);}}>
             {t(option === "all" ? "filterAll" : option === "scheduled" ? "filterAutomatic" : "filterCustom")}<span>{kindCounts[option]}</span>
@@ -137,15 +139,14 @@ function ProjectLibrary({ projectId, view }: { projectId: string; view: "reports
               {featured && <span className={styles.eyebrow}>{t("latestReport")}</span>}
               <strong>{report.title}</strong>
               <span className={styles.reportPeriod}><b className={styles.coverage}>{coverageLabel(report.period.from, report.period.toExclusive, locale)}</b>{formatPeriod(report.period.from, shiftDate(report.period.toExclusive,-1), locale)}</span>
-              <span className={styles.reportTags}><span className={report.category === "scheduled" ? styles.tagAutomatic : undefined}>{report.category === "scheduled" ? t("automatic") : t("custom")}</span>{report.source === "site" && <span className={report.id === overviewReportId ? styles.tagAutomatic : undefined}>{report.id === overviewReportId ? t("onOverview") : t("siteReport")}</span>}<span>v{report.version ?? 1}</span>{featured && <span>{t("generatedAt", { time: generated })}</span>}</span>
-              {featured && <span className={styles.reportCta}>{t("openReport")}<EnergyIcon name="arrow" /></span>}
+              <span className={styles.reportTags}><span className={report.category === "scheduled" ? styles.tagAutomatic : undefined}>{report.category === "scheduled" ? t("automatic") : t("custom")}</span>{report.source === "site" && <span className={report.id === overviewReportId ? styles.tagAutomatic : undefined}>{report.id === overviewReportId ? t("onOverview") : t("siteReport")}</span>}<span>v{report.version ?? 1}</span><span>{t("generatedAt", { time: generated })}</span></span>
+              <span className={styles.reportCta}>{t("openShort")}</span>
             </span>
           </button>
           {!showVersions && previous.length>0 && <details className={styles.versions}><summary>{t("earlierVersions", { count: previous.length })}</summary>{previous.map(item=><button key={item.id} className={styles.activityLink} onClick={()=>openReport(item)}>v{item.version} · {formatPeriod(item.period.from, shiftDate(item.period.toExclusive,-1), locale)} · {t("generatedAt", { time: dayKey(item) })}</button>)}</details>}
         </article>;})}</div></section>)}{shown.length>12 && <nav aria-label={t("reportPages")} className={styles.pagination}><button disabled={!currentPage} onClick={()=>setPage(currentPage-1)}>{t("previous")}</button><span>{t("pageOf", { page: currentPage+1, total: maxPage+1 })}</span><button disabled={currentPage===maxPage} onClick={()=>setPage(currentPage+1)}>{t("next")}</button></nav>}</section>}
     {library && view === "skills" && <>
-      <div role="tablist" aria-label={t("skillsAndTools")} className={styles.innerTabs}>{(["skills","tools"] as const).map(tab=><button key={tab} role="tab" aria-selected={skillsTab===tab} onClick={()=>{setSkillsTab(tab);setFile(null);}}>{tab === "skills" ? t("tabSkills") : t("tabTools")}</button>)}</div>
-      <section className={styles.skillGuide} aria-label={t("howToUseSkills")}><h2>{t("reuseHeading")}</h2><p>{t("reuseIntro")}</p><ol><li><strong>{t("stepReadTitle")}</strong>{t("stepReadBody")}</li><li><strong>{t("stepUseTitle")}</strong>{t("stepUseBody")}</li><li><strong>{t("stepKeepTitle")}</strong>{t("stepKeepBody")}</li></ol>{library.canChat && <button onClick={()=>router.push(`/energyiq/reports?${new URLSearchParams({projectId,sessionId:"new"})}`)}>{t("openAdvisor")}</button>}<p className={styles.muted}>{t("activationNote")}</p></section>
+      <section className={styles.skillGuide} aria-label={t("howToUseSkills")}><div className={layout.guideBody}><h2>{t("reuseHeading")}</h2><p>{t("reuseIntro")}</p><ol><li><strong>{t("stepReadTitle")}</strong>{t("stepReadBody")}</li><li><strong>{t("stepUseTitle")}</strong>{t("stepUseBody")}</li><li><strong>{t("stepKeepTitle")}</strong>{t("stepKeepBody")}</li></ol><p className={styles.muted}>{t("activationNote")}</p></div>{library.canChat && <button onClick={()=>router.push(`/energyiq/reports?${new URLSearchParams({projectId,sessionId:"new"})}`)}>{t("openAdvisor")}</button>}</section>
       {notice && <p role="status" className="mb-4 text-sm">{notice}</p>}
       {skillsTab === "skills" && <section aria-label={t("savedSkills")}><div className={styles.skillCount}><h2>{t("skillsHeading")}</h2><span>{t(displayedSkills.length === 1 ? "skillCountOne" : "skillCountOther", { count: displayedSkills.length })}</span></div>{(["general","project","personal"] as const).map(scope=>{const items=displayedSkills.filter(skill=>(skill.scope ?? "project") === scope);return <section key={scope} aria-label={scope === "general" ? t("generalMethods") : scope === "personal" ? t("personalSkills") : t("projectSkills")} className={styles.skillGroup}><div className={styles.skillCount}><h3>{scope === "general" ? t("generalMethods") : scope === "personal" ? t("personalSkills") : t("projectSkills")}</h3><span>{items.length}</span></div>{items.length ? <div className={styles.skillCards}>{items.map(renderSkill)}</div> : <p className={styles.muted}>{scope === "general" ? t("noGeneral") : scope === "personal" ? t("noPersonal") : t("noProjectSkills")}</p>}</section>;})}</section>}
       {selectedSkill && !editing && <SkillDialog onClose={()=>{setSelectedSkill(null);setEditing(null);}} title={selectedSkill.name}>
@@ -155,7 +156,7 @@ function ProjectLibrary({ projectId, view }: { projectId: string; view: "reports
 
       </SkillDialog>}
       {editing && <ReportSkillVersionDialog canManageProject={library.canManageProject === true} projectId={projectId} skills={library.skills.filter((skill): skill is Skill & ReportSkillOption => !!skill.id && skill.revision !== undefined)} initial={editing as ReportSkillOption} content={editing.content} onClose={()=>setEditing(null)} onSaved={()=>{setRevision(value=>value+1);setNotice(t("skillVersionSaved"));}} />}
-      {skillsTab === "tools" && <section aria-label={t("availableTools")} className="mt-8"><h2 className="mb-3 font-semibold">{t("availableTools")}</h2>{!library.tools.length ? <p className={styles.muted}>{t("noTools")}</p> : <ul className="divide-y divide-border">{library.tools.map(tool => <li key={tool.name} className="py-3 text-sm"><strong>{tool.name}</strong><p className="mt-1 text-muted">{tool.description}</p></li>)}</ul>}</section>}
+      {skillsTab === "tools" && <section aria-label={t("availableTools")} className={layout.toolsCard}><h2>{t("availableTools")}</h2>{!library.tools.length ? <p className={styles.muted}>{t("noTools")}</p> : <ul>{library.tools.map(tool => <li key={tool.name}><code>{tool.name}</code><p>{tool.description}</p></li>)}</ul>}</section>}
     </>}
     </div></div>{file && <ReportFilePreview actions={library?.canUseActions === true && library.reports.some(item=>item.id===file.id) ? <ReportActionPanel key={`${projectId}:${file.id}`} projectId={projectId} reportId={file.id} /> : undefined} aiNote={library?.reports.some(item=>item.id===file.id && item.source !== "site") ? <AiAnswerNote compact targetKind="report" targetId={file.id} projectId={projectId} /> : undefined} notice={library?.reports.find(item=>item.id===file.id)?.source === "site" ? t("siteReportNotice") : library?.reports.find(item=>item.id===file.id)?.canDiscuss === false ? t("sharedReportNotice") : undefined} onDiscuss={library?.canChat && library.reports.some(item=>item.id===file.id && item.canDiscuss !== false) ? ()=>{router.push(`/energyiq/reports?${new URLSearchParams({projectId,sessionId:"new",reportId:file.id})}`);} : undefined} file={file} onClose={closeReport} />}</div>;
 }

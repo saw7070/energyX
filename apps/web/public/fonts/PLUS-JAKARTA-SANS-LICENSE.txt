@@ -1,0 +1,5 @@
+Plus Jakarta Sans (variable, weights 200-800; latin and latin-ext subsets from Google Fonts)
+Copyright 2020 The Plus Jakarta Sans Project Authors (https://github.com/tokotype/PlusJakartaSans)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+The full license text is available at https://openfontlicense.org/open-font-license-official-text/

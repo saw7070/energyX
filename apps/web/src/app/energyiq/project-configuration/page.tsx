@@ -55,9 +55,9 @@ function Configuration({ projectId, readOnly, canEditFacility, canEditHours, can
   }, [projectId, refresh, readOnly]);
   return <section className="space-y-6">
     <header className={styles.pageHeader}>
-      <div className={styles.pageHeading}><h1>{t("title")}</h1><p>{t(readOnly ? "introReview" : "introPublish")}</p></div>
+      <div className={styles.pageHeading}>{data && <span data-facility-crumb>{t("title")} / {data.setup.draft.document.project.name}</span>}<h1>{t("title")}</h1><p>{t(readOnly ? "introReview" : "introPublish")}</p></div>
       <div className={styles.toolbar}>
-        {canEditFacility && <button onClick={() => setUploading(true)}><EnergyIcon name="attach" aria-hidden="true" />{t("uploadData")}</button>}
+        {canEditFacility && <button data-primary onClick={() => setUploading(true)}><EnergyIcon name="attach" aria-hidden="true" />{t("uploadData")}</button>}
         {canConnect && <button onClick={() => setConnecting(true)}><EnergyIcon name="bolt" aria-hidden="true" />{t("liveConnection")}</button>}
         {isAdmin && <ReportSettingsButton projectId={projectId} mode="project" onClose={()=>setRefresh(value=>value+1)} />}<button onClick={() => setRefresh(value => value + 1)}>{t("refresh")}</button>
         <Link className={`${styles.advisorAction} focus-visible:ring-2 focus-visible:ring-primary`} href={`/energyiq/reports?${new URLSearchParams({ projectId, sessionId: "new", ...(isAdmin ? { configure: "1" } : {}) })}`}><EnergyIcon name="ask" aria-hidden="true" />{t("editWithAdvisor")}</Link>

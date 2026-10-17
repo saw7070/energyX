@@ -65,16 +65,17 @@ describe("Notification bell", () => {
     expect(rows).toHaveLength(4);
     expect(rows[0]).toContain("The daily update didn't finish");
     expect(rows[0]).toContain("Tuya refused this server's internet address");
-    expect(rows[1]).toContain("2 meters stopped sending readings");
-    expect(rows[1]).toContain("Meter 05, Meter 06");
-    expect(rows[2]).toContain("Your weekly report is ready");
-    expect(rows[2]).toContain("21 Sept 2026 – 27 Sept 2026");
+    // Newest first: the failed update (1 Oct), the weekly report (28 Sep), then the meters that stopped (23 Sep).
+    expect(rows[1]).toContain("Your weekly report is ready");
+    expect(rows[1]).toContain("21 Sept 2026 – 27 Sept 2026");
+    expect(rows[2]).toContain("2 meters stopped sending readings");
+    expect(rows[2]).toContain("Meter 05, Meter 06");
     expect(rows[3]).toContain("Switch off the LED wall at night");
     expect(container.querySelector("button")!.getAttribute("aria-label")).toBe("Notifications, 4 new");
     const links = [...container.querySelectorAll("li a")].map((link) => link.getAttribute("href"));
     expect(links[0]).toBe("/energyiq/project-configuration?projectId=p1&connection=live");
-    expect(links[1]).toBe("/energyiq/project-configuration?projectId=p1&tab=devices");
-    expect(links[2]).toBe("/energyiq/library?projectId=p1&reportId=r1");
+    expect(links[1]).toBe("/energyiq/library?projectId=p1&reportId=r1");
+    expect(links[2]).toBe("/energyiq/project-configuration?projectId=p1&tab=devices");
   });
 
   it("forgets an alert once it is opened, and hides what was read before", async () => {
@@ -140,5 +141,18 @@ describe("Notification bell", () => {
     await openBell();
     expect(container.querySelector("[role=alert]")).toBeNull();
     expect(container.textContent).toContain("You're all caught up");
+  });
+});
+
+describe("alert times", () => {
+  const words = { today: (time: string) => `Today, ${time}`, yesterday: (time: string) => `Yesterday, ${time}`, dayAt: (day: string, time: string) => `${day}, ${time}` };
+  // Friday 16 October 2026, 10:00 in Singapore.
+  const now = Date.parse("2026-10-16T02:00:00.000Z");
+  it("says today, yesterday, the weekday within a week, then the date, in Singapore time", async () => {
+    const { alertTime } = await import("./energyiq-notification-bell");
+    expect(alertTime("2026-10-15T22:05:00.000Z", "en-SG", words, now)).toBe("Today, 6:05 am");
+    expect(alertTime("2026-10-15T15:00:00.000Z", "en-SG", words, now)).toBe("Yesterday, 11:00 pm");
+    expect(alertTime("2026-10-14T08:15:00.000Z", "en-SG", words, now)).toBe("Wednesday, 4:15 pm");
+    expect(alertTime("2026-10-01T08:15:00.000Z", "en-SG", words, now)).toBe("1 Oct, 4:15 pm");
   });
 });

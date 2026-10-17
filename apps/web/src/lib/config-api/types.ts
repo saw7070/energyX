@@ -586,6 +586,8 @@ export type EnergyDataAvailabilityDto = {
     /** Offline right now, per the 15-minute live check. */
     offlineSince?: string;
     checks: Array<{ kind: "stuck_value" | "flat_zero"; from: string; to: string; hours: number; kwhPerHour: number }>;
+    /** One entry per site-local day of the period: every reading arrived, some missing, or none arrived. */
+    days?: Array<"all" | "some" | "none">;
   }>;
   outages: Array<{ meterPointId: string; name: string; from: string; to: string; hours: number; kind: "estimated" | "missing"; estimatedKwh: number; ongoing: boolean }>;
 };

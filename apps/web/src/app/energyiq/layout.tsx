@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import "./energyiq-theme.css";
+import "./energyiq-polish.css";
 
 import { DataTaskIdentityProvider } from "../data-tasks/data-task-identity";
 import { EnergyIqShell } from "./_components/energyiq-shell";

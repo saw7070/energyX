@@ -49,6 +49,8 @@ export function DataAvailability({ projectId, siteName, document, canEdit, busy,
   const day = (value: string) => new Intl.DateTimeFormat(intl, { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" }).format(new Date(`${value}T00:00:00Z`));
   const when = (iso: string) => new Intl.DateTimeFormat(intl, { timeZone: timezone, day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
   const number = (value: number, digits = 1) => new Intl.NumberFormat(intl, { maximumFractionDigits: digits }).format(value);
+  const shortDay = (value: string) => new Intl.DateTimeFormat(intl, { timeZone: "UTC", day: "numeric", month: "short" }).format(new Date(`${value}T00:00:00Z`));
+  const shiftDay = (value: string, days: number) => new Date(Date.parse(`${value}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
   const monthName = (id: string) => new Intl.DateTimeFormat(intl, { timeZone: "UTC", month: "long", year: "numeric" }).format(new Date(`${id}-01T00:00:00Z`));
   const target = data?.targetPct ?? 95;
   const statusText = (status: Meter["status"]) => t(`status.${status}`, { target });
@@ -86,6 +88,8 @@ export function DataAvailability({ projectId, siteName, document, canEdit, busy,
   // A meter offline right now leads: every hour it stays offline costs availability.
   const rank = (meter: Meter) => meter.offlineSince ? -1 : severity[meter.status];
   const meters = [...(data?.meters ?? [])].sort((left, right) => rank(left) - rank(right) || left.availabilityPct - right.availabilityPct || left.name.localeCompare(right.name));
+  // The day-by-day strip appears once the service sends each meter's days.
+  const hasDays = meters.some(meter => (meter.days?.length ?? 0) > 0);
   const locations = new Map((data?.meters ?? []).map(meter => [meter.meterPointId, meter.location]));
   const sitePct = data?.site.availabilityPct ?? null;
   const meets = sitePct !== null && sitePct >= target;
@@ -93,35 +97,34 @@ export function DataAvailability({ projectId, siteName, document, canEdit, busy,
   const columns = canEdit ? 7 : 6;
 
   return <section className={styles.panel} aria-label={t("title")}>
+    {/* The Facility tab already names the page, so the title is for screen readers; the explanation sits in the card below. */}
     <header className={styles.header}>
-      <div>
-        <h3>{t("title")}</h3>
-        <p className={styles.muted}>{t("intro", { target })}</p>
-        {data && <span className={styles.range}><EnergyIcon name="calendar" className="h-3.5 w-3.5" aria-hidden="true" />{t("range", { from: day(data.from), to: day(data.to) })}</span>}
-      </div>
+      <h3 className="sr-only">{t("title")}</h3>
       <div className={styles.controls}>
         <label>{t("period")}<select value={periodId} onChange={event => setPeriodId(event.target.value)}>
           {periods.map(item => <option key={item.id} value={item.id}>{item.id === "last30" ? t("period.last30") : monthName(item.id)}</option>)}
         </select></label>
-        <button type="button" className={styles.secondary} disabled={!data || loading} onClick={download}><EnergyIcon name="download" className="h-4 w-4" aria-hidden="true" />{t("download")}</button>
+        {data && <span className={styles.range}>{t("range", { from: day(data.from), to: day(data.to) })}</span>}
       </div>
+      <button type="button" className={styles.secondary} disabled={!data || loading} onClick={download}><EnergyIcon name="download" className="h-4 w-4" aria-hidden="true" />{t("download")}</button>
     </header>
     {failed && <p role="alert" className={styles.error}>{t("failed")}<button type="button" className={styles.link} onClick={() => setAttempt(value => value + 1)}>{t("retry")}</button></p>}
     {!data && loading && <p role="status" className={styles.status}>{t("loading")}</p>}
     {data && <>
       <div className={styles.summary}>
         <div className={styles.hero}>
+          <span className={styles.heroLabel}>{t("hero.label")}</span>
           <div className={styles.heroTop}>
-            <span>{t("tile.site")}</span>
-            {sitePct !== null && <span className={`${styles.badge} ${meets ? styles.badgeOk : styles.badgeWarn}`}><i aria-hidden="true" />{meets ? t("status.ok") : t("hero.below")}</span>}
+            <strong className={styles.heroValue}>{sitePct === null ? "—" : `${number(sitePct)}%`}</strong>
+            {sitePct !== null && <span className={`${styles.badge} ${meets ? styles.badgeOk : styles.badgeWarn}`}>{meets ? t("status.ok") : t("hero.below")}</span>}
           </div>
-          <strong className={styles.heroValue}>{sitePct === null ? "—" : `${number(sitePct)}%`}</strong>
-          {sitePct !== null && <span className={`${styles.heroBar} ${meets ? "" : styles.heroBarLow}`} aria-hidden="true"><span style={{ width: `${Math.min(100, sitePct)}%` }} /><i className={styles.heroTarget} style={{ left: `${target}%` }} /></span>}
-          <small className={styles.heroNote}>{sitePct === null ? t("tile.siteNone")
-            : t(meets ? "hero.gapAbove" : "hero.gapBelow", { points: number(Math.abs(sitePct - target)), target })}</small>
+          <p className={styles.heroGap}>{sitePct === null ? t("tile.siteNone")
+            : t(meets ? "hero.gapAbove" : "hero.gapBelow", { points: number(Math.abs(sitePct - target)), target })}</p>
+          {sitePct !== null && <span className={`${styles.heroBar} ${meets ? "" : styles.heroBarLow}`} aria-hidden="true"><span style={{ width: `${Math.min(100, sitePct)}%` }} /><i className={styles.heroTarget} style={{ left: `${target}%` }} /><b className={styles.heroTargetLabel} style={{ left: `${target}%` }}>{target}%</b></span>}
+          <small className={styles.heroNote}>{t("intro", { target })}</small>
         </div>
         <div className={styles.stats}>
-          <div className={styles.stat}><span>{t("tile.below", { target })}</span><strong>{data.site.metersBelowTarget}<em>/ {data.site.metersCounted}</em></strong><small>{t("tile.belowNote", { target })}</small></div>
+          <div className={styles.stat}><span>{t("tile.below", { target })}</span><strong data-alert={data.site.metersBelowTarget > 0 ? "" : undefined}>{data.site.metersBelowTarget}<em>/ {data.site.metersCounted}</em></strong><small>{t("tile.belowNote", { target })}</small></div>
           <div className={styles.stat}><span>{t("tile.outages")}</span><strong>{data.site.outageCount}</strong><small>{t("tile.outagesNote")}</small></div>
           <div className={styles.stat}><span>{t("tile.estimated")}</span><strong>{number(data.site.estimatedKwh)}<em>kWh</em></strong><small>{t("tile.estimatedNote")}</small></div>
         </div>
@@ -134,11 +137,14 @@ export function DataAvailability({ projectId, siteName, document, canEdit, busy,
       </div>}
 
       <div className={styles.section}>
-        <div className={styles.sectionHead}><h4>{t("meters.title")}</h4><span>{t("meters.note", { count: meters.length })}</span></div>
+        <div className={styles.sectionHead}>
+          <div><h4>{t("meters.title")}</h4><span>{t("meters.note", { count: meters.length })}</span></div>
+          {hasDays && <ul className={styles.legend} aria-label={t("legend")}>{(["all", "some", "none"] as const).map(kind => <li key={kind} data-day={kind}>{t(`day.${kind}`)}</li>)}</ul>}
+        </div>
         <div className={styles.tableWrap}>
           <table className={styles.table}>
             <thead><tr>
-              <th>{t("col.meter")}</th><th>{t("col.received")}</th><th className={styles.number}>{t("col.outage")}</th>
+              <th>{t("col.meter")}</th><th>{t("col.received")}</th>{hasDays && <th>{t("col.days")}</th>}<th className={styles.number}>{t("col.outage")}</th>
               <th className={styles.number}>{t("col.estimated")}</th><th>{t("col.last")}</th><th>{t("col.status")}</th>{canEdit && <th aria-label={t("action.notInUse")} />}
             </tr></thead>
             <tbody>{meters.flatMap(meter => {
@@ -149,6 +155,9 @@ export function DataAvailability({ projectId, siteName, document, canEdit, busy,
                   <span className={`${styles.bar} ${low ? styles.barLow : ""}`} aria-hidden="true"><span style={{ width: `${Math.min(100, meter.availabilityPct)}%` }} /><i className={styles.target} style={{ left: `${target}%` }} /></span>
                   <b>{number(meter.availabilityPct)}%</b>
                 </span></td>
+                {hasDays && <td>{meter.days && <span className={styles.days} role="img" aria-label={t("days.summary", { all: String(meter.days.filter(kind => kind === "all").length), some: String(meter.days.filter(kind => kind === "some").length), none: String(meter.days.filter(kind => kind === "none").length) })}>
+                  {meter.days.map((kind, index) => <i key={index} data-day={kind} title={t("day.title", { date: shortDay(shiftDay(data.from, index)), status: t(`day.${kind}`) })} />)}
+                </span>}</td>}
                 <td className={styles.number}>{meter.longestOutageHours >= 1 ? t("hours", { hours: number(meter.longestOutageHours) }) : <span className={styles.quiet}>{t("none")}</span>}</td>
                 <td className={styles.number}>{meter.estimatedKwh > 0 ? t("kwh", { kwh: number(meter.estimatedKwh, 2) }) : <span className={styles.quiet}>—</span>}</td>
                 <td>{meter.lastReadingAt ? when(meter.lastReadingAt) : <span className={styles.quiet}>—</span>}</td>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EnergyMeterIntervalCoverage } from "@datafoundry/data-gateway";
-import { resolveDataAvailabilityPeriod, summariseDataAvailability } from "./energy-data-availability.js";
+import { localDayStarts, resolveDataAvailabilityPeriod, summariseDataAvailability } from "./energy-data-availability.js";
 
 const HOUR = 3_600_000, QUARTER = 900_000;
 const from = Date.parse("2026-09-01T00:00:00.000Z");
@@ -11,6 +11,24 @@ const quarterHours = (meterPointId: string, start: number, hours: number, status
   Array.from({ length: hours * 4 }, (_, index) => ({ meterPointId, startMs: start + index * QUARTER, endMs: start + (index + 1) * QUARTER, qualityStatus: status, usageKwh: kwhAt(Math.floor(index / 4)) / 4 }));
 
 describe("data availability", () => {
+  it("marks each site-local day as all readings, some missing or none arrived", () => {
+    // Singapore days run from 16:00 UTC: four days from 1 Sep local midnight.
+    const starts = localDayStarts("2026-09-01", "2026-09-04", "Asia/Singapore");
+    expect(starts.map(start => new Date(start).toISOString())).toEqual(["2026-08-31T16:00:00.000Z", "2026-09-01T16:00:00.000Z", "2026-09-02T16:00:00.000Z", "2026-09-03T16:00:00.000Z"]);
+    const fromMs = starts[0]!, toMs = starts[3]! + days(1);
+    const intervals = [
+      ...quarterHours("a", fromMs, 24),
+      // Day 2: three hours missing, then two estimated; day 3: nothing; day 4: complete again.
+      ...quarterHours("a", fromMs + days(1) + 3 * HOUR, 19),
+      ...quarterHours("a", fromMs + days(1) + 22 * HOUR, 2, "gap"),
+      ...quarterHours("a", fromMs + days(3), 24),
+    ];
+    const summary = summariseDataAvailability({ fromMs, toMs, meters: [{ meterPointId: "a", name: "Router" }], intervals, lastReadingAt: new Map([["a", new Date(toMs).toISOString()]]), dayStartsMs: starts });
+    expect(summary.meters[0]!.days).toEqual(["all", "some", "none", "all"]);
+    // Without day boundaries there is no strip.
+    expect(summariseDataAvailability({ fromMs, toMs, meters: [{ meterPointId: "a", name: "Router" }], intervals, lastReadingAt: new Map() }).meters[0]!.days).toBeUndefined();
+  });
+
   it("counts only received readings toward a meter's availability and lists each outage once", () => {
     const to = from + days(10);
     const intervals = [

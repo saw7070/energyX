@@ -80,6 +80,59 @@
 .newer{margin:0 0 12px;padding:11px 15px;border:1px solid #efdfc0;border-left:3px solid #c98f2e;border-radius:10px;background:#fdf7ed;font-size:13.5px}
 .page .schedule{margin:0}
 
+/* Prototype layout: a wide page and a white headline card with one orange phrase, the forecast as a pill and one green action. */
+.page{max-width:1440px;padding:28px clamp(16px,3vw,40px) 72px}
+.hero{--hero-ink:#0b1a13;--hero-body:#4b5a52;--hero-quiet:#52615a;--hero-rule:#e3eae5;--hero-underline:#9bb6a7;--hero-cta:#176b59;--hero-cta-ink:#fff;--hero-cta-hover:#1d7f69;background:#fff;color:var(--hero-ink);border:1px solid #dde5e0;border-radius:22px;padding:34px 40px 30px;box-shadow:0 1px 2px #0a281b0d,0 18px 40px -26px #0a281b40}
+.hero h2{font-size:clamp(30px,2.6vw,42px);line-height:1.12;letter-spacing:-.035em;font-weight:700;color:var(--hero-ink);max-width:24ch;margin:12px 0 16px}
+.hero h2 span{color:#d4521c}
+.hero>p{color:var(--hero-body);font-size:16px;max-width:72ch}
+.heroEyebrow{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--hero-quiet)}
+.heroEyebrow::before{content:"";width:8px;height:8px;border-radius:50%;background:#16a34a}
+.hero .heroForecast{display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin-top:20px;padding:9px 14px;border:0;border-radius:12px;background:#eef5f1;color:var(--hero-quiet);font-size:14px}
+.hero .heroForecast a{color:#176b59;border-bottom-color:#9bb6a7}
+.hero .heroLinks{margin-top:18px}
+.hero .heroLinks a{background:var(--hero-cta);color:var(--hero-cta-ink);box-shadow:inset 0 1px 0 #ffffff33,0 1px 2px #063c2859}
+.hero .heroLinks a:hover{background:var(--hero-cta-hover)}
+:global(html[data-energyiq-theme="dark"]) .hero{--hero-ink:#eef3f0;--hero-body:#b5c3bb;--hero-quiet:#a6b5ad;--hero-rule:#2c302e;--hero-underline:#4d6b5c;--hero-cta:#2f7a5b;--hero-cta-ink:#fff;--hero-cta-hover:#37896a}
+:global(html[data-energyiq-theme="dark"]) .hero h2 span{color:#ff8f62}
+:global(html[data-energyiq-theme="dark"]) .hero .heroForecast a{color:#7fd3ae}
+
+/* Prototype Overview details: a larger headline in the report orange, the forecast pill beside the action,
+   the source as a plain line, live figures as large numbers, and quiet notice rows. */
+.hero{display:flex;flex-wrap:wrap;align-items:center;gap:0 10px}
+.hero>*{flex-basis:100%}
+.hero .heroForecast,.hero .heroLinks{flex-basis:auto;margin-top:22px}
+.hero h2{font-size:clamp(32px,3vw,46px);font-weight:800;letter-spacing:-.04em;line-height:1.08;max-width:22ch}
+.hero h2 span{color:#e8501f}
+.hero>p{font-size:17px;line-height:1.6;max-width:62ch}
+.hero .heroForecast{padding:10px 16px 10px 40px;border-radius:12px;background:#eef4fe url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231e40af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 17l6-6 4 4 8-8M15 7h6v6'/%3E%3C/svg%3E") 14px center / 17px no-repeat;color:#1e40af;font-size:14.5px;font-weight:500}
+.hero .heroForecast a{color:#1e40af;font-weight:700;text-decoration:underline;text-underline-offset:3px;border-bottom:0}
+.hero .heroLinks a{padding:12px 18px;border-radius:12px;font-size:15px}
+.source{margin:0 0 10px;padding:4px 2px;border:0;border-radius:0;background:transparent;box-shadow:none;font-size:14px}
+.source>svg{padding:0;background:transparent}
+.source a{margin-left:6px}
+.source[data-live="figures"]{flex-wrap:wrap;align-items:baseline;gap:8px 26px;margin:0 0 14px;padding:16px 22px;border:1px solid #dde5e0;border-radius:18px;background:#fff;box-shadow:0 1px 2px #0a281b0d,0 8px 24px -16px #0a281b33}
+.source [data-live-label]{display:inline-flex;align-items:center;gap:8px;align-self:center;font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#176b59}
+.source [data-live-label]>span{width:10px;height:10px;border-radius:50%;background:#16a34a;box-shadow:0 0 0 4px #16a34a26}
+.source [data-live-figure] strong{font-size:30px;font-weight:700;letter-spacing:-.02em;color:#0b1a13}
+.source [data-live-figure] small{margin-left:4px;font-size:13.5px;color:#5b6d63}
+.source [data-live-updated]{margin-left:auto;font-size:12.5px;color:#7b8a82}
+.newer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 16px;padding:11px 16px;border:0;border-radius:10px;background:#eef4fe;color:#1e40af}
+.newer a{color:#1e40af}
+.page .schedule{display:flex;width:100%;box-sizing:border-box;margin:0 0 6px;padding:11px 16px;border:0;border-radius:10px;background:#f1f4f2;color:#33403a;font-size:13.5px}
+.fullReport{border-radius:20px}
+.fullReport>header{background:#f3faf6}
+.fullReport>header h2{font-size:21px;font-weight:700}
+:global(html[data-energyiq-theme="dark"]) .hero .heroForecast{background-color:#172340;color:#93c5fd}
+:global(html[data-energyiq-theme="dark"]) .hero .heroForecast a{color:#93c5fd}
+:global(html[data-energyiq-theme="dark"]) .hero h2 span{color:#ff7a4d}
+
+/* The live strip is always a card, as in the prototype, whether it shows figures or a status line. */
+.source[role="status"]{margin:4px 0 14px;padding:14px 20px;border:1px solid #dde5e0;border-radius:18px;background:#fff;box-shadow:0 1px 2px #0a281b0d,0 8px 24px -16px #0a281b33}
+.source[role="status"]>p>strong:first-child{margin-right:6px;font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#176b59}
+.source[role="status"]>svg{color:#16a34a}
+.hero h2{max-width:26ch}
+
 /* energyiq-dark-theme:start — generated by scripts/energyiq-dark-theme.mjs; do not edit by hand */
 :global(:where(html[data-energyiq-theme="dark"])) .page { color:#accdc1; }
 :global(:where(html[data-energyiq-theme="dark"])) .header h1 { color:#bfd5c7; }
@@ -142,4 +195,39 @@
 :global(:where(html[data-energyiq-theme="dark"])) .hero .heroLinks a:hover { border:0; background:var(--hero-cta-hover); }
 :global(:where(html[data-energyiq-theme="dark"])) .source { background:#191919; border-color:#303732; }
 :global(:where(html[data-energyiq-theme="dark"])) .newer { border:1px solid #41341a; border-left:3px solid #c98f2e; border-radius:10px; background:#201c14; }
+:global(:where(html[data-energyiq-theme="dark"])) .hero { background:#191919; color:var(--hero-ink); border:1px solid #313733; border-radius:22px; box-shadow:0 1px 2px #0a281b15,0 18px 40px -26px #0a281b66; }
+:global(:where(html[data-energyiq-theme="dark"])) .hero h2 { color:var(--hero-ink); }
+:global(:where(html[data-energyiq-theme="dark"])) .hero h2 span { color:#dc8363; }
+:global(:where(html[data-energyiq-theme="dark"])) .hero>p { color:var(--hero-body); }
+:global(:where(html[data-energyiq-theme="dark"])) .heroEyebrow { color:var(--hero-quiet); }
+:global(:where(html[data-energyiq-theme="dark"])) .heroEyebrow::before { border-radius:50%; background:#16a34a; }
+:global(:where(html[data-energyiq-theme="dark"])) .hero .heroForecast { border:0; border-radius:12px; background:#1a1f1d; color:var(--hero-quiet); }
+:global(:where(html[data-energyiq-theme="dark"])) .hero .heroForecast a { color:#75c1ac; border-bottom-color:#334a3e; }
+:global(:where(html[data-energyiq-theme="dark"])) .hero .heroLinks a { background:var(--hero-cta); color:var(--hero-cta-ink); box-shadow:inset 0 1px 0 #06060633,0 1px 2px #063c288e; }
+:global(:where(html[data-energyiq-theme="dark"])) .hero .heroLinks a:hover { background:var(--hero-cta-hover); }
+:global(:where(html[data-energyiq-theme="dark"])) :global(html[data-energyiq-theme="dark"]) .hero h2 span { color:#ff8f62; }
+:global(:where(html[data-energyiq-theme="dark"])) :global(html[data-energyiq-theme="dark"]) .hero .heroForecast a { color:#7fd3ae; }
+:global(:where(html[data-energyiq-theme="dark"])) .hero h2 span { color:#e8501f; }
+:global(:where(html[data-energyiq-theme="dark"])) .hero .heroForecast { border-radius:12px; background:#1a1e25 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231e40af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 17l6-6 4 4 8-8M15 7h6v6'/%3E%3C/svg%3E") 14px center / 17px no-repeat; color:#96b6fe; }
+:global(:where(html[data-energyiq-theme="dark"])) .hero .heroForecast a { color:#96b6fe; text-decoration:underline; border-bottom:0; }
+:global(:where(html[data-energyiq-theme="dark"])) .hero .heroLinks a { border-radius:12px; }
+:global(:where(html[data-energyiq-theme="dark"])) .source { border:0; border-radius:0; background:transparent; box-shadow:none; }
+:global(:where(html[data-energyiq-theme="dark"])) .source>svg { background:transparent; }
+:global(:where(html[data-energyiq-theme="dark"])) .source[data-live="figures"] { border:1px solid #313733; border-radius:18px; background:#191919; box-shadow:0 1px 2px #0a281b15,0 8px 24px -16px #0a281b52; }
+:global(:where(html[data-energyiq-theme="dark"])) .source [data-live-label] { color:#75c1ac; }
+:global(:where(html[data-energyiq-theme="dark"])) .source [data-live-label]>span { border-radius:50%; background:#16a34a; box-shadow:0 0 0 4px #16a34a3d; }
+:global(:where(html[data-energyiq-theme="dark"])) .source [data-live-figure] strong { color:#c9ddd2; }
+:global(:where(html[data-energyiq-theme="dark"])) .source [data-live-figure] small { color:#9cb0a5; }
+:global(:where(html[data-energyiq-theme="dark"])) .source [data-live-updated] { color:#91a098; }
+:global(:where(html[data-energyiq-theme="dark"])) .newer { border:0; border-radius:10px; background:#1a1e25; color:#96b6fe; }
+:global(:where(html[data-energyiq-theme="dark"])) .newer a { color:#96b6fe; }
+:global(:where(html[data-energyiq-theme="dark"])) .page .schedule { border:0; border-radius:10px; background:#1c1f1d; color:#b5c5bd; }
+:global(:where(html[data-energyiq-theme="dark"])) .fullReport { border-radius:20px; }
+:global(:where(html[data-energyiq-theme="dark"])) .fullReport>header { background:#191e1b; }
+:global(:where(html[data-energyiq-theme="dark"])) :global(html[data-energyiq-theme="dark"]) .hero .heroForecast { background-color:#172340; color:#93c5fd; }
+:global(:where(html[data-energyiq-theme="dark"])) :global(html[data-energyiq-theme="dark"]) .hero .heroForecast a { color:#93c5fd; }
+:global(:where(html[data-energyiq-theme="dark"])) :global(html[data-energyiq-theme="dark"]) .hero h2 span { color:#ff7a4d; }
+:global(:where(html[data-energyiq-theme="dark"])) .source[role="status"] { border:1px solid #313733; border-radius:18px; background:#191919; box-shadow:0 1px 2px #0a281b15,0 8px 24px -16px #0a281b52; }
+:global(:where(html[data-energyiq-theme="dark"])) .source[role="status"]>p>strong:first-child { color:#75c1ac; }
+:global(:where(html[data-energyiq-theme="dark"])) .source[role="status"]>svg { color:#16a34a; }
 /* energyiq-dark-theme:end */

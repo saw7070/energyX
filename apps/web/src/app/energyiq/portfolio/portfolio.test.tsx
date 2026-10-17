@@ -45,7 +45,7 @@ describe("Portfolio view", () => {
     expect(host.textContent).toContain("S$1,500.00 + RM2,600.00");
     expect(host.textContent).toContain("7.9 tCO2e");
     expect(host.textContent).toContain("1 over · 0 heading over");
-    const names = () => Array.from(host.querySelectorAll("tbody th")).map(cell => cell.textContent);
+    const names = () => Array.from(host.querySelectorAll("tbody th a")).map(cell => cell.textContent);
     expect(names()).toEqual(["KL Office", "Raffles HQ", "Tuas Depot"]);
     expect(host.textContent).toContain("No readings for this period");
     expect(host.textContent).toContain("89% of readings");

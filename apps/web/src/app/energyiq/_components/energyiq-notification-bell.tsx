@@ -13,7 +13,26 @@ import { notificationMessages } from "./notification-messages";
 
 type Notice = { actionId: string; title: string; runId: string };
 
-export type BellEntry = { key: string; tone: "warning" | "info"; title: string; detail: string; href: string; readKey?: string; runId?: string };
+export type BellKind = "overnight" | "budget" | "meters" | "sync" | "report" | "action";
+export type BellEntry = { key: string; tone: "warning" | "info"; kind: BellKind; title: string; detail: string; href: string; at?: string; readKey?: string; runId?: string };
+
+/** The icon and colour each kind of alert gets in the list, so a reader can tell them apart at a glance. */
+const KIND_ICON: Record<BellKind, Parameters<typeof EnergyIcon>[0]["name"]> = {
+  overnight: "alert", budget: "dollar", meters: "meter-off", sync: "alert", report: "document", action: "spark",
+};
+
+/** "Today, 6:05 am", "Yesterday, 11:00 pm", "Wednesday, 4:15 pm" within a week, then "8 Oct, 4:15 pm". Singapore time. */
+export const alertTime = (iso: string, locale: string, words: { today: (time: string) => string; yesterday: (time: string) => string; dayAt: (day: string, time: string) => string }, now = Date.now()): string => {
+  const zone = "Asia/Singapore";
+  const date = new Date(iso);
+  const time = new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit", timeZone: zone }).format(date);
+  const dayKey = (value: number) => new Intl.DateTimeFormat("en-CA", { timeZone: zone }).format(new Date(value));
+  const daysAgo = Math.round((Date.parse(dayKey(now)) - Date.parse(dayKey(date.getTime()))) / 86_400_000);
+  if (daysAgo <= 0) return words.today(time);
+  if (daysAgo === 1) return words.yesterday(time);
+  const day = new Intl.DateTimeFormat(locale, daysAgo < 7 ? { weekday: "long", timeZone: zone } : { day: "numeric", month: "short", timeZone: zone }).format(date);
+  return words.dayAt(day, time);
+};
 
 /** Meter health is a heavier read than the rest, and a stopped meter is not news by the second. */
 const HEALTH_REFRESH_MS = 5 * 60_000;
@@ -97,7 +116,7 @@ export function EnergyIqNotificationBell({ projectId }: { projectId: string }) {
     const list: BellEntry[] = [];
     if (alerts?.sync) {
       list.push({
-        key: alerts.sync.key, readKey: alerts.sync.key, tone: "warning",
+        key: alerts.sync.key, readKey: alerts.sync.key, tone: "warning", kind: "sync", at: alerts.sync.failedAt,
         title: tn("sync.title"), detail: tn(`sync.${alerts.sync.reason}`),
         href: `/energyiq/project-configuration?${new URLSearchParams({ projectId, connection: "live" })}`,
       });
@@ -106,7 +125,7 @@ export function EnergyIqNotificationBell({ projectId }: { projectId: string }) {
       const key = offlineKey(offline);
       const first = offline[0]!;
       list.push({
-        key, readKey: key, tone: "warning",
+        key, readKey: key, tone: "warning", kind: "meters", at: first.since,
         title: offline.length === 1 ? tn("offline.one", { name: first.name }) : tn("offline.many", { count: offline.length }),
         detail: offline.length === 1
           ? tn("offline.detail", { when: when(first.since) })
@@ -120,7 +139,7 @@ export function EnergyIqNotificationBell({ projectId }: { projectId: string }) {
       const key = stoppedKey(stopped);
       const first = stopped[0]!;
       list.push({
-        key, readKey: key, tone: "warning",
+        key, readKey: key, tone: "warning", kind: "meters", at: first.lastReadingAt,
         title: stopped.length === 1 ? tn("meters.one", { name: first.name }) : tn("meters.many", { count: stopped.length }),
         detail: stopped.length === 1
           ? tn("meters.detail", { when: when(first.lastReadingAt!) })
@@ -138,14 +157,14 @@ export function EnergyIqNotificationBell({ projectId }: { projectId: string }) {
           : `${Number(value ?? 0).toLocaleString(intlLocale(locale), { maximumFractionDigits: 0 })} kWh`;
         const month = new Intl.DateTimeFormat(intlLocale(locale), { month: "long", timeZone: "UTC" }).format(new Date(`${String(details.month ?? "2000-01")}-01T00:00:00Z`));
         list.push({
-          key: alert.key, readKey: alert.key, tone: "warning",
+          key: alert.key, readKey: alert.key, tone: "warning", kind: "budget", at: alert.createdAt,
           title: tn(details.status === "over" ? "budget.over" : "budget.at-risk", { month }),
           detail: tn("budget.detail", { forecast: amount(onMoney ? details.forecastCost : details.forecastKwh), budget: amount(onMoney ? details.budgetAmount : details.budgetKwh) }),
           href: `/energyiq/project-configuration?${new URLSearchParams({ projectId, tab: "targets" })}`,
         });
       } else {
         list.push({
-          key: alert.key, readKey: alert.key, tone: "warning",
+          key: alert.key, readKey: alert.key, tone: "warning", kind: "overnight", at: alert.createdAt,
           title: tn("overnight.title"),
           detail: tn("overnight.detail", { date: day(String(details.night ?? "")), kw: Number(details.nightKw ?? 0), pct: Number(details.abovePct ?? 0) }),
           href: `/energyiq/analysis?${new URLSearchParams({ projectId })}`,
@@ -155,7 +174,7 @@ export function EnergyIqNotificationBell({ projectId }: { projectId: string }) {
     for (const report of alerts?.reports ?? []) {
       const last = lastDay(report.toExclusive);
       list.push({
-        key: report.key, readKey: report.key, tone: "info",
+        key: report.key, readKey: report.key, tone: "info", kind: "report", at: report.finishedAt,
         title: tn(`report.${report.cadence}`),
         detail: tn("report.detail", { period: report.from === last ? day(report.from) : `${day(report.from)} – ${day(last)}` }),
         href: `/energyiq/library?${new URLSearchParams({ projectId, reportId: report.reportId })}`,
@@ -163,11 +182,16 @@ export function EnergyIqNotificationBell({ projectId }: { projectId: string }) {
     }
     for (const item of items) {
       list.push({
-        key: `action:${item.runId}`, runId: item.runId, tone: "info", title: item.title, detail: t("notifications.newResult"),
+        key: `action:${item.runId}`, runId: item.runId, tone: "info", kind: "action", title: item.title, detail: t("notifications.newResult"),
         href: `/energyiq/actions?${new URLSearchParams({ projectId, actionId: item.actionId })}`,
       });
     }
-    return list.filter((entry) => (!entry.readKey || !read.has(entry.readKey)) && (!entry.runId || !actionsReadNow.has(entry.runId)));
+    // Newest first; entries without a time (action results) keep their order at the end.
+    return list
+      .filter((entry) => (!entry.readKey || !read.has(entry.readKey)) && (!entry.runId || !actionsReadNow.has(entry.runId)))
+      .map((entry, index) => ({ entry, index, at: entry.at ? Date.parse(entry.at) : Number.NEGATIVE_INFINITY }))
+      .sort((left, right) => right.at - left.at || left.index - right.index)
+      .map(({ entry }) => entry);
   }, [alerts, health, offline, items, readNow, actionsReadNow, locale, projectId, t, tn]);
 
   const markRead = (entry: BellEntry) => {
@@ -190,6 +214,11 @@ export function EnergyIqNotificationBell({ projectId }: { projectId: string }) {
   // The button that was pressed disappears with its entry, so keep keyboard focus inside the list.
   const markOne = (entry: BellEntry) => { markRead(entry); panel.current?.focus(); };
   const markAll = () => { entries.forEach(markRead); panel.current?.focus(); };
+  const when = (iso: string) => alertTime(iso, intlLocale(locale), {
+    today: (time) => tn("today", { time }),
+    yesterday: (time) => tn("yesterday", { time }),
+    dayAt: (day, time) => tn("dayAt", { day, time }),
+  });
 
   return <div ref={root} className={styles.bell}>
     <button ref={trigger} type="button" className={styles.iconButton} aria-label={entries.length ? t("notifications.count", { count: entries.length }) : t("notifications.title")} aria-expanded={open} aria-controls="energyiq-notifications" onClick={() => setOpen(value => !value)}>
@@ -197,18 +226,23 @@ export function EnergyIqNotificationBell({ projectId }: { projectId: string }) {
     </button>
     {open && <section ref={panel} tabIndex={-1} id="energyiq-notifications" aria-label={t("notifications.title")} className={styles.popover}>
       <div className={styles.popoverHead}>
-        <h2>{t("notifications.title")}</h2>
-        {entries.length > 1 && <button type="button" className={styles.readAll} onClick={markAll}>{tn("markAllRead")}</button>}
+        <h2>{tn("title")}</h2>
+        {entries.length > 0 && <span className={styles.openCount}>{tn("openCount", { count: entries.length })}</span>}
       </div>
-      {entries.length ? <ul>{entries.map(entry => <li key={entry.key} data-tone={entry.tone} className={styles.entry}>
-        <Link href={entry.href} onClick={() => openEntry(entry)}>
-          <strong>{entry.tone === "warning" ? <EnergyIcon name="alert" aria-hidden="true" className="mr-1 inline h-3.5 w-3.5 align-[-2px] text-amber-600" /> : null}{entry.title}</strong>
-          <small>{entry.detail}</small>
+      {entries.length ? <ul>{entries.map(entry => <li key={entry.key} data-tone={entry.tone} data-kind={entry.kind} className={styles.entry}>
+        <Link href={entry.href} onClick={() => openEntry(entry)} title={entry.detail}>
+          <span className={styles.entryIcon} aria-hidden="true"><EnergyIcon name={KIND_ICON[entry.kind]} /></span>
+          <span className={styles.entryText}>
+            <strong>{entry.title}</strong>
+            <small>{entry.at ? when(entry.at) : entry.detail}</small>
+            {entry.at && <span className={styles.entryDetail}>{entry.detail}</span>}
+          </span>
         </Link>
         <button type="button" className={styles.readButton} title={tn("markRead")} aria-label={tn("markReadNamed", { title: entry.title })} onClick={() => markOne(entry)}><EnergyIcon name="check" aria-hidden="true" /></button>
       </li>)}</ul>
         : failed ? <p role="alert">{tf("notifications.failed")} <button type="button" className="font-medium underline underline-offset-2" onClick={() => setAttempt(value => value + 1)}>{tf("tryAgain")}</button></p>
         : <p>{t("notifications.empty")}</p>}
+      {entries.length > 1 && <div className={styles.popoverFoot}><button type="button" className={styles.readAll} onClick={markAll}>{tn("markAllRead")}</button></div>}
     </section>}
   </div>;
 }

@@ -27,6 +27,11 @@ export const notificationMessages = defineMessages({
   "markRead": "Mark as read",
   "markReadNamed": "Mark “{title}” as read",
   "markAllRead": "Mark all as read",
+  "title": "Alerts",
+  "openCount": "{count} open",
+  "today": "Today, {time}",
+  "yesterday": "Yesterday, {time}",
+  "dayAt": "{day}, {time}",
 }, {
   "zh-Hans": {
     "offline.one": "{name} 已离线",
@@ -54,6 +59,11 @@ export const notificationMessages = defineMessages({
     "markRead": "标为已读",
     "markReadNamed": "将“{title}”标为已读",
     "markAllRead": "全部标为已读",
+    "title": "提醒",
+    "openCount": "{count} 条未读",
+    "today": "今天 {time}",
+    "yesterday": "昨天 {time}",
+    "dayAt": "{day} {time}",
   },
   ms: {
     "offline.one": "{name} di luar talian",
@@ -81,5 +91,10 @@ export const notificationMessages = defineMessages({
     "markRead": "Tandakan sudah dibaca",
     "markReadNamed": "Tandakan “{title}” sudah dibaca",
     "markAllRead": "Tandakan semua sudah dibaca",
+    "title": "Amaran",
+    "openCount": "{count} terbuka",
+    "today": "Hari ini, {time}",
+    "yesterday": "Semalam, {time}",
+    "dayAt": "{day}, {time}",
   },
 });

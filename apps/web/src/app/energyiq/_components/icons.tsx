@@ -17,6 +17,8 @@ export type EnergyIconName =
   | "building"
   | "floor"
   | "meter"
+  | "meter-off"
+  | "dollar"
   | "chevron"
   | "calendar"
   | "clock"
@@ -177,6 +179,19 @@ export function EnergyIcon({
         <svg {...common}>
           <path d="m4 8 8-4 8 4-8 4z" />
           <path d="m4 12 8 4 8-4M4 16l8 4 8-4" />
+        </svg>
+      );
+    case "meter-off":
+      return (
+        <svg {...common}>
+          <path d="M6.3 6.3A8 8 0 0 0 17.7 17.7M9 4.6A8 8 0 0 1 19.4 15" />
+          <path d="M8 16h5M4 4l16 16" />
+        </svg>
+      );
+    case "dollar":
+      return (
+        <svg {...common}>
+          <path d="M12 3v18M16.5 7.5c-.6-1.4-2.3-2.3-4.4-2.3-2.6 0-4.3 1.3-4.3 3.2 0 4.4 9 2.4 9 6.9 0 2-1.9 3.4-4.6 3.4-2.3 0-4.1-1-4.8-2.6" />
         </svg>
       );
     case "meter":

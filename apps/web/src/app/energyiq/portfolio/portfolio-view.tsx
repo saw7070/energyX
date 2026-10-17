@@ -7,6 +7,7 @@ import type { EnergyPortfolioDto, EnergyPortfolioSiteDto } from "../../../lib/co
 import { useEnergyIqLocale, useMessages } from "../_components/energyiq-locale";
 import { intlLocale } from "../_components/energyiq-messages";
 import { withCurrency } from "../_components/money";
+import { EnergyIcon, type EnergyIconName } from "../_components/icons";
 import { portfolioMessages } from "./portfolio-messages";
 import styles from "./portfolio.module.css";
 
@@ -37,16 +38,18 @@ export function PortfolioView({ portfolio }: { portfolio: EnergyPortfolioDto }) 
   return (
     <div className={styles.stack}>
       <section className={styles.tiles} aria-label={t("title")}>
-        <Tile label={t("tile.energy")} value={`${format.kwh(totals.usageKwh)} kWh`} note={change === null ? t("tile.sites", { count: totals.sitesWithData }) : t("tile.change", { change: format.signedPct(change) })} />
-        <Tile label={t("tile.cost")} value={Object.keys(totals.costByCurrency).length
+        <Tile icon="bolt" iconTone="energy" chip={change === null ? undefined : format.signedPct(change)} chipTone={change !== null && change > 0 ? "up" : "down"} label={t("tile.energy")} value={`${format.kwh(totals.usageKwh)} kWh`} note={change === null ? t("tile.sites", { count: totals.sitesWithData }) : t("tile.change", { change: format.signedPct(change) })} />
+        <Tile icon="dollar" iconTone="cost" label={t("tile.cost")} value={Object.keys(totals.costByCurrency).length
           ? Object.entries(totals.costByCurrency).map(([currency, amount]) => withCurrency(currency, format.money(amount))).join(" + ")
           : "—"} note={Object.keys(totals.costByCurrency).length ? undefined : t("tile.noCost")} />
-        <Tile label={t("tile.carbon")} value={`${format.tonnes(totals.carbonKg / 1000)} tCO2e`} note={t("tile.carbonNote")} />
-        <Tile label={t("tile.budgets")} value={budgeted.length === 0 ? t("budgets.none") : totals.sitesOverBudget || totals.sitesAtRisk
+        <Tile icon="leaf" iconTone="carbon" label={t("tile.carbon")} value={`${format.tonnes(totals.carbonKg / 1000)} tCO2e`} note={t("tile.carbonNote")} />
+        <Tile icon="wallet" iconTone="budget" label={t("tile.budgets")} value={budgeted.length === 0 ? t("budgets.none") : totals.sitesOverBudget || totals.sitesAtRisk
           ? t("budgets.summary", { over: totals.sitesOverBudget, risk: totals.sitesAtRisk })
           : t("budgets.ok")} tone={totals.sitesOverBudget ? "bad" : totals.sitesAtRisk ? "warn" : undefined} note={budgeted.length === 0 ? t("setBudget") : undefined} />
       </section>
 
+      <section className={styles.sitesCard} aria-labelledby="portfolio-sites-title">
+      <header className={styles.sitesHead}><h2 id="portfolio-sites-title">{t("sitesTitle")}</h2><span>{t("sortHint")}</span></header>
       <div className={styles.tableWrap}>
         <table className={styles.table}>
           <thead>
@@ -67,7 +70,13 @@ export function PortfolioView({ portfolio }: { portfolio: EnergyPortfolioDto }) 
             {sites.map(site => (
               <tr key={site.projectId}>
                 <th scope="row" className={styles.siteCell}>
-                  <Link href={`/energyiq/key-points?${new URLSearchParams({ projectId: site.projectId })}`} aria-label={t("openSite", { site: site.name })}>{site.name}</Link>
+                  <span className={styles.siteLine}>
+                    <span className={styles.siteBadge} aria-hidden="true">{site.country ?? site.name.slice(0, 2).toUpperCase()}</span>
+                    <span className={styles.siteName}>
+                      <Link href={`/energyiq/key-points?${new URLSearchParams({ projectId: site.projectId })}`} aria-label={t("openSite", { site: site.name })}>{site.name}</Link>
+                      {site.country && <small>{site.country === "MY" && site.state ? `${site.state} · ` : ""}{t(`country.${site.country}`)}</small>}
+                    </span>
+                  </span>
                   {site.status === "ok" && <span className={styles.bar} aria-hidden="true"><span style={{ width: `${(site.usageKwh / largest) * 100}%` }} /></span>}
                 </th>
                 {site.status === "unavailable" ? (
@@ -92,8 +101,8 @@ export function PortfolioView({ portfolio }: { portfolio: EnergyPortfolioDto }) 
       </div>
 
       {factors.length > 0 && (
-        <section className={styles.footnote}>
-          <h3>{t("carbonTitle")}</h3>
+        <details className={styles.footnote}>
+          <summary>{t("carbonTitle")}</summary>
           <p>{t("carbonBody")}</p>
           <ul>
             {factors.map(factor => (
@@ -104,16 +113,21 @@ export function PortfolioView({ portfolio }: { portfolio: EnergyPortfolioDto }) 
               </li>
             ))}
           </ul>
-        </section>
+        </details>
       )}
+      </section>
     </div>
   );
 }
 
-function Tile({ label, value, note, tone }: { label: string; value: string; note?: string | undefined; tone?: "warn" | "bad" | undefined }) {
+function Tile({ label, value, note, tone, icon, iconTone, chip, chipTone }: { label: string; value: string; note?: string | undefined; tone?: "warn" | "bad" | undefined; icon: EnergyIconName; iconTone: "energy" | "cost" | "carbon" | "budget"; chip?: string | undefined; chipTone?: "up" | "down" }) {
   return (
     <div className={`${styles.tile} ${tone ? styles[tone] : ""}`}>
-      <span className={styles.tileLabel}>{label}</span>
+      <span className={styles.tileHead}>
+        <span className={`${styles.tileIcon} ${styles[`icon-${iconTone}`]}`} aria-hidden="true"><EnergyIcon name={icon} /></span>
+        <span className={styles.tileLabel}>{label}</span>
+        {chip && <span className={`${styles.tileChip} ${chipTone === "up" ? styles.chipUp : styles.chipDown}`}>{chip}</span>}
+      </span>
       <strong className={styles.tileValue}>{value}</strong>
       {note && <span className={styles.tileNote}>{note}</span>}
     </div>

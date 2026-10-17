@@ -120,9 +120,9 @@ export function EnergyIqTeam() {
 
   // Same page padding the Facility page gets from the project gate.
   return (
-    <div className="min-w-0 space-y-4 p-4 sm:p-6">
-      <OrganisationAiCard workspaceId={workspaceId} />
+    <div data-team-page className="mx-auto min-w-0 max-w-[1440px] space-y-4 p-4 sm:p-6">
       <TeamView
+        aiCard={<OrganisationAiCard workspaceId={workspaceId} />}
         organisationName={team?.organisation.name}
         members={team?.members ?? null}
         roles={team?.roles ?? []}
@@ -169,12 +169,17 @@ export type TeamViewProps = {
   onResend: (member: EnergyTeamMemberDto) => void;
   onRemove: (member: EnergyTeamMemberDto) => void;
   onRefresh: () => void;
+  /** Shown under the client summary, as in the prototype layout. */
+  aiCard?: ReactNode;
 };
 
 type Filter = "all" | EnergyTeamMemberDto["status"];
 
+/** Two letters for the client badge, as in the prototype: "Harbourline Group" becomes "HG". */
+const initialsOf = (name: string | undefined) => (name ?? "").split(/\s+/).filter(Boolean).slice(0, 2).map(word => word[0]!.toUpperCase()).join("") || "?";
+
 export function TeamView(props: TeamViewProps) {
-  const { organisationName, members, roles, canWrite, busy, error, notice, invitationUrl } = props;
+  const { organisationName, members, roles, canWrite, busy, error, notice, invitationUrl, aiCard } = props;
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [copied, setCopied] = useState(false);
@@ -205,7 +210,7 @@ export function TeamView(props: TeamViewProps) {
       </header>
 
       <section className={styles.overview} aria-label="Client summary">
-        <div className={styles.projectMark} aria-hidden="true"><EnergyIcon name="user" className="h-7 w-7" /></div>
+        <div className={styles.projectMark} aria-hidden="true">{initialsOf(organisationName)}</div>
         <div className={styles.projectIdentity}>
           <h2>{organisationName ?? "Your client"}</h2>
           <p><EnergyIcon name="info" aria-hidden="true" />Team access</p>
@@ -221,6 +226,8 @@ export function TeamView(props: TeamViewProps) {
           <div className={styles.stateRow}><span className={counts.pending === 0 ? styles.live : undefined}>{counts.pending === 0 ? "Everyone has joined" : `${counts.pending} waiting to join`}</span></div>
         </div>
       </section>
+
+      {aiCard}
 
       {error ? <Banner tone="error">{error}</Banner> : null}
       {notice && !invitationUrl ? <Banner tone="success">{notice}</Banner> : null}

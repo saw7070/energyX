@@ -32,6 +32,13 @@ export function LiveNow({ projectId, className }: { projectId: string; className
     live.powerKw !== undefined ? t("power", { power: number(live.powerKw) }) : null,
     live.todayKwh !== undefined ? t("today", { energy: number(live.todayKwh) }) : null,
   ].filter(Boolean).join(" · ");
+  // With live figures the strip reads like a meter: a label, two large numbers and when they were read.
+  if (figures) return <div className={className} aria-label={t("label")} role="status" title={t("note")} data-live="figures">
+    <span data-live-label><span aria-hidden="true" />{t("label")}</span>
+    {live.powerKw !== undefined && <span data-live-figure><strong>{number(live.powerKw)} kW</strong> <small>{t("inUseNow")}</small></span>}
+    {live.todayKwh !== undefined && <span data-live-figure><strong>{number(live.todayKwh)} kWh</strong> <small>{t("soFarToday")}</small></span>}
+    <span data-live-updated>{t("updated", { time, minutes: String(live.intervalMinutes) })}</span>
+  </div>;
   return <div className={className} aria-label={t("label")} role="status">
     <EnergyIcon name="bolt" />
     <p>

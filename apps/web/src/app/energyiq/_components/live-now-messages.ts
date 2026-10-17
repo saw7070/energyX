@@ -9,6 +9,8 @@ export const liveNowMessages = defineMessages({
   partial: "{reporting} of {total} main meters are reporting, so there is no site total right now.",
   waiting: "Live readings start within {minutes} minutes of connecting, and power shows from the second reading.",
   note: "Live figures are a quick view. Reports use the full daily update.",
+  inUseNow: "in use now",
+  soFarToday: "so far today",
 }, {
   "zh-Hans": {
     label: "实时",
@@ -18,6 +20,8 @@ export const liveNowMessages = defineMessages({
     partial: "{total} 个主电表中有 {reporting} 个在上报，暂时无法给出全站合计。",
     waiting: "连接后 {minutes} 分钟内开始实时读数，第二次读数起显示功率。",
     note: "实时数字仅供快速查看，报告使用完整的每日更新。",
+    inUseNow: "当前用电",
+    soFarToday: "今天至今",
   },
   ms: {
     label: "Langsung",
@@ -27,5 +31,7 @@ export const liveNowMessages = defineMessages({
     partial: "{reporting} daripada {total} meter utama sedang melapor, jadi tiada jumlah tapak buat masa ini.",
     waiting: "Bacaan langsung bermula dalam {minutes} minit selepas disambungkan, dan kuasa dipaparkan dari bacaan kedua.",
     note: "Angka langsung ialah paparan pantas. Laporan menggunakan kemas kini harian penuh.",
+    inUseNow: "sedang digunakan",
+    soFarToday: "setakat hari ini",
   },
 });

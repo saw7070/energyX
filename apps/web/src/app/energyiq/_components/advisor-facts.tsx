@@ -49,7 +49,7 @@ export function AdvisorFacts({ projectId, notes, timezone, canEdit, onSaved }: {
           <button type="button" className={styles.edit} disabled={busy || editing !== null} aria-label={t("editLabel", { text: fact.text })} onClick={() => { setStatus(""); setEditing({ line: fact.line, kind: fact.kind, text: factEditText(fact.text) }); }}>{t("edit")}</button>
           <button type="button" className={styles.remove} disabled={busy || editing !== null} aria-label={t("removeLabel", { text: fact.text })} onClick={() => void save(removeFact(notes, fact), t("removed"))}>{t("remove")}</button>
         </div>}
-      </li>)}</ul> : canEdit && <div className={styles.examples}><p>{t("empty")}</p><ul>{FACT_KINDS.filter(item => item !== "other").map(item => <li key={item}><button type="button" onClick={() => { setKind(item); setText(t(`example.${item}`)); }}><b>{t(`kind.${item}`)}</b> {t(`example.${item}`)}</button></li>)}</ul></div>}
+      </li>)}</ul> : canEdit && <div className={styles.examples}><p>{t("empty")}</p><ul>{FACT_KINDS.filter(item => item !== "other").map(item => <li key={item} data-kind={item}><button type="button" onClick={() => { setKind(item); setText(t(`example.${item}`)); }}><b>{t(`kind.${item}`)}</b> {t(`example.${item}`)}</button></li>)}</ul></div>}
     {canEdit ? <form className={styles.form} onSubmit={submit}>
       <div className={styles.kinds} role="group" aria-label={t("kindLabel")}>{FACT_KINDS.map(item => <button key={item} type="button" aria-pressed={kind === item} onClick={() => setKind(item)}>{t(`kind.${item}`)}</button>)}</div>
       <div className={styles.row}>

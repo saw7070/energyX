@@ -1,0 +1,22 @@
+/* Reports page layout (prototype): the explanation under the page title, and a "Project reports" heading with the
+   saved count and the schedule on the left and the search on the right. Colours come from the theme tokens. */
+.headerIntro { max-width: 72ch; margin-top: 6px; font-size: 14.5px; line-height: 1.55; color: var(--text-secondary); }
+.reportsHead { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 20px; margin-bottom: 14px; }
+.reportsHead > label { flex: 0 1 340px; }
+.reportsTitle { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.reportsTitle h2 { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0; font-size: 18px; font-weight: 800; letter-spacing: -0.015em; }
+.reportsTitle h2 span { padding: 2px 10px; border-radius: 999px; background: var(--surface-subtle); color: var(--text-secondary); font-size: 12px; font-weight: 700; letter-spacing: 0; }
+.showLabel { font-size: 13px; font-weight: 700; color: var(--text-secondary); }
+
+/* Advisor guidelines (prototype): a small "Energy advisor" label above the title, the reuse card's text column,
+   and the category chip on each instruction card. Colours for the chip come from energyiq-polish.css. */
+.eyebrow { display: block; margin-bottom: 4px; font-size: 13px; font-weight: 600; color: var(--text-tertiary); }
+.guideBody { display: flex; flex: 1 1 380px; flex-direction: column; gap: 12px; min-width: 0; }
+.skillCategory { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 11.5px; font-weight: 700; }
+/* Capabilities: one card listing each tool by its name and what it does. */
+.toolsCard { display: flex; flex-direction: column; gap: 4px; padding: 22px; border: 1px solid var(--polish-card-line, var(--border)); border-radius: 20px; background: var(--surface); box-shadow: var(--polish-card-shadow, none); }
+.toolsCard h2 { margin: 0 0 8px; font-size: 18px; font-weight: 800; letter-spacing: -0.01em; }
+.toolsCard ul { margin: 0; padding: 0; list-style: none; }
+.toolsCard li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; padding: 12px 0; border-top: 1px solid var(--border); }
+.toolsCard code { min-width: 70px; font-size: 13px; font-weight: 700; color: var(--ai-fg, var(--primary)); }
+.toolsCard li p { flex: 1 1 260px; min-width: 0; margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--text-secondary); }

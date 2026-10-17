@@ -21,6 +21,8 @@ const HOUR_MS = 3_600_000;
 export type DataAvailabilityMeterInput = { meterPointId: string; name: string; location?: string; notInUse?: string };
 export type DataAvailabilityStatus = "ok" | "below_target" | "stopped" | "no_readings" | "not_in_use";
 export type DataAvailabilityCheck = { kind: "stuck_value" | "flat_zero"; from: string; to: string; hours: number; kwhPerHour: number };
+/** One site-local day of a meter: every reading arrived, some are missing (or only estimated), or none arrived. */
+export type DataAvailabilityDay = "all" | "some" | "none";
 export type DataAvailabilityMeter = {
   meterPointId: string;
   name: string;
@@ -35,6 +37,8 @@ export type DataAvailabilityMeter = {
   longestOutageHours: number;
   lastReadingAt?: string;
   checks: DataAvailabilityCheck[];
+  /** One entry per site-local day of the period, in order, when the day boundaries are known. */
+  days?: DataAvailabilityDay[];
 };
 export type DataAvailabilityOutage = {
   meterPointId: string;
@@ -114,12 +118,22 @@ const checksFor = (segments: Segment[]): DataAvailabilityCheck[] => {
   return checks;
 };
 
+/** Each day's share of real readings: all of it (allowing a rounding sliver), none, or something in between. */
+const daysFor = (segments: Segment[], dayStartsMs: number[], toMs: number): DataAvailabilityDay[] => dayStartsMs.map((start, index) => {
+  const end = Math.min(dayStartsMs[index + 1] ?? toMs, toMs);
+  const length = Math.max(1, end - start);
+  const real = segments.filter(segment => segment.kind === "real").reduce((sum, segment) => sum + Math.max(0, Math.min(segment.end, end) - Math.max(segment.start, start)), 0);
+  return real >= length * 0.999 ? "all" : real <= 0 ? "none" : "some";
+});
+
 export function summariseDataAvailability(input: {
   fromMs: number;
   toMs: number;
   meters: DataAvailabilityMeterInput[];
   intervals: EnergyMeterIntervalCoverage[];
   lastReadingAt: Map<string, string>;
+  /** Start of each site-local day in the period (see localDayStarts), for the day-by-day strip. */
+  dayStartsMs?: number[];
 }): DataAvailabilitySummary {
   const periodMs = Math.max(1, input.toMs - input.fromMs);
   const byMeter = new Map<string, EnergyMeterIntervalCoverage[]>();
@@ -171,6 +185,7 @@ export function summariseDataAvailability(input: {
       longestOutageHours: round(longest / HOUR_MS),
       ...(lastReadingAt ? { lastReadingAt } : {}),
       checks: meter.notInUse ? [] : checksFor(segments),
+      ...(input.dayStartsMs?.length ? { days: daysFor(segments, input.dayStartsMs, input.toMs) } : {}),
     };
   });
   const counted = meters.filter(meter => meter.status !== "not_in_use");
@@ -207,6 +222,12 @@ export const localDayStartMs = (date: string, timezone: string): number => {
 export const siteLocalDate = (instant: number, timezone: string): string =>
   new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(instant));
 const shiftDate = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00.000Z`) + days * DAY_MS).toISOString().slice(0, 10);
+/** Start of each site-local day from one date to another, both inclusive. */
+export const localDayStarts = (from: string, to: string, timezone: string): number[] => {
+  const starts: number[] = [];
+  for (let date = from; date <= to && starts.length < 400; date = shiftDate(date, 1)) starts.push(localDayStartMs(date, timezone));
+  return starts;
+};
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 /** At most about a quarter; a monthly availability report needs a month. */

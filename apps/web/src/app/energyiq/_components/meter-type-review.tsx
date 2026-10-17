@@ -6,6 +6,7 @@ import { meterTypeChanges, meterTypeRows, SORTABLE_TYPES } from "./meter-type-re
 import { meterTypeReviewMessages } from "./meter-type-review-messages";
 import { measurementLabel } from "./site-structure-editing";
 import styles from "./project-configuration-view.module.css";
+import { EnergyIcon } from "./icons";
 
 /** Shown above the floor layout while some meters' equipment suggests a better type than the one they have. */
 export function MeterTypeBanner({ document, onOpen }: { document: EnergyProjectSetupDocumentDto; onOpen: () => void }) {
@@ -13,6 +14,7 @@ export function MeterTypeBanner({ document, onOpen }: { document: EnergyProjectS
   const count = meterTypeChanges(meterTypeRows(document)).length;
   if (!count) return null;
   return <section className={styles.typesBanner} aria-label={t("banner.title")}>
+    <span data-banner-icon aria-hidden="true"><EnergyIcon name="meter" /></span>
     <div><strong>{t("banner.title")}</strong><p>{count === 1 ? t("banner.bodyOne") : t("banner.body", { count })}</p></div>
     <button type="button" className={styles.primaryAction} onClick={onOpen}>{t("open")}</button>
   </section>;

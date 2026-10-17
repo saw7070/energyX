@@ -104,7 +104,7 @@ export function ReportSchedulesView({ data, busy, error, notice, onCreate, onUpd
           <h2 id="report-schedules-title">{t("schedulesTitle")}</h2>
           <p>{t("schedulesIntro")}</p>
         </div>
-        {!editing && <button type="button" className={styles.secondary} onClick={() => setEditing({ draft: blank() })}><EnergyIcon name="plus" className="h-4 w-4" />{t("schedulesNew")}</button>}
+        {!editing && <button type="button" className={styles.primary} onClick={() => setEditing({ draft: blank() })}><EnergyIcon name="plus" className="h-4 w-4" />{t("schedulesNew")}</button>}
       </header>
       {data.emailMode !== "smtp" && <p className={styles.hint}>{data.emailMode === "test" ? t("schedulesTestMode") : t("schedulesOff")}</p>}
       {error && <p role="alert" className={styles.error}>{error}</p>}

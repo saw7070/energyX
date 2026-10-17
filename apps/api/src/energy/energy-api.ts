@@ -24,7 +24,7 @@ import {
   readEnergyMeterDataHealth,
   readEnergyMeterIntervalCoverage,
 } from "@datafoundry/data-gateway";
-import { resolveDataAvailabilityPeriod, summariseDataAvailability } from "./energy-data-availability.js";
+import { localDayStarts, resolveDataAvailabilityPeriod, summariseDataAvailability } from "./energy-data-availability.js";
 import { readOfflineMeters } from "./energy-live-status.js";
 import { normalizeProjectRegion, type EnergyIqProjectRegion, type MetadataStore } from "@datafoundry/metadata";
 import type {
@@ -1738,6 +1738,7 @@ export const handleEnergyApiRequest = async (
         const summary = summariseDataAvailability({
           fromMs: period.fromMs,
           toMs: period.toMs,
+          dayStartsMs: localDayStarts(period.from, period.to, project.timezone),
           meters: meterPoints.map((meterPoint) => {
             const detail = details.get(meterPoint.meterPointId);
             return {

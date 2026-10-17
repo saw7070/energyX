@@ -31,7 +31,7 @@ it("shows the site's power now and energy so far today", async () => {
   const { host, close } = await render(live({ readAt: "2026-10-02T02:15:00.000Z", powerKw: 42.36, todayKwh: 318.4 }));
   try {
     expect(host.textContent).toContain("Live now");
-    expect(host.textContent).toContain("Using 42.4 kW now");
+    expect(host.textContent).toContain("42.4 kW in use now");
     expect(host.textContent).toContain("318.4 kWh so far today");
     expect(host.textContent).toContain("every 15 minutes");
   } finally { await close(); }

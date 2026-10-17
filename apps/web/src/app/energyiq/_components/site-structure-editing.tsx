@@ -4,6 +4,7 @@ import type { EnergyMeterCategoryDto, EnergyMeterMappingRowDto, EnergyProjectSet
 import { addNode, applyMeterMappingRowEdit, buildAggregationReview, hasSiblingNameConflict, nodePathLabel, removeNodeAndDescendants } from "../admin/project-setup-model";
 import { projectMeterName } from "./project-meter-name";
 import styles from "./project-configuration-view.module.css";
+import { EnergyIcon } from "./icons";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { translatorFor, type EnergyIqLocale } from "./energyiq-messages";
 import { measurementMessages, structureMessages } from "./facility-messages";
@@ -158,6 +159,7 @@ export function MeterTotalsCheck({ document, busy, onConfirm }: { document: Ener
   if (!mapping || mapping.confirmed || !mapping.rows.length) return null;
   const problems = meterTotalProblems(document, locale);
   return <section className={styles.totalsCheck} aria-label={t("check.aria")}>
+    <span data-banner-icon aria-hidden="true"><EnergyIcon name="info" /></span>
     <div><strong>{t("check.title")}</strong><p>{problems.length ? t("check.fixFirst") : t("check.changed")}</p>{problems.length > 0 && <ul>{problems.map(problem => <li key={problem}>{problem}</li>)}</ul>}</div>
     <button type="button" className={styles.primaryAction} disabled={busy || problems.length > 0} onClick={onConfirm}>{t("check.confirm")}</button>
   </section>;
