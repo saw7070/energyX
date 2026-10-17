@@ -91,6 +91,8 @@ export class ReportService {
     loadSiteReportData?: typeof loadSiteReportData;
     root: string;
     harness: ReportHarness;
+    /** Removes workers left running by an earlier process; given which runs are settled, returns the names removed. */
+    removeOrphanedWorkers?: (isSettled: (runId: string) => boolean) => Promise<string[]>;
     projectLifecycle?: (run: ReportRun) => ProjectLifecycle;
     prepareInputs?: typeof prepareReportInputs;
     availablePeriod?: typeof availableReportPeriod;
@@ -103,6 +105,10 @@ export class ReportService {
     if (!this.stopped) return;
     this.stopped = false;
     this.store.recoverInterrupted();
+    // A restart mid-answer leaves that answer's worker running with nobody to stop it; clear those once it is marked interrupted.
+    void this.options.removeOrphanedWorkers?.(id => this.store.isSettled(id))
+      .then(removed => { if (removed.length) console.log(`[report-agent] removed ${removed.length} leftover worker${removed.length === 1 ? "" : "s"}: ${removed.join(", ")}`); })
+      .catch(() => undefined);
     this.timer = setInterval(() => { this.requestTick(); }, 30_000);
     this.timer.unref();
     this.requestTick();

@@ -53,7 +53,7 @@ import { z } from "zod";
 import { handleConfigApiRequest } from "./config-api.js";
 import { reportSkillCatalog, resolveReportSkillSelection } from "./report-agent/report-skill-catalog.js";
 import { ReportService, registerReportService } from "./report-agent/report-service.js";
-import { createPiReportHarness, DEFAULT_REPORT_AGENT_IMAGE, resolvePiReportModel } from "./report-agent/pi-report-harness.js";
+import { createPiReportHarness, DEFAULT_REPORT_AGENT_IMAGE, removeOrphanedReportWorkers, resolvePiReportModel } from "./report-agent/pi-report-harness.js";
 import { checkAdvisorWorker } from "./energy/energy-system-health.js";
 import { createAsyncMemoByKey, createStartupTimer } from "./async-memo.js";
 import { ensureBuiltinDtcGrowthDatasource } from "./builtin-dtc-growth-datasource.js";
@@ -756,6 +756,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
       image: process.env.ENERGYIQ_REPORT_AGENT_IMAGE ?? DEFAULT_REPORT_AGENT_IMAGE,
       model: (workspaceId) => resolvePiReportModel(metadataStore, workspaceId),
     }) : async () => { throw new Error("REPORT_HARNESS_NOT_CONFIGURED"); },
+    ...((process.env.ENERGYIQ_REPORT_AGENT_HARNESS ?? "pi") === "pi" ? { removeOrphanedWorkers: (isSettled: (runId: string) => boolean) => removeOrphanedReportWorkers(isSettled) } : {}),
   }) : undefined;
   if (reportService) registerReportService(metadataStore, reportService);
   // Say at startup, not at the first question, when the advisor cannot run here (for example a missing worker image).

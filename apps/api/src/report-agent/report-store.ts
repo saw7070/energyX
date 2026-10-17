@@ -364,6 +364,12 @@ export class ReportStore {
       ...(run.sessionId ? { sessionId: run.sessionId } : {}), ...(run.parentRunId ? { parentRunId: run.parentRunId } : {}), retryOfRunId: run.id });
   }
 
+  /** True when this store knows the run and it is no longer queued or running, so nothing still needs its worker. */
+  isSettled(id: string): boolean {
+    const row = this.db.prepare("SELECT status FROM energyiq_report_runs WHERE id = ?").get(id) as { status?: string } | undefined;
+    return !!row?.status && row.status !== "queued" && row.status !== "running";
+  }
+
   recoverInterrupted(): void {
     for (const row of this.db.prepare("SELECT document FROM energyiq_report_runs WHERE status = 'running'").all()) {
       const run = JSON.parse(String(row.document)) as ReportRun;

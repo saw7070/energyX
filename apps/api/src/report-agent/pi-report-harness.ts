@@ -48,6 +48,27 @@ async function docker(args: string[], signal: AbortSignal) {
   try { return await execute("docker", args, { env: env(), windowsHide: true, signal, maxBuffer: 1024 * 1024 }); }
   catch { throw new Error(signal.aborted ? "REPORT_CANCELLED" : "REPORT_DOCKER_OPERATION_FAILED"); }
 }
+const WORKER_PREFIX = "energyiq-report-";
+type DockerExec = (args: string[]) => Promise<{ stdout: string }>;
+const dockerExec: DockerExec = args => execute("docker", args, { env: env(), windowsHide: true, timeout: 15_000, maxBuffer: 1024 * 1024 });
+
+/**
+ * Removes advisor workers left behind when the API stopped mid-answer (a restart or deploy) and so never ran its own
+ * clean-up. Only workers whose run this API knows and has settled are removed; a worker for a run it does not know
+ * (for example another API sharing the Docker host) is left alone. Docker being unavailable is not an error here.
+ */
+export async function removeOrphanedReportWorkers(isSettled: (runId: string) => boolean, exec: DockerExec = dockerExec): Promise<string[]> {
+  let listed: string;
+  try { listed = (await exec(["ps", "--all", "--filter", `name=${WORKER_PREFIX}`, "--format", "{{.Names}}"])).stdout; }
+  catch { return []; }
+  const orphans = listed.split("\n").map(name => name.trim())
+    .filter(name => name.startsWith(WORKER_PREFIX) && /^[A-Za-z0-9-]+$/.test(name) && isSettled(name.slice(WORKER_PREFIX.length)));
+  const removed: string[] = [];
+  for (const name of orphans) {
+    try { await exec(["rm", "--force", name]); removed.push(name); } catch { /* left for the next start */ }
+  }
+  return removed;
+}
 export function workerArguments(name: string, image: string): string[] {
   const configuredMemory = Number(process.env.ENERGYIQ_REPORT_WORKER_MEMORY_MB ?? 2048);
   const memory = Number.isInteger(configuredMemory) && configuredMemory >= 768 && configuredMemory <= 4096 ? `${configuredMemory}m` : "2048m";
@@ -70,7 +91,7 @@ export function validateWorkerTree(root: string, limit = 100 * 1024 * 1024): voi
 export function createPiReportHarness(options: { image: string; model: (workspaceId?: string) => PiReportModel; timeoutMs?: number; fetch?: typeof fetch }): ReportHarness {
   return async ({ directory, runId, prompt, signal, previousStateDirectory, onEvent, tools = [], executeTool, workspaceId, onUsage }) => {
     const model = options.model(workspaceId);
-    const name = `energyiq-report-${runId}`;
+    const name = `${WORKER_PREFIX}${runId}`;
     const controller = new AbortController();
     const abort = () => controller.abort();
     signal.addEventListener("abort", abort, { once: true });
