@@ -40,6 +40,8 @@ export function resolvePiReportModel(metadata: MetadataStore, workspaceId?: stri
   return { apiProtocol: reportModelProtocol(payload.apiProtocol), model, baseUrl: url.toString().replace(/\/$/, ""), apiKey };
 }
 const REVIEW_METHOD = readFileSync(new URL("../../../../packages/skills/builtin/report-review/SKILL.md", import.meta.url), "utf8") + "\n\n" + ANNUAL_BENEFIT_REVIEW + "\n\n" + ANALYSIS_PACKAGE_INSTRUCTIONS;
+/** The advisor worker image this server runs unless ENERGYIQ_REPORT_AGENT_IMAGE names another. */
+export const DEFAULT_REPORT_AGENT_IMAGE = "energyiq-report-agent:pi-review-20260913";
 const execute = promisify(execFile);
 const env = (): NodeJS.ProcessEnv => ({ PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE });
 async function docker(args: string[], signal: AbortSignal) {

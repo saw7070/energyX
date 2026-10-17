@@ -92,6 +92,7 @@ import {
 } from "./project-setup-model";
 import { AuditHistory } from "./audit-history";
 import { AdminAiGovernance } from "./admin-ai";
+import { AdminSystemHealth } from "./admin-system-health";
 
 type AccessState = ReturnType<typeof useEnergyIqAccess>;
 const ReportAgentPanel = dynamic(() => import("./report-agent-panel").then((module) => module.ReportAgentPanel));
@@ -455,9 +456,10 @@ export function EnergyIqAdminWorkbench({
           ) : null}
           {section === "audit" ? <AuditHistory /> : null}
           {section === "ai-governance" ? <AdminAiGovernance /> : null}
-          {section !== "task-history" && section !== "models" && section !== "organisations" && section !== "users" && section !== "roles" && section !== "audit" && section !== "ai-governance" && loading && !setupMatchesSelection ? <LoadingPanel /> : null}
+          {section === "system-health" ? <AdminSystemHealth /> : null}
+          {section !== "task-history" && section !== "models" && section !== "organisations" && section !== "users" && section !== "roles" && section !== "audit" && section !== "ai-governance" && section !== "system-health" && loading && !setupMatchesSelection ? <LoadingPanel /> : null}
           {/* Background refreshes keep the section mounted so in-progress results (e.g. an import summary) survive. */}
-          {section !== "task-history" && section !== "models" && section !== "organisations" && section !== "users" && section !== "roles" && section !== "audit" && section !== "ai-governance" && setupMatchesSelection && document && setup ? renderAdminSection({
+          {section !== "task-history" && section !== "models" && section !== "organisations" && section !== "users" && section !== "roles" && section !== "audit" && section !== "ai-governance" && section !== "system-health" && setupMatchesSelection && document && setup ? renderAdminSection({
             section,
             projects,
             selectedProject,
@@ -2859,6 +2861,7 @@ function adminSectionMeta(section: AdminSection, projectName?: string): { title:
     users: { title: "Users", description: "Accounts, membership and Project access." },
     roles: { title: "Role access", description: "Create roles and choose what each can read and change." },
     audit: { title: "Audit history", description: "Who signed in, changed access or changed a project, and when." },
+    "system-health": { title: "System health", description: "Whether the AI advisor, email and each site's meter data are working, and what to do when they are not." },
     "ai-governance": { title: "AI governance", description: "Per client: AI on or off, which model their data goes to, monthly limits, usage and feedback." },
     "project-overview": { title: "Project status & publishing", description: `${project} · delivery status, blockers and next action.` },
     basics: { title: "Project basics", description: `${project} · identity, timezone and stable Project scope.` },

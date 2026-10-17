@@ -4577,3 +4577,7 @@ export type EnergyAdminAiActivityDto = {
   usage: Array<{ id: string; feature: string; status: "allowed" | "blocked-disabled" | "blocked-limit"; model?: string; inputTokens?: number; outputTokens?: number; createdAt: string; project?: string; user?: string }>;
   feedback: Array<{ id: string; targetKind: string; targetId: string; rating: "up" | "down"; comment?: string; createdAt: string; project?: string; user?: string }>;
 };
+
+/** Admin → System health: whether the AI advisor, email and each site's data are working. */
+export type SystemHealthCheckDto = { id: string; group: string; title: string; status: "ok" | "warning" | "problem"; detail: string; fix?: string };
+export type SystemHealthDto = { checkedAt: string; checks: SystemHealthCheckDto[] };

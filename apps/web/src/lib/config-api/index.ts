@@ -191,6 +191,8 @@ export type {
   EnergyAuditFilterDto,
   EnergyAdminAiActivityDto,
   EnergyAdminAiDto,
+  SystemHealthCheckDto,
+  SystemHealthDto,
   EnergyAiModelOptionDto,
   EnergyAiOrganisationDto,
   EnergyBudgetDto,

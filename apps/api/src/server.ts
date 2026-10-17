@@ -53,7 +53,8 @@ import { z } from "zod";
 import { handleConfigApiRequest } from "./config-api.js";
 import { reportSkillCatalog, resolveReportSkillSelection } from "./report-agent/report-skill-catalog.js";
 import { ReportService, registerReportService } from "./report-agent/report-service.js";
-import { createPiReportHarness, resolvePiReportModel } from "./report-agent/pi-report-harness.js";
+import { createPiReportHarness, DEFAULT_REPORT_AGENT_IMAGE, resolvePiReportModel } from "./report-agent/pi-report-harness.js";
+import { checkAdvisorWorker } from "./energy/energy-system-health.js";
 import { createAsyncMemoByKey, createStartupTimer } from "./async-memo.js";
 import { ensureBuiltinDtcGrowthDatasource } from "./builtin-dtc-growth-datasource.js";
 import { reclaimOrphanedQueuedAndRunningRuns } from "./stale-active-runs.js";
@@ -752,11 +753,13 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
         publish: revisions => publishAgentProjectSetup(context, run.projectId, revisions)};
     },
     harness: (process.env.ENERGYIQ_REPORT_AGENT_HARNESS ?? "pi") === "pi" ? createPiReportHarness({
-      image: process.env.ENERGYIQ_REPORT_AGENT_IMAGE ?? "energyiq-report-agent:pi-review-20260913",
+      image: process.env.ENERGYIQ_REPORT_AGENT_IMAGE ?? DEFAULT_REPORT_AGENT_IMAGE,
       model: (workspaceId) => resolvePiReportModel(metadataStore, workspaceId),
     }) : async () => { throw new Error("REPORT_HARNESS_NOT_CONFIGURED"); },
   }) : undefined;
   if (reportService) registerReportService(metadataStore, reportService);
+  // Say at startup, not at the first question, when the advisor cannot run here (for example a missing worker image).
+  if (reportService) void checkAdvisorWorker().then(check => { if (check.status !== "ok") console.warn(`[report-agent] ${check.detail}${check.fix ? ` Fix: ${check.fix}` : ""}`); }).catch(() => undefined);
   const sessionOutputService = new SessionOutputService(metadataStore, fileAssetService);
   const knowledgeService = new LocalKnowledgeService(metadataStore, {
     embedding: {

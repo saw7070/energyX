@@ -63,6 +63,7 @@ import type {
   EnergyAuditFilterDto,
   EnergyAdminAiActivityDto,
   EnergyAdminAiDto,
+  SystemHealthDto,
   EnergyAiOrganisationDto,
   EnergyPortfolioDto,
   EnergyProjectTargetsDto,
@@ -328,6 +329,9 @@ export const configApi = {
   },
   setEnergyAiEnabled(enabled: boolean): Promise<EnergyAiOrganisationDto> {
     return requestEnvelope<EnergyAiOrganisationDto>("/api/v1/energy/ai/settings", { method: "PUT", body: JSON.stringify({ enabled }) });
+  },
+  getSystemHealth(): Promise<SystemHealthDto> {
+    return requestEnvelope<SystemHealthDto>("/api/v1/energy/admin/system-health");
   },
   getEnergyAdminAi(): Promise<EnergyAdminAiDto> {
     return requestEnvelope<EnergyAdminAiDto>("/api/v1/energy/admin/ai");

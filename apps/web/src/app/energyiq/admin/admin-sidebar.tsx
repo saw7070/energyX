@@ -31,6 +31,7 @@ export type AdminSection =
   | "traces"
   | "harness"
   | "models"
+  | "system-health"
   | "skills"
   | "tools"
   | "mcp";
@@ -91,6 +92,7 @@ const operationItems: NavigationItem[] = [
 
 const configurationItems: NavigationItem[] = [
   { id: "models", label: "Models", icon: "settings", available: true },
+  { id: "system-health", label: "System health", icon: "monitor", available: true },
   { id: "harness", label: "Configuration overview", icon: "settings", available: true },
 ];
 
@@ -188,6 +190,7 @@ function SidebarContent({
           onSelect={onSectionChange}
           prominent
         />
+        <NavigationButton item={{ id: "system-health", label: "System health", icon: "monitor", available: true }} active={activeSection === "system-health"} onSelect={onSectionChange} />
 
         <NavigationGroup title="Accounts & access" items={accessItems} activeSection={activeSection} onSelect={onSectionChange} />
 
@@ -227,7 +230,7 @@ function SidebarContent({
 
         <NavigationButton item={{ id: "models", label: "Models", icon: "settings", available: true }} active={activeSection === "models"} onSelect={onSectionChange} />
         <NavigationButton item={operationItems[0]!} active={activeSection === "task-history"} onSelect={onSectionChange} />
-        <NavigationGroup title="Legacy / Developer diagnostics" items={[...operationItems.filter(item => item.id !== "task-history"), ...configurationItems.filter(item => item.id !== "models")]} activeSection={activeSection} onSelect={onSectionChange} />
+        <NavigationGroup title="Legacy / Developer diagnostics" items={[...operationItems.filter(item => item.id !== "task-history"), ...configurationItems.filter(item => item.id !== "models" && item.id !== "system-health")]} activeSection={activeSection} onSelect={onSectionChange} />
         <NavigationGroup title="Legacy features" items={legacyItems} activeSection={activeSection} onSelect={onSectionChange} />
         {selectedProjectId && <Link className="flex min-h-10 items-center gap-2 rounded-lg px-2.5 text-ui-support text-muted hover:bg-surface-subtle" href={`/energyiq/reports?${new URLSearchParams({projectId:selectedProjectId})}`}><EnergyIcon name="ask" className="h-4 w-4" />Open energy advisor</Link>}
       </nav>
@@ -345,6 +348,6 @@ export function isAdminSection(value: string | null): value is AdminSection {
   return [
     "overview", "organisations", "users", "roles", "audit", "ai-governance", "project-overview", "basics", "structure",
     "data-sources", "meter-mapping", "operational-policies", "data-map", "templates", "ai-analysis", "knowledge", "methods", "assets",
-    "task-history", "runs", "conversations", "usage", "traces", "harness", "models", "skills", "tools", "mcp", "report-agent",
+    "task-history", "runs", "conversations", "usage", "traces", "harness", "models", "system-health", "skills", "tools", "mcp", "report-agent",
   ].includes(value);
 }

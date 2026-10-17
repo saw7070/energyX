@@ -363,6 +363,10 @@ export const handleEnergyApiRequest = async (
 ): Promise<ConfigApiResponse> => {
   try {
     const user = context.metadataStore.users.getById({ user_id: context.userId });
+    if (segments[0] === "admin" && segments[1] === "system-health" && segments.length === 2 && request.method === "GET") {
+      const { handleSystemHealthApi } = await import("./energy-system-health.js");
+      return await handleSystemHealthApi(context, user);
+    }
     if (segments[0] === "ai" || (segments[0] === "admin" && segments[1] === "ai")) {
       const { handleAiApi } = await import("./energy-ai-api.js");
       const response = await handleAiApi(request, segments, context, user, { readJsonBody });
