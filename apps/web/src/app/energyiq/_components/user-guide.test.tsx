@@ -5,6 +5,7 @@ import { expect, it, vi } from "vitest";
 vi.mock("./energyiq-access", () => ({ useEnergyIqAccess: () => ({ access: { role: "user" } }) }));
 import { UserGuide } from "./user-guide";
 import { GUIDE_PAGES, GUIDE_SAMPLES, GUIDE_START } from "./user-guide-content";
+import { TOUR_PAGES, guideTour } from "./user-guide-tour";
 
 it("lists every page with a working link and filters the guide by search", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); vi.stubGlobal("React", React);
@@ -87,7 +88,7 @@ it("teaches a newcomer with a walkthrough and drawn chart examples, in every lan
   const samples = host.querySelector("#samples")!;
   expect(samples.querySelectorAll("article").length).toBe(GUIDE_SAMPLES.length);
   expect(samples.querySelectorAll("svg[role='img']").length).toBe(GUIDE_SAMPLES.length);
-  expect([...samples.querySelectorAll("svg")].every(figure => (figure.getAttribute("aria-label") ?? "").length > 10)).toBe(true);
+  expect([...samples.querySelectorAll("svg[role='img']")].every(figure => (figure.getAttribute("aria-label") ?? "").length > 10)).toBe(true);
   expect(samples.textContent).toContain("running 24 hours");
   // The examples carry no real site's figures.
   expect(samples.textContent).toContain("The figures here are made up.");
@@ -113,4 +114,39 @@ it("teaches a newcomer with a walkthrough and drawn chart examples, in every lan
     await act(async () => translated.unmount());
   }
   host.remove(); localStorage.clear(); document.documentElement.lang = "en"; vi.unstubAllGlobals();
+});
+
+it("walks through every page with a picture whose numbers match the explained parts, in every language", async () => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  for (const locale of ["en", "zh-Hans", "ms"] as const) {
+    const tour = guideTour(locale);
+    expect(tour.map(page => page.id)).toEqual(TOUR_PAGES.map(page => page.id));
+    for (const page of tour) {
+      // Every number drawn on the picture has a matching explanation, and the picture itself is in the app.
+      expect(page.shot.markers.length).toBe(page.parts.length);
+      expect(page.shot.markers.every(([x, y]) => x >= 0 && x <= 100 && y >= 0 && y <= 100)).toBe(true);
+      expect(fs.existsSync(path.join(process.cwd(), "public", page.image))).toBe(true);
+    }
+    if (locale !== "en") expect(tour.some((page, index) => page.title === TOUR_PAGES[index]!.title && page.intro === TOUR_PAGES[index]!.intro)).toBe(false);
+  }
+
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); vi.stubGlobal("React", React);
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host);
+  await act(async () => root.render(<UserGuide />));
+  const section = host.querySelector("#tour")!;
+  expect(section.querySelectorAll("article").length).toBe(TOUR_PAGES.length);
+  const floor = section.querySelector("#tour-floor")!;
+  expect(floor.querySelector("img")?.getAttribute("src")).toBe("/guide/en/floor.webp");
+  expect(floor.querySelector("img")?.getAttribute("alt")).toContain("sample site");
+  expect(floor.querySelectorAll("ol li").length).toBe(floor.querySelectorAll("a[target] > span").length);
+  expect(floor.querySelector("a[target]")?.getAttribute("href")).toBe("/guide/en/floor.webp");
+  expect(floor.textContent).toContain("Main menu → Facility → Floor layout");
+  // Search finds a page by what one of its parts says.
+  const input = host.querySelector<HTMLInputElement>('input[type="search"]')!;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "resend invite"); input.dispatchEvent(new Event("input", { bubbles: true })); });
+  expect([...host.querySelectorAll("#tour article")].map(article => article.id)).toEqual(["tour-team"]);
+  await act(async () => root.unmount());
+  host.remove(); vi.unstubAllGlobals();
 });

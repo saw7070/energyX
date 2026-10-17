@@ -1,0 +1,137 @@
+/* User guide, documentation layout: a deep green header with quick starts and key numbers, a sticky "On this page"
+   list beside the content on wide screens, an icon beside every section heading, and calmer, more even cards.
+   Colours use the theme tokens where they can; the few fixed tints have dark versions at the end. */
+
+/* ---------- Header ---------- */
+.hero.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.9fr);
+  align-items: end;
+  gap: 28px 40px;
+  padding: clamp(26px, 3vw, 40px) clamp(22px, 3vw, 44px);
+  background:
+    radial-gradient(520px 280px at 100% 0%, rgb(126 231 188 / 0.2), transparent 65%),
+    radial-gradient(420px 260px at 0% 110%, rgb(96 165 250 / 0.12), transparent 60%),
+    linear-gradient(135deg, #12372a 0%, #0d2b21 55%, #0a221a 100%);
+}
+.heroText { min-width: 0; }
+.heroText h1 { max-width: 20ch; text-wrap: balance; }
+.heroActions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+.heroActions a { display: inline-flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 18px; border-radius: 12px; font-size: 14px; font-weight: 700; text-decoration: none; transition: background-color 0.15s ease, transform 0.15s ease; }
+.heroActions svg { width: 16px; height: 16px; }
+.heroPrimary { background: #7ee7bc; color: #0c281c; box-shadow: 0 6px 18px -8px rgb(126 231 188 / 0.7); }
+.heroPrimary:hover { background: #9bf0cd; transform: translateY(-1px); }
+.heroSecondary { border: 1px solid rgb(255 255 255 / 0.22); background: rgb(255 255 255 / 0.06); color: #eaf4ee; }
+.heroSecondary:hover { background: rgb(255 255 255 / 0.12); }
+.heroSide { display: grid; gap: 14px; min-width: 0; }
+.heroSide > label { max-width: none; width: 100%; }
+.heroStats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0; }
+.heroStats > div { display: flex; flex-direction: column-reverse; gap: 2px; padding: 12px 14px; border: 1px solid rgb(255 255 255 / 0.12); border-radius: 14px; background: rgb(255 255 255 / 0.05); }
+.heroStats dd { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; color: #ffffff; font-variant-numeric: tabular-nums; }
+.heroStats dt { font-size: 12px; line-height: 1.35; color: #b9cec2; }
+
+/* ---------- Two columns: "On this page" beside the content ---------- */
+.columns { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 40px; align-items: start; margin-top: 28px; }
+.side { position: sticky; top: 16px; display: grid; gap: 18px; max-height: calc(100dvh - 104px); overflow: auto; padding-bottom: 8px; }
+.sideTitle { margin: 0 0 8px 10px; font-size: 11.5px; font-weight: 800; letter-spacing: 0.09em; text-transform: uppercase; color: var(--text-tertiary); }
+.sideList, .sideSub { margin: 0; padding: 0; list-style: none; }
+.sideList { display: grid; gap: 2px; }
+.sideList a { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; color: var(--text-secondary); font-size: 13.5px; font-weight: 600; text-decoration: none; }
+.sideList a:hover { background: var(--surface-subtle); color: var(--foreground); }
+.sideList a svg { width: 16px; height: 16px; flex-shrink: 0; opacity: 0.8; }
+.sideList a span { flex: 1; min-width: 0; }
+.sideList a b { min-width: 20px; padding: 1px 6px; border-radius: 999px; background: var(--surface-subtle); font-size: 11px; text-align: center; }
+.sideList a[aria-current] { background: rgb(23 107 89 / 0.1); color: var(--foreground); box-shadow: inset 3px 0 0 #176b59; }
+.sideList a[aria-current] svg { color: #176b59; opacity: 1; }
+.sideEmpty { opacity: 0.45; }
+.sideSub { display: grid; gap: 1px; margin: 4px 0 8px 22px; padding-left: 10px; border-left: 1px solid var(--border); }
+.sideSub a { padding: 5px 8px; font-size: 12.5px; font-weight: 500; }
+.sideHelp { display: grid; gap: 6px; padding: 16px; border: 1px solid #e2dafb; border-radius: 16px; background: linear-gradient(160deg, #f4f1fe, var(--surface) 80%); }
+.sideHelp > span { display: grid; place-items: center; width: 34px; height: 34px; margin-bottom: 4px; border-radius: 10px; background: #ede7fe; color: #6d28d9; }
+.sideHelp > span svg { width: 18px; height: 18px; }
+.sideHelp strong { font-size: 14px; font-weight: 800; color: var(--foreground); }
+.sideHelp p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--text-secondary); }
+.sideHelp a { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; color: #6d28d9; font-size: 13px; font-weight: 700; text-decoration: none; }
+.sideHelp a svg { width: 14px; height: 14px; }
+.content { min-width: 0; }
+.content > .toc { display: none; }
+
+/* ---------- Sections ---------- */
+.content > section { margin-top: 0; }
+.content > section ~ section { margin-top: 44px; padding-top: 40px; border-top: 1px solid var(--border); }
+.sectionHead { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 4px; }
+.sectionIcon { display: grid; place-items: center; width: 42px; height: 42px; flex-shrink: 0; border-radius: 12px; background: rgb(23 107 89 / 0.1); color: #176b59; }
+.sectionIcon svg { width: 20px; height: 20px; }
+.sectionHead > div > h2 { margin: 0; padding-top: 1px; font-size: 22px; font-weight: 800; letter-spacing: -0.02em; color: var(--foreground); }
+.sectionHead > div > p { margin-top: 6px; color: var(--text-secondary); }
+
+/* Start here: numbered step cards, the number sitting on the card's top edge. */
+.content :global(#start) ol { gap: 14px; margin-top: 30px; }
+.content :global(#start) ol > li { position: relative; gap: 6px; padding: 28px 18px 18px; border-color: var(--border); border-radius: 18px; background: var(--surface); }
+.content :global(#start) ol > li::before { position: absolute; top: -16px; left: 18px; width: 34px; height: 34px; background: linear-gradient(180deg, #1f8a6c, #176b59); color: #ffffff; font-size: 14px; font-weight: 800; box-shadow: 0 0 0 4px var(--surface), 0 4px 10px -4px rgb(6 60 40 / 0.5); }
+.content :global(#start) ol > li strong { font-size: 15px; font-weight: 800; color: var(--foreground); }
+.content :global(#start) ol > li span { color: var(--text-secondary); }
+
+/* What each page is for: a coloured icon per group, even cards that lift a little on hover. */
+.content :global(#pages) [data-tone] > h3 { display: flex; align-items: center; gap: 12px; margin: 26px 0 12px; color: var(--text-tertiary); }
+.content :global(#pages) [data-tone] > h3::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.content :global(#pages) article { gap: 12px; padding: 20px; border-radius: 18px; background: var(--surface); transition: transform 0.15s ease, border-color 0.15s ease; }
+.content :global(#pages) article:hover { transform: translateY(-2px); border-color: rgb(23 107 89 / 0.35); }
+.content :global(#pages) article header > span { width: 40px; height: 40px; border-radius: 12px; }
+.content :global(#pages) article h4 { font-size: 16px; font-weight: 800; color: var(--foreground); }
+.content :global(#pages) article header p, .content :global(#pages) article ul { color: var(--text-secondary); }
+.content :global(#pages) article > a { padding-top: 12px; border-top: 1px solid var(--border); width: 100%; }
+.content :global(#pages) article > a svg { transition: transform 0.15s ease; }
+.content :global(#pages) article:hover > a svg { transform: translateX(3px); }
+.content :global(#pages) [data-tone="green"] article header > span { background: rgb(23 107 89 / 0.1); color: #176b59; }
+.content :global(#pages) [data-tone="blue"] article header > span { background: #e8eefb; color: #3a5bc7; }
+.content :global(#pages) [data-tone="violet"] article header > span { background: #f1ecfe; color: #6d28d9; }
+
+/* How do I… and Questions: calm accordions, steps as numbered circles. */
+.content :global(#tasks) details, .content :global(#questions) details { border-radius: 14px; background: var(--surface); transition: border-color 0.15s ease; }
+.content :global(#tasks) details[open], .content :global(#questions) details[open] { border-color: rgb(23 107 89 / 0.35); }
+.content :global(#tasks) summary, .content :global(#questions) summary { padding: 16px 18px; font-weight: 700; color: var(--foreground); }
+.content :global(#tasks) details ol { counter-reset: step; display: grid; gap: 10px; margin: 2px 18px 18px; padding: 0; list-style: none; color: var(--text-secondary); }
+.content :global(#tasks) details ol > li { counter-increment: step; position: relative; min-height: 24px; padding-left: 36px; }
+.content :global(#tasks) details ol > li::before { content: counter(step); position: absolute; top: 0; left: 0; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: rgb(23 107 89 / 0.1); color: #176b59; font-size: 12px; font-weight: 800; }
+.content :global(#questions) details > p { color: var(--text-secondary); }
+
+/* Reading the charts and Words we use: definition cards with a green edge. */
+.content :global(#charts) dl > div, .content :global(#terms) dl > div { border-radius: 14px; background: var(--surface); box-shadow: inset 3px 0 0 #176b59, 0 1px 2px #0a281b0d; }
+.content :global(#charts) dt, .content :global(#terms) dt { font-weight: 800; color: var(--foreground); }
+.content :global(#charts) dd, .content :global(#terms) dd { color: var(--text-secondary); }
+.content :global(#samples) article { border-radius: 18px; background: var(--surface); }
+.content :global(#samples) article h3 { font-weight: 800; color: var(--foreground); }
+
+/* Closing help card. */
+.content > footer { margin-top: 48px; padding: 22px 24px; border: 1px solid #e2dafb; border-radius: 20px; background: linear-gradient(135deg, #f4f1fe, var(--surface) 75%); font-size: 15px; }
+.content > footer > svg { width: 46px; height: 46px; padding: 12px; border-radius: 14px; background: #ede7fe; }
+
+@media (max-width: 1099px) {
+  .columns { grid-template-columns: minmax(0, 1fr); gap: 0; margin-top: 18px; }
+  .side { display: none; }
+  .content > .toc { display: flex; }
+}
+@media (min-width: 1100px) {
+  .content :global(#tour) nav { display: none; }
+}
+@media (max-width: 900px) {
+  .hero.hero { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .heroActions a, .content :global(#pages) article, .content :global(#pages) article > a svg { transition: none; }
+}
+
+/* ---------- Dark ---------- */
+:global(html[data-energyiq-theme="dark"]) .sideHelp, :global(html[data-energyiq-theme="dark"]) .content > footer { border-color: #3b2f5e; background: linear-gradient(160deg, #221b38, var(--surface) 80%); }
+:global(html[data-energyiq-theme="dark"]) .sideHelp > span, :global(html[data-energyiq-theme="dark"]) .content > footer > svg { background: #2c2350; color: #c4b5fd; }
+:global(html[data-energyiq-theme="dark"]) .sideHelp a { color: #c4b5fd; }
+:global(html[data-energyiq-theme="dark"]) .sideList a[aria-current] { background: rgb(127 211 174 / 0.12); box-shadow: inset 3px 0 0 #7fd3ae; }
+:global(html[data-energyiq-theme="dark"]) .sideList a[aria-current] svg, :global(html[data-energyiq-theme="dark"]) .sectionIcon { color: #7fd3ae; }
+:global(html[data-energyiq-theme="dark"]) .sectionIcon { background: rgb(127 211 174 / 0.12); }
+:global(html[data-energyiq-theme="dark"]) .content :global(#pages) [data-tone="green"] article header > span { background: rgb(127 211 174 / 0.12); color: #7fd3ae; }
+:global(html[data-energyiq-theme="dark"]) .content :global(#pages) [data-tone="blue"] article header > span { background: #1c2337; color: #93b4fd; }
+:global(html[data-energyiq-theme="dark"]) .content :global(#pages) [data-tone="violet"] article header > span { background: #241d3b; color: #c4b5fd; }
+:global(html[data-energyiq-theme="dark"]) .content :global(#tasks) details ol > li::before { background: rgb(127 211 174 / 0.12); color: #7fd3ae; }
+:global(html[data-energyiq-theme="dark"]) .content :global(#charts) dl > div, :global(html[data-energyiq-theme="dark"]) .content :global(#terms) dl > div { box-shadow: inset 3px 0 0 #7fd3ae; }
+:global(html[data-energyiq-theme="dark"]) .content :global(#pages) article:hover, :global(html[data-energyiq-theme="dark"]) .content :global(#tasks) details[open], :global(html[data-energyiq-theme="dark"]) .content :global(#questions) details[open] { border-color: rgb(127 211 174 / 0.35); }
