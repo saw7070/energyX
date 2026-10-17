@@ -77,7 +77,7 @@ function FacilityDialog({ id, title, intro, onClose, children }: { id: string; t
   return <dialog
     ref={dialog}
     aria-labelledby={`${id}-title`}
-    className="m-auto max-h-[calc(100dvh-48px)] w-[min(960px,calc(100vw-32px))] overflow-y-auto rounded-2xl border border-border bg-surface-subtle p-0 shadow-2xl backdrop:bg-black/40"
+    className="m-auto max-h-[calc(100dvh-48px)] w-[min(960px,calc(100vw-32px))] overflow-y-auto rounded-[22px] border border-border bg-surface-subtle p-0 shadow-2xl backdrop:bg-black/45 backdrop:backdrop-blur-[2px]"
     onCancel={event => { event.preventDefault(); onClose(); }}
     onClick={event => {
       // A click on the dimmed backdrop lands on the dialog itself, outside its box.
@@ -86,9 +86,9 @@ function FacilityDialog({ id, title, intro, onClose, children }: { id: string; t
       if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) onClose();
     }}
   >
-    <header className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-border bg-surface px-6 py-4">
-      <div><h2 id={`${id}-title`} className="text-lg font-semibold">{title}</h2><p className="mt-1 text-xs text-muted">{intro}</p></div>
-      <button type="button" onClick={onClose} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold hover:bg-surface-subtle">{t("close")}</button>
+    <header className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-border bg-surface px-6 py-5">
+      <div><h2 id={`${id}-title`} className="text-xl font-extrabold tracking-tight">{title}</h2><p className="mt-1 text-[13px] text-muted">{intro}</p></div>
+      <button type="button" onClick={onClose} className="inline-flex h-9 items-center rounded-[10px] border border-border bg-surface px-3.5 text-[13px] font-semibold shadow-[0_1px_2px_rgba(10,40,27,0.05)] hover:bg-surface-subtle">{t("close")}</button>
     </header>
     <div className="p-6">{children}</div>
   </dialog>;
