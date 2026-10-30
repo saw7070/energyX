@@ -56,6 +56,7 @@ import { initializeEnergyIqLiveConnectorSchema } from "./energyiq-live-connector
 import { ENERGYIQ_ORGANISATION_ADMIN_ROLE_ID, initializeEnergyIqAccessRoleSchema, upgradeSeededOrganisationAdminRole } from "./energyiq-access-role-store.js";
 import { initializeEnergyIqTargetsSchema } from "./energyiq-targets-store.js";
 import { initializeEnergyIqAiGovernanceSchema } from "./energyiq-ai-governance-store.js";
+import { AuthTwoStepStore, initializeAuthTwoStepSchema } from "./auth-two-step-store.js";
 import { recordSchemaMigration, runSchemaMigration } from "./schema-migration.js";
 
 export * from "./config-store.js";
@@ -63,6 +64,7 @@ export * from "./energyiq-store.js";
 export * from "./energyiq-carbon.js";
 export * from "./energyiq-targets-store.js";
 export * from "./energyiq-ai-governance-store.js";
+export * from "./auth-two-step-store.js";
 export * from "./energyiq-import-readiness.js";
 export * from "./energyiq-saved-analysis-store.js";
 export * from "./energyiq-scope-metadata-resolver.js";
@@ -724,6 +726,7 @@ export class MetadataStore {
   readonly authAuditEvents: AuthAuditEventRepository;
   readonly authSessions: AuthSessionRepository;
   readonly authTokens: AuthTokenRepository;
+  readonly authTwoStep: AuthTwoStepStore;
   readonly artifactVersions: ArtifactVersionRepository;
   readonly artifacts: ArtifactRepository;
   readonly configJobs: ConfigJobRepository;
@@ -760,6 +763,7 @@ export class MetadataStore {
     this.authSessions = new AuthSessionRepository(db);
     this.authTokens = new AuthTokenRepository(db);
     this.authAuditEvents = new AuthAuditEventRepository(db);
+    this.authTwoStep = new AuthTwoStepStore(db);
     this.workspaces = new WorkspaceRepository(db);
     this.workspaceMemberships = new WorkspaceMembershipRepository(db);
     this.workspaceDefaultModelProfiles = new WorkspaceDefaultModelProfileRepository(db);
@@ -4713,6 +4717,15 @@ const runMigrations = (db: DatabaseSync): void => {
     "Add per-organisation AI settings, AI usage records and AI answer feedback",
     () => {
       initializeEnergyIqAiGovernanceSchema(db);
+    },
+    { atomic: true },
+  );
+  runSchemaMigration(
+    db,
+    "0053_auth_two_step_verification",
+    "Add two-step verification factors, recovery codes, sign-in challenges and the Organisation requirement",
+    () => {
+      initializeAuthTwoStepSchema(db);
     },
     { atomic: true },
   );

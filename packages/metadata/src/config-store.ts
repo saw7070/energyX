@@ -223,6 +223,11 @@ export class EncryptedSecretStore {
     this.key = masterKey ? createHash("sha256").update(masterKey).digest() : undefined;
   }
 
+  /** False when no SECRET_MASTER_KEY was configured, so nothing can be stored or read. */
+  isConfigured(): boolean {
+    return this.key !== undefined;
+  }
+
   /** Encrypt and persist a write-only credential object. */
   put(input: {
     workspace_id: string;
