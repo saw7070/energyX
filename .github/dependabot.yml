@@ -1,0 +1,28 @@
+# Weekly dependency update pull requests. Security updates are separate: they are raised as soon as
+# an advisory is published, independent of this schedule, once Dependabot security updates are on.
+version: 2
+updates:
+  # The root lockfile covers every npm workspace (apps/*, packages/*). evaluations/pi-ai-gateway is
+  # left out on purpose: its exact pins are what that evaluation gates on.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    groups:
+      # One pull request for all minor and patch bumps; each major bump gets its own.
+      npm-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      github-actions:
+        patterns:
+          - "*"
