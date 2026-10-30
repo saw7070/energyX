@@ -114,7 +114,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@next/eslint-plugin-next": "^15.5.28",
+    "@next/eslint-plugin-next": "^16.4.3",
     "@types/busboy": "^1.5.4",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^24.0.0",
