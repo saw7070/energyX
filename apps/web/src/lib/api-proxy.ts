@@ -24,6 +24,17 @@ export function getApiProxyTarget(): string {
   );
 }
 
+/** Same rule as the API (apps/api/src/observability/request-context.ts): nginx's $request_id, UUIDs and similar. */
+const SAFE_REQUEST_ID = /^[A-Za-z0-9._:-]{8,64}$/u;
+
+/**
+ * The ID that ties this request's lines in the web, API and nginx logs together: the one nginx (or another caller)
+ * sent when it is a short safe token, otherwise a new one.
+ */
+export function resolveRequestId(value: string | null): string {
+  return value && SAFE_REQUEST_ID.test(value) ? value : crypto.randomUUID();
+}
+
 export function isStreamingProxyPath(pathname: string): boolean {
   return pathname === "/api/copilotkit" || pathname.startsWith("/api/copilotkit/");
 }
@@ -133,6 +144,8 @@ export async function proxyToApi(request: Request, pathname: string): Promise<Re
   headers.delete("host");
   headers.delete("connection");
   headers.delete("content-length");
+  const requestId = resolveRequestId(request.headers.get("x-request-id"));
+  headers.set("x-request-id", requestId);
 
   const init: RequestInit = {
     method: request.method,
@@ -152,6 +165,8 @@ export async function proxyToApi(request: Request, pathname: string): Promise<Re
 
   const upstream = await fetch(targetUrl, init);
   const responseHeaders = buildProxyResponseHeaders(upstream.headers, pathname);
+  // The API echoes the ID; set it here too so the browser can quote it even when an older API does not.
+  if (!responseHeaders.has("x-request-id")) responseHeaders.set("x-request-id", requestId);
 
   return new Response(upstream.body, {
     status: upstream.status,
