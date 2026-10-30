@@ -123,7 +123,7 @@
     "eslint": "^10.13.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.13.0",
-    "typescript": "^5.8.0",
+    "typescript": "^7.0.2",
     "typescript-eslint": "^8.72.1",
     "vitest": "^3.2.6",
     "write-excel-file": "^4.1.1"
