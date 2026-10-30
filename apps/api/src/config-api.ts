@@ -100,6 +100,7 @@ import {
   workspaceDefaultModelProfileDto
 } from "./workspace-model-profile-api.js";
 import { workspaceDefaultModelProfileConfigured } from "./workspace-model-profile-resolver.js";
+import { assertLegacyConfigRequestAllowed, assertStdioMcpAllowed } from "./legacy-config-guard.js";
 
 const MAX_JSON_BODY_BYTES = 1024 * 1024;
 const DEFAULT_WORKSPACE_ID = "default";
@@ -210,6 +211,12 @@ const routeConfigRequest = async (
   if (root === "dev") {
     return handleDevIdentityRequest(request, segments.slice(1), context);
   }
+  assertLegacyConfigRequestAllowed({
+    metadataStore: context.metadataStore,
+    userId: context.userId,
+    method: request.method,
+    segments
+  });
   if (root === "datasource-types" && request.method === "GET") {
     return ok(await context.dataGateway.supportTypes());
   }
@@ -1786,6 +1793,9 @@ const saveConfigResourceInTransaction = (
     user_id: context.userId,
     kind
   });
+  if (kind === "mcp-server" && (body.transport === "stdio" || recordValue(body.payload)?.transport === "stdio")) {
+    assertStdioMcpAllowed();
+  }
   if (kind === "skill" && (hasReportSkillFields(body) || hasReportSkillFields(recordValue(body.payload)) || hasReportSkillFields(current?.payload))) {
     throw new Error("REPORT_SKILL_CONFIG_FORBIDDEN");
   }
@@ -4279,6 +4289,9 @@ const listMcpTools = async (
     ?? (transport === "stdio" ? stringValue(resource.payload.command) : undefined);
   if (!urlOrCommand || (transport !== "streamable-http" && transport !== "sse" && transport !== "stdio")) {
     throw new Error("MCP_SERVER_CONFIG_INVALID");
+  }
+  if (transport === "stdio") {
+    assertStdioMcpAllowed();
   }
   const secret = resource.secret_ref
     ? context.metadataStore.secrets.get({

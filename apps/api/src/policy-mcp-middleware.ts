@@ -15,6 +15,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { randomUUID } from "node:crypto";
 import { Observable } from "rxjs";
+import { assertStdioMcpAllowed } from "./legacy-config-guard.js";
 
 export type PolicyMcpToolConfig = {
   description?: string | undefined;
@@ -302,6 +303,7 @@ export class PolicyMcpMiddleware extends Middleware {
 
 const createTransport = (serverConfig: PolicyMcpClientConfig): Transport => {
   if (serverConfig.type === "stdio") {
+    assertStdioMcpAllowed();
     return new StdioClientTransport({
       command: serverConfig.command,
       ...(serverConfig.args ? { args: serverConfig.args } : {}),

@@ -14,6 +14,8 @@ function fixture() {
   const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
   cleanup.push(() => { metadata.close(); rmSync(root, { recursive: true, force: true }); });
   metadata.users.upsertDevUser({ id: "u", email: "u@example.test", display_name: "u", dev_token: "u" });
+  // Only platform administrators may change the DataFoundry configuration resources at all.
+  metadata.energyIq.upsertUserRole({ user_id: "u", role: "admin" });
   const context = { metadataStore: metadata, userId: "u", workspaceId: "w" } as ConfigApiContext;
   const call = (method: string, path: string, body: unknown = {}) => {
     const request = Readable.from([JSON.stringify(body)]) as IncomingMessage;
