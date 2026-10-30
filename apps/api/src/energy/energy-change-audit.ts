@@ -1,6 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import { randomUUID } from "node:crypto";
 import type { MetadataStore } from "@datafoundry/metadata";
+import { clientIpAddress } from "../client-ip.js";
 
 /**
  * Records who changed a project's settings or data, and when, so an administrator can answer "who changed what".
@@ -44,8 +45,7 @@ export const recordEnergyChange = (input: {
   if (input.status >= 400) return;
   const event = changeEventFor(input.segments, method);
   if (!event) return;
-  const forwarded = input.request.headers["x-forwarded-for"];
-  const ip = (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.split(",")[0]?.trim() || input.request.socket?.remoteAddress;
+  const ip = clientIpAddress(input.request);
   const userAgent = input.request.headers["user-agent"];
   try {
     const user = input.metadataStore.users.getById({ user_id: input.userId });

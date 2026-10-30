@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AuthIdentity, AuthService } from "./service.js";
 import { AuthError, userDto, workspaceDto } from "./service.js";
 import { appendAuthCookies, appendClearAuthCookies, CSRF_COOKIE, parseCookies, SESSION_COOKIE } from "./cookies.js";
+import { clientIpAddress } from "../client-ip.js";
 
 export type AuthRouteContext = {
   authService: AuthService;
@@ -177,10 +178,19 @@ function requireIdentity(context: AuthRouteContext): AuthIdentity {
   return context.identity;
 }
 
+// Sign-in forms are tiny; refuse anything bigger before buffering it, since these routes run before sign-in.
+const MAX_AUTH_BODY_BYTES = 64 * 1024;
+
 async function readJsonBody(request: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
+  let size = 0;
   for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > MAX_AUTH_BODY_BYTES) {
+      throw new AuthError(413, "PAYLOAD_TOO_LARGE", "Request body is too large.");
+    }
+    chunks.push(buffer);
   }
   if (chunks.length === 0) {
     return {};
@@ -202,9 +212,7 @@ function optionalString(value: unknown): string | undefined {
 
 function requestMeta(request: IncomingMessage): { ipAddress?: string | undefined; userAgent?: string | undefined } {
   return {
-    ...(headerString(request.headers["x-forwarded-for"]) ?? request.socket.remoteAddress
-      ? { ipAddress: (headerString(request.headers["x-forwarded-for"]) ?? request.socket.remoteAddress)?.split(",")[0]?.trim() }
-      : {}),
+    ...(clientIpAddress(request) ? { ipAddress: clientIpAddress(request) } : {}),
     ...(headerString(request.headers["user-agent"]) ? { userAgent: headerString(request.headers["user-agent"]) } : {})
   };
 }

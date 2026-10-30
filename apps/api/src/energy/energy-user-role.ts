@@ -22,10 +22,13 @@ export const resolveEnergyIqUserRole = (
       .map((email) => email.trim().toLowerCase())
       .filter(Boolean)
   );
-  const allowlisted = user.id === "dev-user"
+  // The built-in dev user is only an administrator while the server runs in dev sign-in mode.
+  const allowlisted = (user.id === "dev-user" && devSignInMode(env))
     || (user.email ? adminEmails.has(user.email.toLowerCase()) : false);
   const existing = metadataStore.energyIq.findUserRole(user.id);
   if (allowlisted) return "admin";
   return existing?.role ?? "user";
 };
 
+const devSignInMode = (env: Record<string, string | undefined>): boolean =>
+  (env.DATAFOUNDRY_AUTH_MODE ?? (env.NODE_ENV === "production" ? "password" : "dev")) === "dev";
