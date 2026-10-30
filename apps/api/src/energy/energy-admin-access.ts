@@ -132,7 +132,12 @@ export class EnergyAdminAccessService {
     db.exec("BEGIN IMMEDIATE");
     try {
       // Workspace-scoped settings created alongside the Organisation go with it.
-      for (const table of ["config_resources", "encrypted_secrets", "workspace_default_model_profiles"]) {
+      for (const table of [
+        "config_resources", "encrypted_secrets", "workspace_default_model_profiles",
+        // Its single sign-on connection (freeing its email domains) and provisioning keys.
+        "organisation_sso_configs", "organisation_sso_domains", "organisation_sso_login_states",
+        "organisation_scim_tokens", "organisation_scim_users"
+      ]) {
         const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
         if (exists) db.prepare(`DELETE FROM "${table}" WHERE workspace_id = ?`).run(organisation.id);
       }
@@ -320,7 +325,9 @@ export class EnergyAdminAccessService {
       role: storedRole,
       status: user.disabled_at
         ? "disabled"
-        : user.dev_token || (user.email_verified_at && user.password_updated_at)
+        // Joined: activated an invitation (password set) or signed in through single sign-on, which
+        // verifies the email address without ever setting a password.
+        : user.dev_token || user.email_verified_at
           ? "active"
           : "pending",
       organisationIds: organisations.map((organisation) => organisation.id),
