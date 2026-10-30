@@ -148,7 +148,9 @@ export class EnergyAdminAccessService {
 
   setProjectArchived(input: { actorUserId: string; projectId: string; archived: boolean }): { organisations: EnergyAdminOrganisationDto[] } {
     const result = setEnergyProjectArchived({ metadataStore: this.metadataStore, projectId: input.projectId, archived: input.archived });
-    this.audit(input.archived ? "energyiq.project_archived" : "energyiq.project_restored", input.actorUserId, result);
+    // Naming the Organisation puts the event on that client's Activity page.
+    const workspaceId = this.metadataStore.energyIq.getProject(result.projectId).workspace_id;
+    this.audit(input.archived ? "energyiq.project_archived" : "energyiq.project_restored", input.actorUserId, { ...result, workspaceId });
     return { organisations: this.listOrganisations() };
   }
 

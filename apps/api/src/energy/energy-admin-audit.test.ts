@@ -75,6 +75,42 @@ describe("Audit history for super admins", () => {
     expect(text).toContain("energyiq.electricity_rate_published");
   });
 
+  it("downloads every event, past the old 10,000-row limit, with platform and support events in their own category", async () => {
+    const { metadata, context } = setup();
+    metadata.db.exec("BEGIN IMMEDIATE");
+    for (let index = 0; index < 10_020; index += 1) {
+      metadata.authAuditEvents.append({ id: `bulk-${index}`, event_type: "auth.login_succeeded", user_id: "dev-user" });
+    }
+    metadata.db.exec("COMMIT");
+    metadata.authAuditEvents.append({ id: "support", event_type: "energyiq.support_access", user_id: "dev-user", metadata: { workspaceId: NGEE_ANN_WORKSPACE_ID, access: "read" } });
+    metadata.authAuditEvents.append({ id: "config", event_type: "energyiq.platform_config_changed", user_id: "dev-user", metadata: { resource: "skills" } });
+
+    const csv = await handleEnergyApiRequest(get("/api/v1/energy/admin/audit?format=csv"), ["admin", "audit"], context);
+    const lines = (csv.body as Buffer).toString("utf8").trimEnd().split("\r\n");
+    expect(lines.filter((line) => line.includes("auth.login_succeeded"))).toHaveLength(10_020);
+
+    const platform = await handleEnergyApiRequest(get("/api/v1/energy/admin/audit?category=platform"), ["admin", "audit"], context);
+    const types = (platform.body as { data: { events: Array<{ type: string }> } }).data.events.map((event) => event.type);
+    expect(types.sort()).toEqual(["energyiq.platform_config_changed", "energyiq.support_access"]);
+  }, 60_000);
+
+  it("verifies the audit chain on request and names the first altered record", async () => {
+    const { metadata, context } = setup();
+    metadata.authAuditEvents.append({ id: "first", event_type: "auth.login_succeeded", user_id: "dev-user" });
+    metadata.authAuditEvents.append({ id: "second", event_type: "auth.logout", user_id: "dev-user" });
+    const verify = () => handleEnergyApiRequest(get("/api/v1/energy/admin/audit/verify"), ["admin", "audit", "verify"], context);
+    const intact = await verify();
+    expect(intact.status).toBe(200);
+    expect((intact.body as { data: unknown }).data).toMatchObject({ ok: true, checked: 2, head: { seq: 2 } });
+
+    metadata.db.exec("DROP TRIGGER auth_audit_events_immutable");
+    metadata.db.prepare("UPDATE auth_audit_events SET user_id = NULL WHERE id = 'first'").run();
+    expect((await verify()).body).toMatchObject({ data: { ok: false, firstBreak: { reason: "hash_mismatch", seq: 1, id: "first" } } });
+
+    const member = metadata.users.createPasswordUser({ id: "viewer-2", email: "viewer2@example.test" });
+    expect((await handleEnergyApiRequest(get("/api/v1/energy/admin/audit/verify"), ["admin", "audit", "verify"], { ...context, userId: member.id })).status).toBe(403);
+  });
+
   it("is refused to anyone who is not a super admin", async () => {
     const { metadata, context } = setup();
     const member = metadata.users.createPasswordUser({ id: "viewer-1", email: "viewer@example.test", display_name: "Viewer" });

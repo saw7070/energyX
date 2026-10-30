@@ -117,6 +117,7 @@ import {
   queueCurrentProjectOverviewAiArtifact,
 } from "./overview-ai-artifact.js";
 import { EnergyAdminAccessService } from "./energy-admin-access.js";
+import { csvBody, organisationActivityResponse } from "./energy-organisation-activity.js";
 import { extractDeviceListFromImage } from "./energy-device-list-vision.js";
 import {
   materializeCurrentProjectOverviewProjection,
@@ -441,6 +442,10 @@ export const handleEnergyApiRequest = async (
       if (segments[1] === "audit" && segments.length === 2 && request.method === "GET") {
         return auditHistoryResponse(context.metadataStore, new URL(request.url ?? "/", "http://localhost").searchParams);
       }
+      if (segments[1] === "audit" && segments[2] === "verify" && segments.length === 3 && request.method === "GET") {
+        const { auditChainVerificationResponse } = await import("./energy-audit-log.js");
+        return auditChainVerificationResponse(context.metadataStore);
+      }
       const service = new EnergyAdminAccessService(context.metadataStore, context.authService);
       if (segments[1] === "organisations" && segments.length === 2 && request.method === "GET") {
         return { status: 200, body: createSuccessResult({ organisations: service.listOrganisations() }) };
@@ -630,6 +635,9 @@ export const handleEnergyApiRequest = async (
       }
     }
     if (segments[0] === "team") {
+      if (segments[1] === "activity" && segments.length === 2 && request.method === "GET") {
+        return organisationActivityResponse(context.metadataStore, user, context.workspaceId, new URL(request.url ?? "/", "http://localhost").searchParams);
+      }
       const team = new EnergyTeamAccessService(context.metadataStore, context.authService);
       const workspaceId = context.workspaceId;
       if (segments.length === 1 && request.method === "GET") {
@@ -4878,6 +4886,7 @@ const AUDIT_CATEGORIES: Record<string, { categories?: string[]; eventTypes?: str
     "energyiq.changes_made_live", "energyiq.data_import", "energyiq.live_connection", "energyiq.locations_", "energyiq.analysis_rules",
     "energyiq.overview_layout", "energyiq.budget_carbon", "energyiq.report_"] },
   ai: { categories: ["energyiq.ai_"] },
+  platform: { categories: ["energyiq.platform_", "energyiq.support_", "energyiq.audit_"] },
 };
 
 /** The platform audit history for super admins: a page of events as JSON, or every matching event as a CSV file. */
@@ -4934,20 +4943,19 @@ const auditHistoryResponse = (metadataStore: MetadataStore, params: URLSearchPar
   });
   if (params.get("format") === "csv") {
     const rows: string[][] = [["When (UTC)", "Who", "What", "Affected", "Organisation", "Project", "IP address", "Details"]];
+    // Every matching event, page by page: an auditor's export must not stop at an arbitrary row count.
     let before: string | undefined;
-    for (let page = 0; page < 20; page += 1) {
+    do {
       const result = metadataStore.authAuditEvents.list({ ...filter, limit: 500, ...(before ? { before } : {}) });
       for (const event of result.events.map(shape)) {
         rows.push([event.at, event.email ?? "", event.type, event.target ?? "", event.organisation ?? "", event.project ?? "", event.ip ?? "", event.action ?? JSON.stringify(event.details)]);
       }
-      if (!result.next) break;
       before = result.next;
-    }
-    const cell = (value: string) => /[",\n]/u.test(value) ? `"${value.replace(/"/gu, '""')}"` : value;
+    } while (before);
     return {
       status: 200,
       headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": "attachment; filename=\"audit-history.csv\"" },
-      body: Buffer.from(`\ufeff${rows.map((row) => row.map(cell).join(",")).join("\r\n")}\r\n`, "utf8"),
+      body: csvBody(rows),
     };
   }
   const limit = Number(params.get("limit") ?? 100);

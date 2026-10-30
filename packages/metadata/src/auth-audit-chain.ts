@@ -389,8 +389,10 @@ function* verifyAuditChainSteps(
 
 /**
  * SQL (with its parameters) for the events that concern one Organisation: those whose details name it, and the
- * sign-in, MFA and SSO events (`auth.*`) of the people who belong to it. Nothing else matches, so one client's
- * admins never see another client's activity.
+ * sign-in, password, MFA and SSO events (`auth.*`) of the people who belong to it. Invitations are left out of the
+ * latter: a person in two Organisations may invite someone into the other one, and that Organisation's own
+ * `team_member_invited` event already names it. Nothing else matches, so one client's admins never see another
+ * client's activity.
  */
 export const organisationAuditScopeSql = (workspaceId: string): { sql: string; params: string[] } => ({
   sql: `(
@@ -402,7 +404,8 @@ export const organisationAuditScopeSql = (workspaceId: string): { sql: string; p
       OR (json_type(metadata_json, '$.organisationIds') = 'array'
         AND EXISTS (SELECT 1 FROM json_each(metadata_json, '$.organisationIds') AS organisation WHERE organisation.value = ?))
     ) ELSE 0 END)
-    OR (event_type LIKE 'auth.%' AND user_id IN (SELECT user_id FROM workspace_memberships WHERE workspace_id = ?))
+    OR (event_type LIKE 'auth.%' AND event_type NOT LIKE 'auth.invitation%'
+      AND user_id IN (SELECT user_id FROM workspace_memberships WHERE workspace_id = ?))
   )`,
   params: [workspaceId, workspaceId, workspaceId, workspaceId, workspaceId, workspaceId],
 });
