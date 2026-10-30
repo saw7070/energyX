@@ -4,14 +4,17 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AUTH_BUTTON_CLASS, AuthFlow, AuthLoadingScreen, PasswordAuthShell, type AuthMode } from "../../components/auth/auth-flow";
 import { SsoSignInForm, SsoSignInLink } from "../../components/auth/sso-sign-in";
+import { TwoStepSignIn } from "../../components/auth/two-step-sign-in";
 import { configApi, isLocalDevAdminAvailable, isPasswordAuthMode } from "../../lib/config-api/client";
 import { ssoErrorMessage } from "../../lib/config-api/organisation-sign-in";
+import type { TwoStepPromptDto } from "../../lib/config-api/types";
 
 export function LoginClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [checking, setChecking] = useState(true);
   const [localAdminAvailable, setLocalAdminAvailable] = useState(false);
+  const [twoStep, setTwoStep] = useState<TwoStepPromptDto | null>(null);
   const returnTo = useMemo(() => safeEnergyIqReturnTo(searchParams.get("returnTo")), [searchParams]);
   // Single sign-on: chosen on this page (?sso=1), or the organisation's sign-in sent the person back (?sso_error=).
   const ssoError = useMemo(() => ssoErrorMessage(searchParams.get("sso_error")), [searchParams]);
@@ -87,6 +90,9 @@ export function LoginClient() {
     );
   }
 
+  if (twoStep) {
+    return <TwoStepSignIn prompt={twoStep} onAuthenticated={redirectAfterAuthentication} onCancel={() => setTwoStep(null)} />;
+  }
   if (ssoMode && authEntry.mode === "login") {
     return (
       <PasswordAuthShell title="Sign in with SSO" subtitle="Use your organisation’s account">
@@ -102,6 +108,7 @@ export function LoginClient() {
       initialToken={authEntry.token}
       onAuthenticated={redirectAfterAuthentication}
       alternativeSignIn={<SsoSignInLink onClick={() => setSsoMode(true)} />}
+      onTwoStep={setTwoStep}
     />
   );
 }

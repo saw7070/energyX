@@ -101,6 +101,13 @@ Two formal environments share the same start commands:
 
 Password mode adds `/api/v1/auth/*` endpoints for registration, login, email verification, password reset, logout, session listing, and password change. Unsafe requests require `X-CSRF-Token` from the `df_csrf` cookie. The session cookie is `df_session`.
 
+Sign-in protections in password mode:
+
+- Two-step verification with an authenticator app (RFC 6238 codes). When it is on, a correct password returns `{ twoStep: { mode, challenge } }` and no cookies; `POST /api/v1/auth/mfa/verify` with the challenge and a `code` or `recoveryCode` issues the session. People manage it under `/api/v1/auth/mfa` (Settings → Security in the web app). Authenticator secrets are encrypted with `SECRET_MASTER_KEY`; recovery codes are stored only as keyed hashes.
+- It is required for members of an Organisation whose admins turn on "Require two-step verification" (Team page), and for platform super admins unless `ENERGYX_REQUIRE_MFA_FOR_PLATFORM_ADMINS=false`. Anyone required who has not set it up is taken through setup straight after their password. Super admins can reset it for someone who lost their phone.
+- Ten wrong passwords for one email within 15 minutes pause password sign-in to it for 15 minutes. New and changed passwords need 12 characters and may not be a common password.
+- A session unused for `ENERGYX_SESSION_IDLE_MINUTES` (default 120) ends. "Remember me" (30 days) is opt-in; otherwise the session ends with the browser, or after 12 hours.
+
 Also set `NEXT_PUBLIC_DATAFOUNDRY_AUTH_MODE=password` and leave `NEXT_PUBLIC_AGENT_RUNTIME_URL` / `NEXT_PUBLIC_CONFIG_API_URL` empty so the browser uses the same-origin Next BFF; point the upstream API with `API_PROXY_TARGET` in `apps/web/.env.local`. Start with `npm run build && npm run build:web && npm run start:api && npm run start:web`. Real-production reverse-proxy sample: `deploy/nginx.datafoundry.conf.example`.
 
 Real production also needs secret management, audit export, access control, and operations monitoring.

@@ -26,24 +26,24 @@ const cookiesFor = (input: Parameters<typeof appendAuthCookies>[1]): string[] =>
 };
 
 describe("Remember me", () => {
-  it("keeps a remembered sign-in for 30 days and limits an unremembered one to 12 hours", async () => {
+  it("keeps a remembered sign-in for 30 days and limits any other to 12 hours", async () => {
     const root = mkdtempSync(join(tmpdir(), "auth-remember-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
     try {
       const auth = new AuthService(metadata, authConfig);
       const invitation = await auth.inviteUser({ email: "member@example.test", inviterUserId: "dev-user" });
       const token = new URL(invitation.invitationUrl ?? "").searchParams.get("invite") ?? "";
-      await auth.acceptInvitation({ token, password: "welcome12" });
+      await auth.acceptInvitation({ token, password: "plant-room-meter-42" });
 
-      const remembered = await auth.login({ email: "member@example.test", password: "welcome12", rememberMe: true });
+      const remembered = await auth.login({ email: "member@example.test", password: "plant-room-meter-42", rememberMe: true });
       expect(remembered).toMatchObject({ persistent: true, maxAgeSeconds: 60 * 60 * 24 * 30 });
 
-      const shortLived = await auth.login({ email: "member@example.test", password: "welcome12", rememberMe: false });
+      const shortLived = await auth.login({ email: "member@example.test", password: "plant-room-meter-42", rememberMe: false });
       expect(shortLived).toMatchObject({ persistent: false, maxAgeSeconds: 60 * 60 * 12 });
 
-      // Older clients that do not send the flag keep the previous 30-day behaviour.
-      const legacy = await auth.login({ email: "member@example.test", password: "welcome12" });
-      expect(legacy.persistent).toBe(true);
+      // "Remember me" is opt-in: a client that does not send the flag gets a sign-in that ends with the browser.
+      const unflagged = await auth.login({ email: "member@example.test", password: "plant-room-meter-42" });
+      expect(unflagged).toMatchObject({ persistent: false });
     } finally {
       metadata.close();
       rmSync(root, { recursive: true, force: true });

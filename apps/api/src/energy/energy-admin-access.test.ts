@@ -47,8 +47,9 @@ describe("EnergyAdminAccessService", () => {
       const invitationToken = new URL(invited.invitationUrl ?? "").searchParams.get("invite") ?? "";
       const activated = await auth.acceptInvitation({
         token: invitationToken,
-        password: "welcome1"
+        password: "plant-room-meter-42"
       });
+      if ("twoStep" in activated) throw new Error("A Viewer who is not required to use two-step verification signs straight in.");
       expect(activated.sessionToken).toBeTruthy();
       expect(service.listUsers().find((user) => user.id === invited.user.id)?.status).toBe("active");
 
@@ -101,9 +102,9 @@ describe("EnergyAdminAccessService", () => {
       });
       const firstToken = new URL(first.invitationUrl ?? "").searchParams.get("invite") ?? "";
       const secondToken = new URL(second.invitationUrl ?? "").searchParams.get("invite") ?? "";
-      await expect(auth.acceptInvitation({ token: firstToken, password: "welcome1" }))
+      await expect(auth.acceptInvitation({ token: firstToken, password: "plant-room-meter-42" }))
         .rejects.toThrow("Token is invalid or expired");
-      await expect(auth.acceptInvitation({ token: secondToken, password: "welcome1" }))
+      await expect(auth.acceptInvitation({ token: secondToken, password: "plant-room-meter-42" }))
         .resolves.toMatchObject({ user: { email: "fm@example.com" } });
     } finally {
       metadata.close();

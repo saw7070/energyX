@@ -63,6 +63,30 @@ export type MeResponseDto = {
   workspace: IdentityWorkspace;
 };
 
+/** A correct password that still needs a two-step verification code ("verify") or setting it up ("enroll"). */
+export type TwoStepPromptDto = {
+  mode: "verify" | "enroll";
+  challenge: string;
+  expiresAt: string;
+  requiredBy?: "organisation" | "platform";
+};
+
+/** What a sign-in step answers: signed in, or what two-step verification still needs before a session exists. */
+export type SignInResponseDto = (MeResponseDto & { recoveryCodes?: string[] }) | { twoStep: TwoStepPromptDto };
+
+export type TwoStepStatusDto = {
+  enabled: boolean;
+  required: boolean;
+  requiredBy?: "organisation" | "platform";
+  recoveryCodesLeft: number;
+  /** False when the server cannot store authenticator secrets, so it cannot be turned on. */
+  available: boolean;
+};
+
+export type TwoStepSetupDto = { secret: string; otpauthUri: string };
+
+export type EnergyTeamSecurityDto = { required: boolean; membersWithoutTwoStep: number; canChange: boolean };
+
 export type EnergyRole = "user" | "admin";
 
 export type EnergyWorkspaceDto = {
@@ -94,6 +118,8 @@ export type EnergyAdminUserDto = {
   organisationRoles: Record<string, { roleId: string; roleName: string }>;
   projectIds: string[];
   lastLoginAt?: string;
+  /** Whether the person has finished setting up two-step verification. */
+  twoStepEnabled?: boolean;
   createdAt: string;
 };
 

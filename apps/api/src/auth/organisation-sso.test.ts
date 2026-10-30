@@ -321,9 +321,9 @@ describe("Google Workspace", () => {
 describe("Require single sign-on", () => {
   it("refuses password sign-in, invitations and password resets for members, but not for super admins", async () => {
     await setup(async ({ metadata, auth, acme, other, addMember, configure, events, admin }) => {
-      await addMember("sam@acme.test", [acme.id], "password-1");
-      await addMember("both@acme.test", [acme.id, other.id], "password-2");
-      const boss = await addMember("boss@acme.test", [acme.id], "password-3");
+      await addMember("sam@acme.test", [acme.id], "sam-password-1");
+      await addMember("both@acme.test", [acme.id, other.id], "both-password-2");
+      const boss = await addMember("boss@acme.test", [acme.id], "boss-password-3");
       metadata.energyIq.upsertUserRole({ user_id: boss.id, role: "admin" });
       const pending = await admin.inviteUser({ actorUserId: "dev-user", email: "pending@acme.test", organisationIds: [acme.id], role: "user" });
       const resetBefore = await (async () => {
@@ -337,10 +337,10 @@ describe("Require single sign-on", () => {
 
       await configure({ requireSso: true });
 
-      await expect(auth.login({ email: "sam@acme.test", password: "password-1" })).rejects.toMatchObject({ status: 403, code: "SSO_REQUIRED" });
+      await expect(auth.login({ email: "sam@acme.test", password: "sam-password-1" })).rejects.toMatchObject({ status: 403, code: "SSO_REQUIRED" });
       await expect(auth.resetPassword({ token: resetBefore, password: "new-password" })).rejects.toMatchObject({ code: "SSO_REQUIRED" });
       const inviteToken = new URL(pending.invitationUrl ?? "").searchParams.get("invite") ?? "";
-      await expect(auth.acceptInvitation({ token: inviteToken, password: "password-9" })).rejects.toMatchObject({ code: "SSO_REQUIRED" });
+      await expect(auth.acceptInvitation({ token: inviteToken, password: "invited-password-9" })).rejects.toMatchObject({ code: "SSO_REQUIRED" });
       const logged: string[] = [];
       const original = console.log;
       console.log = (line: string) => { logged.push(String(line)); };
@@ -352,13 +352,13 @@ describe("Require single sign-on", () => {
       expect(logged.some((line) => line.includes("password-reset link"))).toBe(false);
       expect(events("auth.password_refused_sso_required").length).toBeGreaterThanOrEqual(3);
 
-      // Break-glass: EnergyX super admins always keep their password.
-      await expect(auth.login({ email: "boss@acme.test", password: "password-3" })).resolves.toMatchObject({ persistent: true });
+      // Break-glass: EnergyX super admins always keep their password, though they still need two-step verification.
+      await expect(auth.login({ email: "boss@acme.test", password: "boss-password-3", rememberMe: true })).resolves.toMatchObject({ twoStep: { mode: "enroll" } });
       // Someone who also belongs to another client cannot use this client's single sign-on, so keeps the password.
-      await expect(auth.login({ email: "both@acme.test", password: "password-2" })).resolves.toMatchObject({ persistent: true });
+      await expect(auth.login({ email: "both@acme.test", password: "both-password-2", rememberMe: true })).resolves.toMatchObject({ persistent: true });
 
       await configure({ requireSso: false });
-      await expect(auth.login({ email: "sam@acme.test", password: "password-1" })).resolves.toMatchObject({ persistent: true });
+      await expect(auth.login({ email: "sam@acme.test", password: "sam-password-1", rememberMe: true })).resolves.toMatchObject({ persistent: true });
     });
   });
 });

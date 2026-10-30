@@ -9,9 +9,12 @@ vi.mock("../_components/energyiq-access", () => ({ useEnergyIqAccess: () => acce
 import { configApi } from "../../../lib/config-api";
 import { EnergyIqTeam } from "./team-client";
 
-beforeEach(() => { vi.stubGlobal("React", React); globalThis.IS_REACT_ACT_ENVIRONMENT = true; });
-// The sign-in and provisioning section has its own tests (organisation-sign-in-card.test.tsx); keep it loading here.
-beforeEach(() => { vi.spyOn(configApi, "organisationSignInRequest").mockReturnValue(new Promise(() => undefined)); });
+beforeEach(() => {
+  vi.stubGlobal("React", React); globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  vi.spyOn(configApi, "getEnergyTeamSecurity").mockResolvedValue({ required: false, membersWithoutTwoStep: 0, canChange: true });
+  // The sign-in and provisioning section has its own tests (organisation-sign-in-card.test.tsx); keep it loading here.
+  vi.spyOn(configApi, "organisationSignInRequest").mockReturnValue(new Promise(() => undefined));
+});
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); document.body.innerHTML = ""; });
 
 const render = async () => {

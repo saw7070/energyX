@@ -177,7 +177,8 @@ describe("SCIM 2.0 provisioning", () => {
         organisationRoles: { [acme.id]: ENERGYIQ_ORGANISATION_ADMIN_ROLE_ID }
       });
       const token = new URL(invited.invitationUrl ?? "").searchParams.get("invite") ?? "";
-      const session = await auth.acceptInvitation({ token, password: "password-1" });
+      const session = await auth.acceptInvitation({ token, password: "invited-password-1" });
+      if (!("sessionToken" in session)) throw new Error("Expected a signed-in session");
       const id = invited.user.id;
 
       const off = await scim(acmeKey, "PATCH", `/Users/${id}`, { Operations: [{ op: "Replace", path: "active", value: "False" }] });

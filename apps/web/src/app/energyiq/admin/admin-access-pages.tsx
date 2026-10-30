@@ -34,9 +34,11 @@ export function AdminAccessPages({ initialView }: AdminAccessPagesProps) {
     | { kind: "deleteProject"; project: MovableProject }
     | { kind: "deleteOrganisation"; organisation: EnergyAdminOrganisationDto }
     | { kind: "deleteRole"; role: EnergyAdminRoleDto }
+    | { kind: "resetTwoStep"; user: EnergyAdminUserDto }
     | null
   >(null);
   const [deletingRole, setDeletingRole] = useState(false);
+  const [resettingTwoStep, setResettingTwoStep] = useState(false);
   const [invitationUrl, setInvitationUrl] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -126,6 +128,7 @@ export function AdminAccessPages({ initialView }: AdminAccessPagesProps) {
               setError(messageFrom(reason, "Failed to resend invitation"));
             }
           }}
+          onResetTwoStep={(user) => setDialog({ kind: "resetTwoStep", user })}
         />
       )}
 
@@ -189,6 +192,30 @@ export function AdminAccessPages({ initialView }: AdminAccessPagesProps) {
               setError(messageFrom(reason, "Failed to delete role"));
             } finally {
               setDeletingRole(false);
+            }
+          }}
+        />
+      ) : null}
+      {dialog?.kind === "resetTwoStep" ? (
+        <ConfirmDialog
+          danger
+          busy={resettingTwoStep}
+          title="Reset two-step verification?"
+          message={`${dialog.user.displayName ?? dialog.user.email ?? "This person"} will be signed out everywhere, and their authenticator app and recovery codes will stop working. If two-step verification is required for them, they set it up again at their next sign-in. Do this only when you are sure who is asking, for example after a lost phone.`}
+          confirmLabel={resettingTwoStep ? "Resetting…" : "Reset"}
+          onCancel={() => setDialog(null)}
+          onConfirm={async () => {
+            const user = dialog.user;
+            setResettingTwoStep(true);
+            setError(null);
+            try {
+              await configApi.resetEnergyAdminUserTwoStep(user.id);
+              await finishMutation(`Two-step verification was reset for ${user.email ?? user.displayName ?? "this user"}.`);
+            } catch (reason) {
+              setDialog(null);
+              setError(messageFrom(reason, "Failed to reset two-step verification"));
+            } finally {
+              setResettingTwoStep(false);
             }
           }}
         />
@@ -314,12 +341,14 @@ function UsersView({
   onInvite,
   onEdit,
   onResend,
+  onResetTwoStep,
 }: {
   users: EnergyAdminUserDto[];
   organisations: EnergyAdminOrganisationDto[];
   onInvite: () => void;
   onEdit: (user: EnergyAdminUserDto) => void;
   onResend: (user: EnergyAdminUserDto) => Promise<void>;
+  onResetTwoStep: (user: EnergyAdminUserDto) => void;
 }) {
   const [query, setQuery] = useState("");
   const [organisationId, setOrganisationId] = useState("all");
@@ -377,10 +406,17 @@ function UsersView({
                   : <span className="text-xs text-muted-light">Platform access only</span>}
               </div>
               <span className="text-xs font-medium capitalize">{user.role === "admin" ? "Admin" : [...new Set(Object.values(user.organisationRoles).map((entry) => entry.roleName))].join(", ") || "User"}</span>
-              <div><StatusBadge status={user.status} /><p className="mt-1 text-[10px] text-muted-light">{formatLastLogin(user.lastLoginAt)}</p></div>
+              <div>
+                <StatusBadge status={user.status} />
+                <p className="mt-1 text-[10px] text-muted-light">{formatLastLogin(user.lastLoginAt)}</p>
+                {user.twoStepEnabled ? <p className="mt-0.5 text-[10px] text-muted-light">Two-step verification on</p> : null}
+              </div>
               <div className="flex justify-end gap-2">
                 {user.status === "pending" ? (
                   <button type="button" onClick={() => void onResend(user)} className={secondaryButton}>Resend</button>
+                ) : null}
+                {user.twoStepEnabled ? (
+                  <button type="button" onClick={() => onResetTwoStep(user)} className={secondaryButton}>Reset two-step</button>
                 ) : null}
                 <button type="button" onClick={() => onEdit(user)} className={secondaryButton}>Edit</button>
               </div>

@@ -1,10 +1,17 @@
 export type AuthMode = "dev" | "password";
 
+/** A session unused for this long ends (ENERGYX_SESSION_IDLE_MINUTES). */
+export const DEFAULT_SESSION_IDLE_MINUTES = 120;
+
 export type PasswordAuthConfig = {
   mode: AuthMode;
   publicBaseUrl: string;
   sessionSecret: string;
   emailDelivery: "smtp" | "test";
+  /** Minutes without any request after which a session ends. Defaults to DEFAULT_SESSION_IDLE_MINUTES. */
+  sessionIdleMinutes?: number;
+  /** Whether platform super admins must use two-step verification to sign in with a password. Defaults to true. */
+  requireTwoStepForPlatformAdmins?: boolean;
   smtp?: {
     from: string;
     host: string;
@@ -21,7 +28,9 @@ export function loadPasswordAuthConfig(env: Record<string, string | undefined>):
     mode,
     publicBaseUrl: env.AUTH_PUBLIC_BASE_URL ?? "",
     sessionSecret: env.AUTH_SESSION_SECRET ?? "",
-    emailDelivery: env.AUTH_EMAIL_DELIVERY === "test" ? "test" : "smtp"
+    emailDelivery: env.AUTH_EMAIL_DELIVERY === "test" ? "test" : "smtp",
+    sessionIdleMinutes: parseIdleMinutes(env.ENERGYX_SESSION_IDLE_MINUTES),
+    requireTwoStepForPlatformAdmins: env.ENERGYX_REQUIRE_MFA_FOR_PLATFORM_ADMINS?.trim().toLowerCase() !== "false"
   };
   if (env.SMTP_HOST || env.AUTH_SMTP_HOST) {
     config.smtp = {
@@ -63,6 +72,14 @@ function isPublicBaseUrl(value: string | undefined): boolean {
     return false;
   }
   return !(hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname.endsWith(".localhost"));
+}
+
+function parseIdleMinutes(value: string | undefined): number {
+  const minutes = Number(value?.trim() || DEFAULT_SESSION_IDLE_MINUTES);
+  if (!Number.isFinite(minutes) || minutes < 1) {
+    throw new Error("AUTH_CONFIG_INVALID:ENERGYX_SESSION_IDLE_MINUTES must be a number of minutes, 1 or more.");
+  }
+  return minutes;
 }
 
 function parseAuthMode(value: string | undefined, nodeEnv: string | undefined): AuthMode {
