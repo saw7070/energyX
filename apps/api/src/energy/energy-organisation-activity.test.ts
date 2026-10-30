@@ -152,7 +152,7 @@ describe("Organisation Activity", () => {
     const csv = activity(metadata, user(eliteAdmin), elite.id, "format=csv");
     expect(csv.headers?.["Content-Disposition"]).toBe("attachment; filename=\"elite-iot-activity.csv\"");
     const lines = (csv.body as Buffer).toString("utf8").trimEnd().split("\r\n");
-    expect(lines[0]).toBe("﻿When (UTC),Who,Email,What,Project,Affected,IP address,Event type,Technical detail");
+    expect(lines[0]).toBe("\ufeffWhen (UTC),Who,Email,What,Project,Affected,IP address,Event type,Technical detail");
     const bulkRows = lines.filter((line) => line.includes(",Used AI,"));
     expect(bulkRows).toHaveLength(10_050);
     expect(lines.some((line) => line.includes("Other Client") || line.includes("HYPERLINK"))).toBe(false);

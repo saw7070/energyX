@@ -136,7 +136,7 @@ export const csvBody = (rows: string[][]): Buffer => {
     const value = /^[=+\-@\t\r]/u.test(raw) ? `'${raw}` : raw;
     return /[",\r\n]/u.test(value) ? `"${value.replace(/"/gu, '""')}"` : value;
   };
-  return Buffer.from(`﻿${rows.map((row) => row.map(cell).join(",")).join("\r\n")}\r\n`, "utf8");
+  return Buffer.from(`\ufeff${rows.map((row) => row.map(cell).join(",")).join("\r\n")}\r\n`, "utf8");
 };
 
 export const organisationActivityResponse = (
