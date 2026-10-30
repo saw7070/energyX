@@ -2,6 +2,8 @@ import { createErrorResult, createSuccessResult } from "@datafoundry/contracts";
 import type { MetadataStore, UserRecord } from "@datafoundry/metadata";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
+import { handleScimRequest } from "../scim/scim-routes.js";
+import { ScimService } from "../scim/scim-service.js";
 import type { PasswordAuthConfig } from "./config.js";
 import { appendAuthCookies, parseCookies } from "./cookies.js";
 import { OrganisationSsoService, SsoSignInError, type SaveSsoInput } from "./organisation-sso.js";
@@ -10,10 +12,11 @@ import type { OutboundHttpClient } from "./safe-http.js";
 import { AuthError, type AuthService } from "./service.js";
 
 /**
- * HTTP routes for Organisation single sign-on.
+ * HTTP routes for Organisation single sign-on and SCIM provisioning.
  *
- * - `handleBeforeSessionAuth` runs before the server looks at the session cookie: the two sign-in steps
- *   (`POST /api/v1/auth/sso/start`, `GET /api/v1/auth/sso/callback`), which happen before anyone is signed in.
+ * - `handleBeforeSessionAuth` runs before the server looks at the session cookie: SCIM requests (authenticated by a
+ *   provisioning key only) and the two sign-in steps (`POST /api/v1/auth/sso/start`, `GET /api/v1/auth/sso/callback`),
+ *   which happen before anyone is signed in.
  * - `handleSettings` runs after session authentication and the CSRF check: the Team page's sign-in settings under
  *   `/api/v1/organisation-sign-in`.
  *
@@ -29,6 +32,7 @@ const MAX_BODY_BYTES = 64 * 1024;
 
 export type OrganisationIdentityRoutes = {
   sso: OrganisationSsoService;
+  scim: ScimService;
   handleBeforeSessionAuth: (request: IncomingMessage, response: ServerResponse, url: URL) => Promise<boolean>;
   handleSettings: (
     request: IncomingMessage,
@@ -47,12 +51,23 @@ export const createOrganisationIdentityRoutes = (dependencies: {
   now?: () => number;
 }): OrganisationIdentityRoutes => {
   const sso = new OrganisationSsoService(dependencies);
+  const scim = new ScimService({
+    metadataStore: dependencies.metadataStore,
+    hashKey: (key) => sso.hash("scim-key", key),
+    ...(dependencies.env ? { env: dependencies.env } : {}),
+    ...(dependencies.now ? { now: dependencies.now } : {})
+  });
   const publicBaseUrl = dependencies.authConfig.publicBaseUrl.replace(/\/+$/u, "");
   const passwordMode = dependencies.authConfig.mode === "password";
 
   return {
     sso,
+    scim,
     handleBeforeSessionAuth: async (request, response, url) => {
+      if (url.pathname === "/api/v1/scim/v2" || url.pathname.startsWith("/api/v1/scim/v2/")) {
+        await handleScimRequest(request, response, url, scim, publicBaseUrl || requestOrigin(request));
+        return true;
+      }
       if (!url.pathname.startsWith(`${SSO_COOKIE_PATH}/`)) return false;
       if (!passwordMode) {
         sendJson(response, 404, createErrorResult("NOT_ENABLED", "Single sign-on works only when password sign-in is switched on."));
