@@ -191,7 +191,9 @@ export class EnergyTeamAccessService {
         ...(user.email ? { email: user.email } : {}),
         status: user.disabled_at
           ? "disabled"
-          : user.dev_token || (user.email_verified_at && user.password_updated_at)
+          // Joined: activated an invitation (password set) or signed in through single sign-on, which
+          // verifies the email address without ever setting a password.
+          : user.dev_token || user.email_verified_at
             ? "active"
             : "pending",
         roleName: this.metadataStore.energyIq.roles.find(membership.role_id ?? ENERGYIQ_VIEWER_ROLE_ID)?.name ?? "Unknown role",

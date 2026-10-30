@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AUTH_BUTTON_CLASS, AuthFlow, AuthLoadingScreen, PasswordAuthShell, type AuthMode } from "../../components/auth/auth-flow";
+import { SsoSignInForm, SsoSignInLink } from "../../components/auth/sso-sign-in";
 import { configApi, isLocalDevAdminAvailable, isPasswordAuthMode } from "../../lib/config-api/client";
+import { ssoErrorMessage } from "../../lib/config-api/organisation-sign-in";
 
 export function LoginClient() {
   const router = useRouter();
@@ -11,6 +13,9 @@ export function LoginClient() {
   const [checking, setChecking] = useState(true);
   const [localAdminAvailable, setLocalAdminAvailable] = useState(false);
   const returnTo = useMemo(() => safeEnergyIqReturnTo(searchParams.get("returnTo")), [searchParams]);
+  // Single sign-on: chosen on this page (?sso=1), or the organisation's sign-in sent the person back (?sso_error=).
+  const ssoError = useMemo(() => ssoErrorMessage(searchParams.get("sso_error")), [searchParams]);
+  const [ssoMode, setSsoMode] = useState(() => searchParams.get("sso") === "1" || ssoError !== null);
   const authEntry = useMemo<{ mode: AuthMode; token: string }>(() => {
     const invite = searchParams.get("invite");
     if (invite) return { mode: "invite", token: invite };
@@ -82,12 +87,21 @@ export function LoginClient() {
     );
   }
 
+  if (ssoMode && authEntry.mode === "login") {
+    return (
+      <PasswordAuthShell title="Sign in with SSO" subtitle="Use your organisation’s account">
+        <SsoSignInForm returnTo={returnTo} error={ssoError} onBack={() => setSsoMode(false)} />
+      </PasswordAuthShell>
+    );
+  }
+
   return (
     <AuthFlow
       key={`${authEntry.mode}:${authEntry.token}`}
       initialMode={authEntry.mode}
       initialToken={authEntry.token}
       onAuthenticated={redirectAfterAuthentication}
+      alternativeSignIn={<SsoSignInLink onClick={() => setSsoMode(true)} />}
     />
   );
 }

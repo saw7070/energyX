@@ -13,6 +13,7 @@ import {
 } from "../../../lib/config-api";
 import { useEnergyIqAccess } from "../_components/energyiq-access";
 import { OrganisationAiCard } from "./organisation-ai-card";
+import { OrganisationSignInSettings } from "./organisation-sign-in-card";
 import { friendlyErrorMessage } from "../_components/friendly-error";
 import { EnergyIcon, type EnergyIconName } from "../_components/icons";
 import styles from "../_components/project-configuration-view.module.css";
@@ -148,6 +149,7 @@ export function EnergyIqTeam() {
           }
         }}
       />
+      {canWrite ? <OrganisationSignInSettings workspaceId={workspaceId} /> : null}
     </div>
   );
 }

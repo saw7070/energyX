@@ -5,6 +5,7 @@ import { configApi, type EnergyAuditEventDto, type EnergyAuditFilterDto } from "
 import { EnergyIcon } from "../_components/icons";
 import { EnergySelect } from "../_components/energy-select";
 import { friendlyErrorMessage } from "../_components/friendly-error";
+import { ORGANISATION_SIGN_IN_AUDIT_LABELS, ORGANISATION_SIGN_IN_AUDIT_WARNINGS } from "../../../lib/config-api/organisation-sign-in";
 
 /** Plain words for each recorded event. Anything new still shows, under its technical name. */
 export const AUDIT_EVENT_LABELS: Record<string, string> = {
@@ -60,9 +61,10 @@ export const AUDIT_EVENT_LABELS: Record<string, string> = {
   "energyiq.support_access": "Support looked at or changed a client's data",
   "energyiq.platform_config_changed": "Changed a platform setting",
   "energyiq.audit_retention_applied": "Removed audit records past the retention period",
+  ...ORGANISATION_SIGN_IN_AUDIT_LABELS,
 };
 
-const WARNINGS = new Set(["energyiq.ai_blocked", "auth.login_failed", "auth.login_unverified", "auth.password_reset_requested_unknown"]);
+const WARNINGS = new Set(["energyiq.ai_blocked", "auth.login_failed", "auth.login_unverified", "auth.password_reset_requested_unknown", ...ORGANISATION_SIGN_IN_AUDIT_WARNINGS]);
 const PERIODS = [
   { value: "7", label: "Last 7 days" },
   { value: "30", label: "Last 30 days" },

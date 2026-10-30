@@ -65,6 +65,7 @@ import { ensureBuiltinDtcGrowthDatasource } from "./builtin-dtc-growth-datasourc
 import { reclaimOrphanedQueuedAndRunningRuns } from "./stale-active-runs.js";
 import { loadPasswordAuthConfig, type PasswordAuthConfig } from "./auth/config.js";
 import { AuthService, type AuthIdentity } from "./auth/service.js";
+import { createOrganisationIdentityRoutes } from "./auth/sso-routes.js";
 import { serverDefaultConnectionStatus, isServerLlmEnvConfigured } from "./model-profile-connection-status.js";
 import {
   handleAuthApiRequest,
@@ -797,6 +798,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
     );
   const runCancelRegistry = new RunCancelRegistry();
   const authService = new AuthService(metadataStore, authConfig);
+  const organisationIdentity = createOrganisationIdentityRoutes({ metadataStore, authService, authConfig });
   ensureDevUser(metadataStore);
   ensureEnergyIqBootstrap(metadataStore);
   removeLegacyBuiltinDemoDataSourceOnce(metadataStore, DEV_USER.id);
@@ -1245,6 +1247,11 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
         return;
       }
 
+      // SCIM (provisioning key only) and the single sign-on steps run before any session or CSRF handling.
+      if (await organisationIdentity.handleBeforeSessionAuth(request, response, requestUrl)) {
+        return;
+      }
+
       if (isPasswordAuth(authConfig) && requestUrl.pathname.startsWith("/api/v1/auth/")) {
         let identity: AuthIdentity | undefined;
         try {
@@ -1273,6 +1280,13 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
           authContext.user.id,
           authContext.workspaceId,
         );
+      }
+
+      if (await organisationIdentity.handleSettings(request, response, requestUrl, {
+        user: authContext.identity.user,
+        workspaceId: authContext.workspaceId,
+      })) {
+        return;
       }
 
       const configResponse = await handleConfigApiRequest(request, requestUrl.pathname, {
