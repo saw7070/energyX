@@ -87,7 +87,8 @@ These endpoints are enabled when password auth mode is active:
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/healthz` | Process liveness. |
-| GET | `/ready` | Readiness: Mastra / builtins finished; response includes `startup_ms` and `phases`. |
+| GET | `/ready` | Readiness: startup finished and the metadata database, storage root, free disk and background jobs pass; 503 when a critical check fails. Includes `startup_ms`, `phases` and `checks`. |
+| GET | `/metrics` | Prometheus metrics; only from the host itself or with `Authorization: Bearer $ENERGYX_METRICS_TOKEN`. |
 | GET | `/api/v1/capabilities` | Read backend capability switches. |
 | GET | `/api/v1/me` | Read current identity. |
 
