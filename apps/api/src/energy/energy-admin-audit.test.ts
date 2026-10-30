@@ -37,7 +37,12 @@ describe("Audit history for super admins", () => {
   it("lists who changed a project's settings, newest first, filtered and paged, and downloads them as CSV", async () => {
     const { metadata, context } = setup();
     metadata.authAuditEvents.append({ id: "a1", event_type: "auth.login_succeeded", user_id: "dev-user" });
-    const change = Object.assign(new PassThrough(), { method: "POST", headers: { "x-forwarded-for": "203.0.113.9, 10.0.0.1", "user-agent": "Test" } }) as unknown as IncomingMessage;
+    // Behind our own proxy only its entry counts; the spoofable entry to its left is ignored.
+    const change = Object.assign(new PassThrough(), {
+      method: "POST",
+      headers: { "x-forwarded-for": "198.51.100.7, 203.0.113.9", "user-agent": "Test" },
+      socket: { remoteAddress: "127.0.0.1" },
+    }) as unknown as IncomingMessage;
     recordEnergyChange({
       metadataStore: metadata, request: change, segments: ["projects", "ngee-ann-polytechnic", "operational-policies", "tariff"],
       userId: "dev-user", workspaceId: NGEE_ANN_WORKSPACE_ID, status: 201,
