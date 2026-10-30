@@ -158,7 +158,9 @@ describe("Energy API business error mapping", () => {
       metadata.close();
       removeTemporaryEnergyFixture(root);
     }
-  });
+    // Materializes a real DuckDB Snapshot, which can take longer than vitest's 5 s default. A timeout
+    // here also leaves this test's fake clock and ENERGYIQ_DUCKDB_PATH in place for the next tests.
+  }, 30_000);
 
   it("rejects an explicitly unknown Period instead of silently using Last 30 days", async () => {
     const root = mkdtempSync(join(tmpdir(), "energy-api-period-"));
