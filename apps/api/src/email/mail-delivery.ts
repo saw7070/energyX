@@ -3,6 +3,7 @@ import { join } from "node:path";
 import nodemailer from "nodemailer";
 
 import { loadPasswordAuthConfig } from "../auth/config.js";
+import { environmentSubject, stagingEmailAllowed } from "../deployment-environment.js";
 
 /**
  * One way out for every email the server sends on its own (alerts, scheduled reports). It follows the same settings
@@ -44,7 +45,8 @@ export const createMailDelivery = (env: Record<string, string | undefined> = pro
   });
   return {
     mode: "smtp",
-    send: async (message) => {
+    send: async (unfiltered) => {
+      const message = forThisEnvironment(unfiltered, env);
       if (message.to.length === 0) return;
       // Recipients are blind-copied so a report sent to several people does not share their addresses.
       await transport.sendMail({
@@ -89,3 +91,10 @@ const pruneOutbox = (outbox: string): void => {
 };
 
 const safeFileName = (name: string): string => name.replace(/[^\w.\- ]+/gu, "_").slice(0, 120) || "attachment";
+
+/** On staging, only allowlisted people receive mail and the subject is marked; elsewhere the message is unchanged. */
+const forThisEnvironment = (message: MailMessage, env: Record<string, string | undefined>): MailMessage => ({
+  ...message,
+  to: message.to.filter((address) => stagingEmailAllowed(address, env)),
+  subject: environmentSubject(message.subject, env),
+});

@@ -1,5 +1,6 @@
 import nodemailer from "nodemailer";
 import type { PasswordAuthConfig } from "./config.js";
+import { environmentSubject, stagingEmailAllowed } from "../deployment-environment.js";
 
 export type AuthMailResult = {
   testToken?: string;
@@ -57,7 +58,8 @@ export class AuthMailer {
     url: string;
   }): Promise<AuthMailResult> {
     this.assertDeliveryConfigured();
-    if (this.config.emailDelivery === "test") {
+    // Staging never emails people outside its allowlist; the link is handed back exactly as in test mode.
+    if (this.config.emailDelivery === "test" || !stagingEmailAllowed(input.email)) {
       return { testToken: input.token, testUrl: input.url };
     }
     const smtp = this.config.smtp!;
@@ -72,7 +74,7 @@ export class AuthMailer {
     await transport.sendMail({
       from: smtp.from,
       to: input.email,
-      subject: input.subject,
+      subject: environmentSubject(input.subject),
       text: input.text
     });
     return {};

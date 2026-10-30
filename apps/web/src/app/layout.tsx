@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "@copilotkit/react-core/v2/styles.css";
+import { StagingBanner } from "../components/environment/staging-banner";
 
 export const metadata: Metadata = {
   title: {
@@ -17,7 +18,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className="font-sans antialiased">{children}</body>
+      <body className="font-sans antialiased">
+        <StagingBanner />
+        {children}
+      </body>
     </html>
   );
 }

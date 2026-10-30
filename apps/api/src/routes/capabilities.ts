@@ -1,5 +1,6 @@
 import { createErrorResult, createSuccessResult } from "@datafoundry/contracts";
 import type { ConfigApiResponse } from "./types.js";
+import { stdioMcpAllowed } from "../legacy-config-guard.js";
 
 const CAPABILITIES = {
   "artifact.export": true,
@@ -24,7 +25,7 @@ const CAPABILITIES = {
   "llm.samplingParams": true,
   knowledge: true,
   mcp: true,
-  "mcp.stdio": true,
+  "mcp.stdio": stdioMcpAllowed(),
   "mcp.toolPolicy": true,
   "skill.resourceBinding": true,
   skills: true
