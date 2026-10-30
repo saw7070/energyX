@@ -1,3 +1,4 @@
+import { ENERGYIQ_DECISION_BRIEF_SAFETY_LIMITS_V1 } from "@datafoundry/contracts";
 import { describe, expect, it } from "vitest";
 
 import type { PreschoolSectionPackV2 } from "./preschool-section-pack-v2.js";
@@ -197,7 +198,7 @@ describe("Preschool Section discovery", () => {
         status: "available",
         summary: { text: "One event is supported.", evidenceRefs: ["evidence:1"] },
         candidates: [],
-        limitation: "L".repeat(321),
+        limitation: "L".repeat(ENERGYIQ_DECISION_BRIEF_SAFETY_LIMITS_V1.sectionLimitationChars + 1),
       }),
       expectedSectionId: "standby-wastage",
       binding: pack.binding,

@@ -54,14 +54,7 @@ const USER_ID = "preparation-test-user";
 const WORKSPACE_ID = "preparation-test-workspace";
 const PROJECT_ID = "preparation-test-project";
 const DATASOURCE_ID = "preparation-test-datasource";
-const DATA_ANALYSIS_SKILL_CONTENT = readFileSync(join(
-  process.cwd(),
-  "packages",
-  "skills",
-  "builtin",
-  "data-analysis",
-  "SKILL.md",
-));
+const DATA_ANALYSIS_SKILL_CONTENT = readFileSync(new URL("../../../packages/skills/builtin/data-analysis/SKILL.md", import.meta.url));
 
 describe("DataFoundryAgUiAgent Energy preparation orchestration", () => {
   let root = "";

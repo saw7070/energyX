@@ -852,12 +852,14 @@ describe("Overview AI Artifact API", () => {
         context,
       );
 
+      // Imports and setup publication are gated by the Facility write permission of the
+      // user's Organisation role, which a workspace member does not have.
       for (const response of [materialize, publish]) {
         expect(response).toMatchObject({
           status: 403,
           body: {
             success: false,
-            error: { code: "FORBIDDEN", message: "ENERGYIQ_ADMIN_REQUIRED" },
+            error: { code: "FORBIDDEN", message: "ENERGYIQ_PROJECT_FORBIDDEN" },
           },
         });
       }

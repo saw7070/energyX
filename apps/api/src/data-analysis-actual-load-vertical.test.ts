@@ -15,14 +15,7 @@ import { createProjectAiOperationsReader } from "./energy/project-ai-operations.
 import { createRunAgentAssembly } from "./run-agent-assembly.js";
 import { emitRunSkillEvidenceAuditEvents } from "./run-config-audit.js";
 
-const BUILTIN_CONTENT = readFileSync(join(
-  process.cwd(),
-  "packages",
-  "skills",
-  "builtin",
-  "data-analysis",
-  "SKILL.md",
-));
+const BUILTIN_CONTENT = readFileSync(new URL("../../../packages/skills/builtin/data-analysis/SKILL.md", import.meta.url));
 
 describe("Issue #114 actual-loaded data-analysis vertical", () => {
   it("persists one idempotent exact event chain from the real builtin reader and projects it historically", async () => {

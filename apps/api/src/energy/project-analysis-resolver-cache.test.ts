@@ -54,7 +54,7 @@ describe("ProjectAnalysisResolver deterministic result reuse", () => {
     ], released)).toBe(false);
   });
 
-  it("publishes the current Overview when the exact six released Rule Revisions are permuted", async () => {
+  it("publishes the current Overview when the exact seven released Rule Revisions are permuted", async () => {
     const root = mkdtempSync(join(tmpdir(), "project-overview-rule-order-"));
     const databasePath = join(root, "energy.duckdb");
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
@@ -64,7 +64,8 @@ describe("ProjectAnalysisResolver deterministic result reuse", () => {
       await materializePreschoolGoldenFixture(databasePath, metadata);
       const catalogRuleRevisionIds = metadata.energyIq.rules.listRevisions()
         .map(({ revision_id }) => revision_id);
-      expect(catalogRuleRevisionIds).toHaveLength(6);
+      // Every built-in Rule Revision, including comparison.school_holiday_context@1.
+      expect(catalogRuleRevisionIds).toHaveLength(7);
       const releasedRuleRevisionIds = [...catalogRuleRevisionIds].reverse();
       const initialRuleConfig = metadata.energyIq.rules.getProjectConfig("preschool-demo");
       metadata.energyIq.rules.saveProjectConfig({

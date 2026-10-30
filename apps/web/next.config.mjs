@@ -46,6 +46,9 @@ export const securityHeaders = [
 /** @type {import("next").NextConfig} */
 const nextConfig = {
   poweredByHeader: false,
+  // Linting runs once for the whole repository (`npm run lint`, its own CI step). Without this,
+  // `next build` finds the root eslint.config.mjs and lints the app a second time during every build.
+  eslint: { ignoreDuringBuilds: true },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

@@ -26,7 +26,8 @@ describe("Energy import completion", () => {
     expect(earlierFirst.snapshot.id).toBe(laterFirst.snapshot.id);
     expect(JSON.parse(earlierFirst.snapshot.manifest_json)).toEqual(JSON.parse(laterFirst.snapshot.manifest_json));
     expect(JSON.parse(earlierFirst.snapshot.audit_json)).toEqual(JSON.parse(laterFirst.snapshot.audit_json));
-  });
+    // Two full DuckDB materializations; on a busy runner this exceeds vitest's 5 s default.
+  }, 30_000);
 });
 
 type SourceKey = "earlier" | "later";

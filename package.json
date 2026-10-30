@@ -46,6 +46,7 @@
   "scripts": {
     "build": "tsc -b tsconfig.build.json",
     "typecheck": "tsc -b tsconfig.build.json --pretty",
+    "lint": "eslint . --concurrency auto",
     "test:energyiq:seams": "npm --workspace @datafoundry/data-gateway run build && vitest run apps/api/src/energy/project-analysis-resolver.test.ts apps/api/src/energy/energy-api.saved-analysis.test.ts apps/api/src/energy/energy-analysis.test.ts apps/web/src/app/energyiq/_components/project-renderer-registry.test.tsx apps/web/src/app/energyiq/_components/published-decision-dashboard.test.ts apps/web/src/app/energyiq/_components/energy-template-renderer.test.tsx packages/agent-runtime/src/semantic/energy-query-semantic-provider.test.ts",
     "postinstall": "node scripts/postinstall.mjs",
     "predev:api": "node scripts/ensure-dev-environment.mjs",
@@ -112,12 +113,18 @@
     "seed:dtc-growth-demo": "node scripts/seed-dtc-growth-demo.mjs"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@next/eslint-plugin-next": "^15.5.28",
     "@types/busboy": "^1.5.4",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^24.0.0",
     "@types/pg": "^8.20.0",
     "@types/yauzl": "^3.4.0",
+    "eslint": "^10.13.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.13.0",
     "typescript": "^5.8.0",
+    "typescript-eslint": "^8.72.1",
     "vitest": "^3.2.6",
     "write-excel-file": "^4.1.1"
   },
