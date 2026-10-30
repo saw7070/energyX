@@ -3,13 +3,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AUTH_BUTTON_CLASS, AuthFlow, AuthLoadingScreen, PasswordAuthShell, type AuthMode } from "../../components/auth/auth-flow";
+import { TwoStepSignIn } from "../../components/auth/two-step-sign-in";
 import { configApi, isLocalDevAdminAvailable, isPasswordAuthMode } from "../../lib/config-api/client";
+import type { TwoStepPromptDto } from "../../lib/config-api/types";
 
 export function LoginClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [checking, setChecking] = useState(true);
   const [localAdminAvailable, setLocalAdminAvailable] = useState(false);
+  const [twoStep, setTwoStep] = useState<TwoStepPromptDto | null>(null);
   const returnTo = useMemo(() => safeEnergyIqReturnTo(searchParams.get("returnTo")), [searchParams]);
   const authEntry = useMemo<{ mode: AuthMode; token: string }>(() => {
     const invite = searchParams.get("invite");
@@ -82,12 +85,17 @@ export function LoginClient() {
     );
   }
 
+  if (twoStep) {
+    return <TwoStepSignIn prompt={twoStep} onAuthenticated={redirectAfterAuthentication} onCancel={() => setTwoStep(null)} />;
+  }
+
   return (
     <AuthFlow
       key={`${authEntry.mode}:${authEntry.token}`}
       initialMode={authEntry.mode}
       initialToken={authEntry.token}
       onAuthenticated={redirectAfterAuthentication}
+      onTwoStep={setTwoStep}
     />
   );
 }

@@ -9,8 +9,11 @@ import {
 } from "../../data-tasks/data-task-identity";
 import { useEnergyIqAccess } from "../_components/energyiq-access";
 import { EnergyIcon } from "../_components/icons";
+import { TwoStepSettings } from "./two-step-settings";
 
 const MAX_AVATAR_INPUT_BYTES = 5 * 1024 * 1024;
+/** The server also refuses the most common passwords. */
+const MIN_PASSWORD_LENGTH = 12;
 const AVATAR_SIZE = 256;
 
 export function EnergyIqSettings() {
@@ -89,8 +92,8 @@ export function EnergyIqSettings() {
     event.preventDefault();
     setPasswordMessage(null);
     setPasswordError(null);
-    if (newPassword.length < 6) {
-      setPasswordError("New password must be at least 6 characters.");
+    if (newPassword.length < MIN_PASSWORD_LENGTH) {
+      setPasswordError(`New password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -270,7 +273,7 @@ export function EnergyIqSettings() {
             <SettingsSection
               id="security"
               title="Security"
-              description="Update your password for this EnergyX account."
+              description="Your password and two-step verification for this EnergyX account."
             >
               {authMode === "password" ? (
                 <form onSubmit={handlePasswordSubmit} className="grid max-w-xl gap-4">
@@ -286,7 +289,7 @@ export function EnergyIqSettings() {
                     />
                   </SettingsField>
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <SettingsField label="New password" htmlFor="settings-new-password" hint="At least 6 characters.">
+                    <SettingsField label="New password" htmlFor="settings-new-password" hint={`At least ${MIN_PASSWORD_LENGTH} characters. Avoid common passwords.`}>
                       <input
                         id="settings-new-password"
                         type="password"
@@ -319,6 +322,11 @@ export function EnergyIqSettings() {
                     }
                   />
                 </form>
+              ) : null}
+              {authMode === "password" ? (
+                <div className="mt-6 border-t border-border pt-6">
+                  <TwoStepSettings />
+                </div>
               ) : (
                 <div className="rounded-lg border border-border bg-surface-subtle px-4 py-3 text-sm text-muted">
                   Password management is available when production password authentication is enabled.

@@ -12,6 +12,7 @@ import {
 } from "../../../lib/config-api";
 import { useEnergyIqAccess } from "../_components/energyiq-access";
 import { OrganisationAiCard } from "./organisation-ai-card";
+import { OrganisationSecurityCard } from "./organisation-security-card";
 import { friendlyErrorMessage } from "../_components/friendly-error";
 import { EnergyIcon, type EnergyIconName } from "../_components/icons";
 import styles from "../_components/project-configuration-view.module.css";
@@ -122,7 +123,7 @@ export function EnergyIqTeam() {
   return (
     <div data-team-page className="mx-auto min-w-0 max-w-[1440px] space-y-4 p-4 sm:p-6">
       <TeamView
-        aiCard={<OrganisationAiCard workspaceId={workspaceId} />}
+        aiCard={<><OrganisationAiCard workspaceId={workspaceId} /><OrganisationSecurityCard workspaceId={workspaceId} /></>}
         organisationName={team?.organisation.name}
         members={team?.members ?? null}
         roles={team?.roles ?? []}

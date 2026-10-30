@@ -9,7 +9,10 @@ vi.mock("../_components/energyiq-access", () => ({ useEnergyIqAccess: () => acce
 import { configApi } from "../../../lib/config-api";
 import { EnergyIqTeam } from "./team-client";
 
-beforeEach(() => { vi.stubGlobal("React", React); globalThis.IS_REACT_ACT_ENVIRONMENT = true; });
+beforeEach(() => {
+  vi.stubGlobal("React", React); globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  vi.spyOn(configApi, "getEnergyTeamSecurity").mockResolvedValue({ required: false, membersWithoutTwoStep: 0, canChange: true });
+});
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); document.body.innerHTML = ""; });
 
 const render = async () => {

@@ -22,6 +22,19 @@ export const AUDIT_EVENT_LABELS: Record<string, string> = {
   "auth.invitation_resent": "Invitation sent again",
   "auth.invitation_accepted": "Accepted an invitation",
   "auth.email_verified": "Verified their email",
+  "auth.account_locked": "Sign-in paused after too many wrong passwords",
+  "auth.login_locked": "Sign-in refused while paused",
+  "auth.session_idle_timeout": "Signed out after being inactive",
+  "auth.two_step_code_requested": "Asked for a two-step verification code",
+  "auth.two_step_setup_requested": "Asked to set up two-step verification",
+  "auth.two_step_failed": "Entered a wrong two-step verification code",
+  "auth.two_step_enabled": "Turned on two-step verification",
+  "auth.two_step_disabled": "Turned off two-step verification",
+  "auth.two_step_recovery_code_used": "Signed in with a recovery code",
+  "auth.two_step_recovery_codes_regenerated": "Made new recovery codes",
+  "auth.two_step_reset": "Reset someone's two-step verification",
+  "auth.two_step_requirement_skipped": "Two-step verification skipped: not set up on this server",
+  "energyiq.organisation_two_step_changed": "Changed whether a client requires two-step verification",
   "energyiq.user_updated": "Changed a user's account or access",
   "energyiq.user_access_assigned": "Gave a user access",
   "energyiq.team_member_invited": "Invited a team member",
@@ -57,7 +70,10 @@ export const AUDIT_EVENT_LABELS: Record<string, string> = {
   "energyiq.ai_settings_changed": "Changed AI settings",
 };
 
-const WARNINGS = new Set(["energyiq.ai_blocked", "auth.login_failed", "auth.login_unverified", "auth.password_reset_requested_unknown"]);
+const WARNINGS = new Set([
+  "energyiq.ai_blocked", "auth.login_failed", "auth.login_unverified", "auth.password_reset_requested_unknown",
+  "auth.account_locked", "auth.login_locked", "auth.two_step_failed", "auth.two_step_requirement_skipped",
+]);
 const PERIODS = [
   { value: "7", label: "Last 7 days" },
   { value: "30", label: "Last 30 days" },

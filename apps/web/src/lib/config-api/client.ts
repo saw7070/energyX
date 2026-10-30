@@ -88,6 +88,10 @@ import type {
   KnowledgeBaseDto,
   KnowledgeDocumentDto,
   MeResponseDto,
+  SignInResponseDto,
+  TwoStepSetupDto,
+  TwoStepStatusDto,
+  EnergyTeamSecurityDto,
   McpServerDto,
   ModelProfileDto,
   QueryHistoryItemDto,
@@ -400,11 +404,41 @@ export const configApi = {
     });
   },
 
-  login(body: { email: string; password: string; rememberMe?: boolean }): Promise<MeResponseDto> {
-    return requestEnvelope<MeResponseDto>("/api/v1/auth/login", {
+  login(body: { email: string; password: string; rememberMe?: boolean }): Promise<SignInResponseDto> {
+    return requestEnvelope<SignInResponseDto>("/api/v1/auth/login", {
       method: "POST",
       body: JSON.stringify(body),
     });
+  },
+
+  /** During sign-in, when two-step verification is required but not set up yet: the secret to add to an app. */
+  startTwoStepSignInSetup(body: { challenge: string }): Promise<TwoStepSetupDto> {
+    return requestEnvelope("/api/v1/auth/mfa/setup", { method: "POST", body: JSON.stringify(body) });
+  },
+
+  /** Finishes a sign-in with an authenticator code or a recovery code. */
+  completeTwoStepSignIn(body: { challenge: string; code?: string; recoveryCode?: string }): Promise<MeResponseDto & { recoveryCodes?: string[] }> {
+    return requestEnvelope("/api/v1/auth/mfa/verify", { method: "POST", body: JSON.stringify(body) });
+  },
+
+  getTwoStepStatus(): Promise<TwoStepStatusDto> {
+    return requestEnvelope("/api/v1/auth/mfa");
+  },
+
+  startTwoStepSetup(): Promise<TwoStepSetupDto> {
+    return requestEnvelope("/api/v1/auth/mfa/enable", { method: "POST", body: JSON.stringify({}) });
+  },
+
+  confirmTwoStepSetup(code: string): Promise<{ recoveryCodes: string[]; status: TwoStepStatusDto }> {
+    return requestEnvelope("/api/v1/auth/mfa/enable/confirm", { method: "POST", body: JSON.stringify({ code }) });
+  },
+
+  regenerateTwoStepRecoveryCodes(code: string): Promise<{ recoveryCodes: string[]; status: TwoStepStatusDto }> {
+    return requestEnvelope("/api/v1/auth/mfa/recovery-codes", { method: "POST", body: JSON.stringify({ code }) });
+  },
+
+  disableTwoStep(code: string): Promise<TwoStepStatusDto> {
+    return requestEnvelope("/api/v1/auth/mfa/disable", { method: "POST", body: JSON.stringify({ code }) });
   },
 
   verifyEmail(body: { token: string }): Promise<{ user: { id: string; email?: string; displayName?: string } }> {
@@ -447,8 +481,8 @@ export const configApi = {
     return requestEnvelope<MeResponseDto>("/api/v1/me");
   },
 
-  activateAccount(body: { displayName?: string; password: string; token: string }): Promise<MeResponseDto> {
-    return requestEnvelope<MeResponseDto>("/api/v1/auth/activate", {
+  activateAccount(body: { displayName?: string; password: string; token: string }): Promise<SignInResponseDto> {
+    return requestEnvelope<SignInResponseDto>("/api/v1/auth/activate", {
       method: "POST",
       body: JSON.stringify(body),
     });
@@ -607,6 +641,14 @@ export const configApi = {
     });
   },
 
+  /** Super admins: removes someone's two-step verification (a lost phone) and signs them out everywhere. */
+  resetEnergyAdminUserTwoStep(id: string): Promise<{ users: EnergyAdminUserDto[] }> {
+    return requestEnvelope(`/api/v1/energy/admin/users/${encodeURIComponent(id)}/reset-two-step`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  },
+
   /** People in the active Organisation. Only for platform admins and Organisation admins who manage people. */
   getEnergyTeam(): Promise<EnergyTeamDto> {
     return requestEnvelope("/api/v1/energy/team");
@@ -628,6 +670,15 @@ export const configApi = {
 
   removeEnergyTeamUser(userId: string): Promise<{ team: EnergyTeamDto }> {
     return requestEnvelope(`/api/v1/energy/team/users/${encodeURIComponent(userId)}`, { method: "DELETE" });
+  },
+
+  /** Whether the active Organisation requires two-step verification. */
+  getEnergyTeamSecurity(): Promise<EnergyTeamSecurityDto> {
+    return requestEnvelope("/api/v1/energy/team/security");
+  },
+
+  setEnergyTeamSecurity(body: { requireTwoStep: boolean }): Promise<EnergyTeamSecurityDto> {
+    return requestEnvelope("/api/v1/energy/team/security", { method: "PUT", body: JSON.stringify(body) });
   },
 
   getEnergyProjectHierarchy(projectId: string): Promise<EnergyProjectHierarchyDto> {

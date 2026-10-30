@@ -3,10 +3,14 @@
 import { useCallback, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { configApi } from "../../lib/config-api/client";
+import type { TwoStepPromptDto } from "../../lib/config-api/types";
 import { friendlyErrorKey, friendlyErrorMessage } from "../../app/energyiq/_components/friendly-error";
 import { EnergyXMark } from "../brand/energyx-mark";
 
 export type AuthMode = "login" | "invite" | "forgot" | "verify" | "reset";
+
+/** New and changed passwords; the server enforces the same and also refuses the most common passwords. */
+export const MIN_PASSWORD_LENGTH = 12;
 
 const AUTH_MODE_META: Record<AuthMode, { title: string; subtitle: string; submit: string }> = {
   login: { title: "Sign in", subtitle: "Welcome back to EnergyX", submit: "Sign in" },
@@ -46,7 +50,7 @@ export function authErrorMessage(reason: unknown, mode: AuthMode): string {
   if (!(reason instanceof Error)) return AUTH_FAILURE_FALLBACK[mode];
   const text = reason.message.trim();
   if (/^(?:email|password|token|currentPassword|newPassword) is required\.?$/i.test(text)) {
-    return missingAuthFields(mode, { email: "", password: "", token: "" }) ?? "Password must be at least 8 characters.";
+    return missingAuthFields(mode, { email: "", password: "", token: "" }) ?? `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
   }
   const key = friendlyErrorKey(reason);
   if (key === "sessionEnded") return "This sign-in page has expired. Refresh the page and try again.";
@@ -68,11 +72,14 @@ export function AuthFlow({
   initialMode,
   initialToken = "",
   onAuthenticated,
+  onTwoStep,
   error = null,
 }: {
   initialMode: AuthMode;
   initialToken?: string;
   onAuthenticated: () => void | Promise<void>;
+  /** The password was right and two-step verification comes next; no session exists yet. */
+  onTwoStep: (prompt: TwoStepPromptDto) => void;
   error?: string | null;
 }) {
   const router = useRouter();
@@ -80,7 +87,8 @@ export function AuthFlow({
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [rememberMe, setRememberMe] = useState(true);
+  // Opt-in: on a shared or public computer the session should end with the browser.
+  const [rememberMe, setRememberMe] = useState(false);
   const [token, setToken] = useState(initialToken);
   const [message, setMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -111,17 +119,18 @@ export function AuthFlow({
     setLocalError(null);
     setMessage(null);
     try {
-      if ((mode === "invite" || mode === "reset") && password.length < 8) {
-        setLocalError("Password must be at least 8 characters.");
+      if ((mode === "invite" || mode === "reset") && password.length < MIN_PASSWORD_LENGTH) {
+        setLocalError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
         return;
       }
-      if (mode === "login") {
-        await configApi.login({ email, password, rememberMe });
-        await onAuthenticated();
-        return;
-      }
-      if (mode === "invite") {
-        await configApi.activateAccount({ token, password, displayName });
+      if (mode === "login" || mode === "invite") {
+        const result = mode === "login"
+          ? await configApi.login({ email, password, rememberMe })
+          : await configApi.activateAccount({ token, password, displayName });
+        if ("twoStep" in result) {
+          onTwoStep(result.twoStep);
+          return;
+        }
         await onAuthenticated();
         return;
       }
@@ -198,8 +207,8 @@ export function AuthFlow({
             type="password"
             value={password}
             onChange={setPassword}
-            placeholder={mode === "login" ? "Enter your password" : "At least 8 characters"}
-            hint={mode === "invite" || mode === "reset" ? "At least 8 characters" : undefined}
+            placeholder={mode === "login" ? "Enter your password" : `At least ${MIN_PASSWORD_LENGTH} characters`}
+            hint={mode === "invite" || mode === "reset" ? `At least ${MIN_PASSWORD_LENGTH} characters. Avoid common passwords.` : undefined}
             autoComplete={mode === "login" ? "current-password" : "new-password"}
             required
             {...(mode === "login"

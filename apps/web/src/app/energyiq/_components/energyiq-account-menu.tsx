@@ -49,6 +49,7 @@ export function EnergyIqAccountMenu({ collapsed, placement = "up" }: { collapsed
       <div className={styles.menuIdentity}><strong>{currentUser.displayName || currentUser.userId}</strong><span>{currentUser.email || currentUser.userId}</span></div>
       <button role="menuitem" onClick={() => show("profile")}><EnergyIcon name="user" />{t("account.profile")}</button>
       {isAdmin && <button role="menuitem" onClick={() => show("admin")}><EnergyIcon name="settings" />{t("account.adminConsole")}</button>}
+      <button role="menuitem" onClick={() => { setMenu(null); router.push("/energyiq/settings#security"); }}><EnergyIcon name="settings" />{t("account.security")}</button>
       <button role="menuitem" onClick={() => { setMenu(null); router.push("/energyiq/guide"); }}><EnergyIcon name="document" />{t("account.userGuide")}</button>
       <button role="menuitem" onClick={() => { setMenu(null); router.push("/legal"); }}><EnergyIcon name="document" />{t("account.legal")}</button>
       <button role="menuitem" className={styles.signOut} onClick={() => { setMenu(null); signOut(); }}><EnergyIcon name="arrow" />{t("account.signOut")}</button>

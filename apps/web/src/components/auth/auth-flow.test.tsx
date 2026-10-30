@@ -64,7 +64,7 @@ describe("AuthFlow", () => {
 
   it("catches blank fields in the browser and shows plain sign-in failures", async () => {
     const onAuthenticated = vi.fn();
-    await act(async () => root.render(<AuthFlow initialMode="login" onAuthenticated={onAuthenticated} />));
+    await act(async () => root.render(<AuthFlow initialMode="login" onAuthenticated={onAuthenticated} onTwoStep={vi.fn()} />));
     expect(container.querySelector("#auth-email")?.getAttribute("aria-required")).toBe("true");
 
     await submit();
@@ -75,7 +75,7 @@ describe("AuthFlow", () => {
     await type("#auth-password", "correct horse");
     api.login.mockRejectedValueOnce(new ConfigApiError("FORBIDDEN", "CSRF token is invalid.", 403));
     await submit();
-    expect(api.login).toHaveBeenCalledWith({ email: "ada@example.com", password: "correct horse", rememberMe: true });
+    expect(api.login).toHaveBeenCalledWith({ email: "ada@example.com", password: "correct horse", rememberMe: false });
     expect(container.querySelector('[role="alert"]')?.textContent).toBe("This sign-in page has expired. Refresh the page and try again.");
     expect(container.textContent).not.toContain("CSRF");
 
@@ -83,5 +83,38 @@ describe("AuthFlow", () => {
     await submit();
     expect(container.querySelector('[role="alert"]')?.textContent).toBe("Invalid email or password.");
     expect(onAuthenticated).not.toHaveBeenCalled();
+  });
+
+  it("leaves Remember me unticked until the person ticks it", async () => {
+    await act(async () => root.render(<AuthFlow initialMode="login" onAuthenticated={vi.fn()} onTwoStep={vi.fn()} />));
+    const remember = container.querySelector<HTMLInputElement>("#auth-remember")!;
+    expect(remember.checked).toBe(false);
+    await act(async () => remember.click());
+    await type("#auth-email", "ada@example.com");
+    await type("#auth-password", "correct horse battery");
+    api.login.mockResolvedValueOnce({ user: { id: "u" }, workspace: { id: "w" } });
+    await submit();
+    expect(api.login).toHaveBeenCalledWith({ email: "ada@example.com", password: "correct horse battery", rememberMe: true });
+  });
+
+  it("hands a correct password that needs a code to the two-step step, without signing in", async () => {
+    const onAuthenticated = vi.fn();
+    const onTwoStep = vi.fn();
+    await act(async () => root.render(<AuthFlow initialMode="login" onAuthenticated={onAuthenticated} onTwoStep={onTwoStep} />));
+    await type("#auth-email", "ada@example.com");
+    await type("#auth-password", "correct horse battery");
+    const prompt = { mode: "verify", challenge: "challenge-1", expiresAt: "2026-10-30T12:00:00.000Z" };
+    api.login.mockResolvedValueOnce({ twoStep: prompt });
+    await submit();
+    expect(onTwoStep).toHaveBeenCalledWith(prompt);
+    expect(onAuthenticated).not.toHaveBeenCalled();
+  });
+
+  it("asks for 12 characters when choosing a password", async () => {
+    await act(async () => root.render(<AuthFlow initialMode="invite" initialToken="invite-1" onAuthenticated={vi.fn()} onTwoStep={vi.fn()} />));
+    expect(container.textContent).toContain("At least 12 characters");
+    await type("#auth-password", "eleven-char");
+    await submit();
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("Password must be at least 12 characters.");
   });
 });
