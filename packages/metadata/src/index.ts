@@ -1,6 +1,6 @@
 import { EventType, type BaseEvent } from "@ag-ui/core";
 import type { ArtifactSummary, ArtifactType, RunEventEnvelope } from "@datafoundry/contracts";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -57,8 +57,20 @@ import { ENERGYIQ_ORGANISATION_ADMIN_ROLE_ID, initializeEnergyIqAccessRoleSchema
 import { initializeEnergyIqTargetsSchema } from "./energyiq-targets-store.js";
 import { initializeEnergyIqAiGovernanceSchema } from "./energyiq-ai-governance-store.js";
 import { recordSchemaMigration, runSchemaMigration } from "./schema-migration.js";
+import {
+  initializeAuthAuditChainSchema,
+  insertChainedAuditEvent,
+  organisationAuditScopeSql,
+  pruneAuditChain,
+  verifyAuditChain,
+  verifyAuditChainAsync,
+  withAuditWriteLock,
+  type AuditChainAnchorRecord,
+  type AuditChainVerification
+} from "./auth-audit-chain.js";
 
 export * from "./config-store.js";
+export * from "./auth-audit-chain.js";
 export * from "./energyiq-store.js";
 export * from "./energyiq-carbon.js";
 export * from "./energyiq-targets-store.js";
@@ -163,6 +175,10 @@ export type AuthAuditEventRecord = {
   user_agent?: string;
   metadata_json?: string;
   created_at: string;
+  /** Position in the tamper-evident audit chain, with the previous event's hash and this event's own hash. */
+  seq?: number;
+  prev_hash?: string;
+  entry_hash?: string;
 };
 
 export type SessionRecord = {
@@ -759,7 +775,7 @@ export class MetadataStore {
     this.userPasswordCredentials = new UserPasswordCredentialRepository(db);
     this.authSessions = new AuthSessionRepository(db);
     this.authTokens = new AuthTokenRepository(db);
-    this.authAuditEvents = new AuthAuditEventRepository(db);
+    this.authAuditEvents = new AuthAuditEventRepository(db, secretMasterKey);
     this.workspaces = new WorkspaceRepository(db);
     this.workspaceMemberships = new WorkspaceMembershipRepository(db);
     this.workspaceDefaultModelProfiles = new WorkspaceDefaultModelProfileRepository(db);
@@ -1369,39 +1385,62 @@ export class WorkspaceMembershipRepository {
 /** Makes % and _ match themselves in a LIKE pattern used with ESCAPE '\\'. */
 const escapeLike = (value: string): string => value.replace(/[\\%_]/gu, (character) => `\\${character}`);
 
-export class AuthAuditEventRepository {
-  constructor(private readonly db: DatabaseSync) {}
+export type AuthAuditEventInput = {
+  id: string;
+  event_type: string;
+  email?: string;
+  ip_address?: string;
+  metadata?: unknown;
+  user_agent?: string;
+  user_id?: string;
+};
 
-  append(input: {
-    id: string;
-    event_type: string;
-    email?: string;
-    ip_address?: string;
-    metadata?: unknown;
-    user_agent?: string;
-    user_id?: string;
-  }): AuthAuditEventRecord {
-    const now = new Date().toISOString();
-    this.db.prepare(`
-      INSERT INTO auth_audit_events (
-        id, user_id, email, event_type, ip_address, user_agent, metadata_json, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      input.id,
-      input.user_id ?? null,
-      input.email ?? null,
-      input.event_type,
-      input.ip_address ?? null,
-      input.user_agent ?? null,
-      input.metadata === undefined ? null : JSON.stringify(input.metadata),
-      now
-    );
-    return this.get({ id: input.id });
+export type AuthAuditEventListener = (event: AuthAuditEventRecord) => void;
+
+export class AuthAuditEventRepository {
+  private readonly listeners = new Set<AuthAuditEventListener>();
+
+  constructor(private readonly db: DatabaseSync, private readonly secretMasterKey?: string) {}
+
+  /** Appends one event to the end of the tamper-evident chain. */
+  append(input: AuthAuditEventInput): AuthAuditEventRecord {
+    const event = withAuditWriteLock(this.db, () => this.insert(input));
+    this.notify(event);
+    return event;
+  }
+
+  /**
+   * Appends unless `skip` says not to. `skip` runs under the same write lock as the append, so two writers checking
+   * for the same recent event cannot both go on to record it.
+   */
+  appendUnless(skip: () => boolean, input: AuthAuditEventInput): AuthAuditEventRecord | undefined {
+    const event = withAuditWriteLock(this.db, () => (skip() ? undefined : this.insert(input)));
+    if (event) this.notify(event);
+    return event;
+  }
+
+  /** Called after every append, e.g. to copy events off the server. A listener that throws never fails the append. */
+  onAppend(listener: AuthAuditEventListener): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
+
+  /** Whether `user_id` has an `event_type` event since `since` whose details hold every given value. */
+  existsSince(input: { user_id: string; event_type: string; since: string; metadata?: Record<string, string> }): boolean {
+    const entries = Object.entries(input.metadata ?? {});
+    const row = this.db.prepare(`
+      SELECT 1 AS found FROM auth_audit_events
+      WHERE user_id = ? AND event_type = ? AND created_at >= ?
+        ${entries.map(() => "AND (CASE WHEN json_valid(metadata_json) THEN json_extract(metadata_json, ?) = ? ELSE 0 END)").join(" ")}
+      LIMIT 1
+    `).get(input.user_id, input.event_type, input.since, ...entries.flatMap(([key, value]) => [`$.${key}`, value]));
+    return Boolean(row);
   }
 
   /**
    * Audit events newest first, for the admin audit history. `before` is the cursor returned with the previous page;
    * `categories` are event-type prefixes such as "auth." or "energyiq."; `search` matches the email or event type.
+   * `organisationId` keeps only events about that Organisation and its members' sign-ins; `userId` only one actor's.
    */
   list(input: {
     from?: string;
@@ -1409,6 +1448,8 @@ export class AuthAuditEventRepository {
     categories?: string[];
     eventTypes?: string[];
     search?: string;
+    organisationId?: string;
+    userId?: string;
     limit?: number;
     before?: string;
   } = {}): { events: AuthAuditEventRecord[]; next?: string } {
@@ -1427,6 +1468,12 @@ export class AuthAuditEventRepository {
       where.push("(lower(coalesce(email, '')) LIKE ? ESCAPE '\\' OR event_type LIKE ? ESCAPE '\\' OR lower(coalesce(metadata_json, '')) LIKE ? ESCAPE '\\')");
       params.push(term, term, term);
     }
+    if (input.organisationId) {
+      const scope = organisationAuditScopeSql(input.organisationId);
+      where.push(scope.sql);
+      params.push(...scope.params);
+    }
+    if (input.userId) { where.push("user_id = ?"); params.push(input.userId); }
     if (input.before) {
       const [createdAt, id] = input.before.split("|");
       if (createdAt && id) { where.push("(created_at < ? OR (created_at = ? AND id < ?))"); params.push(createdAt, createdAt, id); }
@@ -1449,6 +1496,73 @@ export class AuthAuditEventRepository {
       throw new Error(`AUTH_AUDIT_EVENT_NOT_FOUND:${input.id}`);
     }
     return event;
+  }
+
+  /**
+   * Retention: removes events written before `before` from the start of the chain, records a signed anchor for the
+   * last one removed, and appends an `energyiq.audit_retention_applied` event naming that anchor, all at once.
+   */
+  prune(input: { before: string; retentionMonths?: number }): { pruned: number; anchor?: AuditChainAnchorRecord; event?: AuthAuditEventRecord } {
+    const outcome = withAuditWriteLock(this.db, () => {
+      const now = new Date().toISOString();
+      const pruned = pruneAuditChain(this.db, { before: input.before, now, secretMasterKey: this.secretMasterKey });
+      if (!pruned.anchor) return pruned;
+      const event = this.insert({
+        id: randomUUID(),
+        event_type: "energyiq.audit_retention_applied",
+        metadata: {
+          removedCount: pruned.pruned,
+          removedBefore: input.before,
+          ...(input.retentionMonths !== undefined ? { retentionMonths: input.retentionMonths } : {}),
+          checkpointSeq: pruned.anchor.seq,
+          checkpointHash: pruned.anchor.entry_hash,
+          checkpointSigned: Boolean(pruned.anchor.signature),
+        },
+      });
+      return { ...pruned, event };
+    });
+    if ("event" in outcome && outcome.event) this.notify(outcome.event);
+    return outcome;
+  }
+
+  /** Walks the whole chain and reports the first break. Blocks while it runs; prefer `verifyAsync` in a server. */
+  verify(options: { batchSize?: number } = {}): AuditChainVerification {
+    return verifyAuditChain(this.db, { secretMasterKey: this.secretMasterKey, ...options });
+  }
+
+  /** As `verify`, yielding to other work between batches. A suspected break is re-checked in one pass before it is reported. */
+  async verifyAsync(options: { batchSize?: number } = {}): Promise<AuditChainVerification> {
+    const result = await verifyAuditChainAsync(this.db, {
+      secretMasterKey: this.secretMasterKey,
+      pause: () => new Promise((resolve) => setImmediate(resolve)),
+      ...options,
+    });
+    // Retention may have removed events ahead of the walk while it paused; confirm without pausing.
+    return result.ok ? result : this.verify(options);
+  }
+
+  private insert(input: AuthAuditEventInput): AuthAuditEventRecord {
+    insertChainedAuditEvent(this.db, {
+      id: input.id,
+      user_id: input.user_id ?? null,
+      email: input.email ?? null,
+      event_type: input.event_type,
+      ip_address: input.ip_address ?? null,
+      user_agent: input.user_agent ?? null,
+      metadata_json: input.metadata === undefined ? null : JSON.stringify(input.metadata),
+      created_at: new Date().toISOString(),
+    });
+    return this.get({ id: input.id });
+  }
+
+  private notify(event: AuthAuditEventRecord): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(event);
+      } catch (error) {
+        console.error(`[audit] listener failed for ${event.event_type}: ${error instanceof Error ? error.message : "unknown"}`);
+      }
+    }
   }
 }
 
@@ -4716,6 +4830,15 @@ const runMigrations = (db: DatabaseSync): void => {
     },
     { atomic: true },
   );
+  runSchemaMigration(
+    db,
+    "0053_auth_audit_hash_chain",
+    "Hash-chain the audit log so edits, inserts and deletions are detectable, and put existing events on the chain",
+    () => {
+      initializeAuthAuditChainSchema(db);
+    },
+    { atomic: true },
+  );
 };
 
 const initializeSchemaMigrationTable = (db: DatabaseSync): void => {
@@ -5470,6 +5593,8 @@ const mapAuthAuditEventRow = (row: unknown): Optional<AuthAuditEventRecord> => {
   const ipAddress = optionalString(row.ip_address);
   const userAgent = optionalString(row.user_agent);
   const metadataJson = optionalString(row.metadata_json);
+  const prevHash = optionalString(row.prev_hash);
+  const entryHash = optionalString(row.entry_hash);
   return {
     id: requiredString(row, "id"),
     ...(userId ? { user_id: userId } : {}),
@@ -5478,7 +5603,10 @@ const mapAuthAuditEventRow = (row: unknown): Optional<AuthAuditEventRecord> => {
     ...(ipAddress ? { ip_address: ipAddress } : {}),
     ...(userAgent ? { user_agent: userAgent } : {}),
     ...(metadataJson ? { metadata_json: metadataJson } : {}),
-    created_at: requiredString(row, "created_at")
+    created_at: requiredString(row, "created_at"),
+    ...(typeof row.seq === "number" || typeof row.seq === "bigint" ? { seq: Number(row.seq) } : {}),
+    ...(prevHash ? { prev_hash: prevHash } : {}),
+    ...(entryHash ? { entry_hash: entryHash } : {})
   };
 };
 
