@@ -55,6 +55,11 @@ export const AUDIT_EVENT_LABELS: Record<string, string> = {
   "energyiq.ai_used": "Used AI",
   "energyiq.ai_blocked": "AI request refused",
   "energyiq.ai_settings_changed": "Changed AI settings",
+  "energyiq.user_personal_data_exported": "Exported a person's personal data",
+  "energyiq.user_erased": "Erased a person's personal data",
+  "energyiq.support_access": "Support looked at or changed a client's data",
+  "energyiq.platform_config_changed": "Changed a platform setting",
+  "energyiq.audit_retention_applied": "Removed audit records past the retention period",
 };
 
 const WARNINGS = new Set(["energyiq.ai_blocked", "auth.login_failed", "auth.login_unverified", "auth.password_reset_requested_unknown"]);
@@ -70,6 +75,7 @@ const CATEGORIES: Array<{ value: NonNullable<EnergyAuditFilterDto["category"]>; 
   { value: "access", label: "People and access" },
   { value: "projects", label: "Projects and settings" },
   { value: "ai", label: "AI use" },
+  { value: "platform", label: "Platform settings and support access" },
 ];
 
 const AI_FEATURES: Record<string, string> = { advisor: "Advisor", report: "Report", overview: "Overview AI", insights: "AI insights", actions: "Action suggestions", other: "Other AI" };

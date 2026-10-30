@@ -69,6 +69,13 @@ it("hides the invite form for someone who may only look", async () => {
   const { host, root } = await mount(base({ canWrite: false }));
   expect(host.textContent).not.toContain("Invite someone");
   expect(host.querySelector("form")).toBeNull();
+  expect(host.querySelector("a[href='/energyiq/team/activity']")).toBeNull();
+  await act(async () => root.unmount());
+});
+
+it("links the people who manage the team to the Organisation's activity", async () => {
+  const { host, root } = await mount(base({ activityHref: "/energyiq/team/activity" }));
+  expect(host.querySelector("a[href='/energyiq/team/activity']")?.textContent).toBe("Activity");
   await act(async () => root.unmount());
 });
 
