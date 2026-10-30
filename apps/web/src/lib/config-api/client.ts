@@ -61,6 +61,8 @@ import type {
   EnergyProjectRegionDto,
   EnergyAuditEventDto,
   EnergyAuditFilterDto,
+  EnergyOrganisationActivityDto,
+  EnergyOrganisationActivityFilterDto,
   EnergyAdminAiActivityDto,
   EnergyAdminAiDto,
   SystemHealthDto,
@@ -610,6 +612,18 @@ export const configApi = {
   /** People in the active Organisation. Only for platform admins and Organisation admins who manage people. */
   getEnergyTeam(): Promise<EnergyTeamDto> {
     return requestEnvelope("/api/v1/energy/team");
+  },
+
+  /** The active Organisation's activity, newest first, for the people who manage it; pass `next` as `before` for more. */
+  listEnergyOrganisationActivity(filter: EnergyOrganisationActivityFilterDto & { before?: string; limit?: number } = {}): Promise<{ organisation: { id: string; name: string }; events: EnergyOrganisationActivityDto[]; next?: string }> {
+    return requestEnvelope(`/api/v1/energy/team/activity?${auditQuery(filter)}`);
+  },
+
+  /** Every entry matching the filter, as a CSV file that opens in Excel. */
+  async downloadEnergyOrganisationActivity(filter: EnergyOrganisationActivityFilterDto = {}): Promise<{ blob: Blob; filename: string }> {
+    const response = await requestRaw(`/api/v1/energy/team/activity?${auditQuery({ ...filter, format: "csv" })}`);
+    const disposition = response.headers.get("Content-Disposition") ?? "";
+    return { blob: await response.blob(), filename: /filename="([^"]+)"/u.exec(disposition)?.[1] ?? "organisation-activity.csv" };
   },
 
   inviteEnergyTeamUser(body: {
@@ -1855,7 +1869,7 @@ export function normalizeTraceDagDto(
 
 export { ConfigApiError } from "./types";
 
-const auditQuery = (filter: EnergyAuditFilterDto & { before?: string; limit?: number; format?: "csv" }): string => {
+const auditQuery = (filter: (EnergyAuditFilterDto | EnergyOrganisationActivityFilterDto) & { before?: string; limit?: number; format?: "csv" }): string => {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(filter)) if (value !== undefined && value !== "") params.set(key, String(value));
   return params.toString();

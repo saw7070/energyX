@@ -183,8 +183,33 @@ export type EnergyAuditEventDto = {
 export type EnergyAuditFilterDto = {
   from?: string;
   to?: string;
-  category?: "" | "sign-in" | "access" | "projects" | "ai";
+  category?: "" | "sign-in" | "access" | "projects" | "ai" | "platform";
   search?: string;
+};
+
+/** One entry on an Organisation's Activity page, already in plain words. */
+export type EnergyOrganisationActivityDto = {
+  id: string;
+  at: string;
+  type: string;
+  label: string;
+  who?: string;
+  email?: string;
+  /** Done by EnergyX staff who are not part of the Organisation. */
+  support?: boolean;
+  project?: string;
+  /** The person the change was made to. */
+  target?: string;
+  ip?: string;
+  detail?: string;
+};
+
+export type EnergyOrganisationActivityFilterDto = {
+  from?: string;
+  to?: string;
+  /** A member's user id. */
+  person?: string;
+  type?: "" | "sign-in" | "people" | "projects" | "ai" | "support";
 };
 
 /** Where a site is: decides its money, tax, time zone and public holidays. State is a Malaysian state code. */

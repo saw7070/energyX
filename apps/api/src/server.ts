@@ -226,6 +226,8 @@ import { createEnergyAlertEmailer } from "./energy/energy-alert-emails.js";
 import { assertAiAllowed, finishAiRequest, recordAiRequest } from "./energy/energy-ai-governance.js";
 import { createEnergyReportDeliveryWorker } from "./energy/energy-report-delivery.js";
 import { createEnergyTargetsMonitor } from "./energy/energy-targets-monitor.js";
+import { createAuditRetentionJob } from "./energy/energy-audit-log.js";
+import { attachAuditMirror } from "./audit-mirror.js";
 import { applyApiSecurityHeaders } from "./http-security.js";
 import { repairMovedProjectFactDigests } from "./energy/energy-project-move.js";
 import { resolveEnergyTuyaProjectConnector } from "./energy/energy-tuya-connector.js";
@@ -734,6 +736,11 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
       }
     }),
   );
+  // Daily: audit records older than ENERGYX_AUDIT_RETENTION_MONTHS (24) are removed, then the hash chain is checked.
+  // Created here so a bad setting stops startup before anything runs; started with the other daily jobs.
+  const auditRetention = createAuditRetentionJob({ metadataStore });
+  // With ENERGYX_AUDIT_MIRROR_PATH set, every audit event is also appended to that file, to be shipped off the host.
+  const detachAuditMirror = attachAuditMirror(metadataStore);
   const fileAssetService = new LocalFileAssetService(metadataStore, {
     storageRoot: process.env.FILE_ASSET_STORAGE_ROOT ?? join(envConfig.storage.root_dir, "files")
   });
@@ -1481,6 +1488,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
   targetsMonitor.start();
   const reportEmails = createEnergyReportDeliveryWorker({ metadataStore });
   reportEmails.start();
+  auditRetention.start();
   reportService?.start();
   void observability.checkAtStartup().catch(() => undefined);
 
@@ -1494,6 +1502,8 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
       alertEmailer.stop();
       targetsMonitor.stop();
       reportEmails.stop();
+      auditRetention.stop();
+      detachAuditMirror();
       registerEnergyLiveConnectionScheduler(undefined);
       await reportService?.stop();
       metadataStore.close();

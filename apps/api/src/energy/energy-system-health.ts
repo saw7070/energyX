@@ -7,11 +7,13 @@ import { createMailDelivery } from "../email/mail-delivery.js";
 import { DEFAULT_REPORT_AGENT_IMAGE, resolvePiReportModel } from "../report-agent/pi-report-harness.js";
 import { readReportProjectData } from "../report-agent/report-project-data.js";
 import type { ConfigApiContext, ConfigApiResponse } from "../routes/types.js";
+import { checkAuditLog } from "./energy-audit-log.js";
 import { resolveEnergyAccessContext } from "./energy-query-context.js";
 
 /**
  * GET admin/system-health: one page that says whether the things EnergyX depends on are working, so an
- * administrator does not have to read server logs to find out why the advisor or a site's data stopped.
+ * administrator does not have to read server logs to find out why the advisor or a site's data stopped, or whether
+ * the audit log has been tampered with.
  */
 export type HealthStatus = "ok" | "warning" | "problem";
 export type HealthCheck = { id: string; group: string; title: string; status: HealthStatus; detail: string; fix?: string; projectId?: string; organisation?: string; lastReadingAt?: string };
@@ -127,6 +129,8 @@ export const handleSystemHealthApi = async (context: Required<ConfigApiContext>,
     ...checkAiModel(context.metadataStore, workspaceId),
     await checkAdvisorWorker(),
     checkEmail(),
+    // Whether the audit log is intact, copied off the server and trimmed to the retention period.
+    ...await checkAuditLog(context.metadataStore),
     // Super admins look after every client, so every site they can see is checked, labelled with its organisation.
     ...await checkProjects(context.metadataStore, context.userId, access.workspaces.filter(workspace => !workspace.disabled).flatMap(workspace => context.metadataStore.energyIq.listProjectsByWorkspace(workspace.id).map(project => ({ id: project.id, name: project.name, workspaceId: workspace.id, organisation: workspace.name })))),
   ];

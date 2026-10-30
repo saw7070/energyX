@@ -189,6 +189,8 @@ export type {
   EnergyProjectRegionDto,
   EnergyAuditEventDto,
   EnergyAuditFilterDto,
+  EnergyOrganisationActivityDto,
+  EnergyOrganisationActivityFilterDto,
   EnergyAdminAiActivityDto,
   EnergyAdminAiDto,
   SystemHealthCheckDto,

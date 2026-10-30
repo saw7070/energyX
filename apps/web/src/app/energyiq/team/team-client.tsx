@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 
 import {
@@ -127,6 +128,7 @@ export function EnergyIqTeam() {
         members={team?.members ?? null}
         roles={team?.roles ?? []}
         canWrite={canWrite}
+        {...(canWrite ? { activityHref: "/energyiq/team/activity" } : {})}
         busy={busy}
         error={error}
         notice={notice}
@@ -171,6 +173,8 @@ export type TeamViewProps = {
   onRefresh: () => void;
   /** Shown under the client summary, as in the prototype layout. */
   aiCard?: ReactNode;
+  /** The Organisation's activity log, for the people who manage its members. */
+  activityHref?: string;
 };
 
 type Filter = "all" | EnergyTeamMemberDto["status"];
@@ -205,6 +209,7 @@ export function TeamView(props: TeamViewProps) {
           <p>Everyone who can open {organisationName ? `${organisationName}’s` : "this client’s"} projects, and what each person is allowed to do.</p>
         </div>
         <div className={styles.toolbar}>
+          {props.activityHref ? <Link href={props.activityHref}><EnergyIcon name="clock" />Activity</Link> : null}
           <button type="button" onClick={props.onRefresh} disabled={busy}>Refresh</button>
         </div>
       </header>

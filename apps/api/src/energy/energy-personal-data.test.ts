@@ -48,6 +48,8 @@ describe("personal data requests", () => {
     const erasure = metadata.db.prepare("SELECT user_id, metadata_json FROM auth_audit_events WHERE event_type = 'energyiq.user_erased'").get() as { user_id: string; metadata_json: string };
     expect(erasure.user_id).toBe("admin");
     expect(JSON.parse(erasure.metadata_json)).toMatchObject({ targetUserId: "person" });
+    // The tamper-evident chain hashes none of the blanked fields, so it still verifies after erasure.
+    expect(metadata.authAuditEvents.verify()).toMatchObject({ ok: true });
   });
 
   it("needs the exact email, and refuses self-erasure and allowlisted platform administrators", () => {
