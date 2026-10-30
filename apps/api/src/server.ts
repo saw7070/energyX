@@ -731,6 +731,9 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
       }
     }),
   );
+  // Daily: audit records older than ENERGYX_AUDIT_RETENTION_MONTHS (24) are removed, then the hash chain is checked.
+  // Created here so a bad setting stops startup before anything runs; started with the other daily jobs.
+  const auditRetention = createAuditRetentionJob({ metadataStore });
   // With ENERGYX_AUDIT_MIRROR_PATH set, every audit event is also appended to that file, to be shipped off the host.
   const detachAuditMirror = attachAuditMirror(metadataStore);
   const fileAssetService = new LocalFileAssetService(metadataStore, {
@@ -1481,8 +1484,6 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
   targetsMonitor.start();
   const reportEmails = createEnergyReportDeliveryWorker({ metadataStore });
   reportEmails.start();
-  // Daily: audit records older than ENERGYX_AUDIT_RETENTION_MONTHS (24) are removed, then the hash chain is checked.
-  const auditRetention = createAuditRetentionJob({ metadataStore });
   auditRetention.start();
   reportService?.start();
 
