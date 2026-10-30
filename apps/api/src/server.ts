@@ -780,6 +780,9 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
     );
   const runCancelRegistry = new RunCancelRegistry();
   const authService = new AuthService(metadataStore, authConfig);
+  if (isPasswordAuth(authConfig) && !authService.twoStep.available()) {
+    console.warn("[auth] SECRET_MASTER_KEY is not set: two-step verification cannot be set up, and where it is required people sign in without it.");
+  }
   ensureDevUser(metadataStore);
   ensureEnergyIqBootstrap(metadataStore);
   removeLegacyBuiltinDemoDataSourceOnce(metadataStore, DEV_USER.id);

@@ -9,6 +9,7 @@ import {
 import { randomUUID } from "node:crypto";
 
 import { AuthError, type AuthService } from "../auth/service.js";
+import type { TwoStepOrganisationSetting } from "../auth/two-step.js";
 import { can, resolveEnergyPermissions } from "./energy-permissions.js";
 import { resolveEnergyIqUserRole } from "./energy-user-role.js";
 
@@ -135,6 +136,31 @@ export class EnergyTeamAccessService {
       targetUserId: target.id
     });
     return { team: this.teamDto(organisation, input.actor) };
+  }
+
+  /** Whether this Organisation requires two-step verification, for anyone who may see its people. */
+  security(input: { actor: UserRecord; workspaceId: string }): TwoStepOrganisationSetting & { canChange: boolean } {
+    const organisation = this.requireAccess(input.actor, input.workspaceId, "read");
+    return {
+      ...this.authService.twoStep.organisationSetting(organisation.id),
+      canChange: can(resolveEnergyPermissions(this.metadataStore, input.actor, organisation.id), "people", "write")
+    };
+  }
+
+  /**
+   * Turns the Organisation's two-step verification requirement on or off; for whoever may manage its people. Nobody is
+   * locked out: people who have not set it up yet are taken through setup at their next sign-in.
+   */
+  setSecurity(input: { actor: UserRecord; workspaceId: string; requireTwoStep: boolean }): TwoStepOrganisationSetting & { canChange: boolean } {
+    const organisation = this.requireAccess(input.actor, input.workspaceId, "write");
+    return {
+      ...this.authService.twoStep.setOrganisationRequirement({
+        actor: input.actor,
+        workspaceId: organisation.id,
+        required: input.requireTwoStep
+      }),
+      canChange: true
+    };
   }
 
   private requireAccess(actor: UserRecord, workspaceId: string, needed: "read" | "write"): WorkspaceRecord {

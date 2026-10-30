@@ -22,7 +22,7 @@ describe("Password reset", () => {
       const auth = new AuthService(metadata, authConfig);
       const invitation = await auth.inviteUser({ email: "member@example.test", inviterUserId: "dev-user" });
       const token = new URL(invitation.invitationUrl ?? "").searchParams.get("invite") ?? "";
-      await auth.acceptInvitation({ token, password: "welcome12" });
+      await auth.acceptInvitation({ token, password: "plant-room-meter-42" });
 
       const result = await auth.forgotPassword({ email: "member@example.test" });
 
@@ -31,8 +31,8 @@ describe("Password reset", () => {
       const line = log.mock.calls.map((call) => String(call[0])).find((text) => text.includes("password-reset link"));
       const resetToken = new URL(line?.split(": ").at(-1) ?? "http://x").searchParams.get("reset") ?? "";
       expect(resetToken).not.toBe("");
-      await auth.resetPassword({ token: resetToken, password: "changed12" });
-      await expect(auth.login({ email: "member@example.test", password: "changed12" })).resolves.toMatchObject({ persistent: true });
+      await auth.resetPassword({ token: resetToken, password: "switchboard-reading-7" });
+      await expect(auth.login({ email: "member@example.test", password: "switchboard-reading-7" })).resolves.toMatchObject({ user: { email: "member@example.test" } });
     } finally {
       log.mockRestore();
       metadata.close();

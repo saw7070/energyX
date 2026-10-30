@@ -601,12 +601,30 @@ export const handleEnergyApiRequest = async (
           }))
         };
       }
+      if (segments[1] === "users" && segments[2] && segments[3] === "reset-two-step"
+        && segments.length === 4 && request.method === "POST") {
+        context.authService.twoStep.adminReset({ actor: user, userId: decodeURIComponent(segments[2]) });
+        return { status: 200, body: createSuccessResult({ users: service.listUsers() }) };
+      }
     }
     if (segments[0] === "team") {
       const team = new EnergyTeamAccessService(context.metadataStore, context.authService);
       const workspaceId = context.workspaceId;
       if (segments.length === 1 && request.method === "GET") {
         return { status: 200, body: createSuccessResult(team.list({ actor: user, workspaceId })) };
+      }
+      if (segments[1] === "security" && segments.length === 2 && request.method === "GET") {
+        return { status: 200, body: createSuccessResult(team.security({ actor: user, workspaceId })) };
+      }
+      if (segments[1] === "security" && segments.length === 2 && request.method === "PUT") {
+        const body = requireRecord(await readJsonBody(request));
+        if (typeof body.requireTwoStep !== "boolean") {
+          throw new AuthError(400, "BAD_REQUEST", "Choose whether to require two-step verification.");
+        }
+        return {
+          status: 200,
+          body: createSuccessResult(team.setSecurity({ actor: user, workspaceId, requireTwoStep: body.requireTwoStep }))
+        };
       }
       if (segments[1] === "users" && segments.length === 2 && request.method === "POST") {
         const body = requireRecord(await readJsonBody(request));

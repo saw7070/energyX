@@ -1,6 +1,6 @@
 import { createErrorResult, createSuccessResult, type AppErrorCode } from "@datafoundry/contracts";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { AuthIdentity, AuthService } from "./service.js";
+import type { AuthIdentity, AuthService, AuthSignedIn, AuthTwoStepPending } from "./service.js";
 import { AuthError, userDto, workspaceDto } from "./service.js";
 import { appendAuthCookies, appendClearAuthCookies, CSRF_COOKIE, parseCookies, SESSION_COOKIE } from "./cookies.js";
 
@@ -36,39 +36,37 @@ export async function handleAuthApiRequest(
       return true;
     }
     if (root === "login" && request.method === "POST") {
-      const result = await context.authService.login({
+      sendSignInResult(response, await context.authService.login({
         email: requiredString(body.email, "email"),
         password: requiredString(body.password, "password"),
-        rememberMe: body.rememberMe !== false,
+        rememberMe: body.rememberMe === true,
         ...requestMeta(request)
-      });
-      appendAuthCookies(response, {
-        csrfToken: result.csrfToken,
-        maxAgeSeconds: result.maxAgeSeconds,
-        persistent: result.persistent,
-        sessionToken: result.sessionToken
-      });
-      sendJson(response, 200, createSuccessResult({
-        user: result.user,
-        workspace: result.workspace
       }));
       return true;
     }
     if (root === "activate" && request.method === "POST") {
-      const result = await context.authService.acceptInvitation({
+      sendSignInResult(response, await context.authService.acceptInvitation({
         token: requiredString(body.token, "token"),
         password: requiredString(body.password, "password"),
         ...(optionalString(body.displayName) ? { displayName: optionalString(body.displayName) } : {}),
         ...requestMeta(request)
-      });
-      appendAuthCookies(response, {
-        csrfToken: result.csrfToken,
-        maxAgeSeconds: result.maxAgeSeconds,
-        sessionToken: result.sessionToken
-      });
-      sendJson(response, 200, createSuccessResult({
-        user: result.user,
-        workspace: result.workspace
+      }));
+      return true;
+    }
+    // Two-step verification while signing in: the challenge from the password step stands in for a session.
+    if (root === "mfa" && segments[1] === "setup" && segments.length === 2 && request.method === "POST") {
+      sendJson(response, 200, createSuccessResult(context.authService.beginTwoStepSignInSetup({
+        challenge: requiredString(body.challenge, "challenge"),
+        ...requestMeta(request)
+      })));
+      return true;
+    }
+    if (root === "mfa" && segments[1] === "verify" && segments.length === 2 && request.method === "POST") {
+      sendSignInResult(response, context.authService.completeTwoStepSignIn({
+        challenge: requiredString(body.challenge, "challenge"),
+        code: optionalString(body.code),
+        recoveryCode: optionalString(body.recoveryCode),
+        ...requestMeta(request)
       }));
       return true;
     }
@@ -124,6 +122,39 @@ export async function handleAuthApiRequest(
       sendJson(response, 200, createSuccessResult(context.authService.revokeSession(identity, segments[1])));
       return true;
     }
+    // Two-step verification settings for the signed-in person.
+    if (root === "mfa" && segments.length === 1 && request.method === "GET") {
+      sendJson(response, 200, createSuccessResult(context.authService.twoStep.status(identity.user)));
+      return true;
+    }
+    if (root === "mfa" && segments[1] === "enable" && segments.length === 2 && request.method === "POST") {
+      sendJson(response, 200, createSuccessResult(context.authService.twoStep.beginSetup(identity.user)));
+      return true;
+    }
+    if (root === "mfa" && segments[1] === "enable" && segments[2] === "confirm" && segments.length === 3 && request.method === "POST") {
+      sendJson(response, 200, createSuccessResult(context.authService.twoStep.confirmSetup(
+        identity.user,
+        requiredString(body.code, "code"),
+        requestMeta(request)
+      )));
+      return true;
+    }
+    if (root === "mfa" && segments[1] === "recovery-codes" && segments.length === 2 && request.method === "POST") {
+      sendJson(response, 200, createSuccessResult(context.authService.twoStep.regenerateRecoveryCodes(
+        identity.user,
+        requiredString(body.code, "code"),
+        requestMeta(request)
+      )));
+      return true;
+    }
+    if (root === "mfa" && segments[1] === "disable" && segments.length === 2 && request.method === "POST") {
+      sendJson(response, 200, createSuccessResult(context.authService.twoStep.disable(
+        identity.user,
+        requiredString(body.code, "code"),
+        requestMeta(request)
+      )));
+      return true;
+    }
     if (root === "password" && segments[1] === "change" && request.method === "POST") {
       sendJson(response, 200, createSuccessResult(await context.authService.changePassword({
         identity,
@@ -168,6 +199,28 @@ export function sendAuthError(response: ServerResponse, error: unknown): void {
   }
   const message = error instanceof Error ? error.message : "Unknown auth error";
   sendJson(response, 500, createErrorResult("INTERNAL_ERROR", message));
+}
+
+/**
+ * Answers a sign-in step: either the session cookies and who signed in, or what two-step verification still needs
+ * (no cookies yet). Recovery codes from setting it up during sign-in are passed on to be shown once.
+ */
+function sendSignInResult(response: ServerResponse, result: (AuthSignedIn & { recoveryCodes?: string[] }) | AuthTwoStepPending): void {
+  if ("twoStep" in result) {
+    sendJson(response, 200, createSuccessResult({ twoStep: result.twoStep }));
+    return;
+  }
+  appendAuthCookies(response, {
+    csrfToken: result.csrfToken,
+    maxAgeSeconds: result.maxAgeSeconds,
+    persistent: result.persistent,
+    sessionToken: result.sessionToken
+  });
+  sendJson(response, 200, createSuccessResult({
+    user: result.user,
+    workspace: result.workspace,
+    ...(result.recoveryCodes ? { recoveryCodes: result.recoveryCodes } : {})
+  }));
 }
 
 function requireIdentity(context: AuthRouteContext): AuthIdentity {

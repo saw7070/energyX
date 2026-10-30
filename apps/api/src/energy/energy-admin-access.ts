@@ -40,6 +40,8 @@ export type EnergyAdminUserDto = {
   organisationRoles: Record<string, { roleId: string; roleName: string }>;
   projectIds: string[];
   lastLoginAt?: string;
+  /** Whether the person has finished setting up two-step verification. */
+  twoStepEnabled: boolean;
   createdAt: string;
 };
 
@@ -328,6 +330,7 @@ export class EnergyAdminAccessService {
       organisationRoles,
       projectIds,
       ...(lastLoginAt ? { lastLoginAt } : {}),
+      twoStepEnabled: this.metadataStore.authTwoStep.isEnabled(user.id),
       createdAt: user.created_at
     };
   }
