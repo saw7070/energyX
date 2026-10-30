@@ -69,11 +69,14 @@ export function AuthFlow({
   initialToken = "",
   onAuthenticated,
   error = null,
+  alternativeSignIn = null,
 }: {
   initialMode: AuthMode;
   initialToken?: string;
   onAuthenticated: () => void | Promise<void>;
   error?: string | null;
+  /** Shown under the sign-in form, such as "Sign in with your organisation's account (SSO)". */
+  alternativeSignIn?: ReactNode;
 }) {
   const router = useRouter();
   const [mode, setMode] = useState<AuthMode>(initialMode);
@@ -257,6 +260,8 @@ export function AuthFlow({
           )}
         </button>
       </form>
+
+      {mode === "login" ? alternativeSignIn : null}
 
       <AuthModeSwitch mode={mode} onGoLogin={goToLogin} />
     </PasswordAuthShell>

@@ -630,6 +630,11 @@ export const configApi = {
     return requestEnvelope(`/api/v1/energy/team/users/${encodeURIComponent(userId)}`, { method: "DELETE" });
   },
 
+  /** Single sign-on and provisioning: typed calls live in organisation-sign-in.ts. */
+  organisationSignInRequest<T>(path: `/api/v1/organisation-sign-in${string}` | "/api/v1/auth/sso/start", init?: RequestInit): Promise<T> {
+    return requestEnvelope<T>(path, init);
+  },
+
   getEnergyProjectHierarchy(projectId: string): Promise<EnergyProjectHierarchyDto> {
     return requestEnvelope<EnergyProjectHierarchyDto>(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/hierarchy`,
