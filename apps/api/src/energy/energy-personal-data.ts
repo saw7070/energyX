@@ -28,7 +28,8 @@ const PERSONAL_TABLES = [
   "energyiq_ai_feedback",
   "energyiq_ai_usage",
   "energyiq_saved_analyses",
-  "energyiq_report_schedules"
+  "energyiq_report_schedules",
+  "organisation_scim_users"
 ] as const;
 
 /** What erasing deletes outright, after the person's conversations have gone through the session cascade. */
@@ -48,7 +49,11 @@ const ERASED_TABLES = [
   "context_package_snapshots",
   "energyiq_ai_feedback",
   "config_resources",
-  "encrypted_secrets"
+  "encrypted_secrets",
+  "auth_two_step_factors",
+  "auth_two_step_recovery_codes",
+  "auth_two_step_challenges",
+  "organisation_scim_users"
 ] as const;
 
 const SECRET_COLUMN = /hash|secret|token|password|credential/iu;
