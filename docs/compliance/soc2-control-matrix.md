@@ -36,7 +36,7 @@ Repo paths were verified on 2026-10-30. "Process record" means evidence held out
 | CC6.1 | MFA on staff admin accounts | Gap | Screenshots | Security lead |
 | CC6.2 | Admin-managed customer users; SCIM 2.0 | Implemented / Phase 1 (SCIM) | `apps/api/src/energy/energy-admin-access.ts` | Engineering lead |
 | CC6.2 | Staff leavers lose access within 1 business day | Gap | Leaver tickets | Operations lead |
-| CC6.3 | Legacy config API limited to super-admin; stdio MCP blocked in production; support access audited | Phase 1 (work in progress in `apps/api/src/legacy-config-guard.ts`) | Same, once merged | Engineering lead |
+| CC6.3 | Legacy config API limited to super-admin and its changes audited; stdio MCP blocked in production; super-admin reads and changes of a client's data recorded and shown to that client's admins | Implemented | `apps/api/src/legacy-config-guard.ts`, `apps/api/src/legacy-config-audit.ts`, `apps/api/src/energy/energy-support-access.ts` | Engineering lead |
 | CC6.3 | Quarterly access review (SSH, cloud RAM, GitHub, super-admins) | Gap | Review record | Security lead |
 | CC6.4 | Physical data-centre security | Carved out (Alibaba Cloud) | Vendor report | Operations lead |
 | CC6.5 | Deletion within 60 days of contract end; backup expiry | Partial: commitment published; retention job is Phase 1 | `apps/web/src/app/legal/documents.ts` | Operations lead |
@@ -53,7 +53,7 @@ Repo paths were verified on 2026-10-30. "Process record" means evidence held out
 |---|---|---|---|---|
 | CC7.1 | Dependabot, CodeQL, npm audit; CI runs all API tests and ESLint | Phase 1 (today: build, web and package tests, selected API and smoke tests) | `.github/workflows/ci.yml` | Engineering lead |
 | CC7.1 | Yearly penetration test | Gap | Report | Security lead |
-| CC7.2 | Hash-chained audit log that client admins can export | Phase 1 | — | Engineering lead |
+| CC7.2 | Hash-chained audit log (verified daily and in Admin → System health), 24-month retention behind a signed checkpoint, off-host JSON-lines copy, and a per-client Activity page with full CSV export | Implemented; the write-once storage for the copy is set up by operations | `packages/metadata/src/auth-audit-chain.ts`, `apps/api/src/energy/energy-audit-log.ts`, `apps/api/src/audit-mirror.ts`, `apps/api/src/energy/energy-organisation-activity.ts` | Engineering lead |
 | CC7.2 | Request-ID logging, readiness checks, error tracking, job-failure alerts | Phase 1 (basic `/ready` in `apps/api/src/server.ts`) | Same | Engineering lead |
 | CC7.2 | Backup failures surface as failed systemd units | Implemented (no alerting yet) | `deploy/systemd/energyiq-shared-storage-backup.service`, `deploy/systemd/energyiq-offsite-backup.service` | Operations lead |
 | CC7.3–7.5 | Incident response plan; yearly tabletop | Gap (template drafted) | `docs/compliance/policies/incident-response.md` | Security lead |
