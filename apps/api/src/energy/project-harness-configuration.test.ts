@@ -292,9 +292,9 @@ describe("Project Harness Configuration", () => {
           },
           reportTimePolicy: {
             status: "available",
-            revisionId: "ngee-ann-report-time@1",
+            revisionId: "ngee-ann-report-time@2",
             policyId: "ngee-ann-report-time",
-            revision: "1",
+            revision: "2",
             windows: [
               expect.objectContaining({ id: "current-month-progress", strategy: "calendar_month_to_date" }),
               expect.objectContaining({ id: "recent-operations", strategy: "rolling_complete_days" }),
@@ -302,6 +302,7 @@ describe("Project Harness Configuration", () => {
               expect.objectContaining({ id: "same-progress-comparison", strategy: "prior_equivalent_progress" }),
               expect.objectContaining({ id: "next-month-outlook", strategy: "next_complete_calendar_month" }),
               expect.objectContaining({ id: "day-type-reference", strategy: "same_day_type_baseline" }),
+              expect.objectContaining({ id: "school-holiday-comparison", strategy: "rolling_complete_days" }),
             ],
           },
           sections: [
@@ -309,6 +310,7 @@ describe("Project Harness Configuration", () => {
             expect.objectContaining({ id: "cost-and-trend", primaryWindowId: "current-month-progress" }),
             expect.objectContaining({ id: "operating-patterns", primaryWindowId: "recent-operations" }),
             expect.objectContaining({ id: "circuit-analysis", primaryWindowId: "recent-operations" }),
+            expect.objectContaining({ id: "school-holiday-comparison", primaryWindowId: "school-holiday-comparison" }),
           ],
         },
       });
@@ -397,7 +399,7 @@ describe("Project Harness Configuration", () => {
       metadataStore.db.prepare(`
         DELETE FROM energyiq_report_time_policy_revisions
         WHERE project_id = ? AND revision_id = ?
-      `).run(project.id, "ngee-ann-report-time@1");
+      `).run(project.id, "ngee-ann-report-time@2");
 
       const state = createProjectHarnessConfigurationReader({
         metadataStore,
@@ -415,7 +417,7 @@ describe("Project Harness Configuration", () => {
         },
         reportTimePolicy: {
           status: "unavailable",
-          revisionId: "ngee-ann-report-time@1",
+          revisionId: "ngee-ann-report-time@2",
           windows: [],
         },
       });
@@ -465,7 +467,7 @@ describe("Project Harness Configuration", () => {
         UPDATE energyiq_report_time_policy_revisions
         SET policy_json = ?
         WHERE project_id = ? AND revision_id = ?
-      `).run("{not-json", project.id, "ngee-ann-report-time@1");
+      `).run("{not-json", project.id, "ngee-ann-report-time@2");
 
       const state = createProjectHarnessConfigurationReader({
         metadataStore,
@@ -480,7 +482,7 @@ describe("Project Harness Configuration", () => {
         definition: { status: "available" },
         reportTimePolicy: {
           status: "unavailable",
-          revisionId: "ngee-ann-report-time@1",
+          revisionId: "ngee-ann-report-time@2",
           windows: [],
         },
       });
@@ -506,11 +508,11 @@ describe("Project Harness Configuration", () => {
         workspaceId: "tuya-office",
       }).readProjectHarnessConfiguration("tuya-office");
 
-      expect(state.project.rendererKey).toBe("energy-template-overview");
+      expect(state.project.rendererKey).toBe("tuya-office-overview");
       expect(state.managedOverview).toMatchObject({
         status: "available",
         source: "overview-definition",
-        rendererKey: "energy-template-overview",
+        rendererKey: "tuya-office-overview",
         definition: { status: "available" },
         reportTimePolicy: {
           status: "available",

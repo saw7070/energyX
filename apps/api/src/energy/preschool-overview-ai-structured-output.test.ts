@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { toStandardSchema } from "@mastra/core/schema";
+import { ENERGYIQ_DECISION_BRIEF_SAFETY_LIMITS_V1 } from "@datafoundry/contracts";
 
 import {
   PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V1,
@@ -265,8 +266,13 @@ describe("Preschool Overview AI structured output", () => {
     expect(v4PropertyMap.keyPoints).toBeUndefined();
     expect(v4PropertyMap.allowedNextChecks).toBeUndefined();
     expect(v4Properties.candidates!.items).toEqual({ type: "object" });
-    expect(v4Properties.summary!.properties!.text).toMatchObject({ maxLength: 480 });
-    expect(v4Properties.limitation).toMatchObject({ maxLength: 320 });
+    // Accepted copy is bounded by the shared Decision Brief safety ceilings, not by editorial targets.
+    expect(v4Properties.summary!.properties!.text).toMatchObject({
+      maxLength: ENERGYIQ_DECISION_BRIEF_SAFETY_LIMITS_V1.sectionSummaryChars,
+    });
+    expect(v4Properties.limitation).toMatchObject({
+      maxLength: ENERGYIQ_DECISION_BRIEF_SAFETY_LIMITS_V1.sectionLimitationChars,
+    });
     expect(resolveOverviewAiStageStructuredOutput("section-interpreter"))
       .toBe(PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V3);
     expect(resolveOverviewAiStageStructuredOutputV4("section-interpreter"))
@@ -277,7 +283,10 @@ describe("Preschool Overview AI structured output", () => {
     expect(PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4.schema).toMatchObject({
       required: ["status", "findings"],
       properties: {
-        summary: { type: "object", properties: { text: { maxLength: 600 } } },
+        summary: {
+          type: "object",
+          properties: { text: { maxLength: ENERGYIQ_DECISION_BRIEF_SAFETY_LIMITS_V1.executiveSummaryChars } },
+        },
         findings: {
           type: "array",
           maxItems: 3,

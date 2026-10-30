@@ -477,6 +477,9 @@ describe("EnergyQueryContext", () => {
         user_id: "dev-user",
         document: {
           ...publishedDocument,
+          // Moving the only meter of Level 6 Office Load 3 leaves that location unmeasured, and a
+          // location without a meter cannot be published, so the edit removes it as well.
+          nodes: publishedDocument.nodes.filter((node) => node.id !== "l6-load-3"),
           meter_mapping: { ...mapping, rows, official_aggregation_routes: officialRoutes, confirmed: true },
         },
       });
