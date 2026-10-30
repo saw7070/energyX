@@ -56,6 +56,7 @@ import { initializeEnergyIqLiveConnectorSchema } from "./energyiq-live-connector
 import { ENERGYIQ_ORGANISATION_ADMIN_ROLE_ID, initializeEnergyIqAccessRoleSchema, upgradeSeededOrganisationAdminRole } from "./energyiq-access-role-store.js";
 import { initializeEnergyIqTargetsSchema } from "./energyiq-targets-store.js";
 import { initializeEnergyIqAiGovernanceSchema } from "./energyiq-ai-governance-store.js";
+import { initializeOrganisationIdentitySchema, OrganisationIdentityStore } from "./organisation-identity-store.js";
 import { recordSchemaMigration, runSchemaMigration } from "./schema-migration.js";
 
 export * from "./config-store.js";
@@ -82,6 +83,7 @@ export * from "./energyiq-source-sync-store.js";
 export * from "./energyiq-live-connector-store.js";
 export * from "./energyiq-access-role-store.js";
 export * from "./workspace-model-profile-store.js";
+export * from "./organisation-identity-store.js";
 
 export type UserRecord = {
   id: string;
@@ -739,6 +741,8 @@ export class MetadataStore {
   readonly interactions: InteractionRepository;
   readonly longTermMemories: LongTermMemoryRepository;
   readonly modelRequestSnapshots: ModelRequestSnapshotRepository;
+  /** Per-Organisation single sign-on and SCIM provisioning. */
+  readonly organisationIdentity: OrganisationIdentityStore;
   readonly queryHistory: QueryHistoryRepository;
   readonly protocolStates: ProtocolStateSnapshotRepository;
   readonly runEvents: RunEventRepository;
@@ -783,6 +787,7 @@ export class MetadataStore {
     this.interactions = new InteractionRepository(db);
     this.longTermMemories = new LongTermMemoryRepository(db);
     this.modelRequestSnapshots = new ModelRequestSnapshotRepository(db);
+    this.organisationIdentity = new OrganisationIdentityStore(db);
     this.queryHistory = new QueryHistoryRepository(db);
     this.protocolStates = new ProtocolStateSnapshotRepository(db);
     this.secrets = new EncryptedSecretStore(db, secretMasterKey);
@@ -4713,6 +4718,15 @@ const runMigrations = (db: DatabaseSync): void => {
     "Add per-organisation AI settings, AI usage records and AI answer feedback",
     () => {
       initializeEnergyIqAiGovernanceSchema(db);
+    },
+    { atomic: true },
+  );
+  runSchemaMigration(
+    db,
+    "0053_organisation_sso_and_scim",
+    "Add per-Organisation single sign-on (OpenID Connect) and SCIM provisioning",
+    () => {
+      initializeOrganisationIdentitySchema(db);
     },
     { atomic: true },
   );
