@@ -24,7 +24,7 @@
     "odbc": "^2.5.0",
     "oracledb": "^7.0.0",
     "pg": "^8.22.0",
-    "read-excel-file": "^6.0.1",
+    "read-excel-file": "^9.3.12",
     "redis": "^6.0.1",
     "snowflake-sdk": "^3.0.0",
     "unzipper": "^0.12.5"
