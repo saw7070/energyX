@@ -1,6 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { EnergyIqProjectSetupDocument, MetadataStore } from "@datafoundry/metadata";
 
+import { defineBackgroundJob } from "../observability/background-jobs.js";
+import { logger } from "../observability/logger.js";
 import { resolveEnergyTuyaProjectConnector, type EnergyTuyaProjectConnector } from "./energy-tuya-connector.js";
 import { readOfflineMeters, recordDeviceStatus } from "./energy-live-status.js";
 import type { TuyaDeviceBinding, TuyaLatestEnergyReading } from "./tuya-openapi-client.js";
@@ -17,6 +19,8 @@ const LIVE_STALE_MS = 45 * 60_000;
 /** Power is only worked out across a gap that is neither a duplicate read nor a long outage. */
 const POWER_MIN_GAP_MS = 5 * 60_000;
 const POWER_MAX_GAP_MS = 60 * 60_000;
+
+const log = logger.child({ component: "live-readings" });
 
 export type LiveMeterReading = {
   meterPointId: string;
@@ -213,7 +217,7 @@ export const pollLiveReadings = async (input: {
         }),
       });
     } catch (error) {
-      console.warn(`[live-readings] status check failed project=${input.connector.projectId} code=${error instanceof Error ? error.message.slice(0, 160) : "unknown"}`);
+      log.warn("status check failed", { project_id: input.connector.projectId, code: error instanceof Error ? error.message.slice(0, 160) : "unknown" });
     }
   }
   return { read: readings.length, failed: latest.length - readings.length };
@@ -239,15 +243,20 @@ export const createEnergyLiveReadingsPoller = (input: {
   intervalMs?: number;
 }): EnergyLiveReadingsPoller => {
   const env = input.env ?? process.env;
+  const intervalMs = input.intervalMs ?? LIVE_READING_INTERVAL_MS;
+  // Four missed polls is a stall; one site's failure is reported against that site.
+  const job = defineBackgroundJob("live-readings", { staleAfterMs: Math.max(4 * intervalMs, 60 * 60_000) });
   let timer: NodeJS.Timeout | undefined;
   let running: Promise<void> | undefined;
   let controller: AbortController | undefined;
   const pollAll = (): Promise<void> => {
     running ??= (async () => {
       controller = new AbortController();
+      job.heartbeat();
       try {
         for (const projectId of liveProjectIds(input.metadataStore, env)) {
           if (controller.signal.aborted) return;
+          job.heartbeat();
           try {
             const connector = resolveEnergyTuyaProjectConnector({ metadataStore: input.metadataStore, projectId, env });
             const result = await pollLiveReadings({
@@ -258,9 +267,12 @@ export const createEnergyLiveReadingsPoller = (input: {
               ...(input.now ? { now: input.now } : {}),
               signal: controller.signal,
             });
-            if (result.failed > 0) console.warn(`[live-readings] partial project=${projectId} read=${result.read} failed=${result.failed}`);
+            // Some meters not answering is the meters' problem, shown on Overview; the poll itself worked.
+            if (result.failed > 0) log.warn("partial", { project_id: projectId, read: result.read, failed: result.failed });
+            job.succeeded(projectId);
           } catch (error) {
-            console.error(`[live-readings] failed project=${projectId} code=${error instanceof Error ? error.message.slice(0, 160) : "unknown"}`);
+            log.error("failed", { project_id: projectId, code: error instanceof Error ? error.message.slice(0, 160) : "unknown" });
+            if (!controller.signal.aborted) job.failed(error, projectId);
           }
         }
       } finally {
@@ -273,11 +285,13 @@ export const createEnergyLiveReadingsPoller = (input: {
   return {
     start() {
       if (timer) return;
+      job.start();
       void pollAll();
-      timer = setInterval(() => void pollAll(), input.intervalMs ?? LIVE_READING_INTERVAL_MS);
+      timer = setInterval(() => void pollAll(), intervalMs);
       timer.unref();
     },
     async stop() {
+      if (timer) job.stop();
       if (timer) clearInterval(timer);
       timer = undefined;
       controller?.abort();

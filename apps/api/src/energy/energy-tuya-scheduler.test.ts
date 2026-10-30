@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
+import { createBackgroundJobRegistry } from "../observability/background-jobs.js";
 import type { ConfigApiContext } from "../routes/types.js";
 import { ensureEnergyIqBootstrap } from "./energy-bootstrap.js";
 import { createEnergyTuyaDailyScheduler, resolveNextSingaporeLocalHour } from "./energy-tuya-scheduler.js";
@@ -43,6 +44,34 @@ describe("Tuya daily scheduler", () => {
 
     await expect(scheduler.runIfDue()).resolves.toBe("failed");
     expect(sync).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed sync to its job, so /ready, /metrics and the operator alert see it", async () => {
+    const alerts: string[] = [];
+    const jobs = createBackgroundJobRegistry({
+      alerts: () => ({ enabled: true, notify: (alert) => { alerts.push(alert.text); return "queued"; }, flush: async () => undefined }),
+    });
+    const scheduler = createEnergyTuyaDailyScheduler({
+      enabled: true,
+      localHour: 1,
+      actorUserId: "dev-user",
+      context: {} as Required<ConfigApiContext>,
+      resolveConnector: () => { throw new Error("ENERGYIQ_TUYA_CONNECTOR_REVISION_MISMATCH"); },
+      syncTuyaEnergyReadings: vi.fn(),
+      now: () => Date.parse("2026-08-21T18:00:00.000Z"),
+      job: jobs.define("tuya-sync", { staleAfterMs: 26 * 60 * 60_000 }),
+    });
+    scheduler.start();
+    await scheduler.runIfDue();
+    expect(jobs.snapshot()).toEqual([expect.objectContaining({
+      name: "tuya-sync",
+      status: "failing",
+      failing: [expect.objectContaining({ subject: "unresolved", code: "ENERGYIQ_TUYA_CONNECTOR_REVISION_MISMATCH" })],
+    })]);
+    expect(alerts).toEqual([expect.stringContaining("Background job tuya-sync failed (unresolved): ENERGYIQ_TUYA_CONNECTOR_REVISION_MISMATCH")]);
+    await scheduler.stop();
+    // A stopped scheduler is no longer watched, so it cannot be reported as stalled.
+    expect(jobs.snapshot()).toEqual([]);
   });
 
   it("steps aside while an administrator has taken the Project over in the app", async () => {

@@ -2,6 +2,8 @@ import type { MetadataStore } from "@datafoundry/metadata";
 
 import { loadPasswordAuthConfig } from "../auth/config.js";
 import { createMailDelivery, type MailDelivery } from "../email/mail-delivery.js";
+import { defineBackgroundJob } from "../observability/background-jobs.js";
+import { logger } from "../observability/logger.js";
 import { sendPendingAlertEmails, type AlertEmail } from "./energy-alert-emails.js";
 import { evaluateSiteChecks, localDate, shiftDate, type OvernightFinding, type PortfolioBudgetStatus } from "./energy-portfolio.js";
 import { readerForWorkspace, siteAlertRecipients } from "./energy-recipients.js";
@@ -16,6 +18,7 @@ const CHECK_INTERVAL_MS = 60 * 60_000;
 const CHECK_FROM_LOCAL_HOUR = 7;
 /** An overnight finding about an older night (for example from a late file upload) is not news any more. */
 const OVERNIGHT_NEWS_DAYS = 3;
+const log = logger.child({ component: "target-alert" });
 
 export type TargetAlert =
   | { kind: "budget"; key: string; status: "at-risk" | "over"; budget: PortfolioBudgetStatus }
@@ -83,12 +86,14 @@ export const createEnergyTargetsMonitor = (input: {
   const publicBaseUrl = loadPasswordAuthConfig(env).publicBaseUrl;
   /** The local day each site was last checked, so the hourly tick does the work once a day. */
   const checked = new Map<string, string>();
+  const job = defineBackgroundJob("target-alert", { staleAfterMs: 3 * CHECK_INTERVAL_MS });
   let timer: NodeJS.Timeout | undefined;
   let kickoff: NodeJS.Timeout | undefined;
   let running: Promise<void> | undefined;
   const runOnce = (): Promise<void> => {
     running ??= (async () => {
       try {
+        job.heartbeat();
         const projects = input.metadataStore.workspaces.list()
           .filter((workspace) => workspace.kind === "customer" && !workspace.disabled_at)
           .flatMap((workspace) => input.metadataStore.energyIq.listProjectsByWorkspace(workspace.id))
@@ -98,6 +103,7 @@ export const createEnergyTargetsMonitor = (input: {
           const local = localDate(at, project.timezone);
           const hour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: project.timezone, hour: "2-digit", hourCycle: "h23" }).format(at));
           if (checked.get(project.id) === local || hour < CHECK_FROM_LOCAL_HOUR) continue;
+          let failed = false;
           try {
             const targets = input.metadataStore.energyIq.targets.getTargets(project.id);
             if (!targets.budget && !targets.overnight.enabled) {
@@ -134,9 +140,14 @@ export const createEnergyTargetsMonitor = (input: {
               recipients: siteAlertRecipients(input.metadataStore, project.id),
               send: delivery.send,
             });
-            for (const key of sent) console.log(`[target-alert] emailed project=${project.id} alert=${key.split(":")[0]}`);
+            for (const key of sent) log.info("emailed", { project_id: project.id, alert: key.split(":")[0] });
           } catch (error) {
-            console.error(`[target-alert] failed project=${project.id} code=${error instanceof Error ? error.message.slice(0, 160) : "unknown"}`);
+            failed = true;
+            log.error("failed", { project_id: project.id, code: error instanceof Error ? error.message.slice(0, 160) : "unknown" });
+            job.failed(error, project.id);
+          } finally {
+            // The early `continue`s above are finished checks too.
+            if (!failed) job.succeeded(project.id);
           }
         }
       } finally {
@@ -148,12 +159,14 @@ export const createEnergyTargetsMonitor = (input: {
   return {
     start() {
       if (timer || env.ENERGYIQ_TARGETS_MONITOR_ENABLED?.trim().toLowerCase() === "false") return;
+      job.start();
       timer = setInterval(() => void runOnce(), CHECK_INTERVAL_MS);
       timer.unref();
       kickoff = setTimeout(() => void runOnce(), 60_000);
       kickoff.unref();
     },
     stop() {
+      if (timer) job.stop();
       if (timer) clearInterval(timer);
       if (kickoff) clearTimeout(kickoff);
       timer = undefined;
