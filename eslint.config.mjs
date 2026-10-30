@@ -54,6 +54,7 @@ export default defineConfig(
     "**/.next-*/**",
     "**/coverage/**",
     "**/*.d.ts",
+    ".claude/**",
     ".scratch/**",
     "deploy/**",
     "docs/**",
