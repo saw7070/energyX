@@ -41,3 +41,6 @@ docs/public/assets/
 *.xlsx
 !apps/**/__fixtures__/**/*.xlsx
 !packages/**/__fixtures__/**/*.xlsx
+
+# Local Claude Code worktrees and session state.
+/.claude/worktrees/
