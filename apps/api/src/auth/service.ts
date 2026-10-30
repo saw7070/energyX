@@ -9,6 +9,7 @@ import type {
 import type { PasswordAuthConfig } from "./config.js";
 import { AuthMailer } from "./mailer.js";
 import { createSecretToken, hashPassword, hashToken, verifyPassword } from "./crypto.js";
+import { passwordSignInBlockedBy, SSO_REQUIRED_MESSAGE } from "./sso-policy.js";
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 /** Sign-ins without "Remember me" end when the browser closes, or after this at the latest. */
@@ -135,6 +136,7 @@ export class AuthService {
     if (user.disabled_at) {
       throw new AuthError(403, "FORBIDDEN", "This account is disabled.");
     }
+    this.assertPasswordAllowed(user, input);
     if (input.displayName) {
       user = this.metadataStore.users.updateDisplayName({
         user_id: user.id,
@@ -221,6 +223,7 @@ export class AuthService {
       });
       throw new AuthError(401, "UNAUTHORIZED", "Invalid email or password.");
     }
+    this.assertPasswordAllowed(user, input);
     this.audit("auth.login_succeeded", {
       email,
       ipAddress: input.ipAddress,
@@ -249,6 +252,10 @@ export class AuthService {
         ipAddress: input.ipAddress,
         userAgent: input.userAgent
       });
+      return { ok: true };
+    }
+    if (passwordSignInBlockedBy(this.metadataStore, user)) {
+      this.audit("auth.password_refused_sso_required", { email, ipAddress: input.ipAddress, userAgent: input.userAgent, userId: user.id });
       return { ok: true };
     }
     const resetToken = createSecretToken();
@@ -280,6 +287,7 @@ export class AuthService {
   }): Promise<{ ok: boolean }> {
     assertPassword(input.password);
     const token = this.requireToken("password_reset", input.token);
+    this.assertPasswordAllowed(this.metadataStore.users.getById({ user_id: token.user_id }), input);
     const password = await hashPassword(input.password);
     this.metadataStore.userPasswordCredentials.set({
       user_id: token.user_id,
@@ -403,6 +411,20 @@ export class AuthService {
     }
     this.metadataStore.authSessions.revoke({ id });
     return { revoked: true };
+  }
+
+  /** Signs in someone their Organisation's identity provider has vouched for (see organisation-sso.ts). */
+  createSingleSignOnSession(input: { user: UserRecord; persistent?: boolean; ipAddress?: string; userAgent?: string }) {
+    return this.createAuthenticatedSession(input);
+  }
+
+  /** Members of an Organisation that requires single sign-on may not use a password (see sso-policy.ts). */
+  private assertPasswordAllowed(user: UserRecord, input: { ipAddress?: string | undefined; userAgent?: string | undefined }): void {
+    if (!passwordSignInBlockedBy(this.metadataStore, user)) return;
+    this.audit("auth.password_refused_sso_required", {
+      email: user.email, ipAddress: input.ipAddress, userAgent: input.userAgent, userId: user.id
+    });
+    throw new AuthError(403, "SSO_REQUIRED", SSO_REQUIRED_MESSAGE);
   }
 
   private requireToken(purpose: "account_invitation" | "email_verification" | "password_reset", token: string) {
