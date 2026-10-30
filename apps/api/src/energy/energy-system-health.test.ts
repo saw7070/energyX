@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkAdvisorWorker, checkEmail } from "./energy-system-health.js";
+import { checkAdvisorWorker, checkAiDataRegion, checkEmail } from "./energy-system-health.js";
 
 const enabled = { ENERGYIQ_REPORT_AGENT_ENABLED: "true", ENERGYIQ_REPORT_AGENT_IMAGE: "worker:test" };
 
@@ -20,6 +20,15 @@ describe("system health checks", () => {
   it("separates Docker being down from the advisor being switched off", async () => {
     expect((await checkAdvisorWorker(enabled, async () => { throw new Error("daemon down"); })).detail).toContain("Docker is not running");
     expect((await checkAdvisorWorker({}, async () => undefined)).status).toBe("warning");
+  });
+
+  it("warns when AI requests go to mainland China", () => {
+    for (const host of ["dashscope.aliyuncs.com", "api.deepseek.com", "open.bigmodel.cn"]) {
+      expect(checkAiDataRegion(host).status).toBe("warning");
+    }
+    for (const host of ["dashscope-intl.aliyuncs.com", "api.openai.com", "llm.internal.example.com"]) {
+      expect(checkAiDataRegion(host).status).toBe("ok");
+    }
   });
 
   it("warns when emails are only in test mode", () => {

@@ -28,7 +28,7 @@ export const extractDeviceListFromImage = async (input: {
   if (input.content.length === 0 || input.content.length > MAX_IMAGE_BYTES) throw new Error("ENERGYIQ_DEVICE_LIST_IMAGE_SIZE_INVALID");
   const apiKey = env.LLM_API_KEY?.trim();
   if (!apiKey) throw new Error("ENERGYIQ_DEVICE_LIST_VISION_UNAVAILABLE");
-  const baseUrl = (env.LLM_BASE_URL?.trim() || "https://dashscope.aliyuncs.com/compatible-mode/v1").replace(/\/+$/u, "");
+  const baseUrl = (env.LLM_BASE_URL?.trim() || "https://dashscope-intl.aliyuncs.com/compatible-mode/v1").replace(/\/+$/u, "");
   const model = env.ENERGYIQ_VISION_MODEL?.trim() || "qwen-vl-max";
 
   const response = await (input.fetchImpl ?? fetch)(`${baseUrl}/chat/completions`, {

@@ -263,6 +263,7 @@ const resolvePromptCompatibility = (
   const requiresNonEmptyMessageContent =
     providerId === "alibaba"
     || normalizedBaseUrl.includes("dashscope.aliyuncs.com")
+    || normalizedBaseUrl.includes("dashscope-intl.aliyuncs.com")
     || normalizedBaseUrl.includes("maas.aliyuncs.com");
 
   return requiresNonEmptyMessageContent

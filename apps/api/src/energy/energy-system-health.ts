@@ -42,6 +42,7 @@ export function checkAiModel(metadata: MetadataStore, workspaceId: string): Heal
   try {
     const model = resolvePiReportModel(metadata, workspaceId);
     checks.push({ id: "ai-model", group: "AI advisor", title: "AI model", status: "ok", detail: `Answers use ${model.model} (${new URL(model.baseUrl).host}).` });
+    checks.push(checkAiDataRegion(new URL(model.baseUrl).hostname));
   } catch (error) {
     const code = error instanceof Error ? error.message : "";
     checks.push({ id: "ai-model", group: "AI advisor", title: "AI model", status: "problem",
@@ -54,6 +55,26 @@ export function checkAiModel(metadata: MetadataStore, workspaceId: string): Heal
     : { id: "ai-allowance", group: "AI advisor", title: "AI use", status: "warning", detail: allowance.reason === "disabled" ? "AI is switched off for this organisation." : `This month's limit of ${allowance.limit} requests is used up.`, fix: "Change it in Admin → AI governance." });
   return checks;
 }
+
+/**
+ * Where the advisor's questions and energy figures are sent. Endpoints in mainland China move customer data out of
+ * Singapore and Malaysia, which the client's contract and PDPA transfer rules must allow; public-sector buyers usually
+ * do not.
+ */
+export function checkAiDataRegion(hostname: string): HealthCheck {
+  const base = { id: "ai-region", group: "AI advisor", title: "Where AI requests go" };
+  const host = hostname.toLowerCase();
+  if (isMainlandChinaAiHost(host)) {
+    return { ...base, status: "warning", detail: `AI requests go to ${host}, which is in mainland China, so customer energy data leaves the region.`, fix: "Use an international endpoint (for Alibaba Model Studio, dashscope-intl.aliyuncs.com) or a provider in the client's region, unless the client has agreed in writing." };
+  }
+  return { ...base, status: "ok", detail: `AI requests go to ${host}.` };
+}
+
+const isMainlandChinaAiHost = (host: string): boolean =>
+  host.endsWith(".cn")
+  || host === "dashscope.aliyuncs.com"
+  || (host.endsWith(".aliyuncs.com") && !host.includes("intl") && !host.includes("-ap-") && !host.includes("ap-southeast"))
+  || host === "deepseek.com" || host.endsWith(".deepseek.com");
 
 export function checkEmail(env: NodeJS.ProcessEnv = process.env): HealthCheck {
   const mode = createMailDelivery(env).mode;

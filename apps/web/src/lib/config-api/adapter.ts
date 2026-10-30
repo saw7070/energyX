@@ -150,7 +150,7 @@ export function knowledgeBaseDtoToItem(dto: KnowledgeBaseDto): WorkspaceConfigIt
       embeddingModel: payloadEmbeddingModel ?? "text-embedding-v4",
       embeddingBaseUrl:
         payloadEmbeddingBaseUrl ??
-        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
       embeddingApiKey: "",
       vectorStore: dto.vectorStore ?? "local-sqlite",
       rerankEnabled: asString(dto.rerankEnabled ?? false),

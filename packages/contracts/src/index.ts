@@ -431,7 +431,7 @@ export const createEnvConfig = (env: Record<string, string | undefined>): EnvCon
   llm: {
     provider: env.LLM_PROVIDER ?? "openai-compatible",
     model: env.LLM_MODEL ?? "qwen-plus",
-    base_url: env.LLM_BASE_URL ?? "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    base_url: env.LLM_BASE_URL ?? "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
     ...(env.LLM_API_KEY ? { api_key: env.LLM_API_KEY } : {})
   },
   embedding: {
@@ -439,7 +439,7 @@ export const createEnvConfig = (env: Record<string, string | undefined>): EnvCon
     model: env.EMBEDDING_MODEL ?? "text-embedding-v4",
     dim: Number.parseInt(env.EMBEDDING_DIM ?? "1024", 10),
     output_type: "dense",
-    base_url: env.EMBEDDING_BASE_URL ?? "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    base_url: env.EMBEDDING_BASE_URL ?? "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
     ...(env.EMBEDDING_API_KEY ? { api_key: env.EMBEDDING_API_KEY } : {})
   },
   storage: {

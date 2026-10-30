@@ -1420,7 +1420,7 @@ export function normalizeKbSettings(
     embeddingBaseUrl:
       settings?.embeddingBaseUrl ??
       settings?.embedding_base_url ??
-      "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
     embeddingApiKey: settings?.embeddingApiKey ?? settings?.embedding_api_key ?? "",
     vectorStore: settings?.vectorStore ?? "local-sqlite",
     rerankEnabled: settings?.rerankEnabled ?? "false",
@@ -1736,7 +1736,7 @@ export const WORKSPACE_CONFIG_FIELDS: Record<
       key: "embeddingBaseUrl",
       label: "Embedding Base URL",
       inputType: "url",
-      placeholder: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      placeholder: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
       fullWidth: true,
     },
     {
@@ -1913,7 +1913,7 @@ export const WORKSPACE_CONFIG_FIELDS: Record<
       key: "baseUrl",
       label: "Base URL",
       inputType: "url",
-      placeholder: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      placeholder: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
       helpText: "OpenAI-compatible Chat Completions base URL (without /chat/completions).",
       required: true,
       fullWidth: true,
