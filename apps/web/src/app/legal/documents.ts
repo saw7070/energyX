@@ -209,7 +209,7 @@ export const LEGAL_DOCUMENTS: LegalDocument[] = [
         "Automated tests run on every change; releases are checked before they go live and roll back on their own if checks fail.",
       ]] },
       { heading: "Backups and continuity", blocks: [
-        "Nightly consistent backups with 7 days kept on the server and 35 days offsite, encrypted. Recovery point 24 hours, recovery time target 4 hours, with a restore drill every quarter.",
+        "Nightly consistent backups with 7 days kept on the server and 35 days offsite, encrypted. Recovery point 24 hours, recovery time target 4 hours. Each backup is checksummed when it is taken.",
       ] },
       { heading: "Certifications", blocks: [
         "EnergyX does not yet hold a security certification. We are working towards Singapore's CSA Cyber Trust mark and will share our completed security questionnaire on request.",

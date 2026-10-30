@@ -601,6 +601,33 @@ export const handleEnergyApiRequest = async (
           }))
         };
       }
+      // PDPA access and erasure requests, handled by a platform administrator on the person's behalf.
+      if (segments[1] === "users" && segments[2] && segments[3] === "personal-data" && segments.length === 4) {
+        const { erasePersonalData, exportPersonalData } = await import("./energy-personal-data.js");
+        const targetUserId = decodeURIComponent(segments[2]);
+        if (request.method === "GET") {
+          const exported = exportPersonalData(context.metadataStore, targetUserId);
+          context.metadataStore.authAuditEvents.append({
+            id: randomUUID(),
+            event_type: "energyiq.user_personal_data_exported",
+            user_id: user.id,
+            metadata: { targetUserId }
+          });
+          return { status: 200, body: createSuccessResult(exported) };
+        }
+        if (request.method === "DELETE") {
+          const body = requireRecord(await readJsonBody(request));
+          return {
+            status: 200,
+            body: createSuccessResult(erasePersonalData({
+              metadataStore: context.metadataStore,
+              actorUserId: user.id,
+              userId: targetUserId,
+              confirmEmail: requireNonEmptyString(body.confirmEmail, "ENERGYIQ_USER_EMAIL_REQUIRED")
+            }))
+          };
+        }
+      }
     }
     if (segments[0] === "team") {
       const team = new EnergyTeamAccessService(context.metadataStore, context.authService);

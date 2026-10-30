@@ -48,7 +48,7 @@ export const deleteEnergyProject = async (input: {
   confirmName: string;
   purgeFacts?: (input: { databasePath: string; projectId: string }) => Promise<void>;
   resolveFactStorePath?: (workspaceId: string) => string;
-}): Promise<{ projectId: string; workspaceId: string; metadataRowsDeleted: number }> => {
+}): Promise<{ projectId: string; workspaceId: string; metadataRowsDeleted: number; readingsRemoved: boolean }> => {
   const project = requireProject(input.metadataStore, input.projectId);
   refusePinned(project.id, "deleted");
   if (input.confirmName.trim() !== project.name.trim()) {
@@ -60,9 +60,15 @@ export const deleteEnergyProject = async (input: {
   const metadataRowsDeleted = deleteProjectMetadata(input.metadataStore.db, { projectId: project.id, workspaceId: project.workspace_id });
   const purge = input.purgeFacts ?? purgeEnergyFactProject;
   const resolvePath = input.resolveFactStorePath ?? resolveEnergyFactStorePath;
-  // Readings are only reachable through the deleted project; a failed purge leaves unreachable rows, not a broken project.
-  await purge({ databasePath: resolvePath(project.workspace_id), projectId: project.id }).catch(() => undefined);
-  return { projectId: project.id, workspaceId: project.workspace_id, metadataRowsDeleted };
+  // Readings are only reachable through the deleted project, so a failed purge leaves unreachable rows, not a broken
+  // project. They are still customer data that must go, so the failure is reported instead of being swallowed.
+  const readingsRemoved = await purge({ databasePath: resolvePath(project.workspace_id), projectId: project.id })
+    .then(() => true)
+    .catch((error: unknown) => {
+      console.error(`[energyiq] Project ${project.id} was deleted but its meter readings could not be removed:`, error);
+      return false;
+    });
+  return { projectId: project.id, workspaceId: project.workspace_id, metadataRowsDeleted, readingsRemoved };
 };
 
 const deleteProjectMetadata = (db: DatabaseSync, scope: { projectId: string; workspaceId: string }): number => {
