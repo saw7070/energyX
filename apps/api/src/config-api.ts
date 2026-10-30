@@ -81,6 +81,8 @@ import {
   type PolicyMcpClientConfig
 } from "./policy-mcp-middleware.js";
 import { recordEnergyChange } from "./energy/energy-change-audit.js";
+import { recordSupportAccess } from "./energy/energy-support-access.js";
+import { recordLegacyConfigChange } from "./legacy-config-audit.js";
 import { sessionTitleDto } from "./session-title.js";
 import {
   createSessionBranch,
@@ -169,14 +171,22 @@ export const handleConfigApiRequest = async (
   if (!pathname.startsWith("/api/v1/")) {
     return undefined;
   }
+  const resolved = { ...context, workspaceId: context.workspaceId ?? DEFAULT_WORKSPACE_ID };
+  let response: ConfigApiResponse;
   try {
-    return await routeConfigRequest(request, pathname, {
-      ...context,
-      workspaceId: context.workspaceId ?? DEFAULT_WORKSPACE_ID
-    });
+    response = await routeConfigRequest(request, pathname, resolved);
   } catch (error) {
-    return errorResponse(error);
+    response = errorResponse(error);
   }
+  recordLegacyConfigChange({
+    metadataStore: resolved.metadataStore,
+    request,
+    segments: pathname.slice("/api/v1/".length).split("/").filter(Boolean),
+    userId: resolved.userId,
+    workspaceId: resolved.workspaceId,
+    status: response.status,
+  });
+  return response;
 };
 
 const routeConfigRequest = async (
@@ -192,14 +202,16 @@ const routeConfigRequest = async (
   }
   if (root === "energy") {
     const response = await handleEnergyApiRequest(request, segments.slice(1), context);
-    recordEnergyChange({
+    const audited = {
       metadataStore: context.metadataStore,
       request,
       segments: segments.slice(1),
       userId: context.userId,
       workspaceId: context.workspaceId,
       status: response.status,
-    });
+    };
+    recordEnergyChange(audited);
+    recordSupportAccess(audited);
     return response;
   }
   if (root === "report-models") {
