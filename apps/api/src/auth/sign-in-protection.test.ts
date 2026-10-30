@@ -178,6 +178,27 @@ describe("Session idle timeout", () => {
     }, { sessionIdleMinutes: 30 });
   });
 
+  it("gives sessions open at upgrade a fresh idle window, because reading pages did not count before", () => {
+    const root = mkdtempSync(join(tmpdir(), "auth-idle-upgrade-"));
+    const path = join(root, "metadata.sqlite");
+    let metadata = createMetadataStore({ database_path: path });
+    try {
+      metadata.users.createPasswordUser({ id: "reader", email: "reader@example.test" });
+      metadata.authSessions.create({
+        id: "open-session", user_id: "reader", token_hash: "token", csrf_token_hash: "csrf",
+        expires_at: new Date(Date.now() + 86_400_000).toISOString()
+      });
+      metadata.authSessions.touch({ id: "open-session", last_seen_at: "2026-01-01T00:00:00.000Z" });
+      metadata.db.prepare("DELETE FROM schema_migrations WHERE id = ?").run("0054_auth_session_idle_baseline");
+      metadata.close();
+      metadata = createMetadataStore({ database_path: path });
+      expect(Date.parse(metadata.authSessions.get({ id: "open-session" }).last_seen_at)).toBeGreaterThan(Date.now() - MINUTE);
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
   it("reads its settings from the environment, with safe defaults", () => {
     const passwordEnv = {
       DATAFOUNDRY_AUTH_MODE: "password",

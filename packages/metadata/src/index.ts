@@ -4729,6 +4729,15 @@ const runMigrations = (db: DatabaseSync): void => {
     },
     { atomic: true },
   );
+  runSchemaMigration(
+    db,
+    "0054_auth_session_idle_baseline",
+    "Start every open session's idle clock at upgrade, since reading pages did not count as activity before",
+    () => {
+      db.prepare("UPDATE auth_sessions SET last_seen_at = ? WHERE revoked_at IS NULL").run(new Date().toISOString());
+    },
+    { atomic: true },
+  );
 };
 
 const initializeSchemaMigrationTable = (db: DatabaseSync): void => {
