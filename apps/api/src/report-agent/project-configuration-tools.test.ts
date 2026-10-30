@@ -1,12 +1,18 @@
 import { LocalFileAssetService } from "@datafoundry/files";
 import { vi, afterEach, expect, it } from "vitest";
 import { createMetadataStore, type MetadataStore } from "@datafoundry/metadata";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createProjectConfigurationTools } from "./project-configuration-tools.js";
 import { ReportStore } from "./report-store.js";
 import { buildTuyaOfficeSetup } from "../energy/tuya-office-project.js";
+
+// Real customer workbooks are kept out of git; see docs/agents/customer-fixtures.md.
+const NGEE_ANN_WORKBOOK = join(
+  process.env.ENERGYX_CUSTOMER_FIXTURES_DIR ?? join("docs", "template", "Net-Zero Product"),
+  "Ngee Ann Poly Level 6 (19 May - 17 June).xlsx"
+);
 const cleanup: Array<() => void> = [];
 afterEach(() => { for (const action of cleanup.splice(0)) action(); });
 it("lets a member read the setup but refuses every change, whatever project access row they hold", async () => {
@@ -143,10 +149,10 @@ it("never imports an arbitrary file reference or server path", async () => {
   expect(await executeTool("project_source_import", {attachmentIndex:1,sourceKind:"excel",path:"other.xlsx"})).toMatchObject({ok:false,code:"PROJECT_CONFIGURATION_ARGUMENTS_INVALID"});
 });
 
-it("imports a real Ngee Ann workbook once and returns source evidence for mapping", async () => {
+it.skipIf(!existsSync(NGEE_ANN_WORKBOOK))("imports a real Ngee Ann workbook once and returns source evidence for mapping", async () => {
   const {root,metadata,run} = fixture();
   const files = new LocalFileAssetService(metadata,{storageRoot:join(root,"files")});
-  const {ref} = files.createRef({user_id:run.actorUserId,workspace_id:run.workspaceId,filename:"source.xlsx",source:"upload",content:readFileSync("docs/template/Net-Zero Product/Ngee Ann Poly Level 6 (19 May - 17 June).xlsx"),declared_mime_type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+  const {ref} = files.createRef({user_id:run.actorUserId,workspace_id:run.workspaceId,filename:"source.xlsx",source:"upload",content:readFileSync(NGEE_ANN_WORKBOOK),declared_mime_type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
   const {executeTool} = createProjectConfigurationTools({metadata,run,files,fileRefIds:[ref.id]});
   const imported = await executeTool("project_source_import",{attachmentIndex:1,sourceKind:"excel"}) as any;
   expect(imported).toMatchObject({ok:true,duplicate:false,status:"inspected"});

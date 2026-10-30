@@ -32,3 +32,12 @@ storage/
 !.env.example
 *.tsbuildinfo
 docs/public/assets/
+
+# Customer data and customer-derived reference assets stay out of git. See docs/agents/customer-fixtures.md.
+/docs/template/Net-Zero Product/
+/docs/template/Preschool/
+/outputs/
+/.customer-fixtures/
+*.xlsx
+!apps/**/__fixtures__/**/*.xlsx
+!packages/**/__fixtures__/**/*.xlsx

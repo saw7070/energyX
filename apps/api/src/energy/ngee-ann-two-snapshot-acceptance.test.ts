@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -30,7 +30,9 @@ import { resolveEnergyPublishedMeterRoute } from "./energy-query-context.js";
 import { resolveProjectAnalysis } from "./project-analysis-resolver.js";
 
 const PROJECT_ID = "ngee-ann-polytechnic";
-const SOURCE_ROOT = join(process.cwd(), "docs", "template", "Net-Zero Product");
+// Real customer workbooks are kept out of git; see docs/agents/customer-fixtures.md.
+const SOURCE_ROOT = process.env.ENERGYX_CUSTOMER_FIXTURES_DIR
+  ?? join(process.cwd(), "docs", "template", "Net-Zero Product");
 
 type SourceDefinition = {
   batchId: string;
@@ -74,7 +76,9 @@ const EXTENDED_SOURCES = {
   },
 } as const satisfies Record<string, SourceDefinition>;
 
-describe("Ngee Ann two-Snapshot customer-value acceptance", () => {
+const CUSTOMER_FIXTURES_PRESENT = Object.values(SOURCES).every((source) => existsSync(join(SOURCE_ROOT, source.filename)));
+
+describe.skipIf(!CUSTOMER_FIXTURES_PRESENT)("Ngee Ann two-Snapshot customer-value acceptance", () => {
   afterEach(() => vi.unstubAllEnvs());
 
   it("keeps saved A reproducible while the same Release and Mapping advance current Overview to B", async () => {

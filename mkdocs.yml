@@ -8,7 +8,15 @@ edit_uri: edit/main/docs/
 exclude_docs: |
   README.md
   Net-Zero Product/
-  energyiq/research/
+  # Internal product, customer, compliance and engineering records are never published.
+  agents/
+  compliance/
+  energyiq/
+  engineering/
+  plans/
+  report/
+  superpowers/
+  template/
   en/README.md
   zh/README.md
 
