@@ -63,6 +63,31 @@ describe("api-proxy streaming contract", () => {
     expect(headers.get("content-length")).toBeNull();
   });
 
+  it("forwards a safe request ID to the API, or a new one in place of a missing or unsafe one", async () => {
+    const sent: Array<string | null> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      sent.push(new Headers(init?.headers).get("x-request-id"));
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    }));
+
+    const kept = await proxyToApi(
+      new Request("http://127.0.0.1:3000/api/v1/me", { headers: { "x-request-id": "0123456789abcdef0123456789abcdef" } }),
+      "/api/v1/me",
+    );
+    const replaced = await proxyToApi(
+      new Request("http://127.0.0.1:3000/api/v1/me", { headers: { "x-request-id": "bad id" } }),
+      "/api/v1/me",
+    );
+    const generated = await proxyToApi(new Request("http://127.0.0.1:3000/api/v1/me"), "/api/v1/me");
+
+    expect(sent[0]).toBe("0123456789abcdef0123456789abcdef");
+    expect(sent[1]).toMatch(/^[0-9a-f-]{36}$/u);
+    expect(sent[2]).toMatch(/^[0-9a-f-]{36}$/u);
+    expect(kept.headers.get("x-request-id")).toBe(sent[0]);
+    expect(replaced.headers.get("x-request-id")).toBe(sent[1]);
+    expect(generated.headers.get("x-request-id")).toBe(sent[2]);
+  });
+
   it("normalizes restored structured message content before proxying a CopilotKit run", async () => {
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       const body = typeof init?.body === "string"

@@ -2,6 +2,8 @@ import type { EnergyIqReportScheduleRecord, MetadataStore, UserRecord } from "@d
 
 import { loadPasswordAuthConfig } from "../auth/config.js";
 import { createMailDelivery, type MailDelivery } from "../email/mail-delivery.js";
+import { defineBackgroundJob } from "../observability/background-jobs.js";
+import { logger } from "../observability/logger.js";
 import { renderPortfolioPdf, portfolioPdfFileName } from "./energy-portfolio-pdf.js";
 import { buildPortfolio, localDate, portfolioProjectIds, shiftDate, type Portfolio, type PortfolioPeriod } from "./energy-portfolio.js";
 import { currencyMark } from "./energy-targets-monitor.js";
@@ -14,6 +16,7 @@ import { currencyMark } from "./energy-targets-monitor.js";
 const CHECK_INTERVAL_MS = 15 * 60_000;
 const MAX_ATTEMPTS = 5;
 const RETRY_AFTER_MS = 60 * 60_000;
+const log = logger.child({ component: "report-email" });
 
 export type ReportPeriod = PortfolioPeriod & { key: string; dueDate: string };
 
@@ -155,12 +158,14 @@ export const createEnergyReportDeliveryWorker = (input: {
   const now = input.now ?? (() => new Date());
   const delivery = input.delivery ?? createMailDelivery(env);
   const publicBaseUrl = loadPasswordAuthConfig(env).publicBaseUrl;
+  const job = defineBackgroundJob("report-email", { staleAfterMs: 4 * CHECK_INTERVAL_MS });
   let timer: NodeJS.Timeout | undefined;
   let kickoff: NodeJS.Timeout | undefined;
   let running: Promise<void> | undefined;
   const runOnce = (): Promise<void> => {
     running ??= (async () => {
       try {
+        job.heartbeat();
         for (const schedule of input.metadataStore.energyIq.targets.listEnabledSchedules()) {
           const at = now();
           const period = latestReportPeriod(schedule.frequency, schedule.timezone, at);
@@ -169,10 +174,20 @@ export const createEnergyReportDeliveryWorker = (input: {
           if (previous && (previous.status !== "failed" || previous.attempts >= MAX_ATTEMPTS
             || at.getTime() - Date.parse(previous.updatedAt) < RETRY_AFTER_MS)) continue;
           const outcome = await deliverScheduledReport({ metadataStore: input.metadataStore, schedule, period, delivery, publicBaseUrl, now: at });
-          console.log(`[report-email] ${outcome.status} schedule=${schedule.id} period=${period.key} recipients=${outcome.recipientCount}${outcome.error ? ` code=${outcome.error.slice(0, 120)}` : ""}`);
+          const fields = { schedule_id: schedule.id, period: period.key, recipients: outcome.recipientCount, ...(outcome.error ? { code: outcome.error.slice(0, 120) } : {}) };
+          if (outcome.status === "failed") {
+            log.warn(outcome.status, fields);
+            job.failed(new Error(outcome.error ?? "REPORT_EMAIL_FAILED"), schedule.id);
+          } else {
+            log.info(outcome.status, fields);
+            job.succeeded(schedule.id);
+          }
         }
+        // The pass as a whole finished, which clears a failure of an earlier pass (reported without a schedule).
+        job.succeeded();
       } catch (error) {
-        console.error(`[report-email] failed code=${error instanceof Error ? error.message.slice(0, 160) : "unknown"}`);
+        log.error("failed", { code: error instanceof Error ? error.message.slice(0, 160) : "unknown" });
+        job.failed(error);
       } finally {
         running = undefined;
       }
@@ -182,12 +197,14 @@ export const createEnergyReportDeliveryWorker = (input: {
   return {
     start() {
       if (timer || env.ENERGYIQ_REPORT_EMAILS_ENABLED?.trim().toLowerCase() === "false") return;
+      job.start();
       timer = setInterval(() => void runOnce(), CHECK_INTERVAL_MS);
       timer.unref();
       kickoff = setTimeout(() => void runOnce(), 90_000);
       kickoff.unref();
     },
     stop() {
+      if (timer) job.stop();
       if (timer) clearInterval(timer);
       if (kickoff) clearTimeout(kickoff);
       timer = undefined;

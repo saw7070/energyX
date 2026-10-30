@@ -43,6 +43,12 @@ import { scheduledAnalysisPrompt, withCadenceSkill } from "./report-schedule-pol
 import type { ReportHarness } from "./report-harness.js";
 import { authorizeReportProject, copyReportParent, prepareReportInputs } from "./report-inputs.js";
 import { hasReportArtifact, hasSkillArtifact, ReportStore, type ReportRun, type ReportSettings } from "./report-store.js";
+import { defineBackgroundJob } from "../observability/background-jobs.js";
+import { logger } from "../observability/logger.js";
+
+const log = logger.child({ component: "report-agent" });
+/** The dispatcher ticks every 30 seconds; ten quiet minutes means its timer or a schedule pass is stuck. */
+const STALE_AFTER_MS = 10 * 60_000;
 
 const services = new WeakMap<MetadataStore, ReportService>();
 export const findReportService = (metadata: MetadataStore): ReportService | undefined => services.get(metadata);
@@ -78,6 +84,8 @@ export class ReportService {
   private actionWakeRequested = false;
   /** Site reports currently being written, keyed by their schedule key, so a tick never starts the same one twice. */
   private siteReports = new Map<string, Promise<void>>();
+  /** Scheduling, site reports and action checks, reported per project for /ready, /metrics and operator alerts. */
+  private readonly job = defineBackgroundJob("report-agent", { staleAfterMs: STALE_AFTER_MS });
 
   constructor(private readonly options: {
     maxConcurrent?: number;
@@ -104,10 +112,11 @@ export class ReportService {
   start(): void {
     if (!this.stopped) return;
     this.stopped = false;
+    this.job.start();
     this.store.recoverInterrupted();
     // A restart mid-answer leaves that answer's worker running with nobody to stop it; clear those once it is marked interrupted.
     void this.options.removeOrphanedWorkers?.(id => this.store.isSettled(id))
-      .then(removed => { if (removed.length) console.log(`[report-agent] removed ${removed.length} leftover worker${removed.length === 1 ? "" : "s"}: ${removed.join(", ")}`); })
+      .then(removed => { if (removed.length) log.info(`removed ${removed.length} leftover worker${removed.length === 1 ? "" : "s"}`, { workers: removed }); })
       .catch(() => undefined);
     this.timer = setInterval(() => { this.requestTick(); }, 30_000);
     this.timer.unref();
@@ -138,6 +147,7 @@ export class ReportService {
   }
 
   async stop(): Promise<void> {
+    if (!this.stopped) this.job.stop();
     this.stopped = true;
     if (this.timer) clearInterval(this.timer);
     for (const task of this.active.values()) task.controller.abort();
@@ -153,7 +163,10 @@ export class ReportService {
   }
 
   private requestTick(): void {
-    void this.tick().catch(error => console.error("[report-agent] dispatch_failed", error instanceof Error ? error.name : "unknown"));
+    void this.tick().then(() => { if (!this.stopped) this.job.succeeded("dispatch"); }, error => {
+      log.error("dispatch_failed", { code: error instanceof Error ? error.name : "unknown" });
+      this.job.failed(error instanceof Error ? error.name : "unknown", "dispatch");
+    });
   }
 
   wakeActionChecks(): void {
@@ -163,6 +176,7 @@ export class ReportService {
 
   async tick(now = new Date()): Promise<void> {
     if (this.stopped) return;
+    this.job.heartbeat();
     const capacity = Math.max(1, Math.min(16, Math.floor(this.options.maxConcurrent ?? 1) || 1));
     const perUser = Math.max(1, Math.min(capacity, Math.floor(this.options.maxPerUser ?? 1) || 1));
     this.scheduling ??= this.schedule(now).finally(() => { this.scheduling = undefined; });
@@ -176,7 +190,7 @@ export class ReportService {
       if(this.actionWakeRequested || key!==this.actionDataKey || new ActionStore(this.options.metadata.db).hasDueRetry(now) || now.getTime()-this.lastActionSweep>=300_000){
         this.actionWakeRequested=false;this.actionDataKey=key;this.lastActionSweep=now.getTime();this.actionSweepRunning=true;
         this.actionSweep=sweepActionFeedback(this.options.metadata,this.store,now,this.options.actionEvidenceReader,()=>this.stopped)
-          .catch(()=>console.error("[report-agent] action_sweep_failed"))
+          .then(()=>{this.job.succeeded("action-sweep");},error=>{log.error("action_sweep_failed");this.job.failed(error,"action-sweep");})
           .finally(()=>{this.actionSweepRunning=false;this.requestTick();});
       }
     }
@@ -223,11 +237,16 @@ export class ReportService {
           scheduleKey: `${settings.projectId}:${cadence}:${reportingPeriod.from}:${reportingPeriod.toExclusive}`,
         });
         }
+        this.job.succeeded(`schedule:${settings.projectId}`);
       } catch (error) {
         if (error instanceof Error && /FORBIDDEN|ADMIN_REQUIRED/.test(error.message)) {
           this.store.saveSettings({ ...settings, frequency: "off", schedulePermissionIssue: "Automatic reports paused because their owner no longer has permission. A project editor must review and enable the schedule again." });
+          // Paused and shown to the project's editors; nothing for the operator to fix.
+          log.warn("schedule_failed", { project_id: settings.projectId, code: "SCHEDULE_OWNER_PERMISSION_REVOKED" });
+        } else {
+          log.error("schedule_failed", { project_id: settings.projectId });
+          this.job.failed(error, `schedule:${settings.projectId}`);
         }
-        console.error(`[report-agent] schedule_failed project=${settings.projectId}`);
       }
       this.startDueSiteReports(now, settings.projectId);
     }
@@ -258,13 +277,17 @@ export class ReportService {
           root: this.options.root, settings, cadence, period,
           ...(this.options.loadSiteReportData ? { loadData: this.options.loadSiteReportData } : {}),
         })
-          .then(() => undefined)
-          .catch(() => { console.error(`[report-agent] site_report_failed project=${projectId} cadence=${cadence}`); })
+          .then(() => { this.job.succeeded(`site-report:${projectId}`); })
+          .catch((error) => {
+            log.error("site_report_failed", { project_id: projectId, cadence });
+            this.job.failed(error, `site-report:${projectId}`);
+          })
           .finally(() => { this.siteReports.delete(key); });
         this.siteReports.set(key, task);
       }
-    } catch {
-      console.error(`[report-agent] site_report_schedule_failed project=${projectId}`);
+    } catch (error) {
+      log.error("site_report_schedule_failed", { project_id: projectId });
+      this.job.failed(error, `site-report:${projectId}`);
     }
   }
 
@@ -388,7 +411,7 @@ export class ReportService {
       const message = raw === "WORKSPACE_DEFAULT_MODEL_PROFILE_NOT_CONFIGURED" ? "REPORT_MODEL_NOT_CONFIGURED" : raw;
       const code = /^(REPORT_|ENERGYIQ_)[A-Z0-9_]+$/.test(message) ? message : "REPORT_GENERATION_FAILED";
       // The reader only sees the code; keep the underlying cause in the server log for whoever runs the service.
-      if (code === "REPORT_GENERATION_FAILED") console.error(`[report-agent] run=${run.id} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+      if (code === "REPORT_GENERATION_FAILED") log.error("run failed", { run_id: run.id, project_id: run.projectId, err: error });
       this.store.finish({ ...run, status: "failed", errorCode: code, ...(code === "REPORT_METER_NAMES_REQUIRED" ? { answer: meterNamingQuestion(directory) } : {}) });
       if (run.actionFeedback) this.actionWakeRequested = true;
     }

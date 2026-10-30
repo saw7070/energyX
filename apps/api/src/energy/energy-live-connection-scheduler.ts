@@ -1,3 +1,5 @@
+import { defineBackgroundJob } from "../observability/background-jobs.js";
+import { logger } from "../observability/logger.js";
 import type { ConfigApiContext } from "../routes/types.js";
 import { resolveEnergyTuyaProjectConnector } from "./energy-tuya-connector.js";
 import { createEnergyTuyaDailyScheduler } from "./energy-tuya-scheduler.js";
@@ -8,6 +10,10 @@ const HOUR_MS = 60 * 60_000;
 const SINGAPORE_OFFSET_MS = 8 * HOUR_MS;
 /** A newly connected site starts a week back: enough to show it working, small enough to fetch in a few passes. */
 const FIRST_SYNC_LOOKBACK_MS = 7 * 24 * HOUR_MS;
+/** The scheduler wakes hourly and on every sync pass (at most 20 minutes each); three quiet hours means it is stuck. */
+const STALE_AFTER_MS = 3 * HOUR_MS;
+
+const log = logger.child({ component: "live-sync" });
 
 export type EnergyLiveConnectionScheduler = {
   start(): void;
@@ -31,6 +37,8 @@ export const createEnergyLiveConnectionScheduler = (input: {
   now?: () => number;
 }): EnergyLiveConnectionScheduler => {
   const now = input.now ?? Date.now;
+  // Each connected site is a subject: one site's broken key keeps the job failing until that site syncs again.
+  const job = defineBackgroundJob("live-sync", { staleAfterMs: STALE_AFTER_MS });
   const queue: string[] = [];
   let active: { projectId: string; stop: () => Promise<void> } | undefined;
   let draining: Promise<void> | undefined;
@@ -54,6 +62,7 @@ export const createEnergyLiveConnectionScheduler = (input: {
       syncTuyaEnergyReadings: input.syncTuyaEnergyReadings,
       afterMaterialization: input.afterMaterialization(projectId, connection.workspace_id, actorUserId),
       initialLookbackMs: FIRST_SYNC_LOOKBACK_MS,
+      job,
       now,
     });
     active = { projectId, stop: () => scheduler.stop() };
@@ -72,7 +81,8 @@ export const createEnergyLiveConnectionScheduler = (input: {
           try {
             await syncOne(projectId);
           } catch (error) {
-            console.error(`[live-sync] failed project=${projectId} code=${error instanceof Error ? error.message : "unknown"}`);
+            log.error("failed", { project_id: projectId, code: error instanceof Error ? error.message : "unknown" });
+            job.failed(error, projectId);
           }
         }
       } finally {
@@ -92,6 +102,7 @@ export const createEnergyLiveConnectionScheduler = (input: {
   };
 
   const runDue = (): Promise<void> => {
+    job.heartbeat();
     const hour = new Date(now() + SINGAPORE_OFFSET_MS).getUTCHours();
     for (const connection of input.context.metadataStore.energyIq.liveConnectors.listSyncEnabled()) {
       if (connection.sync_local_hour === hour) requestSync(connection.project_id);
@@ -112,6 +123,7 @@ export const createEnergyLiveConnectionScheduler = (input: {
     start() {
       if (!stopped) return;
       stopped = false;
+      job.start();
       // Catch up after a restart: a connection that is current returns at once without fetching anything.
       for (const connection of input.context.metadataStore.energyIq.liveConnectors.listSyncEnabled()) {
         requestSync(connection.project_id);
@@ -119,6 +131,7 @@ export const createEnergyLiveConnectionScheduler = (input: {
       scheduleNextHour();
     },
     async stop() {
+      if (!stopped) job.stop();
       stopped = true;
       if (timer) clearTimeout(timer);
       timer = undefined;

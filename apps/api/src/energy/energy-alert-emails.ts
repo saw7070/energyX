@@ -4,6 +4,8 @@ import type { MetadataStore } from "@datafoundry/metadata";
 
 import { loadPasswordAuthConfig } from "../auth/config.js";
 import { createMailDelivery } from "../email/mail-delivery.js";
+import { defineBackgroundJob } from "../observability/background-jobs.js";
+import { logger } from "../observability/logger.js";
 import { withEnergyProjectPublicationReadLock } from "./energy-project-materialization.js";
 import { resolveEnergyPublishedMeterPoints } from "./energy-query-context.js";
 import { readSiteAlerts } from "./energy-site-alerts.js";
@@ -20,6 +22,7 @@ import { readLiveSiteReadings } from "./energy-live-readings.js";
  * ENERGYIQ_ALERT_EMAILS_ENABLED=true and SMTP is configured.
  */
 const CHECK_INTERVAL_MS = 15 * 60_000;
+const log = logger.child({ component: "alert-email" });
 /** Mirrors STALE_METER_REPORTING_MS in energy-analysis.ts and the web's stoppedMeters(). */
 const STOPPED_AFTER_MS = 12 * 60 * 60_000;
 
@@ -156,12 +159,14 @@ export const createEnergyAlertEmailer = (input: {
   const delivery = input.send ? undefined : createMailDelivery(env);
   const send = input.send ?? (delivery && delivery.mode !== "off" ? delivery.send : undefined);
   const readMeters = input.readMeters ?? ((projectId: string) => readProjectMeterHealth(input.metadataStore, projectId));
+  const job = defineBackgroundJob("alert-email", { staleAfterMs: 4 * CHECK_INTERVAL_MS });
   let timer: NodeJS.Timeout | undefined;
   let running: Promise<void> | undefined;
   const runOnce = (): Promise<void> => {
     running ??= (async () => {
       try {
         if (!send) return;
+        job.heartbeat();
         for (const projectId of alertProjectIds(input.metadataStore, env)) {
           try {
             const emails = collectSiteAlertEmails({
@@ -178,9 +183,11 @@ export const createEnergyAlertEmailer = (input: {
               recipients: alertRecipients(input.metadataStore, projectId),
               send,
             });
-            for (const key of sent) console.log(`[alert-email] sent project=${projectId} alert=${key.split(":")[0]}`);
+            for (const key of sent) log.info("sent", { project_id: projectId, alert: key.split(":")[0] });
+            job.succeeded(projectId);
           } catch (error) {
-            console.error(`[alert-email] failed project=${projectId} code=${error instanceof Error ? error.message.slice(0, 160) : "unknown"}`);
+            log.error("failed", { project_id: projectId, code: error instanceof Error ? error.message.slice(0, 160) : "unknown" });
+            job.failed(error, projectId);
           }
         }
       } finally {
@@ -193,14 +200,16 @@ export const createEnergyAlertEmailer = (input: {
     start() {
       if (timer || env.ENERGYIQ_ALERT_EMAILS_ENABLED?.trim() !== "true") return;
       if (!send) {
-        console.warn("[alert-email] disabled: SMTP is not configured");
+        log.warn("disabled: SMTP is not configured");
         return;
       }
+      job.start();
       timer = setInterval(() => void runOnce(), CHECK_INTERVAL_MS);
       timer.unref();
       void runOnce();
     },
     stop() {
+      if (timer) job.stop();
       if (timer) clearInterval(timer);
       timer = undefined;
     },

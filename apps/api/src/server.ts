@@ -51,6 +51,11 @@ import { Observable } from "rxjs";
 import { z } from "zod";
 
 import { handleConfigApiRequest } from "./config-api.js";
+import { reportError } from "./observability/error-reporting.js";
+import { createServerObservability, observeRequest } from "./observability/http.js";
+import { logger } from "./observability/logger.js";
+import { opsAlerts } from "./observability/ops-alerts.js";
+import { setRequestActor } from "./observability/request-context.js";
 import { reportSkillCatalog, resolveReportSkillSelection } from "./report-agent/report-skill-catalog.js";
 import { ReportService, registerReportService } from "./report-agent/report-service.js";
 import { createPiReportHarness, DEFAULT_REPORT_AGENT_IMAGE, removeOrphanedReportWorkers, resolvePiReportModel } from "./report-agent/pi-report-harness.js";
@@ -604,7 +609,7 @@ const transitionEarlyRunFailure = (input: {
     }) !== undefined;
     if (!transitioned) return false;
   } catch (error) {
-    console.warn("[data-foundry] failed to transition early Run failure", error);
+    logger.warn("failed to transition early Run failure", { component: "data-foundry", run_id: input.runId, err: error });
     return false;
   }
   try {
@@ -623,7 +628,7 @@ const transitionEarlyRunFailure = (input: {
     });
   } catch (error) {
     // The Run transition is authoritative; conversation history is auxiliary.
-    console.warn("[data-foundry] failed to persist early failed user message", error);
+    logger.warn("failed to persist early failed user message", { component: "data-foundry", run_id: input.runId, err: error });
   }
   return transitioned;
 };
@@ -653,7 +658,7 @@ const persistClaimedEnergyPreparation = (input: {
     });
   } catch (error) {
     // Preparation evidence is diagnostic; never hide the original terminal error.
-    console.warn("[data-foundry] failed to persist early Energy preparation", error);
+    logger.warn("failed to persist early Energy preparation", { component: "data-foundry", run_id: input.runId, err: error });
   }
 };
 
@@ -760,7 +765,12 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
   }) : undefined;
   if (reportService) registerReportService(metadataStore, reportService);
   // Say at startup, not at the first question, when the advisor cannot run here (for example a missing worker image).
-  if (reportService) void checkAdvisorWorker().then(check => { if (check.status !== "ok") console.warn(`[report-agent] ${check.detail}${check.fix ? ` Fix: ${check.fix}` : ""}`); }).catch(() => undefined);
+  if (reportService) void checkAdvisorWorker().then(check => {
+    if (check.status === "ok") return;
+    const text = `${check.detail}${check.fix ? ` Fix: ${check.fix}` : ""}`;
+    logger.warn(text, { component: "report-agent" });
+    opsAlerts().notify({ key: "startup-advisor-worker", text: `The advisor cannot run on this server. ${text}` });
+  }).catch(() => undefined);
   const sessionOutputService = new SessionOutputService(metadataStore, fileAssetService);
   const knowledgeService = new LocalKnowledgeService(metadataStore, {
     embedding: {
@@ -1199,37 +1209,27 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
     }),
   );
   if (reclaimedActiveRuns > 0) {
-    console.log(`[startup] stale active run reclaim: canceled=${reclaimedActiveRuns}`);
+    logger.info("stale active run reclaim", { component: "startup", canceled: reclaimedActiveRuns });
   }
 
   startupTimings = timer.timings();
   startupTotalMs = timer.totalMs();
   serverReady = true;
-  console.log(
-    `[startup] createServer ready in ${startupTotalMs}ms`,
-    JSON.stringify(startupTimings),
-  );
+  logger.info(`createServer ready in ${startupTotalMs}ms`, { component: "startup", startup_ms: startupTotalMs, phases: startupTimings });
 
-  const server = createHttpServer(async (request, response) => {
+  // /healthz is liveness; /ready checks the database, storage, disk and background jobs; /metrics is operator-only.
+  const observability = createServerObservability({
+    startup: () => ({ ready: serverReady, startupMs: startupTotalMs, phases: startupTimings }),
+    metadataDb: () => metadataStore.db,
+    storageRoot: envConfig.storage.root_dir,
+  });
+
+  const server = createHttpServer((request, response) => observeRequest(request, response, async () => {
     try {
       applyApiSecurityHeaders(request, response);
       const requestUrl = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
 
-      if (request.method === "GET" && requestUrl.pathname === "/healthz") {
-        sendJson(response, 200, createSuccessResult({ status: "ok" }));
-        return;
-      }
-
-      if (request.method === "GET" && requestUrl.pathname === "/ready") {
-        if (!serverReady) {
-          sendJson(response, 503, createErrorResult("INTERNAL_ERROR", "Server is still starting."));
-          return;
-        }
-        sendJson(response, 200, createSuccessResult({
-          status: "ready",
-          startup_ms: startupTotalMs,
-          phases: startupTimings,
-        }));
+      if (await observability.handleProbe(request, response, requestUrl.pathname)) {
         return;
       }
 
@@ -1257,6 +1257,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
         authService,
       });
       const { authContext } = requestPreflight;
+      setRequestActor(authContext.user.id, authContext.workspaceId);
       if (requestPreflight.prepareBuiltinResources) {
         removeLegacyBuiltinDemoDataSourceOnce(metadataStore, authContext.user.id);
         await ensureBuiltinConfigResourcesOnce(
@@ -1328,14 +1329,17 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
       }
       if (!response.headersSent) {
         const classified = classifyServerRequestError(error);
+        // 401 and 403 are expected answers; a 500 is a bug or an outage the operator needs to see.
+        if (classified.status === 500) reportError(error, "request failed", { component: "http" });
         sendJson(response, classified.status, createErrorResult(classified.code, classified.message));
         return;
       }
 
+      reportError(error, "request failed after the response started", { component: "http" });
       const message = error instanceof Error ? error.message : "Unknown server error";
       response.destroy(error instanceof Error ? error : new Error(message));
     }
-  });
+  }));
 
   // Opt-in scheduler state is process-owned; persisted Runs/State make a watch/restart recoverable.
   const tuyaSyncEnabled = process.env.ENERGYIQ_TUYA_SYNC_ENABLED?.trim().toLocaleLowerCase() === "true";
@@ -1452,19 +1456,19 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
     userId: tuyaSyncActorUserId,
   }).then(({ recovered, failed }) => {
     for (const projectId of recovered) {
-      console.log(`[energy-publication] recovered-interrupted-publication project=${projectId}`);
+      logger.info("recovered-interrupted-publication", { component: "energy-publication", project_id: projectId });
     }
     for (const failure of failed) {
-      console.error(`[energy-publication] recovery-failed project=${failure.projectId} code=${failure.message}`);
+      logger.error("recovery-failed", { component: "energy-publication", project_id: failure.projectId, code: failure.message });
     }
   }).catch((error) => {
-    console.error(`[energy-publication] recovery-failed code=${error instanceof Error ? error.message : "unknown"}`);
+    logger.error("recovery-failed", { component: "energy-publication", code: error instanceof Error ? error.message : "unknown" });
   });
   // A project moved before moves re-recorded the readings digest is refused in its new Organisation; repair at boot.
   void repairMovedProjectFactDigests({ metadataStore }).then((repaired) => {
-    for (const projectId of repaired) console.log(`[energy-project-move] repaired-readings-digest project=${projectId}`);
+    for (const projectId of repaired) logger.info("repaired-readings-digest", { component: "energy-project-move", project_id: projectId });
   }).catch((error) => {
-    console.error(`[energy-project-move] repair-failed code=${error instanceof Error ? error.message : "unknown"}`);
+    logger.error("repair-failed", { component: "energy-project-move", code: error instanceof Error ? error.message : "unknown" });
   });
   tuyaScheduler.start();
   liveConnectionScheduler.start();
@@ -1478,10 +1482,12 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
   const reportEmails = createEnergyReportDeliveryWorker({ metadataStore });
   reportEmails.start();
   reportService?.start();
+  void observability.checkAtStartup().catch(() => undefined);
 
   gracefulServerClosers.set(server, bindGracefulServerLifecycle({
     server,
     closeResources: async () => {
+      observability.close();
       await tuyaScheduler.stop();
       await liveConnectionScheduler.stop();
       await liveReadingsPoller.stop();

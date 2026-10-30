@@ -41,17 +41,25 @@ server {
     # brotli_comp_level 5;
     # brotli_types text/plain text/css application/javascript application/json image/svg+xml;
 
+    # X-Request-Id: nginx's $request_id is passed to the web app and API, which log it and echo it back, so one ID
+    # finds a request in all three logs. Add $request_id to your access log_format too (runbooks/observability.md).
+    # /metrics is deliberately not proxied: scrape it on 127.0.0.1:8787 or with ENERGYX_METRICS_TOKEN.
+
     # Liveness: process is up (may still be initializing).
     location = /healthz {
         proxy_http_version 1.1;
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Request-Id $request_id;
         proxy_pass http://datafoundry_api;
     }
 
-    # Readiness: Mastra + builtin resources finished; safe to send traffic.
+    # Readiness: database, storage, disk and background jobs. Public callers see only pass/fail per check.
     location = /ready {
         proxy_http_version 1.1;
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Request-Id $request_id;
         proxy_pass http://datafoundry_api;
     }
 
@@ -71,6 +79,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-Id $request_id;
         proxy_buffering off;
         proxy_cache off;
         gzip off;
@@ -85,6 +94,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-Id $request_id;
         proxy_pass http://datafoundry_web;
     }
 
@@ -94,6 +104,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-Id $request_id;
         proxy_pass http://datafoundry_web;
     }
 }

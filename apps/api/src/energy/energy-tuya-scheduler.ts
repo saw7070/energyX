@@ -1,3 +1,5 @@
+import { defineBackgroundJob, type BackgroundJob } from "../observability/background-jobs.js";
+import { logger } from "../observability/logger.js";
 import type { ConfigApiContext } from "../routes/types.js";
 import {
   createEnergyTuyaSyncRunner,
@@ -28,6 +30,10 @@ const DEFAULT_CATCH_UP_OVERLAP_MS = 4 * 60 * 60_000;
 const DEFAULT_MAX_CATCH_UP_RUNS = 40;
 /** A run that outlives this is abandoned, so it fails cleanly instead of holding the source lock open. */
 const DEFAULT_RUN_DEADLINE_MS = 20 * 60_000;
+/** The sync wakes once a day and on every catch-up pass; a day and two hours without either means its timer died. */
+const STALE_AFTER_MS = 26 * 60 * 60_000;
+
+const log = logger.child({ component: "tuya-sync" });
 
 export type EnergyTuyaScheduler = {
   start(): void;
@@ -65,16 +71,22 @@ export const createEnergyTuyaDailyScheduler = (input: {
   initialLookbackMs?: number;
   /** Step aside while something else owns the Project's sync, e.g. an administrator took it over in the app. */
   skip?: () => boolean;
+  /** Where runs are reported for /ready, /metrics and operator alerts. Default: the server-configured `tuya-sync`. */
+  job?: BackgroundJob;
 }): EnergyTuyaScheduler => {
   const now = input.now ?? Date.now;
+  const job = input.job ?? defineBackgroundJob("tuya-sync", { staleAfterMs: STALE_AFTER_MS });
   let timer: NodeJS.Timeout | undefined;
   let stopped = true;
+  /** Set by stop(): a run it aborts is a shutdown (a deploy restart), not a failure worth an alert. */
+  let stopping = false;
   let inFlight: Promise<"disabled" | "current" | "succeeded" | "failed"> | undefined;
   let inFlightController: AbortController | undefined;
 
   const runIfDue = async (): Promise<"disabled" | "current" | "succeeded" | "failed"> => {
     if (!input.enabled) return "disabled";
     if (inFlight) return inFlight;
+    job.heartbeat();
     if (input.skip?.()) return "disabled";
     const controller = new AbortController();
     inFlightController = controller;
@@ -85,6 +97,7 @@ export const createEnergyTuyaDailyScheduler = (input: {
     const action = (async () => {
       let projectId = "unresolved";
       let completed = 0;
+      let afterPublicationError: unknown;
       try {
         const connector = input.resolveConnector?.();
         if (!connector) throw new Error("ENERGYIQ_TUYA_CONNECTOR_NOT_CONFIGURED");
@@ -110,7 +123,12 @@ export const createEnergyTuyaDailyScheduler = (input: {
               ...watermark,
             })
             : nightly;
-          if (!window) return completed === 0 ? "current" as const : "succeeded" as const;
+          if (!window) {
+            if (afterPublicationError === undefined) job.succeeded(connector.projectId);
+            else job.failed(afterPublicationError, connector.projectId);
+            return completed === 0 ? "current" as const : "succeeded" as const;
+          }
+          job.heartbeat();
           const deadline = setTimeout(() => controller.abort(), runDeadlineMs);
           if (typeof deadline.unref === "function") deadline.unref();
           let result;
@@ -139,16 +157,23 @@ export const createEnergyTuyaDailyScheduler = (input: {
             } catch (error) {
               // The runner has already committed the Snapshot and sync watermark.
               // Report this separately so operators do not retry a successful fetch.
-              console.error(`[tuya-sync] after-publication-failed project=${connector.projectId} run=${result.run.id} code=${sourceSyncErrorCode(error)}`);
+              afterPublicationError = new Error(`ENERGYIQ_TUYA_AFTER_PUBLICATION_FAILED:${sourceSyncErrorCode(error)}`);
+              log.error("after-publication-failed", { project_id: connector.projectId, run_id: result.run.id, code: sourceSyncErrorCode(error) });
             }
           }
-          console.log(`[tuya-sync] succeeded project=${connector.projectId} run=${result.run.id} pass=${completed}`);
+          log.info("succeeded", { project_id: connector.projectId, run_id: result.run.id, pass: completed });
         }
+        if (afterPublicationError === undefined) job.succeeded(connector.projectId);
+        else job.failed(afterPublicationError, connector.projectId);
         return "succeeded" as const;
       } catch (error) {
-        console.error(
-          `[tuya-sync] failed project=${projectId} passes=${completed} code=${sourceSyncErrorCode(error)} detail=${JSON.stringify(sourceSyncErrorDetail(error))}`,
-        );
+        log.error("failed", {
+          project_id: projectId,
+          passes: completed,
+          code: sourceSyncErrorCode(error),
+          detail: sourceSyncErrorDetail(error),
+        });
+        if (!stopping) job.failed(new Error(sourceSyncErrorCode(error)), projectId);
         return completed > 0 ? "succeeded" as const : "failed" as const;
       }
     })();
@@ -174,12 +199,16 @@ export const createEnergyTuyaDailyScheduler = (input: {
     start() {
       if (!stopped) return;
       stopped = false;
+      stopping = false;
       if (!input.enabled) return;
+      job.start();
       void runIfDue();
       scheduleNext();
     },
     async stop() {
+      if (!stopped && input.enabled) job.stop();
       stopped = true;
+      stopping = true;
       if (timer) clearTimeout(timer);
       timer = undefined;
       inFlightController?.abort();
