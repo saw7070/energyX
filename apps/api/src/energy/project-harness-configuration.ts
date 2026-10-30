@@ -660,7 +660,7 @@ const overviewHarnesses = (
 
 const unversionedPlatformInstructions = (): HarnessSummary["instructions"][number] => ({
   kind: "platform",
-  label: "DataFoundry platform instructions",
+  label: "EnergyX platform instructions",
   revision: null,
   revisionStatus: "not-separately-versioned",
   visibility: "summary-only",

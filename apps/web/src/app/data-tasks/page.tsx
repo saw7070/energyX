@@ -1,22 +1,15 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import nextDynamic from "next/dynamic";
+import { DataTasksEntry } from "./data-tasks-entry";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Production entry: keep the route module tiny so the browser can paint a shell
- * before downloading the CopilotKit-heavy workbench chunk.
+ * The general-purpose SQL workbench inherited from DataFoundry is not part of EnergyX. Deployed servers send people to
+ * EnergyX instead unless an operator turns it on for diagnostics with ENERGYX_LEGACY_WORKBENCH_ENABLED=true.
  */
-const DataTasksApp = nextDynamic(() => import("./data-tasks-app"), {
-  ssr: false,
-  loading: () => (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-500">
-      Loading workbench…
-    </div>
-  ),
-});
-
 export default function DataTasksPage() {
-  return <DataTasksApp />;
+  const enabled = process.env.ENERGYX_LEGACY_WORKBENCH_ENABLED === "true" || process.env.NODE_ENV !== "production";
+  if (!enabled) redirect("/energyiq/overview");
+  return <DataTasksEntry />;
 }

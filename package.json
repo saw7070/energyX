@@ -1,32 +1,25 @@
 {
-  "name": "datafoundry",
+  "name": "energyx",
   "version": "0.2.0",
-  "description": "Open-source enterprise Data Agent workbench for trustworthy, auditable data analysis.",
+  "description": "EnergyX: energy management for facility, sustainability and finance teams.",
   "license": "Apache-2.0",
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/datagallery-lab/datafoundry.git"
+    "url": "git+https://github.com/saw7070/energyX.git"
   },
-  "homepage": "https://github.com/datagallery-lab/datafoundry#readme",
+  "homepage": "https://github.com/saw7070/energyX#readme",
   "bugs": {
-    "url": "https://github.com/datagallery-lab/datafoundry/issues"
+    "url": "https://github.com/saw7070/energyX/issues"
   },
   "keywords": [
-    "data-agent",
-    "data-analysis",
-    "semantic-layer",
-    "nl2sql",
-    "agent-workbench",
-    "enterprise-ai",
-    "mcp",
-    "ag-ui",
-    "mastra",
-    "copilotkit"
+    "energy-management",
+    "energy-analytics",
+    "sustainability",
+    "carbon-accounting",
+    "facility-management"
   ],
-  "publishConfig": {
-    "access": "public"
-  },
+  "private": true,
   "files": [
     ".env.example",
     "CONTRIBUTING.md",

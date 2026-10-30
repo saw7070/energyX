@@ -228,7 +228,7 @@ export function ProjectHarnessConfiguration({
               <article key={`${tool.source}:${tool.id}`} className="flex items-start justify-between gap-3 rounded-lg border border-border p-4">
                 <div>
                   <h4 className="text-sm font-semibold text-foreground">{humanize(tool.id)}</h4>
-                  <p className="mt-1 text-xs text-muted">{tool.source === "energyiq-server-owned" ? "EnergyX server-owned" : "DataFoundry built-in"}</p>
+                  <p className="mt-1 text-xs text-muted">{tool.source === "energyiq-server-owned" ? "EnergyX server-owned" : "Built-in"}</p>
                 </div>
                 <StateBadge available label={tool.availability === "registered" ? "Registered" : "Declared for Stage"} />
               </article>

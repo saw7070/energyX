@@ -189,7 +189,7 @@ function configuration(): EnergyProjectHarnessConfigurationDto {
       context: { mode: "run-planned", sources: ["conversation", "evidence", "tool-observations"] },
       instructions: [{
         kind: "platform",
-        label: "DataFoundry platform instructions",
+        label: "EnergyX platform instructions",
         revision: null,
         revisionStatus: "not-separately-versioned",
         visibility: "summary-only",
