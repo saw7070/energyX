@@ -4,6 +4,7 @@ import type { IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
+import { fileURLToPath } from "node:url";
 import writeXlsxFile from "write-excel-file/node";
 
 import {
@@ -32,7 +33,7 @@ import { resolveProjectAnalysis } from "./project-analysis-resolver.js";
 const PROJECT_ID = "ngee-ann-polytechnic";
 // Real customer workbooks are kept out of git; see docs/agents/customer-fixtures.md.
 const SOURCE_ROOT = process.env.ENERGYX_CUSTOMER_FIXTURES_DIR
-  ?? join(process.cwd(), "docs", "template", "Net-Zero Product");
+  ?? fileURLToPath(new URL("../../../../docs/template/Net-Zero Product", import.meta.url));
 
 type SourceDefinition = {
   batchId: string;

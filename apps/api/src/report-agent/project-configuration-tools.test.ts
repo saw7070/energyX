@@ -4,13 +4,14 @@ import { createMetadataStore, type MetadataStore } from "@datafoundry/metadata";
 import { existsSync, mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createProjectConfigurationTools } from "./project-configuration-tools.js";
 import { ReportStore } from "./report-store.js";
 import { buildTuyaOfficeSetup } from "../energy/tuya-office-project.js";
 
 // Real customer workbooks are kept out of git; see docs/agents/customer-fixtures.md.
 const NGEE_ANN_WORKBOOK = join(
-  process.env.ENERGYX_CUSTOMER_FIXTURES_DIR ?? join("docs", "template", "Net-Zero Product"),
+  process.env.ENERGYX_CUSTOMER_FIXTURES_DIR ?? fileURLToPath(new URL("../../../../docs/template/Net-Zero Product", import.meta.url)),
   "Ngee Ann Poly Level 6 (19 May - 17 June).xlsx"
 );
 const cleanup: Array<() => void> = [];
