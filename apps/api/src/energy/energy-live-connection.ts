@@ -13,6 +13,7 @@ import {
   readLiveConnectionCredentials,
   resolveEnergyTuyaProjectConnector,
 } from "./energy-tuya-connector.js";
+import { readEnergyTuyaArtifact } from "./energy-tuya-import.js";
 import {
   createTuyaOpenApiClientFromEnv,
   type TuyaCredentials,
@@ -262,6 +263,97 @@ export const listLiveConnectionDevices = async (
       ...(matchedBy.has(device.id) ? { matchedTo: matchedBy.get(device.id)! } : {}),
     }))
     .sort((left, right) => left.name.localeCompare(right.name, undefined, { numeric: true }));
+};
+
+export type LiveConnectionStarter = {
+  filename: string;
+  content: Buffer;
+  devices: Array<{ ref: string; sourceLabel: string; readings: number }>;
+};
+
+const STARTER_MAX_DEVICES = 200;
+const STARTER_DEFAULT_DAYS = 7;
+const STARTER_MAX_DAYS = 14;
+
+/**
+ * Start a site from its Tuya devices instead of a file. Reads the chosen devices' cumulative energy for the last few
+ * days and returns it as the same readings file (Device Name, Time, Active Energy) an upload would give, so the normal
+ * set-up and publish steps create one meter per device. Each meter's source label is the label returned here, which
+ * is how the caller then matches the meter to the device it came from. Only for a site with no published meters yet.
+ */
+export const buildLiveConnectionStarter = async (
+  dependencies: LiveConnectionDependencies,
+  input: { projectId: string; deviceRefs: unknown; days?: unknown },
+): Promise<LiveConnectionStarter> => {
+  const { metadataStore } = dependencies;
+  const project = metadataStore.energyIq.getProject(input.projectId);
+  requireAppManaged(dependencies, input.projectId);
+  if (publishedMeterRows(metadataStore, input.projectId)) throw new Error("ENERGYIQ_LIVE_STARTER_SETUP_EXISTS");
+  const refs = Array.isArray(input.deviceRefs)
+    ? [...new Set(input.deviceRefs.filter((ref): ref is string => typeof ref === "string" && ref.length > 0))]
+    : [];
+  if (refs.length === 0 || refs.length > STARTER_MAX_DEVICES) throw new Error("ENERGYIQ_LIVE_STARTER_DEVICES_INVALID");
+  const days = input.days === undefined ? STARTER_DEFAULT_DAYS : Number(input.days);
+  if (!Number.isInteger(days) || days < 1 || days > STARTER_MAX_DAYS) throw new Error("ENERGYIQ_LIVE_STARTER_DAYS_INVALID");
+
+  const credentials = readLiveConnectionCredentials(metadataStore, requireConnection(dependencies, input.projectId));
+  const visible = new Map((await listWith(dependencies, credentials)).map((device) => [liveDeviceRef(input.projectId, device.id), device]));
+  const chosen = refs.map((ref) => {
+    const device = visible.get(ref);
+    if (!device) throw new Error("ENERGYIQ_LIVE_DEVICE_NOT_FOUND");
+    if (isTuyaGateway(device)) throw new Error("ENERGYIQ_LIVE_STARTER_GATEWAY");
+    return { ref, device };
+  });
+  const labels = uniqueLabels(chosen.map(({ device }) => device.name.trim() || device.productName?.trim() || "Tuya device"));
+
+  const endTime = dependencies.now?.() ?? Date.now();
+  const artifact = await dependencies.createClient(credentials).syncEnergyReadings({
+    startTime: endTime - days * 86_400_000,
+    endTime,
+    devices: chosen.map(({ device }, index) => ({ deviceId: device.id, sourceLabel: labels[index]! })),
+    credentials,
+  });
+  const readings = readEnergyTuyaArtifact(Buffer.from(JSON.stringify(artifact))).rows
+    .filter((row) => row.eventTime && row.activeEnergyKwh !== undefined && !row.validationError);
+  if (readings.length === 0) throw new Error("ENERGYIQ_LIVE_STARTER_NO_READINGS");
+  const counts = new Map<string, number>();
+  for (const row of readings) counts.set(row.sourceLabel, (counts.get(row.sourceLabel) ?? 0) + 1);
+  // The file holds the site's own wall-clock time, exactly like an export from the meter app.
+  const wallClock = siteWallClock(project.timezone);
+  const lines = [
+    "Device Name,Time,Active Energy",
+    ...readings.map((row) => `${csvCell(row.sourceLabel)},${wallClock(row.eventTime!)},${row.activeEnergyKwh}`),
+  ];
+  return {
+    filename: `tuya-start-${new Date(endTime).toISOString().slice(0, 10)}.csv`,
+    content: Buffer.from(`${lines.join("\r\n")}\r\n`, "utf8"),
+    devices: chosen.map(({ ref }, index) => ({ ref, sourceLabel: labels[index]!, readings: counts.get(labels[index]!) ?? 0 })),
+  };
+};
+
+/** Device names become meter labels, which must be unique however they are capitalised or spaced. */
+const uniqueLabels = (names: string[]): string[] => {
+  const taken = new Set<string>();
+  return names.map((name) => {
+    const base = name.replace(/\s+/gu, " ").trim();
+    let label = base;
+    for (let suffix = 2; taken.has(label.toLocaleLowerCase()); suffix += 1) label = `${base} (${suffix})`;
+    taken.add(label.toLocaleLowerCase());
+    return label;
+  });
+};
+
+const csvCell = (value: string): string => /[",\r\n]/u.test(value) ? `"${value.replace(/"/gu, '""')}"` : value;
+
+const siteWallClock = (timezone: string): ((iso: string) => string) => {
+  const format = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone || "Asia/Singapore",
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+  });
+  return (iso) => {
+    const parts = Object.fromEntries(format.formatToParts(new Date(iso)).map((part) => [part.type, part.value]));
+    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+  };
 };
 
 /** Replace every meter's device. A meter left out, or sent as null, is not connected. */

@@ -102,6 +102,7 @@ import {
 import { markSiteAlertRead, readSiteAlerts } from "./energy-site-alerts.js";
 import { readLiveSiteReadings } from "./energy-live-readings.js";
 import {
+  buildLiveConnectionStarter,
   checkLiveConnection,
   disconnectLiveConnection,
   listLiveConnectionDevices,
@@ -1468,6 +1469,19 @@ export const handleEnergyApiRequest = async (
           }),
         });
       }
+      // Start a site from its Tuya devices: their recent readings become the site's first readings file.
+      if (segments.length === 4 && action === "starter" && request.method === "POST") {
+        requireProjectArea(context, user, projectId, ["facility"], "write");
+        const body = requireRecord(await readJsonBody(request));
+        const starter = await buildLiveConnectionStarter(live, { projectId, deviceRefs: body.deviceRefs, days: body.days });
+        const project = context.metadataStore.energyIq.getProject(projectId);
+        const { batch } = await createReadingsImportBatch(context, project, user, {
+          filename: starter.filename,
+          content: starter.content,
+          mimeType: "text/csv",
+        });
+        return respond({ batch: toEnergyImportBatchDto(batch), devices: starter.devices }, 201);
+      }
       if (segments.length === 4 && action === "sync" && request.method === "POST") {
         requireSyncable(live, projectId);
         if (!scheduler) throw new Error("ENERGYIQ_LIVE_SYNC_UNAVAILABLE");
@@ -1684,42 +1698,10 @@ export const handleEnergyApiRequest = async (
         if (!/\.(xlsx|csv)$/u.test(file.filename.toLowerCase())) {
           throw new Error("ENERGYIQ_EXCEL_FILE_INVALID");
         }
-        const sourceSha256 = createHash("sha256").update(file.content).digest("hex");
-        const existing = context.metadataStore.energyIq.findImportBatchBySha({
-          project_id: projectId,
-          source_sha256: sourceSha256,
-        });
-        if (existing) {
-          return {
-            status: 200,
-            body: createSuccessResult({ batch: toEnergyImportBatchDto(existing), duplicate: true }),
-          };
-        }
-        const inspection = await inspectEnergyExcelWorkbook(file.content);
-        const fileRef = context.fileAssetService.createRef({
-          user_id: user.id,
-          workspace_id: project.workspace_id,
-          filename: file.filename,
-          content: file.content,
-          declared_mime_type: file.mimeType,
-          source: "upload",
-          metadata: { purpose: "energyiq_import", projectId },
-        });
-        const batch = context.metadataStore.energyIq.createImportBatch({
-          id: `energy-import-${randomUUID()}`,
-          workspace_id: project.workspace_id,
-          project_id: projectId,
-          source_kind: "excel",
-          source_sha256: sourceSha256,
-          filename: file.filename,
-          file_asset_ref_id: fileRef.ref.id,
-          status: "inspected",
-          inspection,
-          created_by: user.id,
-        });
+        const { batch, duplicate } = await createReadingsImportBatch(context, project, user, file);
         return {
-          status: 201,
-          body: createSuccessResult({ batch: toEnergyImportBatchDto(batch), duplicate: false }),
+          status: duplicate ? 200 : 201,
+          body: createSuccessResult({ batch: toEnergyImportBatchDto(batch), duplicate }),
         };
       }
     }
@@ -5790,3 +5772,41 @@ export async function publishAgentProjectSetup(context: Required<ConfigApiContex
           })
         };
 }
+
+/** Register a readings file (Excel, or CSV with the same columns) as an import batch; the same bytes reuse the batch. */
+const createReadingsImportBatch = async (
+  context: Required<ConfigApiContext>,
+  project: { workspace_id: string; id: string },
+  user: { id: string },
+  file: { filename: string; content: Buffer; mimeType: string },
+) => {
+  const sourceSha256 = createHash("sha256").update(file.content).digest("hex");
+  const existing = context.metadataStore.energyIq.findImportBatchBySha({
+    project_id: project.id,
+    source_sha256: sourceSha256,
+  });
+  if (existing) return { batch: existing, duplicate: true };
+  const inspection = await inspectEnergyExcelWorkbook(file.content);
+  const fileRef = context.fileAssetService.createRef({
+    user_id: user.id,
+    workspace_id: project.workspace_id,
+    filename: file.filename,
+    content: file.content,
+    declared_mime_type: file.mimeType,
+    source: "upload",
+    metadata: { purpose: "energyiq_import", projectId: project.id },
+  });
+  const batch = context.metadataStore.energyIq.createImportBatch({
+    id: `energy-import-${randomUUID()}`,
+    workspace_id: project.workspace_id,
+    project_id: project.id,
+    source_kind: "excel",
+    source_sha256: sourceSha256,
+    filename: file.filename,
+    file_asset_ref_id: fileRef.ref.id,
+    status: "inspected",
+    inspection,
+    created_by: user.id,
+  });
+  return { batch, duplicate: false };
+};

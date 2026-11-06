@@ -18,6 +18,15 @@ const ACCESS_ID = "abcd1234efgh5678ijkl";
 const ACCESS_SECRET = "secretsecretsecretsecret12345678";
 
 describe("Live connection", () => {
+  it("only starts a site from Tuya when it has no published meters yet", async () => {
+    await withLiveApi(async ({ call }) => {
+      await call("PUT", ["account"], { accessId: ACCESS_ID, accessSecret: ACCESS_SECRET });
+      const refused = await call("POST", ["starter"], { deviceRefs: ["any"] });
+      expect(refused.status).toBe(400);
+      expect(refused.body.error.message).toBe("ENERGYIQ_LIVE_STARTER_SETUP_EXISTS");
+    });
+  });
+
   it("connects a Project's meters to Tuya without sending device ids or the key to the browser", async () => {
     await withLiveApi(async ({ metadata, call, devices, scheduler, clients }) => {
       const initial = await call("GET", []);

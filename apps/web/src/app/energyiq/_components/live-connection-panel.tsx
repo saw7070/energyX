@@ -5,6 +5,8 @@ import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { intlLocale } from "./energyiq-messages";
 import type { Translate } from "@datafoundry/site-report";
 import { liveConnectionMessages } from "./live-connection-messages";
+import { setUpAndPublishReadings } from "../admin/smart-import-publish";
+import { smartImportMessages } from "../admin/smart-import-messages";
 
 export type LiveConnectionDto = {
   projectId: string;
@@ -72,6 +74,9 @@ export function liveErrorKey(message: string): LiveKey {
   if (message.includes("ENERGYIQ_LIVE_DEVICE_USED_TWICE")) return "error.usedTwice";
   if (message.includes("ENERGYIQ_LIVE_SYNC_UNAVAILABLE")) return "error.unavailable";
   if (message.includes("PUBLISHED_SETUP_REQUIRED") || message.includes("PUBLISHED_MAPPING_REQUIRED")) return "error.setupFirst";
+  if (message.includes("ENERGYIQ_LIVE_STARTER_NO_READINGS")) return "error.noReadings";
+  if (message.includes("ENERGYIQ_LIVE_STARTER_GATEWAY")) return "error.gateway";
+  if (message.includes("ENERGYIQ_LIVE_STARTER_SETUP_EXISTS")) return "error.setupExists";
   return "error.generic";
 }
 
@@ -260,10 +265,17 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
   if (!connection) return <p role="status" className="py-10 text-center text-sm text-muted">{t("loading")}</p>;
 
   if (!connection.publishedSetup) {
-    return <Card>
+    if (connection.managedByServer) return <Card>
       <h3 className="text-sm font-semibold">{t("setupFirstTitle")}</h3>
       <p className="mt-1 text-sm leading-6 text-muted">{t("setupFirstBody")}</p>
     </Card>;
+    return <StartFromTuya projectId={projectId} connection={connection} onConnection={adopt} onDone={(next, count) => {
+      adopt(next);
+      setDevices(null);
+      setNotice(count === 1 ? t("startDoneOne") : t("startDone", { count }));
+      loadReadings();
+      onChanged?.();
+    }} t={t} />;
   }
 
   const takenBy = new Map(Object.entries(draft).filter(([, ref]) => ref).map(([meterPointId, ref]) => [ref, meterPointId]));
@@ -560,6 +572,165 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
         : confirmDisconnect ? t("disconnectConfirm") : t("disconnect")}</button>
     </div> : null}
   </div>;
+}
+
+const isGateway = (device: LiveDeviceDto): boolean =>
+  device.category === "wg2" || device.category === "wg" || /gateway|网关/iu.test(device.productName ?? "");
+
+type StartStep = "connect" | "read" | "publish" | "match" | "daily";
+
+/**
+ * A site with no meters yet can start from its Tuya account instead of a file: connect the account, tick the devices
+ * that are meters, and the server reads their last 7 days as the site's first readings. They are then set up and
+ * published like an upload, each meter is matched to the device it came from, and daily updates are switched on.
+ */
+function StartFromTuya({ projectId, connection, onConnection, onDone, t }: {
+  projectId: string;
+  connection: LiveConnectionDto;
+  onConnection: (next: LiveConnectionDto) => void;
+  onDone: (next: LiveConnectionDto, meterCount: number) => void;
+  t: T;
+}) {
+  const setupText = useMessages(smartImportMessages);
+  const [accessId, setAccessId] = useState("");
+  const [accessSecret, setAccessSecret] = useState("");
+  const [showSecret, setShowSecret] = useState(false);
+  const [devices, setDevices] = useState<LiveDeviceDto[] | null>(null);
+  const [chosen, setChosen] = useState<Set<string>>(new Set());
+  const [step, setStep] = useState<StartStep | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadDevices = useCallback(async () => {
+    try {
+      const { devices: next } = await configApi.liveConnectionRequest<{ devices: LiveDeviceDto[] }>(projectId, "devices");
+      setDevices(next);
+      setChosen(new Set(next.filter((device) => !isGateway(device)).map((device) => device.ref)));
+    } catch (reason) {
+      setDevices([]);
+      setError(t(liveErrorKey(messageOf(reason))));
+    }
+  }, [projectId, t]);
+  useEffect(() => {
+    if (connection.connected && devices === null) void loadDevices();
+  }, [connection.connected, devices, loadDevices]);
+
+  const connect = async (event: FormEvent) => {
+    event.preventDefault();
+    setStep("connect");
+    setError(null);
+    try {
+      const result = await configApi.liveConnectionRequest<{ connection: LiveConnectionDto }>(projectId, "account", {
+        method: "PUT",
+        body: JSON.stringify({ accessId: accessId.trim(), accessSecret: accessSecret.trim() }),
+      });
+      setAccessId("");
+      setAccessSecret("");
+      setDevices(null);
+      onConnection(result.connection);
+    } catch (reason) {
+      setError(t(liveErrorKey(messageOf(reason))));
+    } finally {
+      setStep(null);
+    }
+  };
+
+  const start = async () => {
+    setError(null);
+    try {
+      setStep("read");
+      const started = await configApi.liveConnectionRequest<{ devices: Array<{ ref: string; sourceLabel: string }> }>(projectId, "starter", {
+        method: "POST",
+        body: JSON.stringify({ deviceRefs: [...chosen] }),
+      });
+      setStep("publish");
+      await setUpAndPublishReadings(projectId, {
+        board: setupText("setup.board"),
+        boardLevel: setupText("setup.boardLevel"),
+        boardLevelHint: setupText("setup.boardLevelHint"),
+        circuitLevel: setupText("setup.circuitLevel"),
+        circuitLevelHint: setupText("setup.circuitLevelHint"),
+      });
+      setStep("match");
+      const { connection: published } = await configApi.liveConnectionRequest<{ connection: LiveConnectionDto }>(projectId);
+      const refByLabel = new Map(started.devices.map((device) => [device.sourceLabel.toLocaleLowerCase(), device.ref]));
+      const matches = Object.fromEntries(published.meters.flatMap((meter) => {
+        const ref = refByLabel.get(meter.sourceLabel.toLocaleLowerCase());
+        return ref ? [[meter.meterPointId, ref] as const] : [];
+      }));
+      await configApi.liveConnectionRequest(projectId, "matches", { method: "PUT", body: JSON.stringify({ matches }) });
+      setStep("daily");
+      await configApi.liveConnectionRequest(projectId, "schedule", {
+        method: "PUT",
+        body: JSON.stringify({ enabled: true, localHour: published.schedule.localHour }),
+      });
+      // Bring in anything since the starter read; when live updates are not running here the daily run catches up.
+      const synced = await configApi.liveConnectionRequest<{ connection: LiveConnectionDto }>(projectId, "sync", { method: "POST", body: "{}" })
+        .catch(() => null);
+      const next = synced?.connection ?? (await configApi.liveConnectionRequest<{ connection: LiveConnectionDto }>(projectId)).connection;
+      onDone(next, Object.keys(matches).length);
+    } catch (reason) {
+      setError(t(liveErrorKey(messageOf(reason))));
+    } finally {
+      setStep(null);
+    }
+  };
+
+  const busy = step !== null;
+  const selectable = (devices ?? []).filter((device) => !isGateway(device));
+  const toggle = (ref: string) => setChosen((current) => {
+    const next = new Set(current);
+    if (next.has(ref)) next.delete(ref); else next.add(ref);
+    return next;
+  });
+
+  return <Card>
+    <h3 className="text-[15px] font-extrabold">{t("startTitle")}</h3>
+    <p className="mt-1 text-sm leading-6 text-muted">{t("startBody")}</p>
+    {error ? <p role="alert" className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">{error}</p> : null}
+    {!connection.connected ? <form onSubmit={(event) => void connect(event)} className="mt-4 space-y-3">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block text-xs font-semibold text-muted">{t("accessId")}
+          <input value={accessId} onChange={(event) => setAccessId(event.target.value)} autoComplete="off" spellCheck={false} required className={inputClass} />
+        </label>
+        <label className="block text-xs font-semibold text-muted">{t("accessSecret")}
+          <span className="relative mt-1 block">
+            <input type={showSecret ? "text" : "password"} value={accessSecret} onChange={(event) => setAccessSecret(event.target.value)} autoComplete="new-password" spellCheck={false} required className={`${inputClass} mt-0 pr-16`} />
+            <button type="button" onClick={() => setShowSecret((value) => !value)} className="absolute inset-y-0 right-2 my-auto h-7 rounded-md px-2 text-[11px] font-semibold text-primary hover:bg-primary/10" aria-label={t(showSecret ? "hideSecret" : "showSecret")}>{t(showSecret ? "hide" : "show")}</button>
+          </span>
+        </label>
+      </div>
+      <details className="text-xs text-muted">
+        <summary className="cursor-pointer select-none font-semibold">{t("whereToFind")}</summary>
+        <p className="mt-2 leading-5">{t("whereToFindBody")}</p>
+      </details>
+      <button type="submit" className={primaryButton} disabled={busy || !accessId.trim() || !accessSecret.trim()}>{step === "connect" ? t("connecting") : t("connect")}</button>
+    </form> : <div className="mt-4 space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-semibold">{t("startPick")}</p>
+        {selectable.length > 0 ? <span className="flex gap-2">
+          <button type="button" className={secondaryButton} disabled={busy} onClick={() => setChosen(new Set(selectable.map((device) => device.ref)))}>{t("startAll")}</button>
+          <button type="button" className={secondaryButton} disabled={busy} onClick={() => setChosen(new Set())}>{t("startClear")}</button>
+        </span> : null}
+      </div>
+      <p className="text-xs leading-5 text-muted">{t("startPickHint")}</p>
+      {devices === null
+        ? <p role="status" className="text-sm text-muted">{t("loadingDevices")}</p>
+        : selectable.length === 0
+          ? <p className="text-sm text-muted">{t("startNone")}</p>
+          : <ul className="max-h-80 divide-y divide-border overflow-y-auto rounded-xl border border-border">
+            {selectable.map((device) => <li key={device.ref}>
+              <label className="flex cursor-pointer items-center gap-3 px-4 py-2.5 text-sm">
+                <input type="checkbox" checked={chosen.has(device.ref)} disabled={busy} onChange={() => toggle(device.ref)} className="h-4 w-4 accent-[var(--color-primary,#0f6b4b)]" />
+                <span className="flex-1">{device.name}{device.productName ? <span className="text-muted"> · {device.productName}</span> : null}</span>
+                <span className={`text-xs font-semibold ${device.online ? "text-emerald-700" : "text-rose-700"}`}>{t(device.online ? "online" : "offline")}</span>
+              </label>
+            </li>)}
+          </ul>}
+      <button type="button" className={primaryButton} disabled={busy || chosen.size === 0} onClick={() => void start()}>
+        {step && step !== "connect" ? t(`startStep.${step}` as LiveKey) : chosen.size === 1 ? t("startCreateOne") : t("startCreate", { count: chosen.size })}
+      </button>
+    </div>}
+  </Card>;
 }
 
 function SyncSummary({ connection, when, day, t }: { connection: LiveConnectionDto; when: (iso: string) => string; day: (iso: string) => string; t: T }) {
