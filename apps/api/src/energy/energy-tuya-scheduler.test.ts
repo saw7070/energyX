@@ -275,7 +275,8 @@ describe("Tuya daily scheduler", () => {
     } finally {
       fixture.cleanup();
     }
-  });
+    // About six capped catch-up passes, each publishing a Snapshot: slower than most tests on a busy machine.
+  }, 30_000);
 
   it("abandons a run that outlives its deadline instead of holding the source lock", async () => {
     const fixture = schedulerFixture("run-deadline");
