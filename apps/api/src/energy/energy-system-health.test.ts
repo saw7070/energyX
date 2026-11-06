@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkAdvisorWorker, checkAiDataRegion, checkEmail } from "./energy-system-health.js";
+import { checkAdvisorWorker, checkAiDataRegion, checkEmail, tuyaRetentionNote } from "./energy-system-health.js";
 
 const enabled = { ENERGYIQ_REPORT_AGENT_ENABLED: "true", ENERGYIQ_REPORT_AGENT_IMAGE: "worker:test" };
 
@@ -33,5 +33,13 @@ describe("system health checks", () => {
 
   it("warns when emails are only in test mode", () => {
     expect(checkEmail({ AUTH_EMAIL_DELIVERY: "test" }).status).toBe("warning");
+  });
+  it("says how long is left before Tuya deletes readings a failing sync has not fetched, or which days are gone", () => {
+    const now = Date.parse("2026-11-06T03:00:00.000Z");
+    expect(tuyaRetentionNote(Date.parse("2026-11-03T18:00:00.000Z"), now)).toContain("fix this by 11 Nov");
+    const lost = tuyaRetentionNote(Date.parse("2026-10-27T18:00:00.000Z"), now);
+    expect(lost).toContain("Readings from 28 Oct to 30 Oct are older than Tuya keeps");
+    expect(lost).toContain("resumes from the oldest readings Tuya still has");
+    expect(tuyaRetentionNote(undefined, now)).toBe("");
   });
 });

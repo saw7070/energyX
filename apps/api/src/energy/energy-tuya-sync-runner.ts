@@ -58,6 +58,19 @@ export const resolveLatestCompleteSingaporeDayEnd = (nowMs: number): number => {
   return Math.floor((nowMs + SINGAPORE_OFFSET_MS) / DAY_MS) * DAY_MS - SINGAPORE_OFFSET_MS;
 };
 
+/** How long Tuya keeps device report logs. ENERGYX_TUYA_LOG_RETENTION_DAYS overrides it for accounts that keep more. */
+export const tuyaLogRetentionMs = (env: Record<string, string | undefined> = process.env): number => {
+  const days = Number(env.ENERGYX_TUYA_LOG_RETENTION_DAYS ?? "7");
+  return (Number.isFinite(days) && days >= 1 && days <= 365 ? days : 7) * DAY_MS;
+};
+
+/**
+ * The oldest start worth asking Tuya for now: the start of the Singapore day a retention period back, the same reach
+ * a site's first sync has always used.
+ */
+export const oldestRetainedTuyaReadingMs = (nowMs: number, env?: Record<string, string | undefined>): number =>
+  resolveLatestCompleteSingaporeDayEnd(nowMs) - tuyaLogRetentionMs(env);
+
 export const resolveScheduledTuyaSyncWindow = (input: {
   nowMs: number;
   watermarkMs?: number;
@@ -70,6 +83,13 @@ export const resolveScheduledTuyaSyncWindow = (input: {
    * repeats until the backlog is closed.
    */
   maxWindowMs?: number;
+  /**
+   * The oldest moment the provider still holds readings for. Tuya keeps report logs for about 7 days, and asking for
+   * an older start fails or returns nothing, so after an outage longer than that a catch-up that restarted from the
+   * watermark would keep asking for deleted days and never reach the readings that still exist. The window starts no
+   * earlier than this; the days before it are gone either way.
+   */
+  earliestStartMs?: number;
 }): EnergyTuyaSyncWindow | undefined => {
   const completeDayEnd = resolveLatestCompleteSingaporeDayEnd(input.nowMs);
   // Fetch post-midnight cumulative readings to close the previous day's buckets.
@@ -77,11 +97,14 @@ export const resolveScheduledTuyaSyncWindow = (input: {
   const endTime = completeDayEnd + 2 * 60 * 60_000;
   if (input.nowMs < endTime) return undefined;
   if (input.watermarkMs !== undefined && input.watermarkMs >= endTime) return undefined;
-  const startTime = input.watermarkMs === undefined
+  const requestedStartTime = input.watermarkMs === undefined
     ? input.initialLookbackMs === undefined
       ? resolveSingaporeCalendarMonthStart(completeDayEnd)
       : completeDayEnd - input.initialLookbackMs
     : resolveLatestCompleteSingaporeDayEnd(input.watermarkMs) - (input.overlapMs ?? DEFAULT_OVERLAP_MS);
+  const startTime = input.earliestStartMs !== undefined && requestedStartTime < input.earliestStartMs
+    ? input.earliestStartMs
+    : requestedStartTime;
   if (!Number.isSafeInteger(startTime) || startTime <= 0 || endTime <= startTime) {
     throw new Error("ENERGYIQ_SOURCE_SYNC_WINDOW_INVALID");
   }
@@ -91,7 +114,7 @@ export const resolveScheduledTuyaSyncWindow = (input: {
     }
     // Each pass re-reads the previous complete day to close its buckets, so a cap at or below that overlap would
     // hand back the same window for ever. Keep at least one whole new day in every capped pass.
-    const overlapMs = input.watermarkMs === undefined ? 0 : input.overlapMs ?? DEFAULT_OVERLAP_MS;
+    const overlapMs = input.watermarkMs === undefined || startTime !== requestedStartTime ? 0 : input.overlapMs ?? DEFAULT_OVERLAP_MS;
     const cappedWindowMs = Math.max(input.maxWindowMs, overlapMs + DAY_MS);
     if (endTime - startTime > cappedWindowMs) return { startTime, endTime: startTime + cappedWindowMs };
   }

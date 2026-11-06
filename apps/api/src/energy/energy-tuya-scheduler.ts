@@ -3,6 +3,7 @@ import { logger } from "../observability/logger.js";
 import type { ConfigApiContext } from "../routes/types.js";
 import {
   createEnergyTuyaSyncRunner,
+  oldestRetainedTuyaReadingMs,
   resolveScheduledTuyaSyncWindow,
   sourceSyncErrorCode,
   sourceSyncErrorDetail,
@@ -73,6 +74,8 @@ export const createEnergyTuyaDailyScheduler = (input: {
   skip?: () => boolean;
   /** Where runs are reported for /ready, /metrics and operator alerts. Default: the server-configured `tuya-sync`. */
   job?: BackgroundJob;
+  /** The oldest reading Tuya still holds at a given moment; defaults to its 7-day report-log retention. */
+  oldestRetainedMs?: (nowMs: number) => number;
 }): EnergyTuyaScheduler => {
   const now = input.now ?? Date.now;
   const job = input.job ?? defineBackgroundJob("tuya-sync", { staleAfterMs: STALE_AFTER_MS });
@@ -102,6 +105,12 @@ export const createEnergyTuyaDailyScheduler = (input: {
         const connector = input.resolveConnector?.();
         if (!connector) throw new Error("ENERGYIQ_TUYA_CONNECTOR_NOT_CONFIGURED");
         projectId = connector.projectId;
+        if (connector.unmatchedMeterPoints.length > 0) {
+          log.warn("meters-without-device", {
+            project_id: connector.projectId,
+            meters: connector.unmatchedMeterPoints.map((meter) => meter.sourceLabel).join(", "),
+          });
+        }
         // One capped run per pass, repeated until the watermark reaches the latest complete day. Each pass commits
         // its own Snapshot, so an interrupted catch-up keeps everything the earlier passes already fetched.
         while (completed < maxCatchUpRuns && !controller.signal.aborted) {
@@ -112,14 +121,25 @@ export const createEnergyTuyaDailyScheduler = (input: {
           const watermark = state?.watermark_ms === undefined
             ? input.initialLookbackMs === undefined ? {} : { initialLookbackMs: input.initialLookbackMs }
             : { watermarkMs: state.watermark_ms };
+          // After an outage longer than Tuya keeps readings, start at the oldest readings it still has: asking again
+          // for deleted days would fail (or return nothing) every night and the site would never catch up.
+          const earliestStartMs = (input.oldestRetainedMs ?? oldestRetainedTuyaReadingMs)(now());
+          if (completed === 0 && state?.watermark_ms !== undefined && state.watermark_ms < earliestStartMs) {
+            log.warn("readings-older-than-tuya-keeps", {
+              project_id: connector.projectId,
+              synced_until: new Date(state.watermark_ms).toISOString(),
+              resuming_from: new Date(earliestStartMs).toISOString(),
+            });
+          }
           // A night that is up to date keeps the daily overlap: the same window shape that has always worked.
           // Only a backlog switches to the narrower catch-up pass, which is what has to fit in memory.
-          const nightly = resolveScheduledTuyaSyncWindow({ nowMs: now(), ...watermark });
+          const nightly = resolveScheduledTuyaSyncWindow({ nowMs: now(), earliestStartMs, ...watermark });
           const window = nightly && nightly.endTime - nightly.startTime > maxWindowMs
             ? resolveScheduledTuyaSyncWindow({
               nowMs: now(),
               maxWindowMs,
               overlapMs: catchUpOverlapMs,
+              earliestStartMs,
               ...watermark,
             })
             : nightly;

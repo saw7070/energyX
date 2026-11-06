@@ -79,8 +79,17 @@ describe("Live connection", () => {
       expect(synced.status).toBe(202);
       expect(scheduler.requestSync).toHaveBeenCalledWith(TUYA_OFFICE_PROJECT_ID);
 
+      // A meter left without a device (being replaced, say) is skipped; the rest keep their daily update.
       const partial = await call("PUT", ["matches"], { matches: { [meters[0]!.meterPointId]: matches[meters[0]!.meterPointId] } });
-      expect(partial.body.data.connection).toMatchObject({ matchedCount: 1, ready: false, schedule: { enabled: false } });
+      expect(partial.body.data.connection).toMatchObject({ matchedCount: 1, ready: false, schedule: { enabled: true } });
+      expect((await call("POST", ["sync"])).status).toBe(202);
+      const partialConnector = resolveEnergyTuyaProjectConnector({ metadataStore: metadata, projectId: TUYA_OFFICE_PROJECT_ID, env: {} });
+      expect(partialConnector.devices).toHaveLength(1);
+      expect(partialConnector.unmatchedMeterPoints).toHaveLength(meters.length - 1);
+
+      // With no meter matched at all there is nothing to update, so the daily update switches off.
+      const none = await call("PUT", ["matches"], { matches: {} });
+      expect(none.body.data.connection).toMatchObject({ matchedCount: 0, schedule: { enabled: false } });
       expect((await call("POST", ["sync"])).body.error.message).toBe("ENERGYIQ_LIVE_METERS_NOT_MATCHED");
       expect((await call("PUT", ["schedule"], { enabled: true })).body.error.message).toBe("ENERGYIQ_LIVE_METERS_NOT_MATCHED");
 

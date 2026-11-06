@@ -10,6 +10,7 @@ import { createBackgroundJobRegistry } from "../observability/background-jobs.js
 import type { ConfigApiContext } from "../routes/types.js";
 import { ensureEnergyIqBootstrap } from "./energy-bootstrap.js";
 import { createEnergyTuyaDailyScheduler, resolveNextSingaporeLocalHour } from "./energy-tuya-scheduler.js";
+import { oldestRetainedTuyaReadingMs } from "./energy-tuya-sync-runner.js";
 import { resolveEnergyTuyaProjectConnector } from "./energy-tuya-connector.js";
 import {
   TUYA_REPORT_LOG_ARTIFACT_VERSION,
@@ -127,6 +128,7 @@ describe("Tuya daily scheduler", () => {
           connectorFingerprint: "c".repeat(64),
           devices: [{ deviceId: "exampledevice001", sourceLabel: "Meter 01" }],
           meterPoints: [{ meterPointId: "meter-01", sourceLabel: "Meter 01" }],
+          unmatchedMeterPoints: [],
         }),
         syncTuyaEnergyReadings: sync,
         now: () => Date.parse("2026-08-21T18:00:00.000Z"),
@@ -197,6 +199,8 @@ describe("Tuya daily scheduler", () => {
         maxWindowMs: 28 * 3600000,
         catchUpOverlapMs: 4 * 3600000,
         maxCatchUpRuns: 2,
+        // This backlog is about pass size, not Tuya's retention: let it reach back the whole month.
+        oldestRetainedMs: () => 0,
         now: () => Date.parse("2026-08-21T03:00:00.000Z"),
       });
 
@@ -215,6 +219,59 @@ describe("Tuya daily scheduler", () => {
         project_id: TUYA_OFFICE_PROJECT_ID,
         source_kind: "tuya",
       })!.watermark_ms).toBe(windows[1]!.endTime);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("recovers after an outage longer than Tuya keeps readings, skipping only the days Tuya has deleted", async () => {
+    const fixture = schedulerFixture("retention-gap");
+    try {
+      const DAY = 86_400_000;
+      let nowMs = Date.parse("2026-10-27T03:00:00.000Z");
+      const windows: Array<{ startTime: number; endTime: number }> = [];
+      // Tuya only keeps the last 7 days and refuses a request that starts before that.
+      const retainedArtifact = (startTime: number, endTime: number): TuyaReportLogArtifact => {
+        if (startTime < oldestRetainedTuyaReadingMs(nowMs, {})) throw new Error("ENERGYIQ_TUYA_API_ERROR:1109:param is illegal");
+        return schedulerArtifact(startTime, endTime);
+      };
+      const scheduler = createEnergyTuyaDailyScheduler({
+        enabled: true,
+        localHour: 1,
+        actorUserId: "dev-user",
+        context: fixture.context,
+        resolveConnector: () => fixture.connector,
+        syncTuyaEnergyReadings: async (input) => {
+          windows.push({ startTime: input.startTime, endTime: input.endTime });
+          return retainedArtifact(input.startTime, input.endTime);
+        },
+        afterMaterialization: async ({ snapshot }, beforePublish) => {
+          await beforePublish({
+            persistentDirectory: fixture.root,
+            pointerKey: `current:${TUYA_OFFICE_PROJECT_ID}`,
+            previousProjectionKey: null,
+            candidateProjectionKey: `overview:${snapshot.id}`,
+          });
+          return { projectionRef: `overview:${snapshot.id}` };
+        },
+        initialLookbackMs: DAY,
+        now: () => nowMs,
+      });
+      await expect(scheduler.runIfDue()).resolves.toBe("succeeded");
+      const stalled = fixture.metadata.energyIq.sourceSync.findState({ project_id: TUYA_OFFICE_PROJECT_ID, source_kind: "tuya" })!.watermark_ms!;
+
+      // Ten days pass with no successful sync (the server could not reach Tuya), then the problem is fixed.
+      nowMs = Date.parse("2026-11-06T03:00:00.000Z");
+      windows.length = 0;
+      await expect(scheduler.runIfDue()).resolves.toBe("succeeded");
+
+      // The catch-up starts at the oldest readings Tuya still holds instead of asking again for deleted days.
+      expect(windows[0]!.startTime).toBe(oldestRetainedTuyaReadingMs(nowMs, {}));
+      expect(stalled).toBeLessThan(windows[0]!.startTime);
+      const caughtUp = fixture.metadata.energyIq.sourceSync.findState({ project_id: TUYA_OFFICE_PROJECT_ID, source_kind: "tuya" })!;
+      expect(caughtUp.watermark_ms).toBeGreaterThan(stalled);
+      expect(caughtUp.watermark_ms).toBe(windows.at(-1)!.endTime);
+      expect(caughtUp.last_error_code).toBeUndefined();
     } finally {
       fixture.cleanup();
     }

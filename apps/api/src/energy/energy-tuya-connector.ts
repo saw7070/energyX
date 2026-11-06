@@ -18,6 +18,8 @@ export type EnergyTuyaProjectConnector = {
   credentials?: TuyaCredentials;
   /** The app connection's own daily update; an environment connection follows ENERGYIQ_TUYA_SYNC_*. */
   schedule?: { enabled: boolean; localHour: number };
+  /** Published meters with no device matched: they get no readings until one is chosen, while the rest keep updating. */
+  unmatchedMeterPoints: Array<{ meterPointId: string; sourceLabel: string }>;
 };
 
 export const ENERGYIQ_LIVE_SECRET_OWNER_KIND = "energyiq-live-connector";
@@ -133,37 +135,40 @@ const buildConnector = (input: {
     throw new Error("ENERGYIQ_TUYA_PUBLISHED_MAPPING_REQUIRED");
   }
 
+  // Meters change after their devices are matched: one is added, replaced, renamed or marked not in use, and a match
+  // can point at a meter that is no longer published. Requiring an exact match stopped the whole site's daily update
+  // until someone noticed, so sync every meter that has a device, report the ones that do not, and ignore matches
+  // for meters that are gone. A site with no matched meter at all still cannot sync.
   const bindings = input.bindings;
-  const publishedIds = new Set(mapping.rows.map((row) => row.id));
-  const configuredIds = Object.keys(bindings);
-  if (
-    configuredIds.length !== publishedIds.size
-    || configuredIds.some((meterPointId) => !publishedIds.has(meterPointId))
-  ) {
-    throw new Error("ENERGYIQ_TUYA_DEVICE_BINDINGS_MISMATCH");
-  }
-
   const seenDeviceIds = new Set<string>();
   const devices: TuyaDeviceBinding[] = [];
   const meterPoints: EnergyTuyaProjectConnector["meterPoints"] = [];
+  const unmatchedMeterPoints: EnergyTuyaProjectConnector["unmatchedMeterPoints"] = [];
+  const usedBindings: Array<[string, string]> = [];
   for (const row of mapping.rows) {
-    const deviceId = bindings[row.id];
-    if (!deviceId || !/^[A-Za-z0-9]{8,64}$/u.test(deviceId) || seenDeviceIds.has(deviceId)) {
-      throw new Error("ENERGYIQ_TUYA_DEVICE_BINDINGS_MISMATCH");
-    }
     const sourceLabel = row.source_label.trim();
     if (!sourceLabel) throw new Error("ENERGYIQ_TUYA_PUBLISHED_MAPPING_REQUIRED");
+    const deviceId = bindings[row.id];
+    if (!deviceId) {
+      unmatchedMeterPoints.push({ meterPointId: row.id, sourceLabel });
+      continue;
+    }
+    if (!/^[A-Za-z0-9]{8,64}$/u.test(deviceId) || seenDeviceIds.has(deviceId)) {
+      throw new Error("ENERGYIQ_TUYA_DEVICE_BINDINGS_MISMATCH");
+    }
     seenDeviceIds.add(deviceId);
     devices.push({ deviceId, sourceLabel });
     meterPoints.push({ meterPointId: row.id, sourceLabel });
+    usedBindings.push([row.id, deviceId]);
   }
+  if (devices.length === 0) throw new Error("ENERGYIQ_TUYA_DEVICE_BINDINGS_MISMATCH");
 
   const connectorFingerprint = createHash("sha256").update(JSON.stringify({
     workspaceId: input.workspaceId,
     projectId: input.projectId,
     hierarchyRevisionId: publishedRevision.id,
     hierarchySequence: publishedRevision.sequence,
-    bindings: Object.entries(bindings).sort(([left], [right]) => left.localeCompare(right)),
+    bindings: usedBindings.sort(([left], [right]) => left.localeCompare(right)),
     ...(input.account ? { account: input.account } : {}),
   })).digest("hex");
 
@@ -176,6 +181,7 @@ const buildConnector = (input: {
     connectorFingerprint,
     devices,
     meterPoints,
+    unmatchedMeterPoints,
   };
 };
 

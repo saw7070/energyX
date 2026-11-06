@@ -92,6 +92,7 @@ import {
 import {
   createEnergyTuyaSyncRunner,
   resolveLatestCompleteSingaporeDayEnd,
+  oldestRetainedTuyaReadingMs,
   resolveScheduledTuyaSyncWindow,
 } from "./energy-tuya-sync-runner.js";
 import { resolveNextSingaporeLocalHour } from "./energy-tuya-scheduler.js";
@@ -1553,6 +1554,7 @@ export const handleEnergyApiRequest = async (
           }
           : resolveScheduledTuyaSyncWindow({
             nowMs: Date.now(),
+            earliestStartMs: oldestRetainedTuyaReadingMs(Date.now()),
             ...(state?.watermark_ms === undefined ? {} : { watermarkMs: state.watermark_ms }),
           });
         if (!window) {

@@ -208,7 +208,7 @@ describe("LiveConnectionPanel", () => {
     await act(async () => { remove().click(); });
     await flush();
     expect(saves.at(-1)).toEqual({ "m-incoming": "ref-spare" });
-    expect(container.textContent).toContain("Not live yet");
+    expect(container.textContent).toContain("Some meters are not connected");
     expect([...container.querySelectorAll("tbody tr")][1]!.textContent).toContain("Not connected");
   });
 

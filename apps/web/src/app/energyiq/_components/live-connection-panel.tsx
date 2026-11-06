@@ -542,15 +542,15 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
 
     {connection.connected ? <Card>
       <Step number={3} title={t("step.switchOn")} hint={t("step.switchOnHint")} done={connection.schedule.enabled} />
-      {!connection.ready ? <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">{t("needAllMatched")}</p> : null}
+      {!connection.ready ? <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">{t(connection.matchedCount > 0 ? "someUnmatched" : "needAllMatched")}</p> : null}
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-3">
-          <button type="button" className={secondaryButton} disabled={!connection.ready || dirty || busy !== null} onClick={() => runCheck("check")}>{busy === "check" ? t("checking") : t("check")}</button>
+          <button type="button" className={secondaryButton} disabled={connection.matchedCount === 0 || dirty || busy !== null} onClick={() => runCheck("check")}>{busy === "check" ? t("checking") : t("check")}</button>
           {checkLine}
         </div>
         <div className="flex flex-wrap items-center gap-3 rounded-xl bg-surface-subtle px-4 py-3">
           <label className="flex items-center gap-2 text-sm font-medium">
-            <input type="checkbox" checked={connection.schedule.enabled} disabled={busy !== null || (!connection.ready && !connection.schedule.enabled)} onChange={(event) => saveSchedule(event.target.checked, connection.schedule.localHour)} className="h-4 w-4 accent-[var(--color-primary,#1d513a)]" />
+            <input type="checkbox" checked={connection.schedule.enabled} disabled={busy !== null || (connection.matchedCount === 0 && !connection.schedule.enabled)} onChange={(event) => saveSchedule(event.target.checked, connection.schedule.localHour)} className="h-4 w-4 accent-[var(--color-primary,#1d513a)]" />
             {t("dailyUpdate")}
           </label>
           <select aria-label={t("dailyUpdate")} value={connection.schedule.localHour} disabled={busy !== null || !connection.connected} onChange={(event) => saveSchedule(connection.schedule.enabled, Number(event.target.value))} className={`${inputClass} mt-0 w-auto`}>
@@ -559,7 +559,7 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
           <p className="basis-full text-xs text-muted">{t("dailyUpdateHint")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <button type="button" className={primaryButton} disabled={!connection.ready || dirty || busy !== null || running} onClick={fetchNow}>{t("fetchNow")}</button>
+          <button type="button" className={primaryButton} disabled={connection.matchedCount === 0 || dirty || busy !== null || running} onClick={fetchNow}>{t("fetchNow")}</button>
           {running ? <p role="status" className="text-sm text-muted">{t("fetching")}</p> : null}
         </div>
         <SyncSummary connection={connection} when={when} day={day} t={t} />

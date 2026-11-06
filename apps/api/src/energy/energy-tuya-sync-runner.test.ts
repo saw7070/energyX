@@ -295,6 +295,16 @@ describe("Energy Tuya sync runner", () => {
       watermarkMs: completeDayEnd,
       maxWindowMs: 36 * 3600000,
     })).toEqual({ startTime: completeDayEnd - 86400000, endTime: completeDayEnd + 7200000 });
+    // After an outage longer than Tuya keeps readings, the window starts at the oldest reading it still has.
+    const longAgo = completeDayEnd - 10 * 86400000;
+    const earliestStartMs = completeDayEnd - 7 * 86400000;
+    expect(resolveScheduledTuyaSyncWindow({ nowMs: now, watermarkMs: longAgo, earliestStartMs })).toEqual({
+      startTime: earliestStartMs,
+      endTime: completeDayEnd + 7200000,
+    });
+    // A recent watermark is untouched by the limit.
+    expect(resolveScheduledTuyaSyncWindow({ nowMs: now, watermarkMs: completeDayEnd, earliestStartMs }))
+      .toEqual({ startTime: completeDayEnd - 86400000, endTime: completeDayEnd + 7200000 });
     expect(() => resolveScheduledTuyaSyncWindow({ nowMs: now, maxWindowMs: 0 }))
       .toThrow("ENERGYIQ_SOURCE_SYNC_WINDOW_INVALID");
   });

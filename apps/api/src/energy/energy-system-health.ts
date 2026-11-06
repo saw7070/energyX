@@ -9,6 +9,8 @@ import { readReportProjectData } from "../report-agent/report-project-data.js";
 import type { ConfigApiContext, ConfigApiResponse } from "../routes/types.js";
 import { checkAuditLog } from "./energy-audit-log.js";
 import { resolveEnergyAccessContext } from "./energy-query-context.js";
+import { resolveEnergyTuyaProjectConnector } from "./energy-tuya-connector.js";
+import { tuyaLogRetentionMs } from "./energy-tuya-sync-runner.js";
 
 /**
  * GET admin/system-health: one page that says whether the things EnergyX depends on are working, so an
@@ -91,6 +93,28 @@ const ago = (iso: string, now: number) => { const hours = Math.round((now - Date
 const tuyaFix = (code = "") => code.includes("1114") ? "Tuya refused this server's internet address. Add it to the Tuya Cloud project's IP allowlist." : "Check the site's Tuya connection under Admin → Data Sources.";
 
 /** Each site's newest meter reading and, for live-connected sites, its last Tuya sync. */
+/**
+ * Tuya keeps readings for about 7 days. Say how long is left to fix a failing sync before readings are lost, or which
+ * days are already gone; the daily update resumes from the oldest readings Tuya still has once it works again.
+ */
+export const tuyaRetentionNote = (watermarkMs: number | undefined, now: number): string => {
+  if (watermarkMs === undefined) return "";
+  const retention = tuyaLogRetentionMs();
+  const fmt = (ms: number) => new Date(ms).toLocaleDateString("en-SG", { day: "numeric", month: "short", timeZone: "Asia/Singapore" });
+  const lostBefore = now - retention;
+  if (watermarkMs < lostBefore) return ` Readings from ${fmt(watermarkMs)} to ${fmt(lostBefore)} are older than Tuya keeps and can no longer be fetched; once the sync works again it resumes from the oldest readings Tuya still has.`;
+  return ` Tuya keeps readings for ${Math.round(retention / DAY)} days: fix this by ${fmt(watermarkMs + retention)} or readings from ${fmt(watermarkMs)} will be lost.`;
+};
+
+/** Labels of published meters that the site's Tuya connection has no device for. */
+const unmatchedTuyaMeters = (metadata: MetadataStore, projectId: string): string[] => {
+  try {
+    return resolveEnergyTuyaProjectConnector({ metadataStore: metadata, projectId }).unmatchedMeterPoints.map((meter) => meter.sourceLabel);
+  } catch {
+    return [];
+  }
+};
+
 export async function checkProjects(metadata: MetadataStore, userId: string, projects: ReadonlyArray<{ id: string; name: string; workspaceId: string; organisation?: string | undefined }>, now = Date.now()): Promise<HealthCheck[]> {
   const checks: HealthCheck[] = [];
   for (const project of projects) {
@@ -113,9 +137,18 @@ export async function checkProjects(metadata: MetadataStore, userId: string, pro
     if (sync) {
       const failing = !!sync.last_failure_at && (!sync.last_success_at || sync.last_failure_at > sync.last_success_at);
       checks.push(failing
-        ? { id: `${project.id}:tuya`, group, title: "Live sync (Tuya)", status: "problem", detail: `Last sync failed ${ago(sync.last_failure_at!, now)}${sync.last_error_code ? ` (${sync.last_error_code.split(":").slice(0, 3).join(":")})` : ""}.`, fix: tuyaFix(sync.last_error_code) }
+        ? { id: `${project.id}:tuya`, group, title: "Live sync (Tuya)", status: "problem", detail: `Last sync failed ${ago(sync.last_failure_at!, now)}${sync.last_error_code ? ` (${sync.last_error_code.split(":").slice(0, 3).join(":")})` : ""}.${tuyaRetentionNote(sync.watermark_ms, now)}`, fix: tuyaFix(sync.last_error_code) }
         : { id: `${project.id}:tuya`, group, title: "Live sync (Tuya)", status: "ok", detail: sync.last_success_at ? `Last synced ${ago(sync.last_success_at, now)}.` : "Connected; waiting for the first sync." });
       checks[checks.length - 1] = { ...checks[checks.length - 1]!, ...site };
+      const unmatched = unmatchedTuyaMeters(metadata, project.id);
+      if (unmatched.length > 0) {
+        checks.push({
+          id: `${project.id}:tuya-unmatched`, group, title: "Meters without a Tuya device", status: "warning",
+          detail: `${unmatched.length === 1 ? "1 meter has" : `${unmatched.length} meters have`} no Tuya device, so ${unmatched.length === 1 ? "its readings are" : "their readings are"} not updated: ${unmatched.slice(0, 6).join(", ")}${unmatched.length > 6 ? "…" : ""}. The other meters keep updating.`,
+          fix: "Open the site's Facility → Live connection and choose a device for each one.",
+          ...site,
+        });
+      }
     }
   }
   return checks;

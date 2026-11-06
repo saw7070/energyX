@@ -395,8 +395,9 @@ export const saveLiveConnectionMatches = async (
     actor_user_id: input.user.id,
     updated_at: updatedAt,
   });
-  // A daily update cannot run with a meter missing, so switch it off rather than let it fail every night.
-  if (connection.sync_enabled && Object.keys(bindings).length !== rows.length) {
+  // Meters without a device are skipped by the daily update while the rest keep updating; only a site left with no
+  // matched meter at all cannot run, so switch it off rather than let it fail every night.
+  if (connection.sync_enabled && Object.keys(bindings).length === 0) {
     metadataStore.energyIq.liveConnectors.saveSchedule({
       project_id: input.projectId,
       sync_enabled: false,
