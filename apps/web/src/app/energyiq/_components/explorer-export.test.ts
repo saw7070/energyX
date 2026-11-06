@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { EnergyScopeAnalysisDto } from "../../../lib/config-api";
-import { explorerCsvFilename, explorerHourlyCsv } from "./explorer-export";
+import { explorerCsvFilename, explorerDailyCsv, explorerDailyCsvFilename, explorerHourlyCsv } from "./explorer-export";
 
 const analysis = {
   context: { from: "2026-10-01T00:00:00+08:00", scopeId: "Level 2 / Office" },
@@ -30,3 +30,21 @@ it("keeps a name that looks like a formula as text, but negative numbers as numb
   const formulaName = { ...analysis, explorerMeters: [{ id: "ld58", name: "=HYPERLINK(1)", kind: "physical" }] } as unknown as EnergyScopeAnalysisDto;
   expect(explorerHourlyCsv(formulaName).split("\r\n")[0]).toContain(`"'=HYPERLINK(1) (kWh)"`);
 });
+
+it("adds up each day's hours per series for checking against the meter's own app", () => {
+  const twoDays = {
+    ...analysis,
+    explorerTrends: [
+      { id: "__scope__", expectedMinutesPerHour: 60, cells: [["2026-11-04", 0, 0.3, 60, 0], ["2026-11-04", 1, 0.25, 60, 0], ["2026-11-05", 0, 0.4, 60, 0], ["2026-11-05", 1, null, 0, 1]] },
+      { id: "ld58", expectedMinutesPerHour: 60, cells: [["2026-11-04", 0, 0.3, 60, 0], ["2026-11-04", 1, 0.25, 60, 0], ["2026-11-05", 0, 0.4, 60, 0]] },
+    ],
+  } as unknown as EnergyScopeAnalysisDto;
+  expect(explorerDailyCsv(twoDays).split("\r\n")).toEqual([
+    "Date,Total (kWh),\"Office, main (kWh)\",Hours with readings (total)",
+    "2026-11-04,0.55,0.55,2",
+    "2026-11-05,0.4,0.4,1",
+    "",
+  ]);
+  expect(explorerDailyCsvFilename(twoDays, "Block 264E")).toBe("block-264e-daily-2026-11-04-to-2026-11-05.csv");
+});
+

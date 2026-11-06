@@ -21,6 +21,50 @@ export function explorerHourlyCsv(analysis: EnergyScopeAnalysisDto): string {
   return hourlyCsv((analysis.explorerTrends ?? []).map((item) => ({ heading: heading(item.id), cells: item.cells })));
 }
 
+/**
+ * Each day's energy per series, for checking against a meter's own app (the Tuya app shows one figure per day): one
+ * row per local date, the sum of that day's hours. A day missing some hours gets its "Hours with readings" count, so a
+ * short total is not mistaken for low use; a day with no readings stays empty.
+ */
+export function explorerDailyCsv(analysis: EnergyScopeAnalysisDto): string {
+  const meterNames = new Map((analysis.explorerMeters ?? []).map((meter) => [meter.id, meter.kind === "virtual" ? `${meter.name} (virtual)` : meter.name]));
+  const heading = (id: string) => id === "__scope__"
+    ? "Total (kWh)"
+    : id.startsWith("__category__:")
+      ? `${measurement(categoryKey(id.slice("__category__:".length)))} total (kWh)`
+      : `${meterNames.get(id) ?? id} (kWh)`;
+  const series = (analysis.explorerTrends ?? []).map((item) => ({ heading: heading(item.id), cells: item.cells }));
+  const totals = series.map((column) => {
+    const byDate = new Map<string, { kwh: number; hours: number }>();
+    for (const [date, , kwh] of column.cells) {
+      if (kwh == null) continue;
+      const day = byDate.get(date) ?? { kwh: 0, hours: 0 };
+      day.kwh += kwh;
+      day.hours += 1;
+      byDate.set(date, day);
+    }
+    return byDate;
+  });
+  const dates = [...new Set(series.flatMap((column) => column.cells.map(([date]) => date)))].sort();
+  const rows = [
+    ["Date", ...series.map((column) => column.heading), "Hours with readings (total)"],
+    ...dates.map((date) => [
+      date,
+      ...totals.map((byDate) => {
+        const day = byDate.get(date);
+        return day ? String(Math.round(day.kwh * 10_000) / 10_000) : "";
+      }),
+      String(totals[0]?.get(date)?.hours ?? 0),
+    ]),
+  ];
+  return `${rows.map((row) => row.map(csvCell).join(",")).join("\r\n")}\r\n`;
+}
+
+/** File name for the daily totals: "office-daily-2026-09-18-to-2026-10-01.csv". */
+export function explorerDailyCsvFilename(analysis: EnergyScopeAnalysisDto, scopeName: string): string {
+  return explorerCsvFilename(analysis, scopeName).replace("-hourly", "-daily");
+}
+
 /** One row per local hour across every column's hours; a column without a value for that hour stays empty. */
 export function hourlyCsv(columns: Array<{ heading: string; cells: ReadonlyArray<readonly [string, number, number | null, ...unknown[]]> }>): string {
   const values = columns.map((column) => new Map(column.cells.map(([date, hour, kwh]) => [`${date} ${hour}`, kwh])));

@@ -18,7 +18,7 @@ import {
   analysisDates,
   type Mode,
 } from "./explorer-trend-model";
-import { downloadText, explorerCsvFilename, explorerHourlyCsv } from "./explorer-export";
+import { downloadText, explorerCsvFilename, explorerDailyCsv, explorerDailyCsvFilename, explorerHourlyCsv } from "./explorer-export";
 export function ExplorerTrends({
   analysis,
   meterId,
@@ -93,13 +93,22 @@ export function ExplorerTrends({
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted" aria-label="Chart dates">{dates[0] ?? "—"} – {dates.at(-1) ?? "—"} · {timezone}</p>
-        {displayed?.explorerTrends?.length ? <button
-          type="button"
-          className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-surface-subtle"
-          onClick={() => downloadText(explorerCsvFilename(displayed, displayed.context.scopeId), explorerHourlyCsv(displayed))}
-        >
-          Download hourly data (Excel / CSV)
-        </button> : null}
+        {displayed?.explorerTrends?.length ? <span className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-surface-subtle"
+            onClick={() => downloadText(explorerDailyCsvFilename(displayed, displayed.context.scopeId), explorerDailyCsv(displayed))}
+          >
+            Download daily totals (Excel / CSV)
+          </button>
+          <button
+            type="button"
+            className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-surface-subtle"
+            onClick={() => downloadText(explorerCsvFilename(displayed, displayed.context.scopeId), explorerHourlyCsv(displayed))}
+          >
+            Download hourly data (Excel / CSV)
+          </button>
+        </span> : null}
       </div>
       <details aria-label="Trend quality" className="text-sm text-muted">
         <summary className="cursor-pointer">Selected dates · {coverage == null ? "Coverage unavailable" : `${coverage.toFixed(1)}% coverage`}</summary>
