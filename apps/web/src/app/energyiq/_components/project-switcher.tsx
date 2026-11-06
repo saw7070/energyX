@@ -15,9 +15,13 @@ type Props = {
   busy: boolean;
   canCreate: boolean;
   onSelect: (workspaceId: string, projectId: string) => Promise<void> | void;
-  onCreate: () => void;
+  /** Opens New project for the given Organisation, or for the active one when none is given. */
+  onCreate: (workspaceId?: string) => void;
   variant?: "sidebar" | "topbar";
 };
+/** Session key naming the client whose first project to create once the page has reloaded. */
+export const CREATE_PROJECT_IN_KEY = "energyiq:create-project-in";
+
 export function ProjectSwitcher(props: Props) {
   const { t } = useEnergyIqLocale();
   const [open, setOpen] = useState(false);
@@ -100,7 +104,11 @@ function ProjectMenu({ access, activeProject, projects, allowDrafts, allowArchiv
     if (current.kind === "archive" || current.kind === "restore") await configApi.setEnergyAdminProjectArchived(current.projectId, current.kind === "archive");
     else if (current.kind === "deleteProject") await configApi.deleteEnergyAdminProject(current.projectId, typed);
     else if (current.kind === "deleteCustomer") await configApi.deleteEnergyAdminOrganisation(current.id);
-    else await configApi.createEnergyAdminOrganisation({ name: typed });
+    else {
+      const created = await configApi.createEnergyAdminOrganisation({ name: typed });
+      // After the reload, the shell opens New project for the new client: it cannot be opened until it has one.
+      try { window.sessionStorage.setItem(CREATE_PROJECT_IN_KEY, created.id); } catch { /* The picker still offers it. */ }
+    }
     window.location.reload();
   };
   const dropProps = (targetId: string | null, targetName: string) => canMove && dragging && targetId !== dragging.fromId ? {
@@ -131,7 +139,12 @@ function ProjectMenu({ access, activeProject, projects, allowDrafts, allowArchiv
       const isDropTarget = dragging !== null && dropTarget === workspace.id;
       const customerMenu = `w:${workspace.id}`;
       const count = groups[workspace.id]?.length;
-      return <section key={workspace.id} aria-label={workspace.name} className={`${styles.client} ${isDropTarget ? styles.dropTarget : ""}`} {...dropProps(workspace.id, workspace.name)}><h3 className={styles.clientHeader}><span className={styles.clientIcon} aria-hidden="true"><EnergyIcon name="building" /></span><span className={styles.clientText}><span className={styles.groupName}>{workspace.name}</span><small><span className={styles.clientTag}>{t("project.clientTag")}</span>{count !== undefined && <> · {count === 1 ? t("project.countOne") : t("project.countMany", { count })}</>}</small></span>{isDropTarget && <span className={styles.dropLabel}>{t("project.dropHere")}</span>}{canMove && workspace.kind === "customer" && !isDropTarget && <RowMenu open={menuFor === customerMenu} label={t("project.actions", { name: workspace.name })} disabled={pending} onToggle={() => setMenuFor(menuFor === customerMenu ? null : customerMenu)} items={[{ label: t("project.customerDeleteMenu"), danger: true, onSelect: () => { setMenuFor(null); setAction({ kind: "deleteCustomer", id: workspace.id, name: workspace.name }); } }]} />}</h3><div className={styles.clientProjects}>{failures.includes(workspace.id) ? <button onClick={() => { setFailures([]); setRevision(value => value + 1); }}>{t("project.loadFailed")}</button> : !visible ? <p>{t("project.loading")}</p> : !visible.length ? <p>{t("project.none")}</p> : visible.map(project => {
+      return <section key={workspace.id} aria-label={workspace.name} className={`${styles.client} ${isDropTarget ? styles.dropTarget : ""}`} {...dropProps(workspace.id, workspace.name)}><h3 className={styles.clientHeader}><span className={styles.clientIcon} aria-hidden="true"><EnergyIcon name="building" /></span><span className={styles.clientText}><span className={styles.groupName}>{workspace.name}</span><small><span className={styles.clientTag}>{t("project.clientTag")}</span>{count !== undefined && <> · {count === 1 ? t("project.countOne") : t("project.countMany", { count })}</>}</small></span>{isDropTarget && <span className={styles.dropLabel}>{t("project.dropHere")}</span>}{canMove && workspace.kind === "customer" && !isDropTarget && <RowMenu open={menuFor === customerMenu} label={t("project.actions", { name: workspace.name })} disabled={pending} onToggle={() => setMenuFor(menuFor === customerMenu ? null : customerMenu)} items={[
+        ...(workspace.disabled ? [] : [{ label: t("project.createHere"), onSelect: () => { setMenuFor(null); close(); onCreate(workspace.id); } }]),
+        { label: t("project.customerDeleteMenu"), danger: true, onSelect: () => { setMenuFor(null); setAction({ kind: "deleteCustomer", id: workspace.id, name: workspace.name }); } },
+      ]} />}</h3><div className={styles.clientProjects}>{failures.includes(workspace.id) ? <button onClick={() => { setFailures([]); setRevision(value => value + 1); }}>{t("project.loadFailed")}</button> : !visible ? <p>{t("project.loading")}</p> : !visible.length ? (canMove && workspace.kind === "customer" && !workspace.disabled
+        ? <button type="button" className={styles.createFirst} disabled={pending} onClick={() => { close(); onCreate(workspace.id); }}><EnergyIcon name="plus" />{t("project.createFirst")}</button>
+        : <p>{t("project.none")}</p>) : visible.map(project => {
         const projectMenu = `p:${project.id}`;
         const archived = project.status === "archived";
         return <div key={project.id} className={styles.projectRow}><button data-project disabled={pending} draggable={canMove && !pending} onDragStart={canMove ? event => { setMenuFor(null); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", project.name); setDragging({ projectId: project.id, projectName: project.name, fromId: workspace.id, fromName: workspace.name }); } : undefined} onDragEnd={canMove ? () => { setDragging(null); setDropTarget(null); } : undefined} className={dragging?.projectId === project.id ? styles.dragSource : undefined} aria-current={project.id === activeProject?.id && workspace.id === access.activeWorkspaceId ? "true" : undefined} onClick={() => void choose(workspace.id, project.id)}><EnergyIcon name="explorer" /><span>{project.name}<small>{[t("project.kindProject"), project.status === "draft" ? t("project.setupInProgress") : archived ? t("project.archived") : ""].filter(Boolean).join(" · ")}</small></span>{project.dataSource && <DataSourceBadge source={project.dataSource} />}{project.id === activeProject?.id && workspace.id === access.activeWorkspaceId && <EnergyIcon name="check" />}</button>{canMove && <RowMenu open={menuFor === projectMenu} label={t("project.actions", { name: project.name })} disabled={pending} onToggle={() => setMenuFor(menuFor === projectMenu ? null : projectMenu)} items={[

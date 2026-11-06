@@ -230,6 +230,10 @@ async function parseJsonResponse<T>(response: Response): Promise<T> {
   return parsed as T;
 }
 
+/** Sends one request as a specific Organisation instead of the active one; the server still checks access to it. */
+const workspaceHeader = (workspaceId: string | undefined): { headers?: Record<string, string> } =>
+  workspaceId ? { headers: { "X-Workspace-Id": workspaceId } } : {};
+
 async function requestEnvelope<T>(
   path: string,
   init?: RequestInit,
@@ -712,14 +716,16 @@ export const configApi = {
     );
   },
 
+  /** Creates the project in `options.workspaceId` (an Organisation the caller administers) or else the active one. */
   createEnergyProject(body: {
     name: string;
     timezone?: string;
     region?: EnergyProjectRegionDto;
-  }): Promise<{ project: EnergyProjectRecordDto; draft: EnergyProjectSetupDraftDto }> {
+  }, options?: { workspaceId?: string }): Promise<{ project: EnergyProjectRecordDto; draft: EnergyProjectSetupDraftDto }> {
     return requestEnvelope("/api/v1/energy/projects", {
       method: "POST",
       body: JSON.stringify(body),
+      ...workspaceHeader(options?.workspaceId),
     });
   },
 
@@ -787,26 +793,28 @@ export const configApi = {
   publishEnergyTariffSchedule(
     projectId: string,
     body: { entries: EnergyTariffScheduleEntryInputDto[] },
+    options?: { workspaceId?: string },
   ): Promise<{
     revision: EnergyTariffScheduleRevisionDto;
     configuration: EnergyOperationalPolicyConfigurationDto;
   }> {
     return requestEnvelope(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/operational-policies/tariff`,
-      { method: "POST", body: JSON.stringify(body) },
+      { method: "POST", body: JSON.stringify(body), ...workspaceHeader(options?.workspaceId) },
     );
   },
 
   publishEnergyOperatingCalendar(
     projectId: string,
     body: { entries: EnergyOperatingCalendarEntryInputDto[]; academicPeriods?: NonNullable<EnergyOperatingCalendarRevisionDto["academic_periods"]> },
+    options?: { workspaceId?: string },
   ): Promise<{
     revision: EnergyOperatingCalendarRevisionDto;
     configuration: EnergyOperationalPolicyConfigurationDto;
   }> {
     return requestEnvelope(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/operational-policies/calendar`,
-      { method: "POST", body: JSON.stringify(body) },
+      { method: "POST", body: JSON.stringify(body), ...workspaceHeader(options?.workspaceId) },
     );
   },
 

@@ -21,7 +21,7 @@ async function openSingapore(created=vi.fn(async()=>{})){
 
 it("asks where the site is, shows its settings, then creates the project with its price, hours and holidays",async()=>{
  const created=vi.fn(async()=>{});
- await act(async()=>root.render(<CreateProjectDialog workspaceName="School FM" onCreated={created} onClose={()=>{}}/>));
+ await act(async()=>root.render(<CreateProjectDialog workspaceId="org-school" workspaceName="School FM" onCreated={created} onClose={()=>{}}/>));
  expect(container.textContent).toContain("School FM");
  await enterName();
  expect(button("Next: check the settings").disabled).toBe(true);
@@ -34,9 +34,9 @@ it("asks where the site is, shows its settings, then creates the project with it
  expect(price.value).toBe("0.2859");
  expect(container.textContent).toContain("= 28.59 cents");
  await submit();
- expect(api.createEnergyProject).toHaveBeenCalledWith({name:"New School",timezone:"Asia/Singapore",region:{country:"SG"}});
- expect(api.publishEnergyTariffSchedule).toHaveBeenCalledWith("created-project",{entries:[expect.objectContaining({currency:"SGD",ratePerKwh:0.2859,tax:{name:"GST",ratePct:9}})]});
- expect(api.publishEnergyOperatingCalendar).toHaveBeenCalledWith("created-project",{entries:[expect.objectContaining({effectiveFrom:"2020-01-01",exceptions:expect.arrayContaining([expect.objectContaining({date:"2026-08-10",classification:"public_holiday"})])})]});
+ expect(api.createEnergyProject).toHaveBeenCalledWith({name:"New School",timezone:"Asia/Singapore",region:{country:"SG"}},{workspaceId:"org-school"});
+ expect(api.publishEnergyTariffSchedule).toHaveBeenCalledWith("created-project",{entries:[expect.objectContaining({currency:"SGD",ratePerKwh:0.2859,tax:{name:"GST",ratePct:9}})]},{workspaceId:"org-school"});
+ expect(api.publishEnergyOperatingCalendar).toHaveBeenCalledWith("created-project",{entries:[expect.objectContaining({effectiveFrom:"2020-01-01",exceptions:expect.arrayContaining([expect.objectContaining({date:"2026-08-10",classification:"public_holiday"})])})]},{workspaceId:"org-school"});
  expect(created).toHaveBeenCalledWith("created-project");
 });
 

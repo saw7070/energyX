@@ -20,7 +20,9 @@ const planLabel = (planId: TariffPlanId) => translatorFor(newSiteMessages, "en")
  * time zone, electricity price, opening hours and public holidays), each checked and editable before anything is
  * saved. A retry never creates the project twice and never repeats a part that already saved.
  */
-export function CreateProjectDialog({ workspaceName, onCreated, onClose }: {
+export function CreateProjectDialog({ workspaceId, workspaceName, onCreated, onClose }: {
+  /** The Organisation the project is created in; the active one when omitted. */
+  workspaceId?: string;
   workspaceName: string; onCreated: (projectId: string) => Promise<void>; onClose: () => void;
 }) {
   const t = useMessages(projectSetupMessages);
@@ -80,7 +82,7 @@ export function CreateProjectDialog({ workspaceName, onCreated, onClose }: {
             name: name.trim(),
             timezone: settings.timezone,
             region: { country: settings.country, ...(settings.state ? { state: settings.state } : {}) },
-          });
+          }, { workspaceId });
           createdId.current = result.project.id;
         } catch {
           setError(t("createFailed"));
@@ -91,7 +93,7 @@ export function CreateProjectDialog({ workspaceName, onCreated, onClose }: {
       if (!saved.current.price) {
         const entry = tariffEntryForSave(settings, planLabel);
         try {
-          if (entry) await configApi.publishEnergyTariffSchedule(projectId, { entries: [entry] });
+          if (entry) await configApi.publishEnergyTariffSchedule(projectId, { entries: [entry] }, { workspaceId });
           saved.current.price = true;
         } catch {
           setUnsaved("price");
@@ -101,7 +103,7 @@ export function CreateProjectDialog({ workspaceName, onCreated, onClose }: {
       if (!saved.current.hours) {
         const entry = calendarEntryForSave(settings);
         try {
-          if (entry) await configApi.publishEnergyOperatingCalendar(projectId, { entries: [entry] });
+          if (entry) await configApi.publishEnergyOperatingCalendar(projectId, { entries: [entry] }, { workspaceId });
           saved.current.hours = true;
         } catch {
           setUnsaved("hours");

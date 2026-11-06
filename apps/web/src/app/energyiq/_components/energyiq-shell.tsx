@@ -6,7 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 
 import { EnergyIcon, type EnergyIconName } from "./icons";
-import { ProjectSwitcher } from "./project-switcher";
+import { CREATE_PROJECT_IN_KEY, ProjectSwitcher } from "./project-switcher";
 import { useEnergyIqAccess } from "./energyiq-access";
 import { ActionResultNotices } from "./action-result-notices";
 import { EnergyIqAccountMenu } from "./energyiq-account-menu";
@@ -53,7 +53,8 @@ const isReportRoute = (path: string) => ["/energyiq/key-points", "/energyiq/anal
 export function EnergyIqShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { t } = useEnergyIqLocale();
-  const [creatingProject, setCreatingProject] = useState(false);
+  // The Organisation New project creates the project in; null while the dialog is closed.
+  const [creatingProjectIn, setCreatingProjectIn] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   useEffect(() => {
     let preference: string | null = null;
@@ -106,6 +107,19 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
       ? access.projects.filter((project) => project.status !== "archived")
       : publishedProjects;
   const canCreateProject = access?.role === "admin" && !!access.activeWorkspaceId && !activeWorkspace?.disabled;
+  const creationTarget = access?.role === "admin" && creatingProjectIn
+    ? access.workspaces.find((workspace) => workspace.id === creatingProjectIn && workspace.kind === "customer" && !workspace.disabled)
+    : undefined;
+  // A client created in the picker cannot be opened until it has a project, so its New project opens after the reload.
+  useEffect(() => {
+    if (access?.role !== "admin") return;
+    let pending: string | null = null;
+    try {
+      pending = window.sessionStorage.getItem(CREATE_PROJECT_IN_KEY);
+      if (pending) window.sessionStorage.removeItem(CREATE_PROJECT_IN_KEY);
+    } catch { /* Storage is optional. */ }
+    if (pending && access.workspaces.some((workspace) => workspace.id === pending)) setCreatingProjectIn(pending);
+  }, [access]);
   const resetPageScroll = () => {
     const pageScroller = pageScrollerRef.current;
     if (!pageScroller) return;
@@ -266,14 +280,16 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
           </div>
         </aside>
       </div>
-      {creatingProject && canCreateProject && <CreateProjectDialog workspaceName={activeWorkspace?.name ?? "this workspace"} onClose={() => setCreatingProject(false)} onCreated={async projectId => {
-        await refresh();
+      {creatingProjectIn && creationTarget && <CreateProjectDialog workspaceId={creationTarget.id} workspaceName={creationTarget.name} onClose={() => setCreatingProjectIn(null)} onCreated={async projectId => {
+        // A project made for another client opens in that client, so the next steps happen where the project lives.
+        if (creationTarget.id === access?.activeWorkspaceId) await refresh();
+        else await selectProjectContext(creationTarget.id, projectId);
         router.replace(`/energyiq/reports?${new URLSearchParams({ projectId, sessionId: "new", configure: "1", focus: "initialize" })}`, { scroll: false });
-        setCreatingProject(false);
+        setCreatingProjectIn(null);
       }} />}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col print:block">
         <header data-energyiq-topbar aria-label={t("shell.topBar")} className={`${topBar.topBar} print:hidden`}>
-          <div className={topBar.project}>{access && <ProjectSwitcher variant="topbar" access={access} activeProject={activeProject} projects={contextProjects} allowDrafts={access.role === "admin" && (isAdminPage || isReportRoute(pathname))} allowArchived={isAdminPage && access.role === "admin"} busy={switchingWorkspaceId !== null} canCreate={canCreateProject} onCreate={()=>setCreatingProject(true)} onSelect={async(workspaceId,projectId)=>{if(workspaceId === access.activeWorkspaceId)selectProjectFromShell(projectId);else await selectWorkspaceFromShell(workspaceId,projectId);}} />}</div>
+          <div className={topBar.project}>{access && <ProjectSwitcher variant="topbar" access={access} activeProject={activeProject} projects={contextProjects} allowDrafts={access.role === "admin" && (isAdminPage || isReportRoute(pathname))} allowArchived={isAdminPage && access.role === "admin"} busy={switchingWorkspaceId !== null} canCreate={canCreateProject} onCreate={(workspaceId)=>setCreatingProjectIn(workspaceId ?? access.activeWorkspaceId ?? null)} onSelect={async(workspaceId,projectId)=>{if(workspaceId === access.activeWorkspaceId)selectProjectFromShell(projectId);else await selectWorkspaceFromShell(workspaceId,projectId);}} />}</div>
           <div className={topBar.actions}>
             <EnergyIqLanguageSwitch /><EnergyIqThemeSwitch />{activeProject && !switchingWorkspaceId && <EnergyIqNotificationBell key={sessionProjectKey} projectId={activeProject.id} />}
             <div className={topBar.account}><EnergyIqAccountMenu collapsed placement="down" /></div>
