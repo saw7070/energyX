@@ -9,6 +9,7 @@ import { inspectEnergyExcelWorkbook, readEnergyExcelWorkbook } from "./energy-ex
 import {
   buildLiveConnectionStarter,
   liveDeviceRef,
+  resolveLiveConnectionDeviceList,
   saveLiveConnectionAccount,
   type LiveConnectionDependencies,
 } from "./energy-live-connection.js";
@@ -74,6 +75,61 @@ describe("Start a site from Tuya", () => {
       await expect(buildLiveConnectionStarter(deps, { projectId: PROJECT_ID, deviceRefs: [ref("aircon0001device")], days: 30 }))
         .rejects.toThrow("ENERGYIQ_LIVE_STARTER_DAYS_INVALID");
       await expect(buildLiveConnectionStarter(deps, { projectId: TUYA_OFFICE_PROJECT_ID, deviceRefs: [ref("aircon0001device")] }))
+        .rejects.toThrow("ENERGYIQ_LIVE_STARTER_SETUP_EXISTS");
+    });
+  });
+
+  it("names the meters from the site's own device list when labels are given", async () => {
+    await withStarter(async ({ deps, syncs }) => {
+      const refs = ["aircon0001device", "lights0002device", "pantry0004device"].map((id) => liveDeviceRef(PROJECT_ID, id));
+      const starter = await buildLiveConnectionStarter(deps, {
+        projectId: PROJECT_ID,
+        deviceRefs: refs,
+        labels: ["264E Lighting L1", " 264E  Lighting L1 ", "Pantry"],
+      });
+      expect(syncs[0]!.devices.map((device) => device.sourceLabel)).toEqual(["264E Lighting L1", "264E Lighting L1 (2)", "Pantry"]);
+      expect(starter.devices.map((device) => device.sourceLabel)).toEqual(["264E Lighting L1", "264E Lighting L1 (2)", "Pantry"]);
+      expect(starter.content.toString("utf8")).toContain("264E Lighting L1 (2),2026-11-05 08:00:00,");
+
+      for (const labels of [["Only one"], [1, 2, 3], ["A", "", "C"], "A,B,C", ["A", "B", "x".repeat(121)]]) {
+        await expect(buildLiveConnectionStarter(deps, { projectId: PROJECT_ID, deviceRefs: refs, labels }))
+          .rejects.toThrow("ENERGYIQ_LIVE_STARTER_LABELS_INVALID");
+      }
+    });
+  });
+
+  it("checks a pasted device list against the account: found, not found, gateway, listed twice and invalid rows", async () => {
+    await withStarter(async ({ deps }) => {
+      const result = await resolveLiveConnectionDeviceList(deps, {
+        projectId: PROJECT_ID,
+        rows: [
+          { name: " 264E  Lighting L1 ", deviceId: " aircon0001device ", area: "264E", equipment: "Corridor lights" },
+          { name: "264F Lighting L1", deviceId: "missing0009device", area: "264F" },
+          { name: "Hub", deviceId: "gateway003device" },
+          { name: "Again", deviceId: "aircon0001device" },
+          { name: "Bad id", deviceId: "x" },
+          { name: "", deviceId: "lights0002device" },
+          { name: "Pantry", deviceId: "pantry0004device", area: 7 },
+        ],
+      });
+      expect(result.found).toBe(2);
+      expect(result.rows).toEqual([
+        { line: 1, name: "264E Lighting L1", area: "264E", equipment: "Corridor lights", status: "found", ref: liveDeviceRef(PROJECT_ID, "aircon0001device"), tuyaName: "Meter", online: true },
+        { line: 2, name: "264F Lighting L1", area: "264F", status: "not_found" },
+        { line: 3, name: "Hub", status: "gateway", tuyaName: "Zigbee hub", online: true },
+        { line: 4, name: "Again", status: "duplicate" },
+        { line: 5, name: "Bad id", status: "invalid" },
+        { line: 6, name: "", status: "invalid" },
+        { line: 7, name: "Pantry", status: "found", ref: liveDeviceRef(PROJECT_ID, "pantry0004device"), tuyaName: "Pantry, kitchen", online: true },
+      ]);
+      // Device ids are not sent back.
+      expect(JSON.stringify(result)).not.toContain("pantry0004device");
+
+      for (const rows of [[], "rows", [null], Array.from({ length: 201 }, () => ({ name: "A", deviceId: "aircon0001device" }))]) {
+        await expect(resolveLiveConnectionDeviceList(deps, { projectId: PROJECT_ID, rows }))
+          .rejects.toThrow("ENERGYIQ_LIVE_DEVICE_LIST_INVALID");
+      }
+      await expect(resolveLiveConnectionDeviceList(deps, { projectId: TUYA_OFFICE_PROJECT_ID, rows: [{ name: "A", deviceId: "aircon0001device" }] }))
         .rejects.toThrow("ENERGYIQ_LIVE_STARTER_SETUP_EXISTS");
     });
   });

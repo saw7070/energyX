@@ -109,6 +109,7 @@ import {
   listLiveConnectionDevices,
   readLiveConnection,
   requireSyncable,
+  resolveLiveConnectionDeviceList,
   saveLiveConnectionAccount,
   saveLiveConnectionMatches,
   saveLiveConnectionSchedule,
@@ -1474,7 +1475,12 @@ export const handleEnergyApiRequest = async (
       if (segments.length === 4 && action === "starter" && request.method === "POST") {
         requireProjectArea(context, user, projectId, ["facility"], "write");
         const body = requireRecord(await readJsonBody(request));
-        const starter = await buildLiveConnectionStarter(live, { projectId, deviceRefs: body.deviceRefs, days: body.days });
+        const starter = await buildLiveConnectionStarter(live, {
+          projectId,
+          deviceRefs: body.deviceRefs,
+          days: body.days,
+          ...(body.labels === undefined ? {} : { labels: body.labels }),
+        });
         const project = context.metadataStore.energyIq.getProject(projectId);
         const { batch } = await createReadingsImportBatch(context, project, user, {
           filename: starter.filename,
@@ -1482,6 +1488,12 @@ export const handleEnergyApiRequest = async (
           mimeType: "text/csv",
         });
         return respond({ batch: toEnergyImportBatchDto(batch), devices: starter.devices }, 201);
+      }
+      // Check the site's own device list (name and Tuya device ID per meter) before starting the site from it.
+      if (segments.length === 4 && action === "device-list" && request.method === "POST") {
+        requireProjectArea(context, user, projectId, ["facility"], "write");
+        const body = requireRecord(await readJsonBody(request));
+        return respond(await resolveLiveConnectionDeviceList(live, { projectId, rows: body.rows }));
       }
       if (segments.length === 4 && action === "sync" && request.method === "POST") {
         requireSyncable(live, projectId);

@@ -119,6 +119,63 @@ describe("smart setup for a new project", () => {
   });
 });
 
+describe("smart setup grouped by block or area", () => {
+  const labels = ["264E Lighting L1", "264E Lighting L2", "264F Lighting L1", "Pump room"];
+  const areas = { "264E Lighting L1": "264E", "264E Lighting L2": " 264E ", "264F Lighting L1": "264F" };
+
+  it("puts each block's meters under one location per block and the rest on the main board", () => {
+    const plan = buildSmartSetup({
+      document: emptyDocument(), projectId: "p", labels, areas,
+      devices: [{ code: "264E Lighting L1", description: "Corridor light x12" }],
+      names: { board: "Main distribution board", boardLevel: "Board", boardLevelHint: "", circuitLevel: "Circuit", circuitLevelHint: "", areaLevel: "Block" },
+    });
+    expect(plan.mode).toBe("new");
+    expect(plan.totalLabel).toBeUndefined();
+    expect(plan.document.tiers.map((tier) => tier.alias)).toEqual(["Block", "Circuit"]);
+    const nodes = plan.document.nodes;
+    const top = nodes.filter((node) => !node.parent_id).map((node) => node.name);
+    expect(top).toEqual(["264E", "264F", "Main distribution board"]);
+    const parentName = (label: string) => nodes.find((node) => node.id === nodes.find((candidate) => candidate.name === label)!.parent_id)!.name;
+    expect(parentName("264E Lighting L1")).toBe("264E");
+    expect(parentName("264E Lighting L2")).toBe("264E");
+    expect(parentName("264F Lighting L1")).toBe("264F");
+    expect(parentName("Pump room")).toBe("Main distribution board");
+
+    const rows = plan.document.meter_mapping!.rows;
+    expect(rows.every((row) => row.meter_role === "component" && row.aggregation_usage === "official")).toBe(true);
+    expect(rows.find((row) => row.source_label === "264E Lighting L1")!.display_name).toBe("264E Lighting L1 · Corridor light ×12");
+    // Each block adds up its own meters, and the site adds up all of them.
+    const routes = plan.document.meter_mapping!.official_aggregation_routes!;
+    const members = (scopeId: string) => routes.filter((route) => route.scope_id === scopeId).flatMap((route) => route.meter_point_ids).sort();
+    const block = nodes.find((node) => node.name === "264E")!;
+    expect(members(block.id)).toEqual(rows.filter((row) => row.source_label.startsWith("264E")).map((row) => row.id).sort());
+    expect(members("project")).toEqual(rows.map((row) => row.id).sort());
+    expect(savedDeviceList(plan.document, "p")).toEqual([{ code: "264E Lighting L1", description: "Corridor light x12" }]);
+    expect(blockingIssues(plan.document)).toEqual([]);
+  });
+
+  it("has no main board when every meter has a block, and still remembers the device list", () => {
+    const plan = buildSmartSetup({
+      document: emptyDocument(), projectId: "p", labels: labels.slice(0, 3), areas,
+      devices: [{ code: "264F Lighting L1", description: "Lift lobby light x4" }],
+    });
+    expect(plan.document.nodes.filter((node) => !node.parent_id).map((node) => node.name)).toEqual(["264E", "264F"]);
+    expect(plan.document.tiers[0]!.alias).toBe("Area");
+    expect(plan.boardName).toBeUndefined();
+    expect(savedDeviceList(plan.document, "p")).toHaveLength(1);
+    expect(blockingIssues(plan.document)).toEqual([]);
+    // A later import still names devices from the saved list.
+    const later = buildSmartSetup({ document: plan.document, projectId: "p", labels: labels.slice(0, 3), devices: [] });
+    expect(later.rows.find((row) => row.sourceLabel === "264F Lighting L1")?.displayName).toBe("264F Lighting L1 · Lift lobby light ×4");
+  });
+
+  it("builds the usual single board when no label has an area", () => {
+    const plain = buildSmartSetup({ document: emptyDocument(), projectId: "p", labels: ELITE_LABELS, devices: [] });
+    const withEmptyAreas = buildSmartSetup({ document: emptyDocument(), projectId: "p", labels: ELITE_LABELS, devices: [], areas: { A18P: "  ", Other: "264E" } });
+    expect(withEmptyAreas).toEqual(plain);
+  });
+});
+
 describe("smart setup for an existing project", () => {
   it("upgrades an older smart setup whose circuits were left out of reports", () => {
     const first = buildSmartSetup({ document: emptyDocument(), projectId: "p", labels: ELITE_LABELS, devices: [] });

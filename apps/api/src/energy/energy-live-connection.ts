@@ -274,6 +274,73 @@ export type LiveConnectionStarter = {
 const STARTER_MAX_DEVICES = 200;
 const STARTER_DEFAULT_DAYS = 7;
 const STARTER_MAX_DAYS = 14;
+const DEVICE_LIST_NAME_MAX = 120;
+const DEVICE_LIST_TEXT_MAX = 300;
+const TUYA_DEVICE_ID_PATTERN = /^[A-Za-z0-9]{8,64}$/u;
+
+export type LiveDeviceListStatus = "found" | "not_found" | "gateway" | "duplicate" | "invalid";
+
+export type LiveDeviceListRow = {
+  /** The row's position in the list sent, from 1. */
+  line: number;
+  name: string;
+  area?: string;
+  equipment?: string;
+  status: LiveDeviceListStatus;
+  /** Set when the device is in the account: what the starter takes. */
+  ref?: string;
+  tuyaName?: string;
+  online?: boolean;
+};
+
+/**
+ * Check a site's own device list (a name and a Tuya device ID per meter, optionally its block or area and what it
+ * powers) against the devices the connected account can see, before starting the site from them. Each row says
+ * whether its device was found; found rows carry the opaque ref the starter takes, so the list's names can become
+ * the meter names. Only for a site with no published meters yet, like the starter.
+ */
+export const resolveLiveConnectionDeviceList = async (
+  dependencies: LiveConnectionDependencies,
+  input: { projectId: string; rows: unknown },
+): Promise<{ rows: LiveDeviceListRow[]; found: number }> => {
+  const { metadataStore } = dependencies;
+  metadataStore.energyIq.getProject(input.projectId);
+  requireAppManaged(dependencies, input.projectId);
+  if (publishedMeterRows(metadataStore, input.projectId)) throw new Error("ENERGYIQ_LIVE_STARTER_SETUP_EXISTS");
+  if (!Array.isArray(input.rows) || input.rows.length === 0 || input.rows.length > STARTER_MAX_DEVICES) {
+    throw new Error("ENERGYIQ_LIVE_DEVICE_LIST_INVALID");
+  }
+  const submitted = input.rows.map((row) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) throw new Error("ENERGYIQ_LIVE_DEVICE_LIST_INVALID");
+    const record = row as Record<string, unknown>;
+    return {
+      name: listText(record.name, DEVICE_LIST_NAME_MAX),
+      deviceId: listText(record.deviceId, DEVICE_LIST_TEXT_MAX),
+      area: listText(record.area, DEVICE_LIST_NAME_MAX),
+      equipment: listText(record.equipment, DEVICE_LIST_TEXT_MAX),
+    };
+  });
+  const credentials = readLiveConnectionCredentials(metadataStore, requireConnection(dependencies, input.projectId));
+  const visible = new Map((await listWith(dependencies, credentials)).map((device) => [device.id, device]));
+  const seen = new Set<string>();
+  const rows = submitted.map(({ name, deviceId, area, equipment }, index): LiveDeviceListRow => {
+    const base = { line: index + 1, name, ...(area ? { area } : {}), ...(equipment ? { equipment } : {}) };
+    if (!name || !TUYA_DEVICE_ID_PATTERN.test(deviceId)) return { ...base, status: "invalid" };
+    if (seen.has(deviceId)) return { ...base, status: "duplicate" };
+    seen.add(deviceId);
+    const device = visible.get(deviceId);
+    if (!device) return { ...base, status: "not_found" };
+    const seenInTuya = { tuyaName: device.name, online: device.online };
+    return isTuyaGateway(device)
+      ? { ...base, status: "gateway", ...seenInTuya }
+      : { ...base, status: "found", ref: liveDeviceRef(input.projectId, device.id), ...seenInTuya };
+  });
+  return { rows, found: rows.filter((row) => row.status === "found").length };
+};
+
+/** A list cell as one line of trimmed text, cut to `max` characters; anything that is not text is empty. */
+const listText = (value: unknown, max: number): string =>
+  typeof value === "string" ? value.replace(/\s+/gu, " ").trim().slice(0, max).trim() : "";
 
 /**
  * Start a site from its Tuya devices instead of a file. Reads the chosen devices' cumulative energy for the last few
@@ -283,15 +350,27 @@ const STARTER_MAX_DAYS = 14;
  */
 export const buildLiveConnectionStarter = async (
   dependencies: LiveConnectionDependencies,
-  input: { projectId: string; deviceRefs: unknown; days?: unknown },
+  input: { projectId: string; deviceRefs: unknown; days?: unknown; labels?: unknown },
 ): Promise<LiveConnectionStarter> => {
   const { metadataStore } = dependencies;
   const project = metadataStore.energyIq.getProject(input.projectId);
   requireAppManaged(dependencies, input.projectId);
   if (publishedMeterRows(metadataStore, input.projectId)) throw new Error("ENERGYIQ_LIVE_STARTER_SETUP_EXISTS");
-  const refs = Array.isArray(input.deviceRefs)
-    ? [...new Set(input.deviceRefs.filter((ref): ref is string => typeof ref === "string" && ref.length > 0))]
-    : [];
+  const rawRefs: unknown[] = Array.isArray(input.deviceRefs) ? input.deviceRefs : [];
+  // Names from the site's own device list, one per device ref; without them the Tuya device names are used.
+  let rawLabels: string[] | undefined;
+  if (input.labels !== undefined) {
+    if (!Array.isArray(input.labels) || input.labels.length !== rawRefs.length
+      || !input.labels.every((label) => typeof label === "string" && label.trim().length > 0 && label.trim().length <= DEVICE_LIST_NAME_MAX)) {
+      throw new Error("ENERGYIQ_LIVE_STARTER_LABELS_INVALID");
+    }
+    rawLabels = input.labels as string[];
+  }
+  const labelByRef = new Map<string, string | undefined>();
+  rawRefs.forEach((ref, index) => {
+    if (typeof ref === "string" && ref.length > 0 && !labelByRef.has(ref)) labelByRef.set(ref, rawLabels?.[index]?.trim());
+  });
+  const refs = [...labelByRef.keys()];
   if (refs.length === 0 || refs.length > STARTER_MAX_DEVICES) throw new Error("ENERGYIQ_LIVE_STARTER_DEVICES_INVALID");
   const days = input.days === undefined ? STARTER_DEFAULT_DAYS : Number(input.days);
   if (!Number.isInteger(days) || days < 1 || days > STARTER_MAX_DAYS) throw new Error("ENERGYIQ_LIVE_STARTER_DAYS_INVALID");
@@ -304,7 +383,8 @@ export const buildLiveConnectionStarter = async (
     if (isTuyaGateway(device)) throw new Error("ENERGYIQ_LIVE_STARTER_GATEWAY");
     return { ref, device };
   });
-  const labels = uniqueLabels(chosen.map(({ device }) => device.name.trim() || device.productName?.trim() || "Tuya device"));
+  const labels = uniqueLabels(chosen.map(({ ref, device }) =>
+    labelByRef.get(ref) || device.name.trim() || device.productName?.trim() || "Tuya device"));
 
   const endTime = dependencies.now?.() ?? Date.now();
   const artifact = await dependencies.createClient(credentials).syncEnergyReadings({

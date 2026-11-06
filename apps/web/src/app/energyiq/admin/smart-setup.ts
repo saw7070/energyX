@@ -25,6 +25,9 @@ export type SmartSetupNames = {
   boardLevelHint: string;
   circuitLevel: string;
   circuitLevelHint: string;
+  /** The top level when meters are grouped by block or area (see `areas` in buildSmartSetup). */
+  areaLevel?: string;
+  areaLevelHint?: string;
 };
 
 const ENGLISH_NAMES: SmartSetupNames = {
@@ -52,6 +55,7 @@ export type SmartSetupPlan = {
 const BOARD_TIER_SUFFIX = "-smart-tier-board";
 const CIRCUIT_TIER_SUFFIX = "-smart-tier-circuit";
 const BOARD_NODE_SUFFIX = "-smart-board";
+const AREA_NODE_INFIX = "-smart-area-";
 const TOTAL_PATTERN = /\b(?:incoming|incomer|mains?|msb|total)\b/iu;
 
 const key = (value: string): string => value.trim().replace(/\s+/gu, " ").toLocaleLowerCase();
@@ -152,9 +156,14 @@ const smartRoutes = (
     .sort((left, right) => left.scope_id.localeCompare(right.scope_id) || left.category.localeCompare(right.category));
 };
 
+/** Where a smart-built project keeps its device list: its board, or for a site grouped by area, its first area. */
+const deviceListHolder = (document: EnergyProjectSetupDocumentDto, projectId: string): EnergyProjectSetupNodeDto | undefined =>
+  document.nodes.find((node) => node.id === `${projectId}${BOARD_NODE_SUFFIX}`)
+  ?? document.nodes.find((node) => node.id.startsWith(`${projectId}${AREA_NODE_INFIX}`) && Array.isArray(node.metadata?.deviceList));
+
 /** The device list saved with a smart-built project (on its board location), if any. */
 export const savedDeviceList = (document: EnergyProjectSetupDocumentDto, projectId: string): DeviceListEntry[] => {
-  const board = document.nodes.find((node) => node.id === `${projectId}${BOARD_NODE_SUFFIX}`);
+  const board = deviceListHolder(document, projectId);
   const saved = board?.metadata?.deviceList;
   if (!Array.isArray(saved)) return [];
   return saved.flatMap((item) => item && typeof item === "object" && typeof (item as DeviceListEntry).code === "string" && typeof (item as DeviceListEntry).description === "string"
@@ -184,6 +193,11 @@ export const buildSmartSetup = (input: {
   labels: string[];
   devices: DeviceListEntry[];
   names?: SmartSetupNames;
+  /**
+   * Source label → block or area, e.g. from a site's own device list. For a new setup, meters are then grouped into
+   * one location per area (labels without one go on the main board) instead of all sitting on one board.
+   */
+  areas?: Record<string, string>;
 }): SmartSetupPlan => {
   const names = input.names ?? ENGLISH_NAMES;
   const labels = [...new Map(input.labels.map((label) => [key(label), label.trim()])).values()].filter(Boolean)
@@ -198,6 +212,13 @@ export const buildSmartSetup = (input: {
   const existingByLabel = new Map(existingRows.map((row) => [key(row.source_label), row]));
   const isNew = input.document.nodes.length === 0 && existingRows.length === 0;
   const pid = input.projectId;
+
+  const areaByLabel = new Map(Object.entries(input.areas ?? {})
+    .map(([label, area]) => [key(label), typeof area === "string" ? area.replace(/\s+/gu, " ").trim() : ""] as const)
+    .filter(([, area]) => area.length > 0));
+  if (isNew && labels.some((label) => areaByLabel.has(key(label)))) {
+    return buildAreaSetup({ document: input.document, projectId: pid, labels, devices, devicesByCode, areaByLabel, names, displayNameFor });
+  }
 
   if (isNew) {
     const totalLabel = detectTotalLabel(labels);
@@ -246,7 +267,8 @@ export const buildSmartSetup = (input: {
   // Existing project: keep every current row, refresh uncustomised names, add new labels where possible.
   const smartBoard = input.document.nodes.find((node) => node.id === `${pid}${BOARD_NODE_SUFFIX}`);
   const circuitTierId = `${pid}${CIRCUIT_TIER_SUFFIX}`;
-  const nodes = input.document.nodes.map((node) => node === smartBoard ? withSavedDeviceList(node, devices) : node);
+  const listHolder = deviceListHolder(input.document, pid);
+  const nodes = input.document.nodes.map((node) => node === listHolder ? withSavedDeviceList(node, devices) : node);
   const renamed = existingRows.map((row) => row.display_name === row.source_label && devicesByCode.has(key(row.source_label))
     ? { ...row, display_name: displayNameFor(row.source_label) }
     : row);
@@ -320,5 +342,90 @@ export const buildSmartSetup = (input: {
     newLabels,
     ...(upgraded ? { upgraded } : {}),
     unplacedLabels,
+  };
+};
+
+/**
+ * A new setup grouped by block or area: one top-level location per area with its meters as circuits below it, and
+ * labels without an area on the main board. Every meter is a circuit that adds up to its area and the site; no meter
+ * is taken as the site's incoming total, because one incoming meter cannot stand for several blocks.
+ */
+const buildAreaSetup = (input: {
+  document: EnergyProjectSetupDocumentDto;
+  projectId: string;
+  labels: string[];
+  devices: DeviceListEntry[];
+  devicesByCode: Map<string, string>;
+  areaByLabel: Map<string, string>;
+  names: SmartSetupNames;
+  displayNameFor: (label: string) => string;
+}): SmartSetupPlan => {
+  const { names, projectId: pid } = input;
+  const areaTier = {
+    id: `${pid}${BOARD_TIER_SUFFIX}`, ordinal: 2,
+    alias: names.areaLevel ?? "Area", description: names.areaLevelHint ?? "Block, floor or area",
+  };
+  const circuitTier = { id: `${pid}${CIRCUIT_TIER_SUFFIX}`, ordinal: 1, alias: names.circuitLevel, description: names.circuitLevelHint };
+  const groupKey = (label: string): string => {
+    const area = input.areaByLabel.get(key(label));
+    // An area named like the main board joins it, so two locations never share a name.
+    return area && key(area) !== key(names.board) ? key(area) : "";
+  };
+  const areaNames = new Map<string, string>();
+  for (const label of input.labels) {
+    const group = groupKey(label);
+    if (group && !areaNames.has(group)) areaNames.set(group, input.areaByLabel.get(key(label))!);
+  }
+  const usedIds = new Set<string>();
+  const uniqueId = (base: string): string => {
+    let id = base;
+    for (let suffix = 2; usedIds.has(id); suffix += 1) id = `${base}-${suffix}`;
+    usedIds.add(id);
+    return id;
+  };
+  const groups = [...areaNames.entries()]
+    .sort((left, right) => left[1].localeCompare(right[1], undefined, { numeric: true }))
+    .map(([group, name]) => ({ group, name, id: uniqueId(`${pid}${AREA_NODE_INFIX}${slug(name)}`) }));
+  if (input.labels.some((label) => !groupKey(label))) groups.push({ group: "", name: names.board, id: `${pid}${BOARD_NODE_SUFFIX}` });
+  const areaNodes = groups.map((group, index): EnergyProjectSetupNodeDto => ({
+    id: group.id, tier_definition_id: areaTier.id, name: group.name, sort_order: index, metadata_status: "provisional",
+  }));
+  // The device list is kept on the main board when there is one, else on the first area.
+  const holderId = groups.find((group) => !group.group)?.id ?? groups[0]!.id;
+  const tops = areaNodes.map((node) => node.id === holderId ? withSavedDeviceList(node, input.devices) : node);
+  const parentOf = new Map(groups.map((group) => [group.group, group.id]));
+  const circuits = input.labels.map((label, index): EnergyProjectSetupNodeDto => {
+    const equipment = input.devicesByCode.get(key(label));
+    return {
+      id: `${pid}-smart-circuit-${slug(label)}`, tier_definition_id: circuitTier.id, parent_id: parentOf.get(groupKey(label))!, name: label,
+      sort_order: index, metadata_status: "provisional", ...(equipment ? { metadata: { equipment } } : {}),
+    };
+  });
+  const document: EnergyProjectSetupDocumentDto = {
+    ...input.document,
+    tier_structure_locked: true,
+    tiers: [areaTier, circuitTier],
+    nodes: [...tops, ...circuits],
+  };
+  const rows = input.labels.map((label, index): EnergyMeterMappingRowDto => {
+    const scopeId = circuits[index]!.id;
+    return {
+      id: `mapping-${slug(label)}-${index + 1}`, source_label: label, scope_id: scopeId, navigation_scope_id: scopeId,
+      display_name: input.displayNameFor(label), resource: "electricity",
+      category: categoryFor(label, input.devicesByCode.get(key(label))),
+      coverage: "partial", meter_role: "component", aggregation_usage: "official",
+    };
+  });
+  const mainBoard = groups.find((group) => !group.group);
+  return {
+    mode: "new",
+    ...(mainBoard ? { boardName: mainBoard.name } : {}),
+    document: {
+      ...document,
+      meter_mapping: { schema_version: 2, source_kind: "excel", rows, official_aggregation_routes: buildOfficialAggregationRoutes(document, rows), confirmed: true },
+    },
+    rows: rows.map((row) => ({ sourceLabel: row.source_label, displayName: row.display_name, location: row.source_label, role: "component", status: "new" })),
+    newLabels: input.labels,
+    unplacedLabels: [],
   };
 };

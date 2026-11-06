@@ -4,14 +4,19 @@ import {
   pinEnergySourceManifest,
   sourceLabelsAcrossImportBatches,
 } from "./project-setup-model";
-import { buildSmartSetup, type SmartSetupNames } from "./smart-setup";
+import { buildSmartSetup, type DeviceListEntry, type SmartSetupNames } from "./smart-setup";
 
 /**
  * Set up and publish every readings file the project has: one board, one location and one meter per device, then
  * the readings. The same steps as Upload data → Set up & publish, for flows that add the file themselves (such as
- * starting a site from Tuya). Returns how many meters the published setup has.
+ * starting a site from Tuya). `devices` names meters after what they power; `areas` (label → block or area) groups
+ * them into one location per area. Returns how many meters the published setup has.
  */
-export async function setUpAndPublishReadings(projectId: string, names?: SmartSetupNames): Promise<number> {
+export async function setUpAndPublishReadings(
+  projectId: string,
+  names?: SmartSetupNames,
+  options: { devices?: DeviceListEntry[]; areas?: Record<string, string> } = {},
+): Promise<number> {
   const [setup, imports] = await Promise.all([
     configApi.getEnergyProjectSetup(projectId),
     configApi.listEnergyImportBatches(projectId),
@@ -22,8 +27,9 @@ export async function setUpAndPublishReadings(projectId: string, names?: SmartSe
     document: setup.draft.document,
     projectId,
     labels: sourceLabelsAcrossImportBatches(uploads),
-    devices: [],
+    devices: options.devices ?? [],
     ...(names ? { names } : {}),
+    ...(options.areas ? { areas: options.areas } : {}),
   });
   if (plan.unplacedLabels.length > 0) throw new Error(`ENERGYIQ_IMPORT_UNPLACED:${plan.unplacedLabels.join(", ")}`);
   const sourceManifest = await pinEnergySourceManifest(uploads);

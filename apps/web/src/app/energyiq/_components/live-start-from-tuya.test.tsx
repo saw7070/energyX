@@ -92,6 +92,94 @@ describe("Start from Tuya", () => {
     expect(container.textContent).toContain("2 meters created and connected to Tuya");
   });
 
+  it("starts from a pasted device list: checks each ID, names meters from the list and groups them by block", async () => {
+    const listMeters = [
+      { meterPointId: "m-e1", name: "264E Lighting L1 · Corridor lights", sourceLabel: "264E Lighting L1" },
+      { meterPointId: "m-f1", name: "264F Lighting L1", sourceLabel: "264F Lighting L1" },
+    ];
+    const live = connection({ publishedSetup: true, meters: listMeters, matchedCount: 2, ready: true });
+    api.liveConnectionRequest.mockImplementation(async (_project: string, path = "", init?: RequestInit) => {
+      if (path === "" && !init) return { connection: publish.setUpAndPublishReadings.mock.calls.length ? connection({ publishedSetup: true, meters: listMeters }) : connection() };
+      if (path === "devices") return { devices: [{ ref: "ref-x", name: "Meter", online: true }] };
+      if (path === "device-list") return { found: 2, rows: [
+        { line: 1, name: "264E Lighting L1", area: "264E", equipment: "Corridor lights", status: "found", ref: "ref-e1", tuyaName: "Meter", online: true },
+        { line: 2, name: "264F Lighting L1", area: "264F", status: "found", ref: "ref-f1", tuyaName: "Meter", online: false },
+        { line: 3, name: "264F Lighting L2", area: "264F", status: "not_found" },
+      ] };
+      if (path === "starter") return { devices: [{ ref: "ref-e1", sourceLabel: "264E Lighting L1" }, { ref: "ref-f1", sourceLabel: "264F Lighting L1" }] };
+      if (path === "matches" || path === "schedule" || path === "sync") return { connection: live };
+      throw new Error(`unexpected ${path}`);
+    });
+
+    await act(async () => root.render(<LiveConnectionPanel projectId="p" />));
+    await flush();
+    await act(async () => button("Paste your device list").click());
+    const textarea = container.querySelector("textarea")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(textarea, [
+        "Device Name\tDevice ID\tBlock\tWhat it powers",
+        "264E Lighting L1\tbf0123456789abcdef01\t264E\tCorridor lights",
+        "264F Lighting L1\tbf0123456789abcdef02\t264F\t",
+        "264F Lighting L2\tbf0123456789abcdef03\t264F\t",
+      ].join("\n"));
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => button("Check the list").click());
+    await flush();
+
+    const calls = api.liveConnectionRequest.mock.calls as Array<[string, string?, RequestInit?]>;
+    const body = (path: string) => JSON.parse(String(calls.find((call) => call[1] === path)![2]!.body));
+    expect(body("device-list")).toEqual({ rows: [
+      { name: "264E Lighting L1", deviceId: "bf0123456789abcdef01", area: "264E", equipment: "Corridor lights" },
+      { name: "264F Lighting L1", deviceId: "bf0123456789abcdef02", area: "264F" },
+      { name: "264F Lighting L2", deviceId: "bf0123456789abcdef03", area: "264F" },
+    ] });
+    expect(container.textContent).toContain("2 of 3 devices found");
+    expect(container.textContent).toContain("Not in this Tuya account");
+    // Lines are numbered as in the pasted text, after the header.
+    expect([...container.querySelectorAll("tbody tr")].map((row) => row.querySelector("td")!.textContent)).toEqual(["2", "3", "4"]);
+
+    await act(async () => button("Connect 2 meters").click());
+    await flush();
+    expect(body("starter")).toEqual({ deviceRefs: ["ref-e1", "ref-f1"], labels: ["264E Lighting L1", "264F Lighting L1"] });
+    expect(publish.setUpAndPublishReadings).toHaveBeenCalledWith("p", expect.objectContaining({ areaLevel: "Block / area" }), {
+      devices: [{ code: "264E Lighting L1", description: "Corridor lights" }],
+      areas: { "264E Lighting L1": "264E", "264F Lighting L1": "264F" },
+    });
+    expect(body("matches")).toEqual({ matches: { "m-e1": "ref-e1", "m-f1": "ref-f1" } });
+    expect(body("schedule")).toEqual({ enabled: true, localHour: 2 });
+    expect(container.textContent).toContain("2 meters created and connected to Tuya");
+  });
+
+  it("says why a device list can't be used before asking Tuya", async () => {
+    api.liveConnectionRequest.mockImplementation(async (_project: string, path = "", init?: RequestInit) => {
+      if (path === "" && !init) return { connection: connection() };
+      if (path === "devices") return { devices: [] };
+      if (path === "device-list") return { found: 0, rows: [{ line: 1, name: "Hub", status: "gateway", tuyaName: "Zigbee hub", online: true }] };
+      throw new Error(`unexpected ${path}`);
+    });
+    await act(async () => root.render(<LiveConnectionPanel projectId="p" />));
+    await flush();
+    await act(async () => button("Paste your device list").click());
+    const textarea = container.querySelector("textarea")!;
+    const type = async (value: string) => act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(textarea, value);
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await type("Name\tDevice ID");
+    await act(async () => button("Check the list").click());
+    await flush();
+    expect(container.querySelector("[role=alert]")?.textContent).toContain("Paste at least one line");
+    expect(api.liveConnectionRequest.mock.calls.some((call) => call[1] === "device-list")).toBe(false);
+
+    await type("Hub\tgateway003device");
+    await act(async () => button("Check the list").click());
+    await flush();
+    expect(container.textContent).toContain("A gateway: it can't be a meter");
+    expect(container.textContent).toContain("None of these devices are in this Tuya account");
+    expect(button("Connect 0 meters").disabled).toBe(true);
+  });
+
   it("asks for the Tuya key first when no account is connected, and explains a failed start", async () => {
     api.liveConnectionRequest.mockImplementation(async (_project: string, path = "", init?: RequestInit) => {
       if (path === "" && !init) return { connection: connection({ connected: false }) };

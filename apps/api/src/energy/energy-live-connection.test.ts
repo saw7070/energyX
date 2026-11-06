@@ -24,6 +24,9 @@ describe("Live connection", () => {
       const refused = await call("POST", ["starter"], { deviceRefs: ["any"] });
       expect(refused.status).toBe(400);
       expect(refused.body.error.message).toBe("ENERGYIQ_LIVE_STARTER_SETUP_EXISTS");
+      const listRefused = await call("POST", ["device-list"], { rows: [{ name: "A", deviceId: "livedevice0001abc" }] });
+      expect(listRefused.status).toBe(400);
+      expect(listRefused.body.error.message).toBe("ENERGYIQ_LIVE_STARTER_SETUP_EXISTS");
     });
   });
 

@@ -7,6 +7,7 @@ import type { Translate } from "@datafoundry/site-report";
 import { liveConnectionMessages } from "./live-connection-messages";
 import { setUpAndPublishReadings } from "../admin/smart-import-publish";
 import { smartImportMessages } from "../admin/smart-import-messages";
+import { DEVICE_LIST_MAX_ROWS, parseLiveDeviceList } from "./live-device-list";
 
 export type LiveConnectionDto = {
   projectId: string;
@@ -25,6 +26,18 @@ export type LiveConnectionDto = {
 };
 
 export type LiveDeviceDto = { ref: string; name: string; productName?: string; category?: string; online: boolean; matchedTo?: string };
+
+/** One line of a site's own device list, as checked against the Tuya account. */
+export type LiveDeviceListRowDto = {
+  line: number;
+  name: string;
+  area?: string;
+  equipment?: string;
+  status: "found" | "not_found" | "gateway" | "duplicate" | "invalid";
+  ref?: string;
+  tuyaName?: string;
+  online?: boolean;
+};
 
 type CheckDto = { ok: boolean; message?: string; deviceCount?: number; gateways?: { total: number; online: number; offline: string[] }; meters: Array<{ meterPointId: string; ok: boolean; reason?: string; phases?: 1 | 3 }> };
 type LiveKey = keyof (typeof liveConnectionMessages)["en"] & string;
@@ -77,6 +90,8 @@ export function liveErrorKey(message: string): LiveKey {
   if (message.includes("ENERGYIQ_LIVE_STARTER_NO_READINGS")) return "error.noReadings";
   if (message.includes("ENERGYIQ_LIVE_STARTER_GATEWAY")) return "error.gateway";
   if (message.includes("ENERGYIQ_LIVE_STARTER_SETUP_EXISTS")) return "error.setupExists";
+  if (message.includes("ENERGYIQ_LIVE_DEVICE_LIST_INVALID")) return "error.listInvalid";
+  if (message.includes("ENERGYIQ_LIVE_STARTER_LABELS_INVALID")) return "error.labelsInvalid";
   return "error.generic";
 }
 
@@ -577,12 +592,16 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
 const isGateway = (device: LiveDeviceDto): boolean =>
   device.category === "wg2" || device.category === "wg" || /gateway|网关/iu.test(device.productName ?? "");
 
-type StartStep = "connect" | "read" | "publish" | "match" | "daily";
+type StartStep = "connect" | "check" | "read" | "publish" | "match" | "daily";
+
+/** What to start a site from: device refs, and from a device list the meter names, what each powers and its area. */
+type StartPlan = { refs: string[]; labels?: string[]; equipment?: Map<string, string>; areas?: Map<string, string> };
 
 /**
- * A site with no meters yet can start from its Tuya account instead of a file: connect the account, tick the devices
- * that are meters, and the server reads their last 7 days as the site's first readings. They are then set up and
- * published like an upload, each meter is matched to the device it came from, and daily updates are switched on.
+ * A site with no meters yet can start from its Tuya account instead of a file: connect the account, then tick the
+ * devices that are meters or paste the site's own device list (name and Tuya device ID per meter), and the server reads
+ * their last 7 days as the site's first readings. They are then set up and published like an upload, each meter is
+ * matched to the device it came from, and daily updates are switched on.
  */
 function StartFromTuya({ projectId, connection, onConnection, onDone, t }: {
   projectId: string;
@@ -599,6 +618,9 @@ function StartFromTuya({ projectId, connection, onConnection, onDone, t }: {
   const [chosen, setChosen] = useState<Set<string>>(new Set());
   const [step, setStep] = useState<StartStep | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<"pick" | "list">("pick");
+  const [listText, setListText] = useState("");
+  const [checked, setChecked] = useState<LiveDeviceListRowDto[] | null>(null);
 
   const loadDevices = useCallback(async () => {
     try {
@@ -634,22 +656,38 @@ function StartFromTuya({ projectId, connection, onConnection, onDone, t }: {
     }
   };
 
-  const start = async () => {
+  const start = async (plan: StartPlan) => {
     setError(null);
     try {
       setStep("read");
       const started = await configApi.liveConnectionRequest<{ devices: Array<{ ref: string; sourceLabel: string }> }>(projectId, "starter", {
         method: "POST",
-        body: JSON.stringify({ deviceRefs: [...chosen] }),
+        body: JSON.stringify(plan.labels ? { deviceRefs: plan.refs, labels: plan.labels } : { deviceRefs: plan.refs }),
       });
       setStep("publish");
-      await setUpAndPublishReadings(projectId, {
+      const names = {
         board: setupText("setup.board"),
         boardLevel: setupText("setup.boardLevel"),
         boardLevelHint: setupText("setup.boardLevelHint"),
         circuitLevel: setupText("setup.circuitLevel"),
         circuitLevelHint: setupText("setup.circuitLevelHint"),
-      });
+        areaLevel: t("listAreaLevel"),
+        areaLevelHint: t("listAreaLevelHint"),
+      };
+      if (plan.labels) {
+        // The server may have made a name unique ("Meter (2)"); what each powers and its area follow the device.
+        const devices = started.devices.flatMap((device) => {
+          const equipment = plan.equipment?.get(device.ref);
+          return equipment ? [{ code: device.sourceLabel, description: equipment }] : [];
+        });
+        const areas = Object.fromEntries(started.devices.flatMap((device) => {
+          const area = plan.areas?.get(device.ref);
+          return area ? [[device.sourceLabel, area] as const] : [];
+        }));
+        await setUpAndPublishReadings(projectId, names, { devices, areas });
+      } else {
+        await setUpAndPublishReadings(projectId, names);
+      }
       setStep("match");
       const { connection: published } = await configApi.liveConnectionRequest<{ connection: LiveConnectionDto }>(projectId);
       const refByLabel = new Map(started.devices.map((device) => [device.sourceLabel.toLocaleLowerCase(), device.ref]));
@@ -674,6 +712,46 @@ function StartFromTuya({ projectId, connection, onConnection, onDone, t }: {
       setStep(null);
     }
   };
+
+  const checkList = async () => {
+    setError(null);
+    const entries = parseLiveDeviceList(listText);
+    if (entries.length === 0) return setError(t("listEmpty"));
+    if (entries.length > DEVICE_LIST_MAX_ROWS) return setError(t("listTooMany", { max: DEVICE_LIST_MAX_ROWS }));
+    setStep("check");
+    try {
+      const result = await configApi.liveConnectionRequest<{ rows: LiveDeviceListRowDto[]; found: number }>(projectId, "device-list", {
+        method: "POST",
+        body: JSON.stringify({ rows: entries.map(({ name, deviceId, area, equipment }) => ({ name, deviceId, ...(area ? { area } : {}), ...(equipment ? { equipment } : {}) })) }),
+      });
+      // Show each row against its line in the pasted text or file.
+      setChecked(result.rows.map((row, index) => ({ ...row, line: entries[index]?.line ?? row.line })));
+    } catch (reason) {
+      setError(t(liveErrorKey(messageOf(reason))));
+    } finally {
+      setStep(null);
+    }
+  };
+
+  const loadListFile = async (file: File | undefined) => {
+    if (!file) return;
+    setError(null);
+    if (/\.xls[xmb]?$/iu.test(file.name)) return setError(t("listFileExcel"));
+    try {
+      setListText(await file.text());
+      setChecked(null);
+    } catch {
+      setError(t("listFileUnreadable"));
+    }
+  };
+
+  const listFound = (checked ?? []).filter((row): row is LiveDeviceListRowDto & { ref: string } => row.status === "found" && Boolean(row.ref));
+  const connectList = () => void start({
+    refs: listFound.map((row) => row.ref),
+    labels: listFound.map((row) => row.name),
+    equipment: new Map(listFound.flatMap((row) => row.equipment ? [[row.ref, row.equipment] as const] : [])),
+    areas: new Map(listFound.flatMap((row) => row.area ? [[row.ref, row.area] as const] : [])),
+  });
 
   const busy = step !== null;
   const selectable = (devices ?? []).filter((device) => !isGateway(device));
@@ -705,6 +783,15 @@ function StartFromTuya({ projectId, connection, onConnection, onDone, t }: {
       </details>
       <button type="submit" className={primaryButton} disabled={busy || !accessId.trim() || !accessSecret.trim()}>{step === "connect" ? t("connecting") : t("connect")}</button>
     </form> : <div className="mt-4 space-y-3">
+      <div role="group" aria-label={t("startTitle")} className="inline-flex rounded-[10px] border border-border bg-surface-subtle p-1">
+        {(["pick", "list"] as const).map((option) => <button key={option} type="button" aria-pressed={mode === option} disabled={busy}
+          onClick={() => { setMode(option); setError(null); }}
+          className={`rounded-lg px-3 py-1.5 text-[13px] font-semibold disabled:cursor-not-allowed ${mode === option ? "bg-surface text-foreground shadow-[0_1px_2px_rgba(10,40,27,0.08)]" : "text-muted hover:text-foreground"}`}>
+          {t(`startMode.${option}`)}
+        </button>)}
+      </div>
+      {mode === "list" ? <DeviceListStart text={listText} onText={(value) => { setListText(value); setChecked(null); }} onFile={(file) => void loadListFile(file)}
+        checked={checked} found={listFound.length} step={step} onCheck={() => void checkList()} onConnect={connectList} t={t} /> : <>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-semibold">{t("startPick")}</p>
         {selectable.length > 0 ? <span className="flex gap-2">
@@ -726,11 +813,81 @@ function StartFromTuya({ projectId, connection, onConnection, onDone, t }: {
               </label>
             </li>)}
           </ul>}
-      <button type="button" className={primaryButton} disabled={busy || chosen.size === 0} onClick={() => void start()}>
+      <button type="button" className={primaryButton} disabled={busy || chosen.size === 0} onClick={() => void start({ refs: [...chosen] })}>
         {step && step !== "connect" ? t(`startStep.${step}` as LiveKey) : chosen.size === 1 ? t("startCreateOne") : t("startCreate", { count: chosen.size })}
       </button>
+      </>}
     </div>}
   </Card>;
+}
+
+/** Start from the site's own device list: paste or load it, check every device ID with Tuya, then connect the ones found. */
+function DeviceListStart({ text, onText, onFile, checked, found, step, onCheck, onConnect, t }: {
+  text: string;
+  onText: (value: string) => void;
+  onFile: (file: File | undefined) => void;
+  checked: LiveDeviceListRowDto[] | null;
+  found: number;
+  step: StartStep | null;
+  onCheck: () => void;
+  onConnect: () => void;
+  t: T;
+}) {
+  const busy = step !== null;
+  const hasAreas = (checked ?? []).some((row) => row.area);
+  return <div className="space-y-3">
+    <p className="text-xs leading-5 text-muted">{t("listHint")}</p>
+    <label className="block text-xs font-semibold text-muted">{t("listLabel")}
+      <textarea value={text} onChange={(event) => onText(event.target.value)} rows={6} spellCheck={false} disabled={busy}
+        placeholder={t("listPlaceholder")} className={`${inputClass} font-mono text-[13px]`} />
+    </label>
+    <div className="flex flex-wrap items-center gap-3">
+      <label className={`${secondaryButton} cursor-pointer`}>
+        {t("listFile")}
+        <input type="file" accept=".csv,.tsv,.txt,text/csv,text/plain" className="sr-only" disabled={busy}
+          onChange={(event) => { onFile(event.target.files?.[0]); event.target.value = ""; }} />
+      </label>
+      <details className="text-xs text-muted">
+        <summary className="cursor-pointer select-none font-semibold">{t("listWhereIds")}</summary>
+        <p className="mt-2 max-w-prose leading-5">{t("listWhereIdsBody")}</p>
+      </details>
+    </div>
+    <button type="button" className={secondaryButton} disabled={busy || !text.trim()} onClick={onCheck}>
+      {step === "check" ? t("startStep.check") : t("listCheck")}
+    </button>
+    {checked ? <>
+      <p role="status" className="text-sm font-semibold">{t("listSummary", { found, total: checked.length })}</p>
+      <div className="max-h-80 overflow-auto rounded-xl border border-border">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-surface-subtle text-xs text-muted">
+            <tr>
+              <th scope="col" className="px-3 py-2 font-semibold">{t("listColumn.line")}</th>
+              <th scope="col" className="px-3 py-2 font-semibold">{t("listColumn.name")}</th>
+              {hasAreas ? <th scope="col" className="px-3 py-2 font-semibold">{t("listColumn.area")}</th> : null}
+              <th scope="col" className="px-3 py-2 font-semibold">{t("listColumn.status")}</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {checked.map((row) => <tr key={row.line}>
+              <td className="px-3 py-2 text-xs text-muted">{row.line}</td>
+              <td className="px-3 py-2">{row.name || "—"}{row.equipment ? <span className="block text-xs text-muted">{row.equipment}</span> : null}</td>
+              {hasAreas ? <td className="px-3 py-2">{row.area ?? ""}</td> : null}
+              <td className={`px-3 py-2 text-xs font-semibold ${row.status === "found" ? "text-emerald-700" : row.status === "duplicate" ? "text-amber-800" : "text-rose-700"}`}>
+                {t(`listStatus.${row.status}`)}
+                {row.status === "found" ? <span className="font-normal text-muted">{row.tuyaName ? ` · ${row.tuyaName}` : ""} · {t(row.online ? "online" : "offline")}</span> : null}
+              </td>
+            </tr>)}
+          </tbody>
+        </table>
+      </div>
+      {found === 0
+        ? <p className="text-sm text-rose-800">{t("listNoneFound")}</p>
+        : found < checked.length ? <p className="text-xs leading-5 text-muted">{t("listLeftOut")}</p> : null}
+      <button type="button" className={primaryButton} disabled={busy || found === 0} onClick={onConnect}>
+        {step && step !== "connect" && step !== "check" ? t(`startStep.${step}` as LiveKey) : found === 1 ? t("listCreateOne") : t("listCreate", { count: found })}
+      </button>
+    </> : null}
+  </div>;
 }
 
 function SyncSummary({ connection, when, day, t }: { connection: LiveConnectionDto; when: (iso: string) => string; day: (iso: string) => string; t: T }) {
