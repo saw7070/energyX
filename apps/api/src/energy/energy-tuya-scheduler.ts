@@ -181,7 +181,13 @@ export const createEnergyTuyaDailyScheduler = (input: {
               log.error("after-publication-failed", { project_id: connector.projectId, run_id: result.run.id, code: sourceSyncErrorCode(error) });
             }
           }
-          log.info("succeeded", { project_id: connector.projectId, run_id: result.run.id, pass: completed });
+          // Resident memory after each pass shows whether the nightly sync is creeping towards the container limit.
+          log.info("succeeded", {
+            project_id: connector.projectId,
+            run_id: result.run.id,
+            pass: completed,
+            rss_mb: Math.round(process.memoryUsage().rss / 1_048_576),
+          });
         }
         if (afterPublicationError === undefined) job.succeeded(connector.projectId);
         else job.failed(afterPublicationError, connector.projectId);

@@ -584,6 +584,128 @@ describe("Energy Tuya sync runner", () => {
     }
   });
 
+  it("retries a scheduled sync once after the process died, then waits instead of crash-looping", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-tuya-interrupted-guard-"));
+    const previousDuckDbPath = process.env.ENERGYIQ_DUCKDB_PATH;
+    process.env.ENERGYIQ_DUCKDB_PATH = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const files = new LocalFileAssetService(metadata, { storageRoot: join(root, "files") });
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const connector = connectorFor(metadata);
+      const context = {
+        metadataStore: metadata,
+        dataGateway: new LocalDataGateway(metadata),
+        fileAssetService: files,
+        userId: "dev-user",
+        workspaceId: TUYA_OFFICE_WORKSPACE_ID,
+      } as unknown as Required<ConfigApiContext>;
+      const nowMs = Date.parse("2026-11-07T18:05:00.000Z");
+      // A run cut off by an out-of-memory kill, failed by start-up as the server does after the restart.
+      const killRun = (id: string, startedAt: string) => {
+        metadata.energyIq.sourceSync.claim({
+          id,
+          workspace_id: TUYA_OFFICE_WORKSPACE_ID,
+          project_id: TUYA_OFFICE_PROJECT_ID,
+          source_kind: "tuya",
+          connector_fingerprint: connector.connectorFingerprint,
+          trigger: "scheduled",
+          window_start_ms: Date.parse("2026-11-06T16:00:00.000Z"),
+          window_end_ms: Date.parse("2026-11-07T16:00:00.000Z"),
+          actor_user_id: "dev-user",
+          started_at: startedAt,
+        });
+        metadata.energyIq.sourceSync.reclaimInterrupted({ completed_at: new Date(nowMs).toISOString() });
+      };
+      // Reaching the provider is enough to show the guard let the run through.
+      const provider = vi.fn(async (): Promise<TuyaReportLogArtifact> => {
+        throw new Error("ENERGYIQ_TEST_PROVIDER_REACHED");
+      });
+      const runner = createEnergyTuyaSyncRunner({
+        context,
+        now: () => nowMs,
+        id: () => "interrupted-guard-run",
+        syncTuyaEnergyReadings: provider,
+      });
+      const window = {
+        startTime: Date.parse("2026-08-19T02:00:00.000Z"),
+        endTime: Date.parse("2026-08-19T02:30:00.000Z"),
+      };
+
+      // Two interruptions in the last six hours (the night's run and its retry): the scheduler stops there.
+      killRun("killed-nightly", "2026-11-07T18:00:00.000Z");
+      killRun("killed-retry", "2026-11-07T18:00:30.000Z");
+      await expect(runner.run({ connector, actorUserId: "dev-user", trigger: "scheduled", window }))
+        .rejects.toThrow("ENERGYIQ_SOURCE_SYNC_RECENTLY_INTERRUPTED");
+      expect(provider).not.toHaveBeenCalled();
+
+      // An administrator's "Sync now" is not held back.
+      await expect(runner.run({ connector, actorUserId: "dev-user", trigger: "manual", window }))
+        .rejects.toThrow("ENERGYIQ_TEST_PROVIDER_REACHED");
+      expect(provider).toHaveBeenCalledTimes(1);
+    } finally {
+      if (previousDuckDbPath === undefined) delete process.env.ENERGYIQ_DUCKDB_PATH;
+      else process.env.ENERGYIQ_DUCKDB_PATH = previousDuckDbPath;
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
+  it("allows the one automatic retry after a single interruption", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-tuya-interrupted-retry-"));
+    const previousDuckDbPath = process.env.ENERGYIQ_DUCKDB_PATH;
+    process.env.ENERGYIQ_DUCKDB_PATH = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const files = new LocalFileAssetService(metadata, { storageRoot: join(root, "files") });
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const connector = connectorFor(metadata);
+      const context = {
+        metadataStore: metadata,
+        dataGateway: new LocalDataGateway(metadata),
+        fileAssetService: files,
+        userId: "dev-user",
+        workspaceId: TUYA_OFFICE_WORKSPACE_ID,
+      } as unknown as Required<ConfigApiContext>;
+      const nowMs = Date.parse("2026-11-07T18:01:00.000Z");
+      metadata.energyIq.sourceSync.claim({
+        id: "killed-once",
+        workspace_id: TUYA_OFFICE_WORKSPACE_ID,
+        project_id: TUYA_OFFICE_PROJECT_ID,
+        source_kind: "tuya",
+        connector_fingerprint: connector.connectorFingerprint,
+        trigger: "scheduled",
+        window_start_ms: Date.parse("2026-11-06T16:00:00.000Z"),
+        window_end_ms: Date.parse("2026-11-07T16:00:00.000Z"),
+        actor_user_id: "dev-user",
+        started_at: "2026-11-07T18:00:00.000Z",
+      });
+      metadata.energyIq.sourceSync.reclaimInterrupted({ completed_at: new Date(nowMs).toISOString() });
+
+      await expect(createEnergyTuyaSyncRunner({
+        context,
+        now: () => nowMs,
+        id: () => "interrupted-retry-run",
+        syncTuyaEnergyReadings: async () => {
+          throw new Error("ENERGYIQ_TEST_PROVIDER_REACHED");
+        },
+      }).run({
+        connector,
+        actorUserId: "dev-user",
+        trigger: "scheduled",
+        window: {
+          startTime: Date.parse("2026-08-19T02:00:00.000Z"),
+          endTime: Date.parse("2026-08-19T02:30:00.000Z"),
+        },
+      })).rejects.toThrow("ENERGYIQ_TEST_PROVIDER_REACHED");
+    } finally {
+      if (previousDuckDbPath === undefined) delete process.env.ENERGYIQ_DUCKDB_PATH;
+      else process.env.ENERGYIQ_DUCKDB_PATH = previousDuckDbPath;
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
   it("does not publish a first Snapshot when Overview publication returns no receipt", async () => {
     const root = mkdtempSync(join(tmpdir(), "energy-tuya-first-publication-"));
     const previousDuckDbPath = process.env.ENERGYIQ_DUCKDB_PATH;

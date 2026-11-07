@@ -124,6 +124,36 @@ scrape_configs:
 
 Useful rules: `energyx_job_stalled == 1`; `rate(energyx_http_requests_total{status_class="5xx"}[5m]) > 0.1`; `time() - energyx_job_last_success_timestamp_seconds{job="tuya-sync"} > 26*3600`.
 
+## Memory: keep the API inside its container limit
+
+The API container runs with `--memory 1400m` and `NODE_OPTIONS=--max-old-space-size=1024`. Almost none of the API's memory is JavaScript: during a meter sync the V8 heap stays near 40 MB, while DuckDB's native memory (rebuilding a Project's facts) drives resident memory up by several hundred MB. With glibc's default allocator that memory is kept after each sync instead of going back to the system. Resident memory then climbs from one sync to the next until the kernel kills the container at the limit (`status=137` in the journal, `oom-kill ... task=node` in `dmesg`). In November 2026 this happened at the 02:00 Tuya sync on 31 Oct, 1 Nov and 8 Nov, and once during the day.
+
+Measured by replaying one nightly Tuya sync (materialisation plus Overview) four times inside a 2-CPU container:
+
+| Allocator settings | Resident memory after each pass | Peak |
+|---|---|---|
+| glibc defaults | 894 → 998 → 1,367 → 1,455 MB | 1,458 MB |
+| `MALLOC_ARENA_MAX=2` | 740 → 985 → 960 → 964 MB | 1,023 MB |
+| `MALLOC_ARENA_MAX=2`, `MALLOC_TRIM_THRESHOLD_=131072`, `MALLOC_MMAP_THRESHOLD_=131072` | 350 → 377 → 399 → 416 MB | 727 MB |
+
+Each pass took the same time with every setting. Capping DuckDB's own `memory_limit` did not lower the peak; the memory is not DuckDB's buffer pool.
+
+Put all three in the API's environment file (`/opt/energyiq-datafoundry/shared/env/api.env`, which the unit passes with `--env-file`). glibc reads them only when the process starts, so restart the API after changing them:
+
+```bash
+MALLOC_ARENA_MAX=2
+MALLOC_TRIM_THRESHOLD_=131072
+MALLOC_MMAP_THRESHOLD_=131072
+```
+
+How to watch it:
+
+- Every scheduled sync pass logs `rss_mb`: `journalctl -u energyiq-datafoundry-api.service | grep '"succeeded"'`. It should settle at a few hundred MB, not grow night after night.
+- `process_resident_memory_bytes` on `/metrics`, or `docker stats --no-stream energyiq-api`.
+- Crashes: `journalctl -u energyiq-datafoundry-api.service | grep 'status=137'` and `dmesg -T | grep -i oom-kill`.
+
+If the process dies mid-sync anyway, start-up fails the cut-off run (`interrupted source sync reclaimed` in the log, error `SOURCE_SYNC_PROCESS_INTERRUPTED`). The Project's next sync and the nightly backup preflight therefore go ahead, instead of waiting six hours for the run to go stale. The scheduler retries once. If the retry dies too, it stops with `ENERGYIQ_SOURCE_SYNC_RECENTLY_INTERRUPTED` rather than crash-looping, and the next night's run (or an administrator's **Sync now**) catches up.
+
 ## Operator alerts
 
 Set `ENERGYX_OPS_ALERT_WEBHOOK_URL` to a Slack incoming webhook (Slack app → Incoming Webhooks) or a Microsoft Teams incoming webhook / Workflows "post to a channel when a webhook request is received" URL; both receive `{"text": "..."}`. The API logs `operator alerts are off` at startup when it is not set. Alerts are sent in the background with a 5-second timeout: a slow or broken webhook never holds up a job, and a failed post is logged (`component: "ops-alert"`, without the URL) and counted in `energyx_ops_alerts_total{result="failed"}`.

@@ -242,6 +242,74 @@ describe("EnergyIqSourceSyncStore", () => {
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
+
+  it("fails runs a dead process left running at start-up, so the next sync and the backup are not blocked", () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-source-sync-reclaim-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      metadata.workspaces.upsert({ id: "default", owner_user_id: "dev-user", name: "Default", kind: "customer" });
+      metadata.energyIq.upsertProject({
+        id: "tuya-sync-project",
+        workspace_id: "default",
+        name: "Tuya Sync Project",
+        status: "draft",
+      });
+      const claim = (id: string, startedAt: string, windowStartMs: number) => metadata.energyIq.sourceSync.claim({
+        id,
+        workspace_id: "default",
+        project_id: "tuya-sync-project",
+        source_kind: "tuya",
+        connector_fingerprint: "c".repeat(64),
+        trigger: "scheduled",
+        window_start_ms: windowStartMs,
+        window_end_ms: windowStartMs + 86_400_000,
+        actor_user_id: "dev-user",
+        started_at: startedAt,
+      });
+      const done = claim("sync-run-done", "2026-11-06T18:00:00.000Z", 1_800_000_000_000);
+      metadata.energyIq.sourceSync.completeFailure({ run_id: done.run.id, error_code: "TEST_EARLIER_FAILURE" });
+      claim("sync-run-killed", "2026-11-07T18:00:00.000Z", 1_800_086_400_000);
+
+      expect(metadata.energyIq.sourceSync.countInterruptedSince({
+        project_id: "tuya-sync-project",
+        source_kind: "tuya",
+        since: "2026-11-07T12:00:00.000Z",
+      })).toBe(0);
+      const reclaimed = metadata.energyIq.sourceSync.reclaimInterrupted({ completed_at: "2026-11-07T18:00:20.000Z" });
+
+      expect(reclaimed).toEqual([expect.objectContaining({
+        id: "sync-run-killed",
+        status: "failed",
+        error_code: "SOURCE_SYNC_PROCESS_INTERRUPTED",
+        completed_at: "2026-11-07T18:00:20.000Z",
+      })]);
+      expect(metadata.energyIq.sourceSync.getRun("sync-run-done")).toMatchObject({
+        status: "failed",
+        error_code: "TEST_EARLIER_FAILURE",
+      });
+      expect(metadata.energyIq.sourceSync.findState({
+        project_id: "tuya-sync-project",
+        source_kind: "tuya",
+      })).toMatchObject({ last_run_id: "sync-run-killed", last_error_code: "SOURCE_SYNC_PROCESS_INTERRUPTED" });
+      expect(metadata.energyIq.sourceSync.countInterruptedSince({
+        project_id: "tuya-sync-project",
+        source_kind: "tuya",
+        since: "2026-11-07T12:00:00.000Z",
+      })).toBe(1);
+      // Nothing is running any more, so the next claim goes ahead immediately instead of six hours later.
+      expect(claim("sync-run-retry", "2026-11-07T18:00:25.000Z", 1_800_086_400_000))
+        .toMatchObject({ reused: false, run: { status: "running" } });
+      expect(metadata.energyIq.sourceSync.reclaimInterrupted({ completed_at: "2026-11-07T18:01:00.000Z" }))
+        .toHaveLength(1);
+      expect(metadata.energyIq.sourceSync.reclaimInterrupted({ completed_at: "2026-11-07T18:02:00.000Z" }))
+        .toEqual([]);
+      expect(() => metadata.energyIq.sourceSync.reclaimInterrupted({ completed_at: "not a time" }))
+        .toThrow("ENERGYIQ_SOURCE_SYNC_TIMESTAMP_INVALID");
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
 });
 
 const createBatch = (

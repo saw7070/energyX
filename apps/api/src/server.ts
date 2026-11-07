@@ -1223,6 +1223,16 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
   if (reclaimedActiveRuns > 0) {
     logger.info("stale active run reclaim", { component: "startup", canceled: reclaimedActiveRuns });
   }
+  // A meter sync cut off by a dead process (an out-of-memory kill, a host restart) stays "running", which blocks the
+  // Project's next sync and the nightly backup for six hours. No scheduler has started yet, so fail those runs now.
+  for (const run of metadataStore.energyIq.sourceSync.reclaimInterrupted({ completed_at: new Date().toISOString() })) {
+    logger.warn("interrupted source sync reclaimed", {
+      component: "startup",
+      project_id: run.project_id,
+      run_id: run.id,
+      started_at: run.started_at,
+    });
+  }
 
   startupTimings = timer.timings();
   startupTotalMs = timer.totalMs();
