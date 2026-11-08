@@ -80,6 +80,12 @@ export async function prepareReportInputs(run: ReportRun, directory: string, met
     manifest.hierarchy=resolveEnergyPublishedHierarchyNodes(metadata,run.projectId,context.hierarchyRevisionId);
     manifest.meterAttachments=route.attachments;
   }
+  if (run.actionFeedback) {
+    // Follow-ups read no live data, so name the meters from the hierarchy their evidence was frozen against.
+    // Without it the meter-name check treats every meter as unnamed and refuses each follow-up report.
+    manifest.hierarchyRevisionId = run.actionFeedback.observation.hierarchyRevisionId;
+    manifest.meterMappingRevisionId = run.actionFeedback.observation.meterMappingRevisionId;
+  }
   if (run.settings.useProjectData && !preparingProject && !run.actionFeedback) {
     const datasets: Array<Record<string, unknown>> = [];
     let pinnedSnapshotId: string | undefined;

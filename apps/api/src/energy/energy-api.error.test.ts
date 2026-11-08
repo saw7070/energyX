@@ -538,14 +538,13 @@ describe("Energy API business error mapping", () => {
           workspaceId: "default",
         } as Required<ConfigApiContext>,
       );
+      // Publishing checks the Overview release rules against the facts before the readiness gate, so the stale
+      // fact state is refused there with the same code the data-coverage read returns.
       expect(publish).toMatchObject({
         status: 409,
         body: {
           success: false,
-          error: {
-            code: "CONFLICT",
-            message: expect.stringContaining("SNAPSHOT_FACT_STATE_STALE"),
-          },
+          error: { code: "CONFLICT", message: `ENERGYIQ_SNAPSHOT_STALE:${snapshot.id}` },
         },
       });
 

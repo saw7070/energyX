@@ -36,13 +36,32 @@ describe("Energy Project hierarchy API", () => {
       const draft = metadata.energyIq.projectSetup.getDraft({ project_id: projectId, user_id: "dev-user" });
       const seedNode = draft.document.nodes[0];
       if (!seedNode) throw new Error("Hierarchy drift fixture needs one node");
+      const mapping = draft.document.meter_mapping;
+      // Publishing refuses a location with no meter, so the drift location gets its own copy of a routed meter.
+      const seedRoute = mapping?.official_aggregation_routes?.[0];
+      const seedRow = mapping?.rows.find((row) => row.id === seedRoute?.meter_point_ids[0]);
+      if (!mapping || !seedRoute || !seedRow) throw new Error("Hierarchy drift fixture needs one routed meter");
+      const driftRow = {
+        ...seedRow,
+        id: "mapping-current-drift-meter",
+        source_label: "Current drift source",
+        scope_id: "current-drift-node",
+        navigation_scope_id: "current-drift-node",
+      };
       const savedDraft = metadata.energyIq.projectSetup.saveDraft({
         project_id: projectId,
         expected_revision: draft.revision,
         user_id: "dev-user",
         document: {
           ...draft.document,
-          ...(draft.document.meter_mapping ? { meter_mapping: { ...draft.document.meter_mapping, rows: draft.document.meter_mapping.rows.map(row => ({ ...row, display_name: "Current drift meter" })) } } : {}),
+          meter_mapping: {
+            ...mapping,
+            rows: [...mapping.rows, driftRow].map(row => ({ ...row, display_name: "Current drift meter" })),
+            official_aggregation_routes: [
+              ...(mapping.official_aggregation_routes ?? []),
+              { ...seedRoute, scope_id: "current-drift-node", meter_point_ids: [driftRow.id] },
+            ],
+          },
           tiers: draft.document.tiers.map((tier, index) => index === 0
             ? { ...tier, alias: "Current Drift Tier" }
             : tier),

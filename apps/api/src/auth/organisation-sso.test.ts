@@ -185,8 +185,9 @@ describe("Organisation single sign-on (OpenID Connect)", () => {
       const { code, state } = issuer.authorize(started.redirectUrl, "sam@acme.test");
       await expectSignInError(sso.complete({ code, state, browserBinding: "someone-elses-cookie" }), "browser_mismatch");
       await expectSignInError(sso.complete({ code, state }), "expired");
-      expect(events("auth.sso_login_failed").map((event) => JSON.parse(event.metadata_json ?? "{}").reason))
-        .toEqual(["expired", "browser_mismatch"]);
+      // Both failures land in the same millisecond on a fast machine, so the audit order is not stable.
+      expect(events("auth.sso_login_failed").map((event) => JSON.parse(event.metadata_json ?? "{}").reason).sort())
+        .toEqual(["browser_mismatch", "expired"]);
     });
   });
 
