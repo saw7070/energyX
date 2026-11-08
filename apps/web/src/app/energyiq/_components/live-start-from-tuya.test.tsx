@@ -66,7 +66,7 @@ describe("Start from Tuya", () => {
         { ref: "ref-spare", name: "Spare plug", online: false },
         { ref: "ref-hub", name: "Hub", productName: "Zigbee Gateway", category: "wg2", online: true },
       ] };
-      if (path === "starter") return { devices: [{ ref: "ref-incoming", sourceLabel: "Incoming 3Phase" }, { ref: "ref-a18p", sourceLabel: "A18P" }] };
+      if (path === "starter") return { batch: { id: "batch-start" }, devices: [{ ref: "ref-incoming", sourceLabel: "Incoming 3Phase" }, { ref: "ref-a18p", sourceLabel: "A18P" }] };
       if (path === "matches" || path === "schedule" || path === "sync") return { connection: live };
       throw new Error(`unexpected ${path}`);
     });
@@ -85,7 +85,8 @@ describe("Start from Tuya", () => {
     const calls = api.liveConnectionRequest.mock.calls as Array<[string, string?, RequestInit?]>;
     const body = (path: string) => JSON.parse(String(calls.find((call) => call[1] === path)![2]!.body));
     expect(body("starter")).toEqual({ deviceRefs: ["ref-incoming", "ref-a18p"] });
-    expect(publish.setUpAndPublishReadings).toHaveBeenCalledWith("p", expect.objectContaining({ board: expect.any(String) }));
+    // Only the import this run made is published, so a leftover from an earlier failed attempt is not pinned with it.
+    expect(publish.setUpAndPublishReadings).toHaveBeenCalledWith("p", expect.objectContaining({ board: expect.any(String) }), { batchIds: ["batch-start"] });
     expect(body("matches")).toEqual({ matches: { "m-incoming": "ref-incoming", "m-a18p": "ref-a18p" } });
     expect(body("schedule")).toEqual({ enabled: true, localHour: 2 });
     expect(calls.some((call) => call[1] === "sync")).toBe(true);
@@ -106,7 +107,7 @@ describe("Start from Tuya", () => {
         { line: 2, name: "264F Lighting L1", area: "264F", status: "found", ref: "ref-f1", tuyaName: "Meter", online: false },
         { line: 3, name: "264F Lighting L2", area: "264F", status: "not_found" },
       ] };
-      if (path === "starter") return { devices: [{ ref: "ref-e1", sourceLabel: "264E Lighting L1" }, { ref: "ref-f1", sourceLabel: "264F Lighting L1" }] };
+      if (path === "starter") return { batch: { id: "batch-list" }, devices: [{ ref: "ref-e1", sourceLabel: "264E Lighting L1" }, { ref: "ref-f1", sourceLabel: "264F Lighting L1" }] };
       if (path === "matches" || path === "schedule" || path === "sync") return { connection: live };
       throw new Error(`unexpected ${path}`);
     });
@@ -145,6 +146,7 @@ describe("Start from Tuya", () => {
     expect(publish.setUpAndPublishReadings).toHaveBeenCalledWith("p", expect.objectContaining({ areaLevel: "Block / area" }), {
       devices: [{ code: "264E Lighting L1", description: "Corridor lights" }],
       areas: { "264E Lighting L1": "264E", "264F Lighting L1": "264F" },
+      batchIds: ["batch-list"],
     });
     expect(body("matches")).toEqual({ matches: { "m-e1": "ref-e1", "m-f1": "ref-f1" } });
     expect(body("schedule")).toEqual({ enabled: true, localHour: 2 });

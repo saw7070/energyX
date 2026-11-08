@@ -380,6 +380,10 @@ it("schedules full-history weekly and monthly issues once, with independent edit
     availablePeriod: async () => ({ from: "2026-01-01", toExclusive: "2026-06-02", actualLastIntervalEnd: "2026-06-01T16:00:00Z" }),
     prepareInputs: async (_run, directory) => { mkdirSync(join(directory, "inputs")); },
   });
+  // start() schedules on the clock; on a real Monday morning or the 1st, that tick could land after the settings below
+  // and queue a third report. Freeze the date (only the date) on a Saturday, when nothing is due.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-05-30T01:00:00Z"));
   service.start();
   await service.tick();
   service.store.saveSettings({ ...settings, frequency: "weekly-monthly" });
@@ -394,5 +398,5 @@ it("schedules full-history weekly and monthly issues once, with independent edit
       expect(run.periodPreset).toBe("all");
       expect(run.prompt).toContain("ALL supplied available history");
     }
-  } finally { await service.stop(); }
+  } finally { await service.stop(); vi.useRealTimers(); }
 });
