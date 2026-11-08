@@ -276,10 +276,13 @@ export const createEnergyLiveReadingsPoller = (input: {
           }
         }
       } finally {
-        running = undefined;
         controller = undefined;
       }
-    })();
+    })().finally(() => {
+      // Cleared here, not inside the pass: a pass with nothing to await finishes before `running` is
+      // assigned, so clearing it inside would leave the finished pass in place and skip every later run.
+      running = undefined;
+    });
     return running;
   };
   return {

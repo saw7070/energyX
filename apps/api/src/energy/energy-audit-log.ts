@@ -67,10 +67,12 @@ export const createAuditRetentionJob = (input: {
       } catch (error) {
         console.error(`[audit-retention] failed code=${error instanceof Error ? error.message.slice(0, 160) : "unknown"}`);
         return undefined;
-      } finally {
-        running = undefined;
       }
-    })();
+    })().finally(() => {
+      // Cleared here, not inside the pass: a pass with nothing to await finishes before `running` is
+      // assigned, so clearing it inside would leave the finished pass in place and skip every later run.
+      running = undefined;
+    });
     return running;
   };
   return {

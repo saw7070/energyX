@@ -92,68 +92,68 @@ export const createEnergyTargetsMonitor = (input: {
   let running: Promise<void> | undefined;
   const runOnce = (): Promise<void> => {
     running ??= (async () => {
-      try {
-        job.heartbeat();
-        const projects = input.metadataStore.workspaces.list()
-          .filter((workspace) => workspace.kind === "customer" && !workspace.disabled_at)
-          .flatMap((workspace) => input.metadataStore.energyIq.listProjectsByWorkspace(workspace.id))
-          .filter((candidate) => candidate.status === "published");
-        for (const project of projects) {
-          const at = now();
-          const local = localDate(at, project.timezone);
-          const hour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: project.timezone, hour: "2-digit", hourCycle: "h23" }).format(at));
-          if (checked.get(project.id) === local || hour < CHECK_FROM_LOCAL_HOUR) continue;
-          let failed = false;
-          try {
-            const targets = input.metadataStore.energyIq.targets.getTargets(project.id);
-            if (!targets.budget && !targets.overnight.enabled) {
-              checked.set(project.id, local);
-              continue;
-            }
-            const reader = readerForWorkspace(input.metadataStore, project.workspace_id, input.fallbackReaderUserId);
-            if (!reader) {
-              checked.set(project.id, local);
-              continue;
-            }
-            const checks = await evaluateSiteChecks({
-              metadataStore: input.metadataStore,
-              user: reader,
-              workspaceId: project.workspace_id,
-              projectId: project.id,
-              ...(targets.budget ? { budget: targets.budget } : {}),
-              overnight: targets.overnight,
-              now: at,
-            });
-            const fresh = targetAlertsFor(checks, local).filter((alert) => input.metadataStore.energyIq.targets.recordAlert({
-              projectId: project.id,
-              key: alert.key,
-              kind: alert.kind,
-              payload: alert.kind === "budget" ? { ...alert.budget } : { ...alert.finding },
-              now: at,
-            }));
+      job.heartbeat();
+      const projects = input.metadataStore.workspaces.list()
+        .filter((workspace) => workspace.kind === "customer" && !workspace.disabled_at)
+        .flatMap((workspace) => input.metadataStore.energyIq.listProjectsByWorkspace(workspace.id))
+        .filter((candidate) => candidate.status === "published");
+      for (const project of projects) {
+        const at = now();
+        const local = localDate(at, project.timezone);
+        const hour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: project.timezone, hour: "2-digit", hourCycle: "h23" }).format(at));
+        if (checked.get(project.id) === local || hour < CHECK_FROM_LOCAL_HOUR) continue;
+        let failed = false;
+        try {
+          const targets = input.metadataStore.energyIq.targets.getTargets(project.id);
+          if (!targets.budget && !targets.overnight.enabled) {
             checked.set(project.id, local);
-            if (fresh.length === 0 || !emailsOn || delivery.mode === "off") continue;
-            const sent = await sendPendingAlertEmails({
-              metadataStore: input.metadataStore,
-              projectId: project.id,
-              emails: fresh.map((alert) => targetAlertEmail(project.name, alert, publicBaseUrl, project.id)),
-              recipients: siteAlertRecipients(input.metadataStore, project.id),
-              send: delivery.send,
-            });
-            for (const key of sent) log.info("emailed", { project_id: project.id, alert: key.split(":")[0] });
-          } catch (error) {
-            failed = true;
-            log.error("failed", { project_id: project.id, code: error instanceof Error ? error.message.slice(0, 160) : "unknown" });
-            job.failed(error, project.id);
-          } finally {
-            // The early `continue`s above are finished checks too.
-            if (!failed) job.succeeded(project.id);
+            continue;
           }
+          const reader = readerForWorkspace(input.metadataStore, project.workspace_id, input.fallbackReaderUserId);
+          if (!reader) {
+            checked.set(project.id, local);
+            continue;
+          }
+          const checks = await evaluateSiteChecks({
+            metadataStore: input.metadataStore,
+            user: reader,
+            workspaceId: project.workspace_id,
+            projectId: project.id,
+            ...(targets.budget ? { budget: targets.budget } : {}),
+            overnight: targets.overnight,
+            now: at,
+          });
+          const fresh = targetAlertsFor(checks, local).filter((alert) => input.metadataStore.energyIq.targets.recordAlert({
+            projectId: project.id,
+            key: alert.key,
+            kind: alert.kind,
+            payload: alert.kind === "budget" ? { ...alert.budget } : { ...alert.finding },
+            now: at,
+          }));
+          checked.set(project.id, local);
+          if (fresh.length === 0 || !emailsOn || delivery.mode === "off") continue;
+          const sent = await sendPendingAlertEmails({
+            metadataStore: input.metadataStore,
+            projectId: project.id,
+            emails: fresh.map((alert) => targetAlertEmail(project.name, alert, publicBaseUrl, project.id)),
+            recipients: siteAlertRecipients(input.metadataStore, project.id),
+            send: delivery.send,
+          });
+          for (const key of sent) log.info("emailed", { project_id: project.id, alert: key.split(":")[0] });
+        } catch (error) {
+          failed = true;
+          log.error("failed", { project_id: project.id, code: error instanceof Error ? error.message.slice(0, 160) : "unknown" });
+          job.failed(error, project.id);
+        } finally {
+          // The early `continue`s above are finished checks too.
+          if (!failed) job.succeeded(project.id);
         }
-      } finally {
-        running = undefined;
       }
-    })();
+    })().finally(() => {
+      // Cleared here, not inside the pass: a pass with nothing to await finishes before `running` is
+      // assigned, so clearing it inside would leave the finished pass in place and skip every later run.
+      running = undefined;
+    });
     return running;
   };
   return {
