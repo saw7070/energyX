@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ConfigApiContext } from "../routes/types.js";
 import { ensureEnergyIqBootstrap } from "./energy-bootstrap.js";
 import { handleEnergyApiRequest } from "./energy-api.js";
+import { listLiveConnectionDevices } from "./energy-live-connection.js";
 import { deleteEnergyProject } from "./energy-project-lifecycle.js";
 import { resolveEnergyTuyaProjectConnector } from "./energy-tuya-connector.js";
 import type { TuyaCredentials, TuyaDeviceSummary, TuyaOpenApiClient } from "./tuya-openapi-client.js";
@@ -225,6 +226,73 @@ describe("Live connection", () => {
           else process.env[key] = saved[key];
         }
       }
+    });
+  });
+
+  it("marks devices another site already reads, naming the site only within the same client", async () => {
+    await withLiveApi(async ({ metadata, devices }) => {
+      const connect = (projectId: string, workspaceId: string) => {
+        const secretRef = metadata.secrets.put({
+          workspace_id: "energyiq-live-connectors",
+          user_id: "dev-user",
+          owner_kind: "energyiq-live-connector",
+          owner_id: projectId,
+          value: { accessId: ACCESS_ID, accessSecret: ACCESS_SECRET },
+        });
+        metadata.energyIq.liveConnectors.saveAccount({
+          project_id: projectId,
+          workspace_id: workspaceId,
+          secret_ref: secretRef,
+          secret_workspace_id: "energyiq-live-connectors",
+          secret_user_id: "dev-user",
+          access_id_hint: "abcd…ijkl",
+          actor_user_id: "dev-user",
+          checked_at: new Date().toISOString(),
+          reset_bindings: false,
+        });
+      };
+      const officeDeviceCount = devices.length;
+      devices.push(
+        { id: "livedevice9001abc", name: "Other client meter", productName: "Smart meter", online: true },
+        { id: "livedevice9002abc", name: "Spare meter", productName: "Smart meter", online: true },
+      );
+      metadata.energyIq.upsertProject({ id: "new-site", workspace_id: TUYA_OFFICE_WORKSPACE_ID, name: "New site", status: "draft" });
+      connect("new-site", TUYA_OFFICE_WORKSPACE_ID);
+      metadata.workspaces.upsert({ id: "other-client", name: "Other client", kind: "customer", owner_user_id: "dev-user" });
+      metadata.energyIq.upsertProject({ id: "other-site", workspace_id: "other-client", name: "Other client HQ", status: "published" });
+      connect("other-site", "other-client");
+      metadata.energyIq.liveConnectors.saveBindings({
+        project_id: "other-site",
+        bindings: { "other-meter": { device_id: "livedevice9001abc", device_name: "Other client meter" } },
+        actor_user_id: "dev-user",
+        updated_at: new Date().toISOString(),
+      });
+      const rows = (JSON.parse(metadata.energyIq.projectSetup.listHierarchyRevisions(TUYA_OFFICE_PROJECT_ID)
+        .find((revision) => revision.id === metadata.energyIq.getProject(TUYA_OFFICE_PROJECT_ID).hierarchy_revision_id)!
+        .snapshot_json) as { meter_mapping: { rows: Array<{ id: string }> } }).meter_mapping.rows;
+      const client: TuyaOpenApiClient = {
+        syncEnergyReadings: async () => { throw new Error("NOT_USED"); },
+        readLatestEnergy: async () => { throw new Error("NOT_USED"); },
+        listDevices: async () => devices,
+        checkEnergyDevice: async () => ({ ok: true, phases: 1 }),
+      };
+      const listed = await listLiveConnectionDevices({
+        metadataStore: metadata,
+        createClient: () => client,
+        createEnvironmentClient: () => client,
+        env: {
+          // Tuya Office is connected through the server settings and reads its own meters.
+          ENERGYIQ_TUYA_CONNECTOR_PROJECT_ID: TUYA_OFFICE_PROJECT_ID,
+          ENERGYIQ_TUYA_CONNECTOR_WORKSPACE_ID: TUYA_OFFICE_WORKSPACE_ID,
+          ENERGYIQ_TUYA_DEVICE_BINDINGS_JSON: JSON.stringify(Object.fromEntries(rows.map((row, index) => [row.id, devices[index]!.id]))),
+        },
+      }, "new-site");
+      const byName = new Map(listed.map((device) => [device.name, device]));
+      const officeName = metadata.energyIq.getProject(TUYA_OFFICE_PROJECT_ID).name;
+      for (const device of devices.slice(0, officeDeviceCount)) expect(byName.get(device.name)?.usedBy).toEqual({ siteName: officeName });
+      expect(byName.get("Other client meter")?.usedBy).toEqual({});
+      expect(byName.get("Spare meter")?.usedBy).toBeUndefined();
+      expect(JSON.stringify(listed)).not.toContain("Other client HQ");
     });
   });
 

@@ -66,6 +66,13 @@ export class EnergyIqLiveConnectorStore {
     return isRecord(row) ? mapConnector(row) : undefined;
   }
 
+  /** Every connected Project, oldest first, so a device another site already reads can be recognised. */
+  list(): EnergyIqLiveConnectorRecord[] {
+    return this.db.prepare(`
+      SELECT * FROM energyiq_live_connectors ORDER BY created_at, project_id
+    `).all().filter(isRecord).map(mapConnector);
+  }
+
   /** Connected Projects whose daily update is switched on, oldest first so the order is stable. */
   listSyncEnabled(): EnergyIqLiveConnectorRecord[] {
     return this.db.prepare(`

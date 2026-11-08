@@ -73,6 +73,11 @@ export type LiveConnectionDevice = {
   category?: string;
   online: boolean;
   matchedTo?: string;
+  /**
+   * Another site already reads this device. `siteName` is given only when that site belongs to the same client,
+   * so one client never learns another client's site names.
+   */
+  usedBy?: { siteName?: string };
 };
 
 export type LiveConnectionCheck = {
@@ -253,6 +258,7 @@ export const listLiveConnectionDevices = async (
     devices = await listWith(dependencies, readLiveConnectionCredentials(dependencies.metadataStore, connection));
     matchedBy = new Map(Object.entries(connection.bindings).map(([meterPointId, binding]) => [binding.device_id, meterPointId]));
   }
+  const usedBy = devicesUsedElsewhere(dependencies, projectId);
   return devices
     .map((device) => ({
       ref: liveDeviceRef(projectId, device.id),
@@ -261,6 +267,7 @@ export const listLiveConnectionDevices = async (
       ...(device.category ? { category: device.category } : {}),
       online: device.online,
       ...(matchedBy.has(device.id) ? { matchedTo: matchedBy.get(device.id)! } : {}),
+      ...(!matchedBy.has(device.id) && usedBy.has(device.id) ? { usedBy: usedBy.get(device.id)! } : {}),
     }))
     .sort((left, right) => left.name.localeCompare(right.name, undefined, { numeric: true }));
 };
@@ -644,6 +651,44 @@ const environmentBindings = (dependencies: LiveConnectionDependencies, projectId
 };
 
 /** The server settings connect this Project and nobody has taken it over in the app. */
+/**
+ * Device id -> the other site that already reads it: devices matched in another app-managed connection, and the
+ * server-managed Project's devices while the server settings still own it. One Tuya cloud project can hold several
+ * sites' devices, so starting a new site must not take another site's meters by default.
+ */
+const devicesUsedElsewhere = (
+  dependencies: LiveConnectionDependencies,
+  projectId: string,
+): Map<string, { siteName?: string }> => {
+  const { metadataStore } = dependencies;
+  const ownWorkspaceId = metadataStore.energyIq.getProject(projectId).workspace_id;
+  const owners = new Map<string, string>();
+  for (const connection of metadataStore.energyIq.liveConnectors.list()) {
+    if (connection.project_id === projectId) continue;
+    for (const binding of Object.values(connection.bindings)) owners.set(binding.device_id, connection.project_id);
+  }
+  const environmentProjectId = (dependencies.env ?? process.env).ENERGYIQ_TUYA_CONNECTOR_PROJECT_ID?.trim();
+  if (environmentProjectId && environmentProjectId !== projectId && serverOwned(dependencies, environmentProjectId)) {
+    for (const deviceId of environmentBindings(dependencies, environmentProjectId).values()) owners.set(deviceId, environmentProjectId);
+  }
+  const sites = new Map<string, { siteName?: string }>();
+  const usedBy = new Map<string, { siteName?: string }>();
+  for (const [deviceId, ownerId] of owners) {
+    if (!sites.has(ownerId)) {
+      let site: { siteName?: string } = {};
+      try {
+        const owner = metadataStore.energyIq.getProject(ownerId);
+        if (owner.workspace_id === ownWorkspaceId) site = { siteName: owner.name };
+      } catch {
+        // A connection whose Project is gone still holds the device; name nothing.
+      }
+      sites.set(ownerId, site);
+    }
+    usedBy.set(deviceId, sites.get(ownerId)!);
+  }
+  return usedBy;
+};
+
 const serverOwned = (dependencies: LiveConnectionDependencies, projectId: string): boolean =>
   isEnvironmentTuyaProject(projectId, dependencies.env ?? process.env)
   && !dependencies.metadataStore.energyIq.liveConnectors.find(projectId);

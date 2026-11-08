@@ -25,7 +25,8 @@ export type LiveConnectionDto = {
   sync: { running: boolean; lastSuccessAt?: string; lastFailureAt?: string; lastErrorCode?: string; dataUntil?: string };
 };
 
-export type LiveDeviceDto = { ref: string; name: string; productName?: string; category?: string; online: boolean; matchedTo?: string };
+/** `usedBy`: another site already reads this device; its name is given only for the same client. */
+export type LiveDeviceDto = { ref: string; name: string; productName?: string; category?: string; online: boolean; matchedTo?: string; usedBy?: { siteName?: string } };
 
 /** One line of a site's own device list, as checked against the Tuya account. */
 export type LiveDeviceListRowDto = {
@@ -638,11 +639,14 @@ function StartFromTuya({ projectId, connection, onConnection, onDone, t }: {
   const loadDevices = useCallback(async () => {
     try {
       const { devices: next } = await configApi.liveConnectionRequest<{ devices: LiveDeviceDto[] }>(projectId, "devices");
-      const meterRefs = next.filter((device) => !isGateway(device)).map((device) => device.ref);
+      const meters = next.filter((device) => !isGateway(device));
       const kept = keepChosen.current;
       setDevices(next);
       setListFailed(false);
-      setChosen(new Set(kept ? meterRefs.filter((ref) => kept.has(ref)) : meterRefs));
+      // Devices another site already reads start unticked: one Tuya account can hold several sites' meters.
+      setChosen(new Set(kept
+        ? meters.filter((device) => kept.has(device.ref)).map((device) => device.ref)
+        : meters.filter((device) => !device.usedBy).map((device) => device.ref)));
     } catch (reason) {
       setDevices([]);
       setListFailed(true);
@@ -783,11 +787,17 @@ function StartFromTuya({ projectId, connection, onConnection, onDone, t }: {
   const offlineMeters = selectable.filter((device) => !device.online).length;
   const offlineGateways = gateways.filter((device) => !device.online);
   // Every word must appear in the device's name, type or online state, so "264e lobby" or "offline" narrow the list.
+  const usedByLabel = (device: LiveDeviceDto) => device.usedBy
+    ? device.usedBy.siteName ? t("usedByNamed", { site: device.usedBy.siteName }) : t("usedByOther")
+    : "";
+  const usedElsewhere = selectable.filter((device) => device.usedBy).length;
   const words = query.trim().toLowerCase().split(/\s+/u).filter(Boolean);
   const shown = words.length === 0 ? selectable : selectable.filter((device) => {
-    const haystack = `${device.name} ${device.productName ?? ""} ${t(device.online ? "online" : "offline")}`.toLowerCase();
+    const haystack = `${device.name} ${device.productName ?? ""} ${t(device.online ? "online" : "offline")} ${usedByLabel(device)}`.toLowerCase();
     return words.every((word) => haystack.includes(word));
   });
+  // Ticking in bulk leaves out devices another site reads; tick those one by one if they really moved here.
+  const tickable = shown.filter((device) => !device.usedBy);
   const setTicks = (refs: string[], ticked: boolean) => setChosen((current) => {
     const next = new Set(current);
     for (const ref of refs) if (ticked) next.add(ref); else next.delete(ref);
@@ -841,6 +851,7 @@ function StartFromTuya({ projectId, connection, onConnection, onDone, t }: {
             <StarterStat label={t("startStatus.gateways")} value={String(gateways.length)} detail={onlineDetail(gateways.length, offlineGateways.length)} warn={offlineGateways.length > 0} />
             {mode === "pick" ? <StarterStat label={t("startStatus.ticked")} value={String(chosen.size)} detail={t("startStatus.of", { total: selectable.length })} /> : null}
           </dl>
+          {usedElsewhere > 0 ? <p className="mt-2 text-xs text-amber-900">{usedElsewhere === 1 ? t("startStatus.usedElsewhereOne") : t("startStatus.usedElsewhere", { count: usedElsewhere })}</p> : null}
           {offlineGateways.length > 0 ? <p className="mt-2 text-xs text-amber-900">{t("gatewaysOffline", { offline: offlineGateways.length, total: gateways.length, names: offlineGateways.map((device) => device.name).join(", ") })}</p> : null}
         </> : null}
       </section>
@@ -856,8 +867,8 @@ function StartFromTuya({ projectId, connection, onConnection, onDone, t }: {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-semibold">{t("startPick")}</p>
         {selectable.length > 0 ? <span className="flex gap-2">
-          <button type="button" className={secondaryButton} disabled={busy || shown.length === 0} onClick={() => setTicks(shown.map((device) => device.ref), true)}>
-            {words.length > 0 ? t("startTickShown", { count: shown.length }) : t("startAll")}
+          <button type="button" className={secondaryButton} disabled={busy || tickable.length === 0} onClick={() => setTicks(tickable.map((device) => device.ref), true)}>
+            {words.length > 0 ? t("startTickShown", { count: tickable.length }) : t("startAll")}
           </button>
           <button type="button" className={secondaryButton} disabled={busy || shown.length === 0} onClick={() => setTicks(shown.map((device) => device.ref), false)}>
             {words.length > 0 ? t("startUntickShown", { count: shown.length }) : t("startClear")}
@@ -880,7 +891,7 @@ function StartFromTuya({ projectId, connection, onConnection, onDone, t }: {
             {shown.map((device) => <li key={device.ref}>
               <label className="flex cursor-pointer items-center gap-3 px-4 py-2.5 text-sm">
                 <input type="checkbox" checked={chosen.has(device.ref)} disabled={busy} onChange={() => toggle(device.ref)} className="h-4 w-4 accent-[var(--color-primary,#0f6b4b)]" />
-                <span className="flex-1">{device.name}{device.productName ? <span className="text-muted"> · {device.productName}</span> : null}</span>
+                <span className="flex-1">{device.name}{device.productName ? <span className="text-muted"> · {device.productName}</span> : null}{device.usedBy ? <span className="font-semibold text-amber-800"> · {usedByLabel(device)}</span> : null}</span>
                 <span className={`text-xs font-semibold ${device.online ? "text-emerald-700" : "text-rose-700"}`}>{t(device.online ? "online" : "offline")}</span>
               </label>
             </li>)}

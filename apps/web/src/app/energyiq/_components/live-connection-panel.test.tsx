@@ -321,4 +321,38 @@ describe("LiveConnectionPanel", () => {
     expect((lamp.querySelector("input") as HTMLInputElement).checked).toBe(false);
     expect(button("Create 2 meters")).toBeTruthy();
   });
+
+  it("leaves devices another site reads unticked and labels them, so a shared Tuya account cannot take them by default", async () => {
+    const starterDevices = [
+      { ref: "ref-lobby", name: "264E GF Lobby Lighting", productName: "Smart meter", online: true },
+      { ref: "ref-office", name: "DB1 L1 Light", productName: "Smart meter", online: true, usedBy: { siteName: "Tuya Office" } },
+      { ref: "ref-other", name: "A18P", productName: "Smart meter", online: true, usedBy: {} },
+    ];
+    api.liveConnectionRequest.mockImplementation(async (_projectId: string, action = "") => {
+      if (action === "devices") return { devices: starterDevices };
+      return { connection: connection({ publishedSetup: false, connected: true, accountHint: "ab12", meters: [] }) };
+    });
+    await act(async () => root.render(<LiveConnectionPanel projectId="p" />));
+    await flush();
+    const row = (name: string) => [...container.querySelectorAll("ul label")].find((label) => label.textContent?.includes(name))!;
+    const ticked = (name: string) => (row(name).querySelector("input") as HTMLInputElement).checked;
+
+    expect(row("DB1 L1 Light").textContent).toContain("Connected to Tuya Office");
+    expect(row("A18P").textContent).toContain("Connected to another site");
+    expect([ticked("264E GF Lobby Lighting"), ticked("DB1 L1 Light"), ticked("A18P")]).toEqual([true, false, false]);
+    expect(container.textContent).toContain("2 devices are already read by another site, so they are left unticked.");
+    expect(button("Create 1 meter")).toBeTruthy();
+
+    await act(async () => { button("Clear").click(); });
+    await act(async () => { button("Select all").click(); });
+    expect([ticked("264E GF Lobby Lighting"), ticked("DB1 L1 Light"), ticked("A18P")]).toEqual([true, false, false]);
+
+    await act(async () => { (row("A18P").querySelector("input") as HTMLInputElement).click(); });
+    expect(button("Create 2 meters")).toBeTruthy();
+
+    const search = container.querySelector("input[type='search']") as HTMLInputElement;
+    await act(async () => setValue(search, "tuya office"));
+    expect([...container.querySelectorAll("ul label")].map((label) => label.textContent?.split(" · ")[0])).toEqual(["DB1 L1 Light"]);
+    expect(button("Tick these 0").disabled).toBe(true);
+  });
 });
