@@ -138,7 +138,7 @@
 | 文档 | 作用 |
 | --- | --- |
 | [甲方确认稿](product/甲方确认稿-日级能源分析与AI问数MVP.md) | 客户已确认的日级分析与 AI 问数需求边界 |
-| [Charles 静态能源报告](../template/Preschool/Energy_Report_May2026.html) | Preschool 模板种子，不是可运行模板 |
+| Charles 静态能源报告（`docs/template/Preschool/Energy_Report_May2026.html`，客户文件不在 git 中，见 [客户样本](../agents/customer-fixtures.md)） | Preschool 模板种子，不是可运行模板 |
 | [调研索引](research/README.md) | ChatBI 历史选型，以及 Explorer 对 CopilotKit、Superset、Recharts/ECharts 的当前评估 |
 
 ## 历史/已被替代
