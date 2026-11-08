@@ -100,6 +100,19 @@ API bootstrap 同时会尝试 provision DTC Growth demo datasource；其源是 `
 缺少 API/package `main`、Next BUILD_ID、Next 声明的任一 runtime file，或 BUILD_ID 与 Git SHA
 不一致时同样 fail closed。目标 Artifact/Manifest/checksum 已存在时拒绝覆盖。
 
+`package-lock.json` 必须把 `next` 装在根目录 `node_modules/next`：Release Host 的 web 服务在 `apps/web`
+里运行 `node ../../node_modules/next/dist/bin/next start`。lock 里没有 `node_modules/next`，或者在某个
+workspace 下另有 `<workspace>/node_modules/next` 时，pack 和 `--verify` 都会拒绝。2026-11-08 的 2d93edd
+就是因为 lock 把 next 嵌套在 `apps/web/node_modules`，web 服务起不来，部署自动回滚。
+
+Fix when pack refuses (use the production Node version so npm matches):
+
+1. Remove the nested `apps/web/node_modules/next`, `apps/web/node_modules/@next/*` and
+   `apps/web/node_modules/postcss` entries from `package-lock.json`.
+2. Pin `next` in `apps/web/package.json` to the exact locked version, run
+   `npm install --package-lock-only --ignore-scripts`, restore the original range, and run it once more.
+3. Check that only the location changed: every version and `integrity` should match the previous lock.
+
 ## 5. Build Host 命令
 
 PowerShell：

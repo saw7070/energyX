@@ -27,6 +27,10 @@ const BACKUP_RUNBOOK_RELEASE_PAYLOAD = new Map([
   ["deploy/systemd/energyiq-shared-storage-backup.timer", "[Timer]\nOnCalendar=*-*-* 02:15:00\n"],
 ]);
 
+const PACKAGE_LOCK_BODY = JSON.stringify({
+  lockfileVersion: 3,
+  packages: { "node_modules/next": { version: "15.5.19" } },
+}, null, 2) + "\n";
 const sha256 = (body) => createHash("sha256").update(body).digest("hex");
 
 const writeFixtureFile = async (root, relativePath, body) => {
@@ -64,7 +68,7 @@ const createFixture = async () => {
       "start:web": "npm --prefix apps/web run start",
     },
   }, null, 2) + "\n");
-  await writeFixtureFile(root, "package-lock.json", "{\n  \"lockfileVersion\": 3\n}\n");
+  await writeFixtureFile(root, "package-lock.json", PACKAGE_LOCK_BODY);
   await writeFixtureFile(root, "scripts/energyiq/build-release-artifact.mjs", "export const buildTool = true;\n");
   await writeFixtureFile(root, "scripts/energyiq/deploy-release.mjs", "export const deployTool = true;\n");
   for (const [releasePath, body] of BACKUP_RUNBOOK_RELEASE_PAYLOAD) {
@@ -151,7 +155,7 @@ test("creates a deterministic prebuilt artifact and exact sidecar manifest", asy
   assert.deepEqual(firstArtifact, secondArtifact);
   assert.equal(await readFile(second.manifestPath, "utf8"), manifestBody);
   assert.equal(manifest.gitSha, RELEASE_SHA);
-  assert.equal(manifest.packageLockHash, sha256("{\n  \"lockfileVersion\": 3\n}\n"));
+  assert.equal(manifest.packageLockHash, sha256(PACKAGE_LOCK_BODY));
   assert.equal(manifest.builtAt, BUILT_AT);
   assert.equal(manifest.nodeVersion, NODE_VERSION);
   assert.equal(manifest.metadataSchemaRevision, METADATA_SCHEMA_REVISION);
@@ -351,6 +355,78 @@ test("rejects a Web build whose BUILD_ID is not the release Git SHA", async (t) 
   await writeFixtureFile(sourceDir, "apps/web/.next/BUILD_ID", "random-next-build-id\n");
 
   await assert.rejects(packFixture(sourceDir, outputDir), /BUILD_ID.*gitSha.*ENERGYIQ_RELEASE_SHA/i);
+});
+
+test("rejects a lock that nests Next.js under the Web workspace instead of the release root", async (t) => {
+  const sourceDir = await createFixture();
+  const outputDir = await mkdtemp(path.join(tmpdir(), "energyiq-artifact-nested-next-"));
+  t.after(() => Promise.all([
+    rm(sourceDir, { recursive: true, force: true }),
+    rm(outputDir, { recursive: true, force: true }),
+  ]));
+  await writeFixtureFile(sourceDir, "package-lock.json", JSON.stringify({
+    lockfileVersion: 3,
+    packages: { "apps/web/node_modules/next": { version: "15.5.19" } },
+  }, null, 2) + "\n");
+
+  await assert.rejects(
+    packFixture(sourceDir, outputDir),
+    /node_modules\/next.*nested under apps\/web\/node_modules\/next/i,
+  );
+});
+
+test("rejects a lock that has Next.js at the root and a second copy nested under the Web workspace", async (t) => {
+  const sourceDir = await createFixture();
+  const outputDir = await mkdtemp(path.join(tmpdir(), "energyiq-artifact-double-next-"));
+  t.after(() => Promise.all([
+    rm(sourceDir, { recursive: true, force: true }),
+    rm(outputDir, { recursive: true, force: true }),
+  ]));
+  await writeFixtureFile(sourceDir, "package-lock.json", JSON.stringify({
+    lockfileVersion: 3,
+    packages: {
+      "node_modules/next": { version: "15.5.19" },
+      "apps/web/node_modules/next": { version: "15.5.20" },
+    },
+  }, null, 2) + "\n");
+
+  await assert.rejects(packFixture(sourceDir, outputDir), /nested under apps\/web\/node_modules\/next/i);
+});
+
+test("verification rejects an artifact whose archived lock nests Next.js under the Web workspace", async (t) => {
+  const sourceDir = await createFixture();
+  const outputDir = await mkdtemp(path.join(tmpdir(), "energyiq-artifact-verify-nested-next-"));
+  t.after(() => Promise.all([
+    rm(sourceDir, { recursive: true, force: true }),
+    rm(outputDir, { recursive: true, force: true }),
+  ]));
+
+  // A decoy key one letter off lets the archived lock be rewritten in place without changing its length.
+  const decoyLock = JSON.stringify({
+    lockfileVersion: 3,
+    packages: {
+      "node_modules/next": { version: "15.5.19" },
+      "apps/web/node_modules/nexu": { version: "15.5.20" },
+    },
+  }, null, 2) + "\n";
+  await writeFixtureFile(sourceDir, "package-lock.json", decoyLock);
+  const result = await packFixture(sourceDir, outputDir);
+  const archive = await readFile(result.artifactPath);
+  const offset = archive.indexOf(Buffer.from(decoyLock, "utf8"));
+  assert.ok(offset > 0, "archived package-lock.json body found");
+  const nestedLock = Buffer.from(decoyLock.replace("apps/web/node_modules/nexu", "apps/web/node_modules/next"), "utf8");
+  nestedLock.copy(archive, offset);
+  const manifest = JSON.parse(await readFile(result.manifestPath, "utf8"));
+  manifest.entries.find((entry) => entry.path === "package-lock.json").sha256 = sha256(nestedLock);
+  manifest.packageLockHash = sha256(nestedLock);
+  manifest.artifactSha256 = sha256(archive);
+  await writeFile(result.artifactPath, archive);
+  await writeFile(result.manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+
+  await assert.rejects(
+    verifyReleaseArtifact({ artifactPath: result.artifactPath, manifestPath: result.manifestPath }),
+    /nested under apps\/web\/node_modules\/next/i,
+  );
 });
 
 test("verification rejects a modified artifact", async (t) => {
