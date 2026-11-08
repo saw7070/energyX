@@ -360,7 +360,7 @@ export const buildLiveConnectionStarter = async (
   input: { projectId: string; deviceRefs: unknown; days?: unknown; labels?: unknown },
 ): Promise<LiveConnectionStarter> => {
   const { metadataStore } = dependencies;
-  const project = metadataStore.energyIq.getProject(input.projectId);
+  metadataStore.energyIq.getProject(input.projectId);
   requireAppManaged(dependencies, input.projectId);
   if (publishedMeterRows(metadataStore, input.projectId)) throw new Error("ENERGYIQ_LIVE_STARTER_SETUP_EXISTS");
   const rawRefs: unknown[] = Array.isArray(input.deviceRefs) ? input.deviceRefs : [];
@@ -405,15 +405,12 @@ export const buildLiveConnectionStarter = async (
   if (readings.length === 0) throw new Error("ENERGYIQ_LIVE_STARTER_NO_READINGS");
   const counts = new Map<string, number>();
   for (const row of readings) counts.set(row.sourceLabel, (counts.get(row.sourceLabel) ?? 0) + 1);
-  // The file holds the site's own wall-clock time, exactly like an export from the meter app.
-  const wallClock = siteWallClock(project.timezone);
-  const lines = [
-    "Device Name,Time,Active Energy",
-    ...readings.map((row) => `${csvCell(row.sourceLabel)},${wallClock(row.eventTime!)},${row.activeEnergyKwh}`),
-  ];
+  // Kept as Tuya's own report logs, like the daily update imports them: Tuya meters log their running total when it
+  // moves, at uneven times, and only the Tuya import spreads those readings onto a 15-minute grid. Turned into a plain
+  // readings file instead, the uneven spacing failed the data check and a new site could not go live (SKTC, Nov 2026).
   return {
-    filename: `tuya-start-${new Date(endTime).toISOString().slice(0, 10)}.csv`,
-    content: Buffer.from(`${lines.join("\r\n")}\r\n`, "utf8"),
+    filename: `tuya-start-${new Date(endTime).toISOString().slice(0, 10)}.json`,
+    content: Buffer.from(JSON.stringify(artifact), "utf8"),
     devices: chosen.map(({ ref }, index) => ({ ref, sourceLabel: labels[index]!, readings: counts.get(labels[index]!) ?? 0 })),
   };
 };
@@ -428,19 +425,6 @@ const uniqueLabels = (names: string[]): string[] => {
     taken.add(label.toLocaleLowerCase());
     return label;
   });
-};
-
-const csvCell = (value: string): string => /[",\r\n]/u.test(value) ? `"${value.replace(/"/gu, '""')}"` : value;
-
-const siteWallClock = (timezone: string): ((iso: string) => string) => {
-  const format = new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone || "Asia/Singapore",
-    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
-  });
-  return (iso) => {
-    const parts = Object.fromEntries(format.formatToParts(new Date(iso)).map((part) => [part.type, part.value]));
-    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
-  };
 };
 
 /** Replace every meter's device. A meter left out, or sent as null, is not connected. */

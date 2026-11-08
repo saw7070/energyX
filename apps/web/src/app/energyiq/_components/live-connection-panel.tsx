@@ -716,7 +716,7 @@ function StartFromTuya({ projectId, connection, onConnection, onDone, t }: {
     setError(null);
     try {
       setStep("read");
-      const started = await configApi.liveConnectionRequest<{ devices: Array<{ ref: string; sourceLabel: string }> }>(projectId, "starter", {
+      const started = await configApi.liveConnectionRequest<{ batch: { id: string }; devices: Array<{ ref: string; sourceLabel: string }> }>(projectId, "starter", {
         method: "POST",
         body: JSON.stringify(plan.labels ? { deviceRefs: plan.refs, labels: plan.labels } : { deviceRefs: plan.refs }),
       });
@@ -740,9 +740,9 @@ function StartFromTuya({ projectId, connection, onConnection, onDone, t }: {
           const area = plan.areas?.get(device.ref);
           return area ? [[device.sourceLabel, area] as const] : [];
         }));
-        await setUpAndPublishReadings(projectId, names, { devices, areas });
+        await setUpAndPublishReadings(projectId, names, { devices, areas, batchIds: [started.batch.id] });
       } else {
-        await setUpAndPublishReadings(projectId, names);
+        await setUpAndPublishReadings(projectId, names, { batchIds: [started.batch.id] });
       }
       setStep("match");
       const { connection: published } = await configApi.liveConnectionRequest<{ connection: LiveConnectionDto }>(projectId);

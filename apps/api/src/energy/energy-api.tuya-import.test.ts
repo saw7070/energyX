@@ -313,6 +313,108 @@ describe("Tuya Energy API import", () => {
     }
   }, 30_000);
 
+  it("accepts a low-use circuit's uneven Tuya readings with small counter dips, as Start from Tuya imports them", async () => {
+    // Shaped like SKTC's lighting meters: Tuya logs the running total about hourly while the lights are on, adds a
+    // reading a few minutes apart now and then, stays silent through the day, and once steps back by 0.01 kWh.
+    const root = mkdtempSync(join(tmpdir(), "energy-api-tuya-uneven-"));
+    const previousDuckDbPath = process.env.ENERGYIQ_DUCKDB_PATH;
+    process.env.ENERGYIQ_DUCKDB_PATH = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const files = new LocalFileAssetService(metadata, { storageRoot: join(root, "files") });
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const connector = testConnector(metadata);
+      const context = {
+        metadataStore: metadata,
+        dataGateway: new LocalDataGateway(metadata),
+        fileAssetService: files,
+        userId: "dev-user",
+        workspaceId: TUYA_OFFICE_WORKSPACE_ID,
+      } as unknown as Required<ConfigApiContext>;
+      const start = Date.parse("2024-03-09T10:00:00.000Z");
+      const minute = 60_000;
+      const evening = [0, 60, 64, 120, 180, 183, 240, 300, 360, 420, 480, 540, 600, 660, 720]
+        .map((offset, index) => ({ eventTime: start + offset * minute, value: 1000 + index * 7 }));
+      const morning = { eventTime: start + (720 + 11 * 60) * minute, value: 1000 + 15 * 7 };
+      const dip = { eventTime: morning.eventTime + 30 * minute, value: morning.value - 1 };
+      const after = { eventTime: morning.eventTime + 90 * minute, value: morning.value + 6 };
+      const uneven: TuyaReportLogArtifact = {
+        ...artifact(),
+        request: { ...artifact().request, startTime: start, endTime: after.eventTime + minute },
+        devices: artifact().devices.map((device, index) => ({
+          ...device,
+          logs: index === 0
+            ? [...evening, morning, dip, after].map((log) => ({ code: "total_forward_energy", ...log }))
+            : [],
+        })),
+      };
+      const imported = await handleEnergyApiRequest(
+        jsonRequest({ startTime: new Date(start).toISOString(), endTime: new Date(after.eventTime + minute).toISOString() }),
+        ["projects", TUYA_OFFICE_PROJECT_ID, "imports", "tuya"],
+        context,
+        {
+          selectCurrentOverviewPeriod: async () => { throw new Error("NOT_USED"); },
+          resolveTuyaProjectConnector: () => connector,
+          syncTuyaEnergyReadings: async () => uneven,
+        },
+      );
+      expect(imported.status, JSON.stringify(imported.body)).toBe(201);
+      const batch = metadata.energyIq.listImportBatches(TUYA_OFFICE_PROJECT_ID)[0]!;
+      const draft = metadata.energyIq.projectSetup.getDraft({ project_id: TUYA_OFFICE_PROJECT_ID, user_id: "dev-user" });
+      metadata.energyIq.projectSetup.saveDraft({
+        project_id: TUYA_OFFICE_PROJECT_ID,
+        expected_revision: draft.revision,
+        user_id: "dev-user",
+        document: { ...draft.document, source_manifest: createEnergyIqSourceManifest([batch.source_sha256], true) },
+      });
+      const materialized = await handleEnergyApiRequest(
+        jsonRequest({}),
+        ["projects", TUYA_OFFICE_PROJECT_ID, "imports", batch.id, "materialize"],
+        context,
+        {
+          selectCurrentOverviewPeriod: async () => { throw new Error("NOT_USED"); },
+          materializeCurrentOverviewProjection: (async (input: {
+            beforePublish?: (publication: {
+              persistentDirectory: string;
+              pointerKey: string;
+              previousProjectionKey: string | null;
+              candidateProjectionKey: string;
+            }) => Promise<void>;
+          }) => {
+            await input.beforePublish?.({
+              persistentDirectory: root,
+              pointerKey: `current:${TUYA_OFFICE_PROJECT_ID}`,
+              previousProjectionKey: null,
+              candidateProjectionKey: "tuya-overview-projection:uneven",
+            });
+            return {
+              changed: true,
+              resolution: {},
+              contextPackage: { projectionRef: "tuya-overview-projection:uneven", identity: {}, evidenceRefs: [], snapshot: {} },
+            };
+          }) as never,
+          prewarmAnalysisContextPackage: (async () => ({ status: "unchanged", contextPackage: { projectionRef: "analysis-context:tuya:uneven", identity: { projectId: TUYA_OFFICE_PROJECT_ID, metricRevisionIds: [], ruleRevisionIds: [] } } })) as never,
+        },
+      );
+      expect(materialized.status, JSON.stringify(materialized.body)).toBe(200);
+      const imports = await handleEnergyApiRequest(
+        getRequest(),
+        ["projects", TUYA_OFFICE_PROJECT_ID, "imports"],
+        context,
+        { selectCurrentOverviewPeriod: async () => { throw new Error("NOT_USED"); } },
+      );
+      const readiness = (imports.body as { data: { readiness: { blockingReasons: string[]; audit: Record<string, number> } } }).data.readiness;
+      expect(readiness.blockingReasons).not.toContain("INVALID_INTERVAL_DURATION");
+      expect(readiness.blockingReasons).not.toContain("NEGATIVE_INTERVAL_DELTAS");
+      expect(readiness.audit).toMatchObject({ invalidIntervalDurationCount: 0, negativeDeltaIntervalCount: 0 });
+    } finally {
+      if (previousDuckDbPath === undefined) delete process.env.ENERGYIQ_DUCKDB_PATH;
+      else process.env.ENERGYIQ_DUCKDB_PATH = previousDuckDbPath;
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  }, 30_000);
+
   it("rejects another Project and browser-managed device bindings before calling Tuya", async () => {
     const root = mkdtempSync(join(tmpdir(), "energy-api-tuya-boundary-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });

@@ -15,13 +15,19 @@ import { buildSmartSetup, type DeviceListEntry, type SmartSetupNames } from "./s
 export async function setUpAndPublishReadings(
   projectId: string,
   names?: SmartSetupNames,
-  options: { devices?: DeviceListEntry[]; areas?: Record<string, string> } = {},
+  /**
+   * `batchIds`: publish exactly these imports (Start from Tuya passes the one it just made, a Tuya import), so a
+   * leftover from an earlier failed attempt is not pinned with it. Without it, every uploaded file is used.
+   */
+  options: { devices?: DeviceListEntry[]; areas?: Record<string, string>; batchIds?: string[] } = {},
 ): Promise<number> {
   const [setup, imports] = await Promise.all([
     configApi.getEnergyProjectSetup(projectId),
     configApi.listEnergyImportBatches(projectId),
   ]);
-  const uploads = imports.batches.filter((batch) => batch.sourceKind === "excel");
+  const uploads = options.batchIds
+    ? imports.batches.filter((batch) => options.batchIds!.includes(batch.id))
+    : imports.batches.filter((batch) => batch.sourceKind === "excel");
   if (uploads.length === 0) throw new Error("ENERGYIQ_IMPORT_REQUIRED");
   const plan = buildSmartSetup({
     document: setup.draft.document,
