@@ -129,19 +129,7 @@ export class EnergyIqSourceSyncStore {
           SELECT * FROM energyiq_source_sync_runs
           WHERE project_id = ? AND source_kind = ? AND status = 'running' AND started_at < ?
         `).all(input.project_id, input.source_kind, input.stale_before).filter(isRecord).map(mapRun);
-        for (const run of interrupted) {
-          this.db.prepare(`
-            UPDATE energyiq_source_sync_runs
-            SET status = 'failed', error_code = 'SOURCE_SYNC_PROCESS_INTERRUPTED', completed_at = ?
-            WHERE id = ? AND status = 'running'
-          `).run(input.stale_before, run.id);
-          this.db.prepare(`
-            UPDATE energyiq_source_sync_state
-            SET last_run_id = ?, last_failure_at = ?,
-                last_error_code = 'SOURCE_SYNC_PROCESS_INTERRUPTED', updated_at = ?
-            WHERE project_id = ? AND source_kind = ?
-          `).run(run.id, input.stale_before, input.stale_before, run.project_id, run.source_kind);
-        }
+        for (const run of interrupted) this.markInterrupted(run, input.stale_before);
       }
       const succeeded = this.db.prepare(`
         SELECT * FROM energyiq_source_sync_runs
@@ -296,6 +284,39 @@ export class EnergyIqSourceSyncStore {
     }
   }
 
+  /**
+   * Fails every run still marked running. Only call this at server start-up, before any scheduler can claim a run:
+   * a run left running then belonged to a process that died (an out-of-memory kill, a host restart), and leaving it
+   * blocks the Project's next sync and the nightly backup preflight until the six-hour stale window passes.
+   */
+  reclaimInterrupted(input: { completed_at: string }): EnergyIqSourceSyncRunRecord[] {
+    requiredTimestamp(input.completed_at);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const interrupted = this.db.prepare(`
+        SELECT * FROM energyiq_source_sync_runs
+        WHERE status = 'running'
+        ORDER BY started_at, id
+      `).all().filter(isRecord).map(mapRun);
+      for (const run of interrupted) this.markInterrupted(run, input.completed_at);
+      this.db.exec("COMMIT");
+      return interrupted.map((run) => this.getRun(run.id));
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  /** How many of the Project's runs started since `since` were cut short by a process that died. */
+  countInterruptedSince(input: { project_id: string; source_kind: "tuya"; since: string }): number {
+    const row = this.db.prepare(`
+      SELECT COUNT(*) AS count FROM energyiq_source_sync_runs
+      WHERE project_id = ? AND source_kind = ? AND status = 'failed'
+        AND error_code = 'SOURCE_SYNC_PROCESS_INTERRUPTED' AND started_at >= ?
+    `).get(input.project_id, input.source_kind, requiredTimestamp(input.since));
+    return isRecord(row) ? Number(row.count) : 0;
+  }
+
   getRun(runId: string): EnergyIqSourceSyncRunRecord {
     const row = this.db.prepare("SELECT * FROM energyiq_source_sync_runs WHERE id = ?").get(runId);
     if (!isRecord(row)) throw new Error(`ENERGYIQ_SOURCE_SYNC_RUN_NOT_FOUND:${runId}`);
@@ -325,6 +346,20 @@ export class EnergyIqSourceSyncStore {
       ORDER BY started_at DESC, id DESC
       LIMIT ?
     `).all(input.project_id, input.source_kind, limit).filter(isRecord).map(mapRun);
+  }
+
+  private markInterrupted(run: EnergyIqSourceSyncRunRecord, completedAt: string): void {
+    this.db.prepare(`
+      UPDATE energyiq_source_sync_runs
+      SET status = 'failed', error_code = 'SOURCE_SYNC_PROCESS_INTERRUPTED', completed_at = ?
+      WHERE id = ? AND status = 'running'
+    `).run(completedAt, run.id);
+    this.db.prepare(`
+      UPDATE energyiq_source_sync_state
+      SET last_run_id = ?, last_failure_at = ?,
+          last_error_code = 'SOURCE_SYNC_PROCESS_INTERRUPTED', updated_at = ?
+      WHERE project_id = ? AND source_kind = ?
+    `).run(run.id, completedAt, completedAt, run.project_id, run.source_kind);
   }
 
   private requireRunning(runId: string): EnergyIqSourceSyncRunRecord {
@@ -466,6 +501,13 @@ const requireWindow = (start: number, end: number): void => {
   if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start <= 0 || end <= start) {
     throw new Error("ENERGYIQ_SOURCE_SYNC_WINDOW_INVALID");
   }
+};
+
+const requiredTimestamp = (value: string): string => {
+  if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) {
+    throw new Error("ENERGYIQ_SOURCE_SYNC_TIMESTAMP_INVALID");
+  }
+  return value;
 };
 
 const requireErrorCode = (value: string): string => {

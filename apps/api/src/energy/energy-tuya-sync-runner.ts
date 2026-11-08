@@ -25,6 +25,7 @@ const DAY_MS = 86_400_000;
 const SINGAPORE_OFFSET_MS = 8 * 60 * 60_000;
 const DEFAULT_OVERLAP_MS = DAY_MS;
 const DEFAULT_STALE_RUN_MS = 6 * 60 * 60_000;
+const MAX_SCHEDULED_INTERRUPTIONS = 2;
 
 export type EnergyTuyaSyncWindow = {
   startTime: number;
@@ -148,6 +149,15 @@ export const createEnergyTuyaSyncRunner = (dependencies: EnergyTuyaSyncRunnerDep
       throw new Error("ENERGYIQ_TUYA_CONNECTOR_REVISION_MISMATCH");
     }
     const startedAtMs = now();
+    // A scheduled run retries once after the process died mid-sync (start-up fails the cut-off run). If the retry dies
+    // too, stop there rather than crash-looping the server all night; a manual "Sync now" or tomorrow's run still goes.
+    if (input.trigger === "scheduled" && dependencies.context.metadataStore.energyIq.sourceSync.countInterruptedSince({
+      project_id: input.connector.projectId,
+      source_kind: "tuya",
+      since: new Date(startedAtMs - DEFAULT_STALE_RUN_MS).toISOString(),
+    }) >= MAX_SCHEDULED_INTERRUPTIONS) {
+      throw new Error("ENERGYIQ_SOURCE_SYNC_RECENTLY_INTERRUPTED");
+    }
     const claim = dependencies.context.metadataStore.energyIq.sourceSync.claim({
       id: `energy-source-sync-${createId()}`,
       workspace_id: project.workspace_id,
