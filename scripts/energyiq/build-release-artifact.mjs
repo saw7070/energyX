@@ -23,6 +23,10 @@ const ARTIFACT_FORMAT = "ustar";
 const VERIFIED_ARTIFACT = Symbol("verified-release-artifact");
 const WEB_BUILD_ROOT = "apps/web/.next";
 const WEB_BUILD_EXCLUDES = new Set(["cache", "diagnostics", "trace", "types"]);
+// The Release Host's web service runs `node ../../node_modules/next/dist/bin/next start` from apps/web, so the
+// lock must install Next.js at the release root. npm can nest it under a workspace's own node_modules instead;
+// the web service then cannot start and the deploy rolls back (2d93edd on 2026-11-08).
+const WEB_RUNTIME_PACKAGE = "next";
 const RELEASE_HOST_REQUIRED_FILES = [
   "scripts/energyiq/build-release-artifact.mjs",
   "scripts/energyiq/deploy-release.mjs",
@@ -270,12 +274,32 @@ const requireRegularFile = async (sourceDir, relativePath, label = "Runtime file
   return absolutePath;
 };
 
+const requireRootWebRuntime = (packageLock) => {
+  let packages;
+  try {
+    packages = JSON.parse(packageLock.toString("utf8"))?.packages;
+  } catch (error) {
+    throw new Error("package-lock.json is not valid JSON.", { cause: error });
+  }
+  const keys = packages && typeof packages === "object" ? Object.keys(packages) : [];
+  const nested = keys.filter((key) => !key.startsWith("node_modules/")
+    && key.endsWith(`/node_modules/${WEB_RUNTIME_PACKAGE}`));
+  if (typeof packages?.[`node_modules/${WEB_RUNTIME_PACKAGE}`]?.version === "string" && nested.length === 0) return;
+  throw new Error(
+    `package-lock.json must install ${WEB_RUNTIME_PACKAGE} at node_modules/${WEB_RUNTIME_PACKAGE}, where the Release `
+    + "Host's web service starts it"
+    + (nested.length > 0 ? `; it is nested under ${nested.join(", ")}` : "")
+    + ". Regenerate the lock so it is hoisted (see the DPL-01 Release Artifact Contract).",
+  );
+};
+
 const planReleaseEntries = async (sourceDir, gitSha) => {
   const [rootManifest, packageLock, workspaces] = await Promise.all([
     readJson(path.join(sourceDir, "package.json"), "Root package manifest"),
     readFile(path.join(sourceDir, "package-lock.json")),
     discoverWorkspaces(sourceDir),
   ]);
+  requireRootWebRuntime(packageLock);
   const apiPath = startWorkspacePath(rootManifest, "start:api");
   const webPath = startWorkspacePath(rootManifest, "start:web");
   const apiWorkspace = workspaces.byPath.get(apiPath);
@@ -589,6 +613,7 @@ export async function verifyReleaseArtifact({
   if (!packageLockEntry || sha256(packageLockEntry.body) !== manifest.packageLockHash) {
     throw new Error("Manifest packageLockHash does not match the archived package-lock.json.");
   }
+  requireRootWebRuntime(packageLockEntry.body);
   const webBuildIdEntry = archiveEntries.find((candidate) => candidate.path === `${WEB_BUILD_ROOT}/BUILD_ID`);
   if (!webBuildIdEntry || webBuildIdEntry.body.toString("utf8").trim() !== manifest.webBuildId) {
     throw new Error("Manifest webBuildId does not match the archived Next BUILD_ID.");

@@ -93,7 +93,10 @@ const createArtifactFixture = async (root) => {
       ".next/required-server-files.json",
     ],
   };
-  const packageLockBody = "{\n  \"lockfileVersion\": 3\n}\n";
+  const packageLockBody = JSON.stringify({
+    lockfileVersion: 3,
+    packages: { "node_modules/next": { version: "15.5.19" } },
+  }, null, 2) + "\n";
 
   const rootPackageJsonBody = JSON.stringify({
     name: "datafoundry",
