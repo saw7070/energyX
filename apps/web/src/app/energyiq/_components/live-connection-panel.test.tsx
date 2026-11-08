@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({ liveConnectionRequest: vi.fn(), getEnergyProjectMeterHealth: vi.fn() }));
 vi.mock("../../../lib/config-api", () => ({ configApi: api }));
-import { checkReasonKey, LiveConnectionPanel, liveErrorKey, suggestMatches, type LiveConnectionDto } from "./live-connection-panel";
+import { checkReasonKey, LiveConnectionPanel, liveDeviceRefFor, liveErrorKey, suggestMatches, type LiveConnectionDto } from "./live-connection-panel";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -354,5 +354,42 @@ describe("LiveConnectionPanel", () => {
     await act(async () => setValue(search, "tuya office"));
     expect([...container.querySelectorAll("ul label")].map((label) => label.textContent?.split(" · ")[0])).toEqual(["DB1 L1 Light"]);
     expect(button("Tick these 0").disabled).toBe(true);
+  });
+
+  it("works out the same device reference as the server, so device IDs never need to reach the browser", async () => {
+    // Pinned in energy-live-connection.test.ts too: liveDeviceRef("p", "bf0123456789abcdef01").
+    expect(await liveDeviceRefFor("p", "bf0123456789abcdef01")).toBe("bfc728e21e4b3949edf6d1a5");
+  });
+
+  it("finds pasted device IDs, names the ones Tuya does not have, and ticks only those", async () => {
+    const starterDevices = [
+      { ref: "bfc728e21e4b3949edf6d1a5", name: "264F GF Lobby Lighting", productName: "Smart meter", online: true },
+      { ref: "783f81cce4d31accda5f918c", name: "264E Emergency Light", productName: "Smart meter", online: true },
+      { ref: "d16608ac5f38a8ebf0e74d6b", name: "DB1 L1 Light", productName: "Smart meter", online: true },
+      { ref: "07e3da60e3217fcf6e651440", name: "Block 264 Hub", productName: "Zigbee Gateway", category: "wg2", online: true },
+    ];
+    api.liveConnectionRequest.mockImplementation(async (_projectId: string, action = "") => {
+      if (action === "devices") return { devices: starterDevices };
+      return { connection: connection({ publishedSetup: false, connected: true, accountHint: "ab12", meters: [] }) };
+    });
+    await act(async () => root.render(<LiveConnectionPanel projectId="p" />));
+    await flush();
+    expect(button("Create 3 meters")).toBeTruthy();
+    const search = container.querySelector("input[type='search']") as HTMLInputElement;
+
+    await act(async () => setValue(search, "bf0123456789abcdef01 bf0123456789abcdef02, bf0123456789abcdef04 bf0123456789abcdef99"));
+    await flush();
+    expect([...container.querySelectorAll("ul label")].map((label) => label.textContent?.split(" · ")[0]))
+      .toEqual(["264F GF Lobby Lighting", "264E Emergency Light"]);
+    expect(container.textContent).toContain("Found 3 of 4 device IDs");
+    expect(container.textContent).toContain("Not in this Tuya account: bf0123456789abcdef99");
+    expect(container.textContent).toContain("Gateways, not meters: bf0123456789abcdef04");
+    expect(container.textContent).not.toContain("bf0123456789abcdef01,");
+
+    await act(async () => { button("Tick only these 2").click(); });
+    await act(async () => setValue(search, ""));
+    expect(button("Create 2 meters")).toBeTruthy();
+    const office = [...container.querySelectorAll("ul label")].find((label) => label.textContent?.includes("DB1 L1 Light"))!;
+    expect((office.querySelector("input") as HTMLInputElement).checked).toBe(false);
   });
 });
