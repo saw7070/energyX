@@ -164,36 +164,36 @@ export const createEnergyAlertEmailer = (input: {
   let running: Promise<void> | undefined;
   const runOnce = (): Promise<void> => {
     running ??= (async () => {
-      try {
-        if (!send) return;
-        job.heartbeat();
-        for (const projectId of alertProjectIds(input.metadataStore, env)) {
-          try {
-            const emails = collectSiteAlertEmails({
-              metadataStore: input.metadataStore,
-              projectId,
-              meters: await readMeters(projectId),
-              offline: readLiveSiteReadings({ metadataStore: input.metadataStore, projectId }).offline,
-              publicBaseUrl: config.publicBaseUrl,
-            });
-            const sent = await sendPendingAlertEmails({
-              metadataStore: input.metadataStore,
-              projectId,
-              emails,
-              recipients: alertRecipients(input.metadataStore, projectId),
-              send,
-            });
-            for (const key of sent) log.info("sent", { project_id: projectId, alert: key.split(":")[0] });
-            job.succeeded(projectId);
-          } catch (error) {
-            log.error("failed", { project_id: projectId, code: error instanceof Error ? error.message.slice(0, 160) : "unknown" });
-            job.failed(error, projectId);
-          }
+      if (!send) return;
+      job.heartbeat();
+      for (const projectId of alertProjectIds(input.metadataStore, env)) {
+        try {
+          const emails = collectSiteAlertEmails({
+            metadataStore: input.metadataStore,
+            projectId,
+            meters: await readMeters(projectId),
+            offline: readLiveSiteReadings({ metadataStore: input.metadataStore, projectId }).offline,
+            publicBaseUrl: config.publicBaseUrl,
+          });
+          const sent = await sendPendingAlertEmails({
+            metadataStore: input.metadataStore,
+            projectId,
+            emails,
+            recipients: alertRecipients(input.metadataStore, projectId),
+            send,
+          });
+          for (const key of sent) log.info("sent", { project_id: projectId, alert: key.split(":")[0] });
+          job.succeeded(projectId);
+        } catch (error) {
+          log.error("failed", { project_id: projectId, code: error instanceof Error ? error.message.slice(0, 160) : "unknown" });
+          job.failed(error, projectId);
         }
-      } finally {
-        running = undefined;
       }
-    })();
+    })().finally(() => {
+      // Cleared here, not inside the pass: a pass with nothing to await finishes before `running` is
+      // assigned, so clearing it inside would leave the finished pass in place and skip every later run.
+      running = undefined;
+    });
     return running;
   };
   return {
