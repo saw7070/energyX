@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { createServer as createApiServer } from "../apps/api/dist/server.js";
 import { AuthService } from "../apps/api/dist/auth/service.js";
+import { MIN_PASSWORD_LENGTH } from "../apps/api/dist/auth/password-policy.js";
 import { createMetadataStore } from "../packages/metadata/dist/index.js";
 
 const root = mkdtempSync(join(tmpdir(), "datafoundry-auth-smoke-"));
@@ -106,7 +107,7 @@ try {
   });
   assert.equal(tooShort.response.status, 400, JSON.stringify(tooShort.body));
   assert.equal(tooShort.body.error.code, "BAD_REQUEST");
-  assert.match(tooShort.body.error.message, /at least 8 characters/i);
+  assert.match(tooShort.body.error.message, new RegExp(`at least ${MIN_PASSWORD_LENGTH} characters`, "i"));
 
   const activated = await requestJson("/api/v1/auth/activate", {
     method: "POST",
@@ -141,6 +142,7 @@ try {
   });
   assert.equal(missingCsrf.response.status, 403);
   assert.equal(missingCsrf.body.error.code, "FORBIDDEN");
+  assert.match(missingCsrf.body.error.message, /CSRF token is required/i);
 
   const csrf = csrfCookie();
   assert(csrf, "Expected login to set a readable CSRF cookie");
@@ -154,21 +156,41 @@ try {
       settings: { filePath: join(root, "alice.sqlite") }
     })
   });
-  assert.equal(aliceDatasource.response.status, 201, JSON.stringify(aliceDatasource.body));
+  // With the token the request passes the CSRF check and reaches authorization: data sources can point the server
+  // at local files, so only a platform super admin may create one.
+  assert.equal(aliceDatasource.response.status, 403, JSON.stringify(aliceDatasource.body));
+  assert.match(aliceDatasource.body.error.message, /only a platform administrator/i);
 
-  const forgot = await requestJson("/api/v1/auth/password/forgot", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: "alice@example.com" })
-  });
+  // The reset link is never handed back to whoever asked (anyone can type someone else's address). In email test
+  // mode it goes to the server log, so read it from there.
+  const logged = [];
+  const originalLog = console.log;
+  console.log = (...args) => {
+    logged.push(args.join(" "));
+    originalLog(...args);
+  };
+  let forgot;
+  try {
+    forgot = await requestJson("/api/v1/auth/password/forgot", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "alice@example.com" })
+    });
+  } finally {
+    console.log = originalLog;
+  }
   assert.equal(forgot.response.status, 200);
-  assert.equal(typeof forgot.body.data.resetToken, "string");
+  assert.equal("resetToken" in forgot.body.data, false);
+  const resetLine = logged.find((line) => line.includes("password-reset link (email test mode)"));
+  assert(resetLine, "Expected email test mode to log the password-reset link");
+  const resetToken = new URL(resetLine.slice(resetLine.lastIndexOf(" ") + 1)).searchParams.get("reset");
+  assert(resetToken, "Expected the logged password-reset link to carry a token");
 
   const reset = await requestJson("/api/v1/auth/password/reset", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      token: forgot.body.data.resetToken,
+      token: resetToken,
       password: "new correct horse battery staple"
     })
   });

@@ -140,9 +140,9 @@ describe("buildPreschoolPlanningLifecycle", () => {
           { start: "2026-05-25", endInclusive: "2026-05-31", usageKwh: 896 },
         ],
         usageEstimate: { projectedKwh: 3525 },
-        costEstimate: { currentPeriodBeforeGstSgd: 897.183 },
+        // Cost now needs a release-pinned tariff; a plan recovered from May weeks keeps energy and withholds cost.
         limitations: expect.arrayContaining([
-          expect.stringContaining("May 4-31 source window"),
+          expect.stringContaining("No release-pinned tariff covers the target period"),
         ]),
       },
       actual: {
@@ -729,17 +729,37 @@ const juneTargetPeriod = () => ({
   targetDayCount: 30,
 });
 
+const SAVED_PLAN_TARIFF = {
+  sourceName: "SP Group",
+  sourceUrl: "https://www.spgroup.com.sg/our-services/utilities/tariff-information",
+  appendixUrl: "https://www.spgroup.com.sg/our-services/utilities/tariff-information",
+  supplyClass: "Low tension, non-domestic",
+  appliesFrom: "2026-04-01",
+  appliesTo: "2026-06-30",
+  beforeGstSgdPerKwh: 0.2727,
+  withGstSgdPerKwh: 0.2972,
+} as const;
+
 const savedAnalysisForJuly = (input: { omitTariff?: boolean } = {}): EnergyIqSavedAnalysisRecord => {
   const record = savedAnalysis({ operationalVersion: "3" });
   const snapshot = JSON.parse(record.snapshot_json!) as Record<string, unknown>;
   const analysis = mayAnalysis(1);
   const planningOutlook = recoverPreschoolPlanningOutlookFromCompleteWeeks(analysis);
   if (planningOutlook.status !== "provisional") throw new Error("Expected recoverable May plan");
-  if (!planningOutlook.tariffReference || !planningOutlook.costEstimate) {
-    throw new Error("Expected recoverable May tariff and cost plan");
-  }
+  // Recovery no longer invents a tariff, but plans saved while the SP Group reference applied still carry one and
+  // a cost estimate, and the lifecycle reads them. The fixture stands in for such a saved plan.
   const projectedKwh = planningOutlook.weeklyBaseline.averageKwh * (31 / 7);
-  const rate = planningOutlook.tariffReference.beforeGstSgdPerKwh;
+  const rate = SAVED_PLAN_TARIFF.beforeGstSgdPerKwh;
+  Reflect.set(planningOutlook, "tariffReference", { ...SAVED_PLAN_TARIFF });
+  Reflect.set(planningOutlook, "costEstimate", {
+    currency: "SGD",
+    currentPeriodBeforeGstSgd: planningOutlook.usageEstimate.projectedKwh * rate,
+    projectedBeforeGstSgd: projectedKwh * rate,
+    lowerBeforeGstSgd: planningOutlook.weeklyBaseline.minimumKwh * (31 / 7) * rate,
+    upperBeforeGstSgd: planningOutlook.weeklyBaseline.maximumKwh * (31 / 7) * rate,
+  });
+  Reflect.set(planningOutlook, "limitations", planningOutlook.limitations
+    .filter((limitation) => !limitation.startsWith("No release-pinned tariff")));
   Reflect.set(planningOutlook, "targetPeriod", {
     start: "2026-07-01",
     endInclusive: "2026-07-31",
@@ -748,7 +768,6 @@ const savedAnalysisForJuly = (input: { omitTariff?: boolean } = {}): EnergyIqSav
     days: 31,
   });
   Reflect.set(planningOutlook.usageEstimate, "projectedKwh", projectedKwh);
-  Reflect.set(planningOutlook.costEstimate, "projectedBeforeGstSgd", projectedKwh * rate);
   Reflect.deleteProperty(planningOutlook, "estimateSeries");
   if (input.omitTariff) Reflect.deleteProperty(planningOutlook, "tariffReference");
   Reflect.set(snapshot, "preschoolOperational", {

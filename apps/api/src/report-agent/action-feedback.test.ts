@@ -92,6 +92,26 @@ beforeEach(() => {
     status: "published",
     timezone: "Asia/Singapore",
   });
+  // A report run refuses meters without confirmed, descriptive names, read from the published hierarchy revision
+  // the action evidence was frozen against ("h"). Publish one that names the LED meter.
+  metadata.db.prepare(`
+    INSERT INTO energyiq_hierarchy_revisions (
+      id, project_id, sequence, snapshot_json, validation_json, published_by, published_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    "h",
+    "p",
+    1,
+    JSON.stringify({
+      meter_mapping: {
+        confirmed: true,
+        rows: [{ id: "led", display_name: "LED display panels", resource: "electricity", scope_id: "p" }],
+      },
+    }),
+    JSON.stringify({ blocking: false, issues: [] }),
+    "admin",
+    "2026-08-01T00:00:00.000Z",
+  );
   reports = new ReportStore(metadata.db);
   actions = new ActionStore(metadata.db);
   const settings: ReportSettings = {
