@@ -589,6 +589,15 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
   </div>;
 }
 
+/** One figure in the Start from Tuya status box. */
+function StarterStat({ label, value, detail, warn = false }: { label: string; value: string; detail?: string; warn?: boolean }) {
+  return <div className="min-w-0">
+    <dt className="text-xs text-muted">{label}</dt>
+    <dd className="mt-0.5 text-lg font-extrabold tabular-nums">{value}</dd>
+    {detail ? <dd className={`text-xs ${warn ? "font-semibold text-amber-800" : "text-muted"}`}>{detail}</dd> : null}
+  </div>;
+}
+
 const isGateway = (device: LiveDeviceDto): boolean =>
   device.category === "wg2" || device.category === "wg" || /gateway|网关/iu.test(device.productName ?? "");
 
@@ -621,17 +630,32 @@ function StartFromTuya({ projectId, connection, onConnection, onDone, t }: {
   const [mode, setMode] = useState<"pick" | "list">("pick");
   const [listText, setListText] = useState("");
   const [checked, setChecked] = useState<LiveDeviceListRowDto[] | null>(null);
+  const [listFailed, setListFailed] = useState(false);
+  const [query, setQuery] = useState("");
+  /** Ticks to keep across a refresh; null ticks every meter device, as on the first load. */
+  const keepChosen = useRef<Set<string> | null>(null);
 
   const loadDevices = useCallback(async () => {
     try {
       const { devices: next } = await configApi.liveConnectionRequest<{ devices: LiveDeviceDto[] }>(projectId, "devices");
+      const meterRefs = next.filter((device) => !isGateway(device)).map((device) => device.ref);
+      const kept = keepChosen.current;
       setDevices(next);
-      setChosen(new Set(next.filter((device) => !isGateway(device)).map((device) => device.ref)));
+      setListFailed(false);
+      setChosen(new Set(kept ? meterRefs.filter((ref) => kept.has(ref)) : meterRefs));
     } catch (reason) {
       setDevices([]);
+      setListFailed(true);
       setError(t(liveErrorKey(messageOf(reason))));
+    } finally {
+      keepChosen.current = null;
     }
   }, [projectId, t]);
+  const refreshDevices = () => {
+    keepChosen.current = new Set(chosen);
+    setError(null);
+    setDevices(null);
+  };
   useEffect(() => {
     if (connection.connected && devices === null) void loadDevices();
   }, [connection.connected, devices, loadDevices]);
@@ -755,6 +779,23 @@ function StartFromTuya({ projectId, connection, onConnection, onDone, t }: {
 
   const busy = step !== null;
   const selectable = (devices ?? []).filter((device) => !isGateway(device));
+  const gateways = (devices ?? []).filter(isGateway);
+  const offlineMeters = selectable.filter((device) => !device.online).length;
+  const offlineGateways = gateways.filter((device) => !device.online);
+  // Every word must appear in the device's name, type or online state, so "264e lobby" or "offline" narrow the list.
+  const words = query.trim().toLowerCase().split(/\s+/u).filter(Boolean);
+  const shown = words.length === 0 ? selectable : selectable.filter((device) => {
+    const haystack = `${device.name} ${device.productName ?? ""} ${t(device.online ? "online" : "offline")}`.toLowerCase();
+    return words.every((word) => haystack.includes(word));
+  });
+  const setTicks = (refs: string[], ticked: boolean) => setChosen((current) => {
+    const next = new Set(current);
+    for (const ref of refs) if (ticked) next.add(ref); else next.delete(ref);
+    return next;
+  });
+  const onlineDetail = (total: number, offline: number) => total === 0
+    ? t("startStatus.none")
+    : offline === 0 ? t("startStatus.allOnline") : t("startStatus.split", { online: total - offline, offline });
   const toggle = (ref: string) => setChosen((current) => {
     const next = new Set(current);
     if (next.has(ref)) next.delete(ref); else next.add(ref);
@@ -783,6 +824,26 @@ function StartFromTuya({ projectId, connection, onConnection, onDone, t }: {
       </details>
       <button type="submit" className={primaryButton} disabled={busy || !accessId.trim() || !accessSecret.trim()}>{step === "connect" ? t("connecting") : t("connect")}</button>
     </form> : <div className="mt-4 space-y-3">
+      <section aria-label={t("startStatus.devices")} className="rounded-xl border border-border bg-surface-subtle px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="flex items-center gap-2 text-sm font-semibold">
+            <span aria-hidden="true" className={`h-2 w-2 rounded-full ${listFailed ? "bg-rose-600" : devices === null ? "bg-muted" : "bg-emerald-600"}`} />
+            {t("connectedAs", { hint: connection.accountHint ?? "" })}
+          </p>
+          <button type="button" className={secondaryButton} disabled={busy || devices === null} onClick={refreshDevices}>
+            {devices === null ? t("startRefreshing") : t("startRefresh")}
+          </button>
+        </div>
+        {listFailed ? <p className="mt-2 text-xs text-rose-900">{t("startStatus.listFailed")}</p> : devices && devices.length > 0 ? <>
+          <dl className={`mt-3 grid grid-cols-2 gap-3 ${mode === "pick" ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
+            <StarterStat label={t("startStatus.devices")} value={String(devices.length)} />
+            <StarterStat label={t("startStatus.meters")} value={String(selectable.length)} detail={onlineDetail(selectable.length, offlineMeters)} warn={offlineMeters > 0} />
+            <StarterStat label={t("startStatus.gateways")} value={String(gateways.length)} detail={onlineDetail(gateways.length, offlineGateways.length)} warn={offlineGateways.length > 0} />
+            {mode === "pick" ? <StarterStat label={t("startStatus.ticked")} value={String(chosen.size)} detail={t("startStatus.of", { total: selectable.length })} /> : null}
+          </dl>
+          {offlineGateways.length > 0 ? <p className="mt-2 text-xs text-amber-900">{t("gatewaysOffline", { offline: offlineGateways.length, total: gateways.length, names: offlineGateways.map((device) => device.name).join(", ") })}</p> : null}
+        </> : null}
+      </section>
       <div role="group" aria-label={t("startTitle")} className="inline-flex rounded-[10px] border border-border bg-surface-subtle p-1">
         {(["pick", "list"] as const).map((option) => <button key={option} type="button" aria-pressed={mode === option} disabled={busy}
           onClick={() => { setMode(option); setError(null); }}
@@ -795,17 +856,28 @@ function StartFromTuya({ projectId, connection, onConnection, onDone, t }: {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-semibold">{t("startPick")}</p>
         {selectable.length > 0 ? <span className="flex gap-2">
-          <button type="button" className={secondaryButton} disabled={busy} onClick={() => setChosen(new Set(selectable.map((device) => device.ref)))}>{t("startAll")}</button>
-          <button type="button" className={secondaryButton} disabled={busy} onClick={() => setChosen(new Set())}>{t("startClear")}</button>
+          <button type="button" className={secondaryButton} disabled={busy || shown.length === 0} onClick={() => setTicks(shown.map((device) => device.ref), true)}>
+            {words.length > 0 ? t("startTickShown", { count: shown.length }) : t("startAll")}
+          </button>
+          <button type="button" className={secondaryButton} disabled={busy || shown.length === 0} onClick={() => setTicks(shown.map((device) => device.ref), false)}>
+            {words.length > 0 ? t("startUntickShown", { count: shown.length }) : t("startClear")}
+          </button>
         </span> : null}
       </div>
       <p className="text-xs leading-5 text-muted">{t("startPickHint")}</p>
+      {selectable.length > 0 ? <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} aria-label={t("startSearch")}
+          placeholder={t("startSearchPlaceholder")} autoComplete="off" spellCheck={false} className={`${inputClass} mt-0 min-w-0 flex-1 basis-64`} />
+        {words.length > 0 ? <span role="status" className="text-xs text-muted">{t("startShowing", { shown: shown.length, total: selectable.length })}</span> : null}
+      </div> : null}
       {devices === null
         ? <p role="status" className="text-sm text-muted">{t("loadingDevices")}</p>
         : selectable.length === 0
           ? <p className="text-sm text-muted">{t("startNone")}</p>
-          : <ul className="max-h-80 divide-y divide-border overflow-y-auto rounded-xl border border-border">
-            {selectable.map((device) => <li key={device.ref}>
+          : shown.length === 0
+            ? <p className="rounded-xl border border-border px-4 py-3 text-sm text-muted">{t("startSearchNone", { query: query.trim() })}</p>
+            : <ul className="max-h-80 divide-y divide-border overflow-y-auto rounded-xl border border-border">
+            {shown.map((device) => <li key={device.ref}>
               <label className="flex cursor-pointer items-center gap-3 px-4 py-2.5 text-sm">
                 <input type="checkbox" checked={chosen.has(device.ref)} disabled={busy} onChange={() => toggle(device.ref)} className="h-4 w-4 accent-[var(--color-primary,#0f6b4b)]" />
                 <span className="flex-1">{device.name}{device.productName ? <span className="text-muted"> · {device.productName}</span> : null}</span>

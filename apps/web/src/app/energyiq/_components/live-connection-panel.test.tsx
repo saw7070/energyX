@@ -245,4 +245,80 @@ describe("LiveConnectionPanel", () => {
     expect(button("Let support manage it")).toBeTruthy();
     expect([...container.querySelectorAll("tbody tr")][0]!.textContent).toContain("Edit");
   });
+
+  it("shows the Tuya connection and device counts before starting a new site, and keeps ticks on refresh", async () => {
+    const starterDevices = [
+      { ref: "ref-light", name: "264E Lobby Lighting", productName: "Smart Single Phase Zigbee Power Meter", online: true },
+      { ref: "ref-lamp", name: "264E Rubbish Street Lamp", productName: "Smart Single Phase Zigbee Power Meter", online: true },
+      { ref: "ref-pump", name: "264E Pump", productName: "Smart Single Phase Zigbee Power Meter", online: false },
+      { ref: "ref-hub", name: "Block 264 Hub", productName: "Zigbee Gateway", category: "wg2", online: false },
+    ];
+    let listCalls = 0;
+    api.liveConnectionRequest.mockImplementation(async (_projectId: string, action = "") => {
+      if (action === "devices") {
+        listCalls += 1;
+        return { devices: starterDevices };
+      }
+      return { connection: connection({ publishedSetup: false, connected: true, accountHint: "ab12", meters: [] }) };
+    });
+    await act(async () => root.render(<LiveConnectionPanel projectId="p" />));
+    await flush();
+
+    const status = container.querySelector("section[aria-label='Devices in Tuya']") as HTMLElement;
+    expect(status.textContent).toContain("Connected · Access ID ab12");
+    const figures = [...status.querySelectorAll("dl > div")].map((tile) => tile.textContent);
+    expect(figures).toEqual([
+      "Devices in Tuya4",
+      "Can be meters32 online · 1 offline",
+      "Gateways10 online · 1 offline",
+      "Ticked3of 3",
+    ]);
+    expect(status.textContent).toContain("1 of 1 gateways are offline: Block 264 Hub");
+    expect(button("Create 3 meters")).toBeTruthy();
+
+    const pump = [...container.querySelectorAll("label")].find((label) => label.textContent?.includes("264E Pump"))!;
+    await act(async () => { (pump.querySelector("input") as HTMLInputElement).click(); });
+    await act(async () => { button("Refresh list").click(); });
+    await flush();
+    expect(listCalls).toBe(2);
+    expect([...status.querySelectorAll("dl > div")][3]!.textContent).toBe("Ticked2of 3");
+    expect(button("Create 2 meters")).toBeTruthy();
+  });
+
+  it("searches the Tuya device list and ticks or unticks only the devices shown", async () => {
+    const starterDevices = [
+      { ref: "ref-lobby", name: "264E GF Lobby Lighting", productName: "Smart Single Phase Zigbee Power Meter", online: true },
+      { ref: "ref-lamp", name: "264E Rubbish Street Lamp", productName: "Smart Single Phase Zigbee Power Meter", online: true },
+      { ref: "ref-play", name: "264B Playground Lightx4", productName: "SPM02_ZB", online: false },
+    ];
+    api.liveConnectionRequest.mockImplementation(async (_projectId: string, action = "") => {
+      if (action === "devices") return { devices: starterDevices };
+      return { connection: connection({ publishedSetup: false, connected: true, accountHint: "ab12", meters: [] }) };
+    });
+    await act(async () => root.render(<LiveConnectionPanel projectId="p" />));
+    await flush();
+    const search = container.querySelector("input[type='search']") as HTMLInputElement;
+    const listed = () => [...container.querySelectorAll("ul label")].map((label) => label.textContent?.split(" · ")[0]);
+
+    await act(async () => setValue(search, "264e"));
+    expect(listed()).toEqual(["264E GF Lobby Lighting", "264E Rubbish Street Lamp"]);
+    expect(container.textContent).toContain("Showing 2 of 3");
+    await act(async () => setValue(search, "street LAMP"));
+    expect(listed()).toEqual(["264E Rubbish Street Lamp"]);
+    await act(async () => { button("Untick these 1").click(); });
+    expect(button("Create 2 meters")).toBeTruthy();
+
+    await act(async () => setValue(search, "offline"));
+    expect(listed()).toEqual(["264B Playground Lightx4"]);
+    await act(async () => setValue(search, "boiler"));
+    expect(container.textContent).toContain("No devices match “boiler”.");
+    expect(button("Tick these 0").disabled).toBe(true);
+
+    await act(async () => setValue(search, ""));
+    expect(listed()).toHaveLength(3);
+    expect(button("Select all")).toBeTruthy();
+    const lamp = [...container.querySelectorAll("ul label")].find((label) => label.textContent?.includes("Street Lamp"))!;
+    expect((lamp.querySelector("input") as HTMLInputElement).checked).toBe(false);
+    expect(button("Create 2 meters")).toBeTruthy();
+  });
 });
