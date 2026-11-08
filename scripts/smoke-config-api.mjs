@@ -137,6 +137,9 @@ metadataStore.users.upsertDevUser({
   display_name: "Tenant User",
   dev_token: "tenant-token"
 });
+// Only a platform super admin may create or change configuration resources, so the tenant that exercises
+// workspace isolation below is one. The non-admin refusal is checked with analyst-user.
+metadataStore.energyIq.upsertUserRole({ user_id: "tenant-user", role: "admin" });
 metadataStore.workspaces.upsert({
   id: "tenant-workspace",
   owner_user_id: "tenant-user",
@@ -260,6 +263,13 @@ try {
   assert.equal(analystMe.response.status, 200, JSON.stringify(analystMe.body));
   assert.equal(analystMe.body.data.user.id, "analyst-user");
   assert.equal(analystMe.body.data.workspace.id, "default");
+  const analystDatasource = await requestJson("/api/v1/datasources", {
+    method: "POST",
+    headers: { "Authorization": "Bearer dev-token-analyst-user", "Content-Type": "application/json" },
+    body: JSON.stringify({ id: "analyst-sqlite", name: "Analyst SQLite", type: "sqlite", settings: { filePath: datasourcePath } })
+  });
+  assert.equal(analystDatasource.response.status, 403, JSON.stringify(analystDatasource.body));
+  assert.match(analystDatasource.body.error.message, /only a platform administrator/i);
 
   const tenantHeaders = {
     "Authorization": "Bearer tenant-token",
@@ -292,10 +302,12 @@ try {
   assert.equal(tenantKnowledge.response.status, 201);
   const devTenantKnowledge = await requestJson("/api/v1/knowledge-bases/tenant-docs");
   assert.equal(devTenantKnowledge.response.status, 404);
+  // A signed-in user who is not a member of the requested workspace is refused. tenant-user is a platform admin
+  // here (see above), so the non-member is analyst-user, a member of "default" only.
   const tenantOtherWorkspaceKnowledge = await requestJson("/api/v1/knowledge-bases/tenant-docs", {
     headers: {
-      "Authorization": "Bearer tenant-token",
-      "X-Workspace-Id": "other-workspace"
+      "Authorization": "Bearer dev-token-analyst-user",
+      "X-Workspace-Id": "tenant-workspace"
     }
   });
   assert.equal(tenantOtherWorkspaceKnowledge.response.status, 403);
