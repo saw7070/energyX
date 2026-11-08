@@ -1485,7 +1485,8 @@ export const handleEnergyApiRequest = async (
         const { batch } = await createReadingsImportBatch(context, project, user, {
           filename: starter.filename,
           content: starter.content,
-          mimeType: "text/csv",
+          mimeType: "application/json",
+          kind: "tuya",
         });
         return respond({ batch: toEnergyImportBatchDto(batch), devices: starter.devices }, 201);
       }
@@ -5792,7 +5793,8 @@ const createReadingsImportBatch = async (
   context: Required<ConfigApiContext>,
   project: { workspace_id: string; id: string },
   user: { id: string },
-  file: { filename: string; content: Buffer; mimeType: string },
+  /** `tuya`: Tuya's own report logs (Start from Tuya), materialized like the daily update's imports. */
+  file: { filename: string; content: Buffer; mimeType: string; kind?: "excel" | "tuya" },
 ) => {
   const sourceSha256 = createHash("sha256").update(file.content).digest("hex");
   const existing = context.metadataStore.energyIq.findImportBatchBySha({
@@ -5800,21 +5802,22 @@ const createReadingsImportBatch = async (
     source_sha256: sourceSha256,
   });
   if (existing) return { batch: existing, duplicate: true };
-  const inspection = await inspectEnergyExcelWorkbook(file.content);
+  const tuya = file.kind === "tuya";
+  const inspection = tuya ? inspectEnergyTuyaArtifact(file.content) : await inspectEnergyExcelWorkbook(file.content);
   const fileRef = context.fileAssetService.createRef({
     user_id: user.id,
     workspace_id: project.workspace_id,
     filename: file.filename,
     content: file.content,
     declared_mime_type: file.mimeType,
-    source: "upload",
-    metadata: { purpose: "energyiq_import", projectId: project.id },
+    source: tuya ? "artifact" : "upload",
+    metadata: { purpose: "energyiq_import", projectId: project.id, ...(tuya ? { provider: "tuya" } : {}) },
   });
   const batch = context.metadataStore.energyIq.createImportBatch({
     id: `energy-import-${randomUUID()}`,
     workspace_id: project.workspace_id,
     project_id: project.id,
-    source_kind: "excel",
+    source_kind: tuya ? "tuya" : "excel",
     source_sha256: sourceSha256,
     filename: file.filename,
     file_asset_ref_id: fileRef.ref.id,

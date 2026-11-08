@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { ensureEnergyIqBootstrap } from "./energy-bootstrap.js";
-import { inspectEnergyExcelWorkbook, readEnergyExcelWorkbook } from "./energy-excel-import.js";
+import { inspectEnergyTuyaArtifact } from "./energy-tuya-import.js";
 import {
   buildLiveConnectionStarter,
   liveDeviceRef,
@@ -36,7 +36,7 @@ const DEVICES: TuyaDeviceSummary[] = [
 ];
 
 describe("Start a site from Tuya", () => {
-  it("turns the chosen devices' recent readings into a readings file with one unique meter label per device", async () => {
+  it("keeps the chosen devices' recent readings as Tuya report logs with one unique meter label per device", async () => {
     await withStarter(async ({ deps, syncs }) => {
       const refs = ["aircon0001device", "lights0002device", "pantry0004device"].map((id) => liveDeviceRef(PROJECT_ID, id));
       const starter = await buildLiveConnectionStarter(deps, { projectId: PROJECT_ID, deviceRefs: refs });
@@ -52,14 +52,12 @@ describe("Start a site from Tuya", () => {
       // Device ids never leave the server.
       expect(JSON.stringify(starter.devices)).not.toContain("aircon0001device");
 
-      const text = starter.content.toString("utf8");
-      expect(text.split("\r\n")[0]).toBe("Device Name,Time,Active Energy");
-      // Times are the site's wall clock (Singapore), names with commas are quoted.
-      expect(text).toContain("\"Pantry, kitchen\",2026-11-05 08:00:00,");
-      const workbook = await readEnergyExcelWorkbook(starter.content);
-      expect(workbook.inspection).toMatchObject({ readingKind: "cumulative", validRowCount: 9, invalidRowCount: 0 });
-      expect(workbook.inspection.sourceLabels.map((label) => label.label).sort()).toEqual(["Meter", "Meter (2)", "Pantry, kitchen"]);
-      expect((await inspectEnergyExcelWorkbook(starter.content)).typicalIntervalMinutes).toBe(60);
+      // Tuya's own report logs, imported like the daily update's, so uneven Tuya timing is resampled, not rejected.
+      expect(starter.filename).toMatch(/^tuya-start-\d{4}-\d{2}-\d{2}\.json$/u);
+      expect(JSON.parse(starter.content.toString("utf8"))).toMatchObject({ schemaVersion: TUYA_REPORT_LOG_ARTIFACT_VERSION, provider: "tuya" });
+      const inspection = inspectEnergyTuyaArtifact(starter.content);
+      expect(inspection).toMatchObject({ readingKind: "cumulative", validRowCount: 9, invalidRowCount: 0 });
+      expect(inspection.sourceLabels.map((label) => label.label).sort()).toEqual(["Meter", "Meter (2)", "Pantry, kitchen"]);
     });
   });
 
@@ -89,7 +87,8 @@ describe("Start a site from Tuya", () => {
       });
       expect(syncs[0]!.devices.map((device) => device.sourceLabel)).toEqual(["264E Lighting L1", "264E Lighting L1 (2)", "Pantry"]);
       expect(starter.devices.map((device) => device.sourceLabel)).toEqual(["264E Lighting L1", "264E Lighting L1 (2)", "Pantry"]);
-      expect(starter.content.toString("utf8")).toContain("264E Lighting L1 (2),2026-11-05 08:00:00,");
+      expect(inspectEnergyTuyaArtifact(starter.content).sourceLabels.map((label) => label.label).sort())
+        .toEqual(["264E Lighting L1", "264E Lighting L1 (2)", "Pantry"]);
 
       for (const labels of [["Only one"], [1, 2, 3], ["A", "", "C"], "A,B,C", ["A", "B", "x".repeat(121)]]) {
         await expect(buildLiveConnectionStarter(deps, { projectId: PROJECT_ID, deviceRefs: refs, labels }))

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import type { IncomingMessage } from "node:http";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { parseSiteReportSnapshot, type AnalysisData, type ScopeData, type ScopeMeter, type TrendSeries } from "@datafoundry/site-report";
 import type { ConfigApiContext } from "../routes/types.js";
 import { handleReportLibraryApi } from "./report-library-api.js";
@@ -14,7 +14,11 @@ import { publishSiteReport, siteReportScheduleKey } from "./site-report-generati
 import type { loadSiteReportData } from "./site-report-data.js";
 
 const cleanup: Array<() => void> = [];
-afterEach(() => { vi.restoreAllMocks(); for (const close of cleanup.splice(0)) close(); });
+// start() and a bare tick() schedule on the clock. Weekly reports fall due on Mondays after 03:00 Singapore time, so on
+// a real Monday morning they queued an extra report. Every test here runs on Sunday 16 August 2026 instead; only the
+// date is frozen, so timers still run.
+beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-08-16T01:00:00Z")); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); for (const close of cleanup.splice(0)) close(); });
 
 // Two weeks from Monday 3 August 2026, open Monday to Friday, mirroring the office fixture the page is checked with.
 const DATES = Array.from({ length: 14 }, (_, index) => new Date(Date.parse("2026-08-03T00:00:00Z") + index * 86_400_000).toISOString().slice(0, 10));
