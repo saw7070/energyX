@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ConfigApiContext } from "../routes/types.js";
 import { ensureEnergyIqBootstrap } from "./energy-bootstrap.js";
 import { handleEnergyApiRequest } from "./energy-api.js";
-import { listLiveConnectionDevices } from "./energy-live-connection.js";
+import { listLiveConnectionDevices, liveDeviceRef } from "./energy-live-connection.js";
 import { deleteEnergyProject } from "./energy-project-lifecycle.js";
 import { resolveEnergyTuyaProjectConnector } from "./energy-tuya-connector.js";
 import type { TuyaCredentials, TuyaDeviceSummary, TuyaOpenApiClient } from "./tuya-openapi-client.js";
@@ -227,6 +227,11 @@ describe("Live connection", () => {
         }
       }
     });
+  });
+
+  it("keeps the device reference recipe the browser repeats to find pasted device IDs", () => {
+    // Pinned in live-connection-panel.test.tsx too (liveDeviceRefFor); change both together.
+    expect(liveDeviceRef("p", "bf0123456789abcdef01")).toBe("bfc728e21e4b3949edf6d1a5");
   });
 
   it("marks devices another site already reads, naming the site only within the same client", async () => {

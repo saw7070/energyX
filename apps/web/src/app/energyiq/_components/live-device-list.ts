@@ -17,10 +17,10 @@ export const DEVICE_LIST_MAX_ROWS = 200;
 type Column = "name" | "deviceId" | "area" | "equipment";
 
 const HEADERS: Array<[Column, RegExp]> = [
-  ["deviceId", /^(?:(?:tuya\s*)?(?:device|meter)?\s*id|virtual\s*id|设备\s*id|id\s*peranti)$/iu],
+  ["deviceId", /^(?:(?:tuya\s*)?(?:meter\s*)?(?:device\s*)?id|virtual\s*id|设备\s*id|id\s*peranti)$/iu],
   ["name", /^(?:(?:device|meter)?\s*name|meter|device|label|设备名称|名称|电表|nama(?:\s*(?:peranti|meter))?)$/iu],
-  ["area", /^(?:block|blk|area|location|zone|floor|level|楼栋|区域|位置|楼层|blok|kawasan|lokasi|tingkat)$/iu],
-  ["equipment", /^(?:what\s*it\s*powers|equipment|description|load|items?|用途|负载|说明|peralatan|keterangan)$/iu],
+  ["area", /^(?:(?:block|blk|area|location|zone|floor|level)(?:\s*(?:number|no\.?|#))?|楼栋|区域|位置|楼层|blok|kawasan|lokasi|tingkat)$/iu],
+  ["equipment", /^(?:what\s*it\s*(?:powers|measures|tracks)|(?:meter\s*)?tracking\s*location|equipment|description|load|items?|用途|负载|说明|peralatan|keterangan)$/iu],
 ];
 
 /** What a Tuya device ID looks like: letters and digits, with at least one digit (names rarely qualify). */
@@ -30,6 +30,8 @@ export function parseLiveDeviceList(text: string): LiveDeviceListEntry[] {
   const lines = text.replace(/^\uFEFF/u, "").split(/\r?\n/u);
   const entries: LiveDeviceListEntry[] = [];
   let columns: Partial<Record<Column, number>> | undefined;
+  // A sheet that names each block once, on its own row above that block's meters.
+  let blockHeading: string | undefined;
   for (const [index, line] of lines.entries()) {
     if (!line.trim()) continue;
     const cells = splitLine(line).map((cell) => cell.replace(/\s+/gu, " ").trim());
@@ -38,11 +40,37 @@ export function parseLiveDeviceList(text: string): LiveDeviceListEntry[] {
       columns = headerColumns(cells) ?? {};
       if (Object.keys(columns).length > 0) continue;
     }
+    if (columns.area !== undefined && isBlockHeading(cells, columns)) {
+      blockHeading = cells[columns.area];
+      continue;
+    }
     const entry = Object.keys(columns).length > 0 ? fromHeader(cells, columns) : fromPosition(cells);
-    entries.push({ line: index + 1, ...entry });
+    entries.push({ line: index + 1, ...entry, ...(entry.area || !blockHeading ? {} : { area: blockHeading }) });
   }
-  return entries;
+  return withBlockInRepeatedNames(entries);
 }
+
+/** Only the block column has text: the row names the block for the meters below it. */
+const isBlockHeading = (cells: string[], columns: Partial<Record<Column, number>>): boolean =>
+  Boolean(cells[columns.area!]) && !cells.some(looksLikeDeviceId)
+  && cells.every((cell, index) => index === columns.area || !cell);
+
+/**
+ * Blocks often repeat the same meter names ("Emergency Lighting" in every block). Put the block in front of a name
+ * that more than one block uses, so the meters stay tell-apart in charts instead of becoming "Name (2)".
+ */
+const withBlockInRepeatedNames = (entries: LiveDeviceListEntry[]): LiveDeviceListEntry[] => {
+  const blocksByName = new Map<string, Set<string>>();
+  for (const entry of entries) {
+    if (!entry.name || !entry.area) continue;
+    const key = entry.name.toLowerCase();
+    blocksByName.set(key, (blocksByName.get(key) ?? new Set()).add(entry.area.toLowerCase()));
+  }
+  return entries.map((entry) => entry.name && entry.area && (blocksByName.get(entry.name.toLowerCase())?.size ?? 0) > 1
+    && !entry.name.toLowerCase().startsWith(entry.area.toLowerCase())
+    ? { ...entry, name: `${entry.area} ${entry.name}` }
+    : entry);
+};
 
 /** Column positions when the line is a header naming at least the device ID or the name column. */
 const headerColumns = (cells: string[]): Partial<Record<Column, number>> | undefined => {

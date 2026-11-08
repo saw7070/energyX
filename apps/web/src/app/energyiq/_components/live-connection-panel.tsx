@@ -599,6 +599,18 @@ function StarterStat({ label, value, detail, warn = false }: { label: string; va
   </div>;
 }
 
+/**
+ * The server's device reference (liveDeviceRef in apps/api/src/energy/energy-live-connection.ts), worked out here so a
+ * pasted device ID can be found without the browser ever receiving device IDs. Keep the two recipes the same.
+ */
+export const liveDeviceRefFor = async (projectId: string, deviceId: string): Promise<string> => {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`energyiq-live:${projectId}:${deviceId}`));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("").slice(0, 24);
+};
+
+/** A Tuya device ID: 16 to 32 letters and digits with at least one of each, which device names rarely are. */
+const DEVICE_ID_TOKEN = /^(?=[A-Za-z0-9]*\d)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{16,32}$/u;
+
 const isGateway = (device: LiveDeviceDto): boolean =>
   device.category === "wg2" || device.category === "wg" || /gateway|网关/iu.test(device.productName ?? "");
 
@@ -633,6 +645,22 @@ function StartFromTuya({ projectId, connection, onConnection, onDone, t }: {
   const [checked, setChecked] = useState<LiveDeviceListRowDto[] | null>(null);
   const [listFailed, setListFailed] = useState(false);
   const [query, setQuery] = useState("");
+  /** For a search made only of device IDs: each ID's device reference, once worked out. */
+  const [idRefs, setIdRefs] = useState<Map<string, string> | null>(null);
+  const idTokens = useMemo(() => {
+    const tokens = query.split(/[\s,;]+/u).filter(Boolean);
+    return tokens.length > 0 && tokens.every((token) => DEVICE_ID_TOKEN.test(token)) ? tokens : null;
+  }, [query]);
+  useEffect(() => {
+    if (!idTokens) {
+      setIdRefs(null);
+      return;
+    }
+    let current = true;
+    void Promise.all(idTokens.map(async (token) => [await liveDeviceRefFor(projectId, token), token] as const))
+      .then((pairs) => { if (current) setIdRefs(new Map(pairs)); });
+    return () => { current = false; };
+  }, [idTokens, projectId]);
   /** Ticks to keep across a refresh; null ticks every meter device, as on the first load. */
   const keepChosen = useRef<Set<string> | null>(null);
 
@@ -792,7 +820,13 @@ function StartFromTuya({ projectId, connection, onConnection, onDone, t }: {
     : "";
   const usedElsewhere = selectable.filter((device) => device.usedBy).length;
   const words = query.trim().toLowerCase().split(/\s+/u).filter(Boolean);
-  const shown = words.length === 0 ? selectable : selectable.filter((device) => {
+  const idSearch = idTokens !== null;
+  const knownRefs = new Set((devices ?? []).map((device) => device.ref));
+  const gatewayRefs = new Set(gateways.map((device) => device.ref));
+  const idPairs = idSearch && idRefs ? [...idRefs] : [];
+  const missingIds = idPairs.filter(([ref]) => !knownRefs.has(ref)).map(([, id]) => id);
+  const gatewayIds = idPairs.filter(([ref]) => gatewayRefs.has(ref)).map(([, id]) => id);
+  const shown = idSearch ? (idRefs ? selectable.filter((device) => idRefs.has(device.ref)) : []) : words.length === 0 ? selectable : selectable.filter((device) => {
     const haystack = `${device.name} ${device.productName ?? ""} ${t(device.online ? "online" : "offline")} ${usedByLabel(device)}`.toLowerCase();
     return words.every((word) => haystack.includes(word));
   });
@@ -867,8 +901,9 @@ function StartFromTuya({ projectId, connection, onConnection, onDone, t }: {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-semibold">{t("startPick")}</p>
         {selectable.length > 0 ? <span className="flex gap-2">
-          <button type="button" className={secondaryButton} disabled={busy || tickable.length === 0} onClick={() => setTicks(tickable.map((device) => device.ref), true)}>
-            {words.length > 0 ? t("startTickShown", { count: tickable.length }) : t("startAll")}
+          <button type="button" className={secondaryButton} disabled={busy || tickable.length === 0}
+            onClick={() => idSearch ? setChosen(new Set(tickable.map((device) => device.ref))) : setTicks(tickable.map((device) => device.ref), true)}>
+            {idSearch ? t("startTickOnly", { count: tickable.length }) : words.length > 0 ? t("startTickShown", { count: tickable.length }) : t("startAll")}
           </button>
           <button type="button" className={secondaryButton} disabled={busy || shown.length === 0} onClick={() => setTicks(shown.map((device) => device.ref), false)}>
             {words.length > 0 ? t("startUntickShown", { count: shown.length }) : t("startClear")}
@@ -878,9 +913,23 @@ function StartFromTuya({ projectId, connection, onConnection, onDone, t }: {
       <p className="text-xs leading-5 text-muted">{t("startPickHint")}</p>
       {selectable.length > 0 ? <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} aria-label={t("startSearch")}
+          onPaste={(event) => {
+            // A column copied from Excel arrives one ID per line; a one-line box would join them, so keep a space.
+            const text = event.clipboardData.getData("text");
+            if (!/[\r\n\t]/u.test(text)) return;
+            event.preventDefault();
+            const pasted = text.split(/[\r\n\t]+/u).map((part) => part.trim()).filter(Boolean).join(" ");
+            const start = event.currentTarget.selectionStart ?? query.length;
+            const end = event.currentTarget.selectionEnd ?? query.length;
+            setQuery(`${query.slice(0, start)} ${pasted} ${query.slice(end)}`.replace(/\s+/gu, " ").trim());
+          }}
           placeholder={t("startSearchPlaceholder")} autoComplete="off" spellCheck={false} className={`${inputClass} mt-0 min-w-0 flex-1 basis-64`} />
-        {words.length > 0 ? <span role="status" className="text-xs text-muted">{t("startShowing", { shown: shown.length, total: selectable.length })}</span> : null}
+        {idSearch
+          ? idRefs ? <span role="status" className="text-xs text-muted">{t("startIdsFound", { found: idPairs.length - missingIds.length, total: idPairs.length })}</span> : null
+          : words.length > 0 ? <span role="status" className="text-xs text-muted">{t("startShowing", { shown: shown.length, total: selectable.length })}</span> : null}
       </div> : null}
+      {missingIds.length > 0 ? <p className="text-xs text-rose-900">{t("startIdsMissing", { ids: missingIds.join(", ") })}</p> : null}
+      {gatewayIds.length > 0 ? <p className="text-xs text-amber-900">{t("startIdsGateway", { ids: gatewayIds.join(", ") })}</p> : null}
       {devices === null
         ? <p role="status" className="text-sm text-muted">{t("loadingDevices")}</p>
         : selectable.length === 0
