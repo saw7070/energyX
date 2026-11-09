@@ -316,6 +316,9 @@ const toCurrentOverviewProjectionReadModel = (
 
 type ExplorerPeriodSelectionInput = Parameters<typeof selectEnergyLatestCompleteDay>[0];
 
+/** Share of a day's expected readings that must have arrived for an explorer window to end on it. */
+const EXPLORER_MINIMUM_VALID_SHARE = 0.5;
+
 const resolveExplorerAnchoredWindow = async (
   input: ExplorerPeriodSelectionInput & {
     analysisWindow: "latest-complete-day" | "current-overview-28d" | "current-month-to-date";
@@ -337,6 +340,20 @@ const resolveExplorerAnchoredWindow = async (
         && error.message !== "ENERGYIQ_CURRENT_OVERVIEW_PERIOD_NOT_FOUND"
       )) {
         throw error;
+      }
+      // No day where every meter reported in full (one meter offline is enough). These pages show each meter's own
+      // gaps, so end the window on the latest day with at least half its readings rather than on a single day.
+      if (error.message === "ENERGYIQ_CURRENT_OVERVIEW_PERIOD_NOT_FOUND") {
+        try {
+          const mostly = await selectEnergyCurrentOverviewPeriod({
+            ...input,
+            periodBasis: resolveEnergyCurrentOverviewPeriodBasis(input.analysisWindow),
+            minimumValidShare: EXPLORER_MINIMUM_VALID_SHARE,
+          });
+          return { localFrom: mostly.period.localFrom, localTo: mostly.cutoffLocalDate };
+        } catch (relaxed) {
+          if (!(relaxed instanceof Error) || relaxed.message !== "ENERGYIQ_CURRENT_OVERVIEW_PERIOD_NOT_FOUND") throw relaxed;
+        }
       }
     }
   } else {
