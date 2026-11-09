@@ -1071,8 +1071,13 @@ export const resolveEnergyLatestAvailablePeriod = async (
   }
 };
 
+/**
+ * The current overview window ends on the latest day every official meter reported in full. `minimumValidShare`
+ * (0–1) relaxes that to the latest day with at least that share of its readings, for pages that show each meter's
+ * own gaps and would otherwise fall back to a single day when one meter is offline.
+ */
 export const selectEnergyCurrentOverviewPeriod = async (
-  input: EnergyPeriodSelectionInput & { periodBasis: EnergyCurrentOverviewPeriodBasis },
+  input: EnergyPeriodSelectionInput & { periodBasis: EnergyCurrentOverviewPeriodBasis; minimumValidShare?: number },
 ): Promise<EnergyCurrentOverviewPeriodSelection> => {
   const probe = await prepareEnergyPeriodSelection(
     input,
@@ -1107,7 +1112,7 @@ export const selectEnergyCurrentOverviewPeriod = async (
 };
 
 const runCurrentOverviewPeriodSelection = (
-  input: EnergyPeriodSelectionInput & { periodBasis: EnergyCurrentOverviewPeriodBasis },
+  input: EnergyPeriodSelectionInput & { periodBasis: EnergyCurrentOverviewPeriodBasis; minimumValidShare?: number },
   prepared: Awaited<ReturnType<typeof prepareEnergyPeriodSelection>>,
 ) => input.dataGateway.runSqlReadonly({
   user_id: input.userId,
@@ -1118,6 +1123,7 @@ const runCurrentOverviewPeriodSelection = (
     prepared.aggregateMeterNodeIds,
     input.periodBasis,
     input.context.timezone,
+    input.minimumValidShare,
   ),
   limit: 1,
 });
@@ -5814,8 +5820,13 @@ const currentOverviewPeriodSelectionSql = (
   meterNodeIds: string[],
   periodBasis: EnergyCurrentOverviewPeriodBasis,
   timezone: string,
+  minimumValidShare?: number,
 ): string => {
   const rollingDays = periodBasis === "rolling_7_days" ? 7 : CURRENT_OVERVIEW_PERIOD_DAYS;
+  const share = minimumValidShare === undefined ? undefined : Math.min(1, Math.max(0, minimumValidShare));
+  const dayPredicate = share === undefined
+    ? "valid_interval_count = expected_interval_count AND quality_event_count = 0"
+    : `valid_interval_count >= CEIL(${share} * expected_interval_count)`;
   const localFromExpression = periodBasis === "rolling_7_days" || periodBasis === "rolling_28_days"
     ? `local_date - INTERVAL ${rollingDays - 1} DAY`
     : "DATE_TRUNC('month', local_date)";
@@ -5852,8 +5863,7 @@ const currentOverviewPeriodSelectionSql = (
     WHERE ${meterNodeFilter(meterNodeIds)}
     GROUP BY local_date
   ) candidate_days
-  WHERE valid_interval_count = expected_interval_count
-    AND quality_event_count = 0
+  WHERE ${dayPredicate}
   ORDER BY local_date DESC
   LIMIT 1
 `;

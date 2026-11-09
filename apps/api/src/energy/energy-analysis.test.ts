@@ -53,6 +53,7 @@ describe("Energy current Overview window contract", () => {
     const selectionScopes: Array<{ from: string; to: string }> = [];
     let forceNextSelectionMiss = false;
     let forcedSelectionMiss = false;
+    const selectionSql: string[] = [];
     const runSqlReadonly = gateway.runSqlReadonly.bind(gateway);
     gateway.runSqlReadonly = async (request) => {
       if (request.sql.includes("AS cutoff_local_date")) {
@@ -66,6 +67,7 @@ describe("Energy current Overview window contract", () => {
         if (typeof scope?.from === "string" && typeof scope.to === "string") {
           selectionScopes.push({ from: scope.from, to: scope.to });
         }
+        selectionSql.push(request.sql);
         if (forceNextSelectionMiss && !forcedSelectionMiss) {
           forcedSelectionMiss = true;
           return {
@@ -132,6 +134,19 @@ describe("Energy current Overview window contract", () => {
         .toBeLessThanOrEqual(15 * 86_400_000);
       expect(Date.parse(selectionScopes[2]!.to) - Date.parse(selectionScopes[2]!.from))
         .toBeGreaterThan(15 * 86_400_000);
+
+      // Pages that show each meter's gaps may end the window on a day with at least half its readings.
+      await expect(selectEnergyCurrentOverviewPeriod({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: user.id,
+        context,
+        periodBasis: "rolling_28_days",
+        minimumValidShare: 0.5,
+      })).resolves.toMatchObject({ cutoffLocalDate: "2026-06-16", periodDays: 28 });
+      expect(selectionSql.at(-1)).toContain("valid_interval_count >= CEIL(0.5 * expected_interval_count)");
+      expect(selectionSql.at(-1)).not.toContain("quality_event_count = 0");
+      expect(selectionSql[0]).toContain("quality_event_count = 0");
     } finally {
       if (previousStorageRoot === undefined) delete process.env.STORAGE_ROOT_DIR;
       else process.env.STORAGE_ROOT_DIR = previousStorageRoot;
