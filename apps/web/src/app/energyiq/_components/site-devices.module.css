@@ -72,13 +72,18 @@
 
 .chartNote { margin:6px 0 0; font-size:13px; color:#5c6b61; }
 .status { display:inline-flex; align-items:center; gap:6px; font-size:14px; white-space:nowrap; }
-.dot { width:8px; height:8px; border-radius:50%; background:currentColor; flex-shrink:0; }
+.dot { width:10px; height:10px; border-radius:50%; background:currentColor; flex-shrink:0; }
 .reporting { color:#23764f; }
 .gaps { color:#9a6412; }
 .silent { color:#a4262c; }
 /* A meter that went quiet is read like one with no readings at all: nothing is arriving now. */
 .stopped { color:#a4262c; }
 .status.silent, .status.stopped { font-weight:600; }
+/* The dots themselves use brighter, well-separated colours (green, amber, red), so the three states are easy to tell
+   apart at a glance; the status words keep the darker shades above for contrast. */
+.dot.reporting, .reporting > .dot { background:#16a34a; }
+.dot.gaps, .gaps > .dot { background:#de9000; }
+.dot.silent, .dot.stopped, .silent > .dot, .stopped > .dot { background:#dc2626; }
 
 /* Charts */
 .chart { min-width:0; padding:12px 14px 10px; background:white; border:1px solid #e1e7e1; border-radius:12px; }
@@ -288,6 +293,9 @@
 :global(:where(html[data-energyiq-theme="dark"])) .gaps { color:#d29951; }
 :global(:where(html[data-energyiq-theme="dark"])) .silent { color:#f3908b; }
 :global(:where(html[data-energyiq-theme="dark"])) .stopped { color:#f3908b; }
+:global(:where(html[data-energyiq-theme="dark"])) .dot.reporting, :global(:where(html[data-energyiq-theme="dark"])) .reporting > .dot { background:#16a34a; }
+:global(:where(html[data-energyiq-theme="dark"])) .dot.gaps, :global(:where(html[data-energyiq-theme="dark"])) .gaps > .dot { background:#de9000; }
+:global(:where(html[data-energyiq-theme="dark"])) .dot.silent, :global(:where(html[data-energyiq-theme="dark"])) .dot.stopped, :global(:where(html[data-energyiq-theme="dark"])) .silent > .dot, :global(:where(html[data-energyiq-theme="dark"])) .stopped > .dot { background:#dc2626; }
 :global(:where(html[data-energyiq-theme="dark"])) .chart { background:#191919; border:1px solid #323632; border-radius:12px; }
 :global(:where(html[data-energyiq-theme="dark"])) .chart figcaption { color:#b9cdc0; }
 :global(:where(html[data-energyiq-theme="dark"])) .plot svg rect[tabindex]:focus { outline:none; }
