@@ -88,6 +88,15 @@ export function validateWorkerTree(root: string, limit = 100 * 1024 * 1024): voi
   };
   walk(root, 0);
 }
+/** How long one advisor task may run. A report that answers many questions with charts can take well over 20 minutes. */
+export const DEFAULT_REPORT_TIMEOUT_MS = 40 * 60_000;
+
+/** ENERGYIQ_REPORT_AGENT_TIMEOUT_MINUTES (5–120) overrides the default; anything else keeps it. */
+export function reportTimeoutMsFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+  const minutes = Number(env.ENERGYIQ_REPORT_AGENT_TIMEOUT_MINUTES);
+  return Number.isInteger(minutes) && minutes >= 5 && minutes <= 120 ? minutes * 60_000 : DEFAULT_REPORT_TIMEOUT_MS;
+}
+
 export function createPiReportHarness(options: { image: string; model: (workspaceId?: string) => PiReportModel; timeoutMs?: number; fetch?: typeof fetch }): ReportHarness {
   return async ({ directory, runId, prompt, signal, previousStateDirectory, onEvent, tools = [], executeTool, workspaceId, onUsage }) => {
     const model = options.model(workspaceId);
@@ -95,7 +104,9 @@ export function createPiReportHarness(options: { image: string; model: (workspac
     const controller = new AbortController();
     const abort = () => controller.abort();
     signal.addEventListener("abort", abort, { once: true });
-    const timer = setTimeout(abort, options.timeoutMs ?? 20 * 60_000);
+    // Running out of time is not the same as someone stopping the task; say which it was.
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; abort(); }, options.timeoutMs ?? DEFAULT_REPORT_TIMEOUT_MS);
     const runSignal = controller.signal;
     try {
       if (signal.aborted) throw new Error("REPORT_CANCELLED");
@@ -109,7 +120,7 @@ export function createPiReportHarness(options: { image: string; model: (workspac
       const toolRequestIds = new Set<string>();
       const result = await new Promise<{ answer: string; sessionId?: string }>((resolve, reject) => {
         let finished = false;
-        const fail = (error?: unknown) => { if (!finished) { finished = true; const code = error instanceof Error && /^REPORT_(?:REVIEW|ANALYSIS)_[A-Z_]+$/.test(error.message) ? error.message : "REPORT_PI_FAILED"; reject(new Error(runSignal.aborted ? "REPORT_CANCELLED" : code)); } };
+        const fail = (error?: unknown) => { if (!finished) { finished = true; const code = error instanceof Error && /^REPORT_(?:REVIEW|ANALYSIS)_[A-Z_]+$/.test(error.message) ? error.message : "REPORT_PI_FAILED"; reject(new Error(runSignal.aborted ? (timedOut ? "REPORT_TIMEOUT" : "REPORT_CANCELLED") : code)); } };
         child.once("error", fail); child.once("close", fail);
         // Bound an unterminated line too; readline alone would retain it indefinitely.
         let lineBytes = 0;

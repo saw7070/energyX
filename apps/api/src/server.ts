@@ -58,7 +58,7 @@ import { opsAlerts } from "./observability/ops-alerts.js";
 import { setRequestActor } from "./observability/request-context.js";
 import { reportSkillCatalog, resolveReportSkillSelection } from "./report-agent/report-skill-catalog.js";
 import { ReportService, registerReportService } from "./report-agent/report-service.js";
-import { createPiReportHarness, DEFAULT_REPORT_AGENT_IMAGE, removeOrphanedReportWorkers, resolvePiReportModel } from "./report-agent/pi-report-harness.js";
+import { createPiReportHarness, DEFAULT_REPORT_AGENT_IMAGE, removeOrphanedReportWorkers, reportTimeoutMsFromEnv, resolvePiReportModel } from "./report-agent/pi-report-harness.js";
 import { checkAdvisorWorker } from "./energy/energy-system-health.js";
 import { createAsyncMemoByKey, createStartupTimer } from "./async-memo.js";
 import { ensureBuiltinDtcGrowthDatasource } from "./builtin-dtc-growth-datasource.js";
@@ -768,6 +768,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
     harness: (process.env.ENERGYIQ_REPORT_AGENT_HARNESS ?? "pi") === "pi" ? createPiReportHarness({
       image: process.env.ENERGYIQ_REPORT_AGENT_IMAGE ?? DEFAULT_REPORT_AGENT_IMAGE,
       model: (workspaceId) => resolvePiReportModel(metadataStore, workspaceId),
+      timeoutMs: reportTimeoutMsFromEnv(),
     }) : async () => { throw new Error("REPORT_HARNESS_NOT_CONFIGURED"); },
     ...((process.env.ENERGYIQ_REPORT_AGENT_HARNESS ?? "pi") === "pi" ? { removeOrphanedWorkers: (isSettled: (runId: string) => boolean) => removeOrphanedReportWorkers(isSettled) } : {}),
   }) : undefined;
