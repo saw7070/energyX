@@ -27,6 +27,7 @@ import {
   resolveEnergyReportingHealth,
   selectEnergyLatestCompleteDay,
   selectEnergyCurrentOverviewPeriod,
+  selectEnergyFirstReadingDay,
   selectEnergyGoldenPeriod,
   selectEnergyLatestCompletePeriod,
   type EnergyScopeAnalysis,
@@ -147,6 +148,28 @@ describe("Energy current Overview window contract", () => {
       expect(selectionSql.at(-1)).toContain("valid_interval_count >= CEIL(0.5 * expected_interval_count)");
       expect(selectionSql.at(-1)).not.toContain("quality_event_count = 0");
       expect(selectionSql[0]).toContain("quality_event_count = 0");
+
+      // A window that opens weeks before the site's first reading starts on that reading instead.
+      const firstReadingDate = await selectEnergyFirstReadingDay({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: user.id,
+        context,
+        localFrom: "2026-05-01",
+        localTo: "2026-06-16",
+      });
+      expect(firstReadingDate).toMatch(/^2026-0[56]-\d\d$/);
+      expect(firstReadingDate! > "2026-05-01").toBe(true);
+      expect(firstReadingDate! <= "2026-06-10").toBe(true);
+      // An established site keeps its window: readings arrived in the week before it opens.
+      await expect(selectEnergyFirstReadingDay({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: user.id,
+        context,
+        localFrom: "2026-06-12",
+        localTo: "2026-06-16",
+      })).resolves.toBeNull();
     } finally {
       if (previousStorageRoot === undefined) delete process.env.STORAGE_ROOT_DIR;
       else process.env.STORAGE_ROOT_DIR = previousStorageRoot;

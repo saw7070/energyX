@@ -163,13 +163,14 @@ export const lastSentText = (iso: string, timezone: string, locale: EnergyIqLoca
 /** Findings that ask the reader to do something are drawn to be noticed; the rest simply report. */
 const needsAttention = (finding: Finding) => finding.icon === "alert" || finding.icon === "info";
 /** Deterministic, plain-language highlights. Savings are framed as questions to check, never as proven waste. */
-export function siteFindings({ rows, stats, shares, siteKwh, rate, openingHours, board = null, locale = "en", timezone, notInUse = new Set() }: { rows: DeviceRow[]; stats: Map<string, DeviceStatistics>; shares: EnergyShare[]; siteKwh: number; rate: number | null; openingHours: string | null; /** The board's name when the figures cover one board; the whole site otherwise. */ board?: string | null; locale?: EnergyIqLocale; timezone?: string; /** Meters someone confirmed are not in use: their silence is not a problem. */ notInUse?: ReadonlySet<string> }): Finding[] {
+export function siteFindings({ rows, stats, shares, siteKwh, rate, openingHours, board = null, locale = "en", timezone, notInUse = new Set(), periodDays = 28 }: { rows: DeviceRow[]; stats: Map<string, DeviceStatistics>; shares: EnergyShare[]; siteKwh: number; rate: number | null; openingHours: string | null; /** The board's name when the figures cover one board; the whole site otherwise. */ board?: string | null; locale?: EnergyIqLocale; timezone?: string; /** Meters someone confirmed are not in use: their silence is not a problem. */ notInUse?: ReadonlySet<string>; /** Days the figures cover: shorter than 28 for a site that started sending recently. */ periodDays?: number }): Finding[] {
   const t = translatorFor(deviceMessages, locale);
   const { kwh, kw, pct, sgd } = numberFormats(locale);
   const findings: Finding[] = [];
   const money = (kwh: number) => rate ? t("money.about", { amount: sgd(kwh * rate) }) : "";
+  const days = dayCountText(periodDays, locale);
   const top = shares.find(share => !share.unmetered);
-  if (top && siteKwh > 0) findings.push({ icon: "bolt", title: t("finding.biggest.title", { name: top.name }), detail: t(board === null ? "finding.biggest.site" : "finding.biggest.board", { pct: pct(top.kwh / siteKwh * 100), board: board ?? "", kwh: kwh(top.kwh), money: money(top.kwh) }) });
+  if (top && siteKwh > 0) findings.push({ icon: "bolt", title: t("finding.biggest.title", { name: top.name }), detail: t(board === null ? "finding.biggest.site" : "finding.biggest.board", { pct: pct(top.kwh / siteKwh * 100), board: board ?? "", kwh: kwh(top.kwh), money: money(top.kwh), days }) });
   const devices = rows.filter(row => !row.isBoardTotal && stats.has(row.id));
   const afterHours = devices.map(row => ({ row, stat: stats.get(row.id)! })).filter(item => item.stat.outOfHoursKwh !== null && (item.stat.outOfHoursPct ?? 0) >= 50).sort((a, b) => b.stat.outOfHoursKwh! - a.stat.outOfHoursKwh!)[0];
   if (afterHours) findings.push({ icon: "alert", title: t("finding.afterHours.title", { name: afterHours.row.name }), detail: t("finding.afterHours.detail", { kwh: kwh(afterHours.stat.outOfHoursKwh!), pct: pct(afterHours.stat.outOfHoursPct!), hours: openingHours ?? t("operatingHours"), money: money(afterHours.stat.outOfHoursKwh!) }) });
@@ -203,6 +204,12 @@ function numberFormats(locale: EnergyIqLocale) {
     sgd: (value: number) => `SGD ${value.toLocaleString(tag, { minimumFractionDigits: value < 100 ? 2 : 0, maximumFractionDigits: value < 100 ? 2 : 0 })}`,
   };
 }
+/** Whole days from the window's first instant to its exclusive end: 28 normally, fewer for a site that started recently. */
+export const periodDayCount = (from: string, toExclusive: string): number =>
+  Math.max(1, Math.round((Date.parse(toExclusive) - Date.parse(from)) / 86_400_000));
+/** "28 days", "1 day": the window length as the page words it. */
+export const dayCountText = (days: number, locale: EnergyIqLocale = "en"): string =>
+  translatorFor(deviceMessages, locale)(days === 1 ? "days.one" : "days.many", { count: days });
 export function formatPeriod(from: string, toExclusive: string, timeZone: string, locale: EnergyIqLocale = "en"): string {
   const lastDay = new Date(Date.parse(toExclusive) - 1);
   if (locale !== "en") {
@@ -477,6 +484,8 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
   const dayMap = new Map(loaded.days.map(day => [day.date, day]));
   const dateText = (date: string, withWeekday = true) => new Intl.DateTimeFormat(intlLocale(locale), { ...(withWeekday ? { weekday: "short" as const } : {}), day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`));
   const period = formatPeriod(summary.from, summary.toExclusive, summary.timezone, locale);
+  const periodDays = periodDayCount(summary.from, summary.toExclusive);
+  const days = dayCountText(periodDays, locale);
   // "14 Aug – 10 Sep 2026 · 28 days" under every chart title, so each chart says which dates it covers.
   const span = chartRange(loaded.dates, locale, tChart);
   const peakText = (iso: string | null | undefined) => iso ? new Intl.DateTimeFormat(intlLocale(locale), { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: summary.timezone }).format(new Date(iso)) : null;
@@ -518,7 +527,7 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
     const scopeName = isSite ? t("scope.site") : label;
     const scopeKwh = analysis.summary.usageKwh;
     const shares = energyBreakdown(rows, boardNames, locale, boardParents);
-    const findings = siteFindings({ rows, stats, shares, siteKwh: scopeKwh, rate, openingHours, board: isSite ? null : boardName(boardId), locale, timezone: summary.timezone, ...(notInUse ? { notInUse } : {}) });
+    const findings = siteFindings({ rows, stats, shares, siteKwh: scopeKwh, rate, openingHours, board: isSite ? null : boardName(boardId), locale, timezone: summary.timezone, periodDays, ...(notInUse ? { notInUse } : {}) });
     const dailyAverage = analysis.summary.averageDailyUsageKwh;
     const offHours = analysis.offHours.status === "available" ? analysis.offHours : null;
     const peakAt = peakText(analysis.summary.peakAt);
@@ -552,7 +561,7 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
       <div className={styles.glance}>
         <div className={styles.tile}><span>{t("tile.energy")}</span><strong>{kwh(scopeKwh)}</strong><small>{t("tile.dailyAverage", { kwh: kwh(dailyAverage) })}</small></div>
         {tariff && analysis.cost.status === "available" && <div className={styles.tile}><span>{t("tile.cost")}</span><strong>{sgd(analysis.cost.amount)}</strong><small>{tariff.gstPct !== null ? t("tile.beforeGst", { amount: sgd(analysis.cost.amount * (1 + tariff.gstPct / 100)), gst: tariff.gstPct }) : t("tile.savedTariff")}</small></div>}
-        {rate && <div className={styles.tile}><span>{t("tile.yearly")}</span><strong>≈ {sgd(dailyAverage * 365 * rate)}</strong><small>{t("tile.yearlyNote")}</small></div>}
+        {rate && <div className={styles.tile}><span>{t("tile.yearly")}</span><strong>≈ {sgd(dailyAverage * 365 * rate)}</strong><small>{t("tile.yearlyNote", { days })}</small></div>}
         {offHours && <div className={styles.tile}><span>{t("tile.afterHours")}</span><strong>{pct(offHours.sharePct)}</strong><small>{kwh(offHours.usageKwh)}{rate ? ` · ${sgd(offHours.usageKwh * rate)}` : ""}</small></div>}
         <div className={styles.tile}><span>{t("tile.peak")}</span><strong>{kw(analysis.summary.peakKw)}</strong><small>{peakAt ?? t("tile.peakNote")}</small></div>
         <div className={styles.tile}><span>{t("tile.reporting")}</span><strong>{t("tile.reportingCount", { reporting, total: rows.length })}</strong><small>{silent ? t("tile.silent", { count: silent }) : t("tile.allReporting")}</small></div>
@@ -659,7 +668,7 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
       {nav}
       <div className={styles.glance}>
         <div className={styles.tile}><span>{t("tile.energy")}</span><strong>{kwh(row.usageKwh)}</strong><small>{stat.dailyAverageKwh === null ? t("tile.noAverage") : t("tile.dailyAverage", { kwh: kwh(stat.dailyAverageKwh) })}</small></div>
-        {rate && <div className={styles.tile}><span>{t("tile.cost")}</span><strong>{sgd(row.usageKwh * rate)}</strong><small>{stat.dailyAverageKwh === null ? t("tile.inPeriod") : t("aboutPerYear", { amount: sgd(stat.dailyAverageKwh * 365 * rate) })}</small></div>}
+        {rate && <div className={styles.tile}><span>{t("tile.cost")}</span><strong>{sgd(row.usageKwh * rate)}</strong><small>{stat.dailyAverageKwh === null ? t("tile.inPeriod", { days }) : t("aboutPerYear", { amount: sgd(stat.dailyAverageKwh * 365 * rate) })}</small></div>}
         <div className={styles.tile}><span>{t("tile.shareOfSite")}</span><strong>{siteKwh ? pct(row.usageKwh / siteKwh * 100) : "—"}</strong><small>{boardKwh ? t("tile.shareOfBoard", { pct: pct(row.usageKwh / boardKwh * 100), board: boardName(row.boardId) }) : boardName(row.boardId)}</small></div>
         <div className={styles.tile}><span>{t("tile.afterHours")}</span><strong>{stat.outOfHoursPct === null ? "—" : pct(stat.outOfHoursPct)}</strong><small>{stat.outOfHoursKwh === null ? t("tile.noHours") : `${kwh(stat.outOfHoursKwh)}${rate ? ` · ${sgd(stat.outOfHoursKwh * rate)}` : ""}`}</small></div>
         <div className={styles.tile}><span>{t("tile.alwaysOn")}</span><strong>{stat.alwaysOnKw === null ? "—" : kw(stat.alwaysOnKw)}</strong><small>{stat.alwaysOnKw !== null && rate ? t("aboutPerYear", { amount: sgd(stat.alwaysOnKw * 24 * 365 * rate) }) : t("tile.alwaysOnNote")}</small></div>
@@ -694,9 +703,9 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
   const activeBlock = pickedBlock !== undefined && (pickedBlock === null ? view.kind === "site" : true) ? pickedBlock : viewBlock;
   const cardRows = activeBlock ? ordered.filter(row => blockOf.get(row.id) === activeBlock) : ordered;
   const shownCards = activeBlock || allCards ? cardRows : cardRows.slice(0, CARD_PREVIEW);
-  const description = device ? t("description.device", { details: [typeName(device), device.isBoardTotal ? boardTotalNote(device.type, locale) : "", boardName(device.boardId), device.circuit ? t("circuit", { circuit: device.circuit }) : ""].filter(Boolean).join(" · "), period })
-    : view.kind === "board" ? t("description.board", { count: byBoard(view.id).length, period })
-    : t("description.site", { period });
+  const description = device ? t("description.device", { details: [typeName(device), device.isBoardTotal ? boardTotalNote(device.type, locale) : "", boardName(device.boardId), device.circuit ? t("circuit", { circuit: device.circuit }) : ""].filter(Boolean).join(" · "), period, days })
+    : view.kind === "board" ? t("description.board", { count: byBoard(view.id).length, period, days })
+    : t("description.site", { period, days });
 
   return <><MeterHealthNotice projectId={projectId} />
   <section ref={panelRef} className={`${styles.panel} ${fullScreen ? styles.fullScreen : ""}`} aria-label={t("title")}>

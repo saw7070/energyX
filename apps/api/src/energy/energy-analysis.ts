@@ -1111,6 +1111,46 @@ export const selectEnergyCurrentOverviewPeriod = async (
   };
 };
 
+/** How far back a window's first day looks for earlier readings before it counts the site as new. */
+const FIRST_READING_LOOKBACK_DAYS = 7 as const;
+
+/**
+ * A site that started sending partway through a window has no data on the days before. Counting them anyway spreads
+ * its energy over days it was not connected, so per-day averages and yearly estimates come out too low. Returns the
+ * first local date with a valid reading when the window opens on days without any and nothing arrived in the week
+ * before it; otherwise null, so an established site with a short outage keeps its full window.
+ */
+export const selectEnergyFirstReadingDay = async (
+  input: EnergyPeriodSelectionInput & { localFrom: string; localTo: string },
+): Promise<string | null> => {
+  const lookbackFrom = new Date(
+    Date.parse(`${input.localFrom}T00:00:00.000Z`) - (FIRST_READING_LOOKBACK_DAYS + 1) * 86_400_000,
+  ).toISOString();
+  const prepared = await prepareEnergyPeriodSelection(
+    input,
+    "ENERGYIQ_CURRENT_OVERVIEW_COVERAGE_NOT_FOUND",
+    { from: lookbackFrom },
+  );
+  const result = await input.dataGateway.runSqlReadonly({
+    user_id: input.userId,
+    workspace_id: input.context.workspaceId,
+    datasource_id: prepared.scoped.datasourceId,
+    sql: firstReadingDaySql(
+      prepared.scoped.viewName,
+      prepared.aggregateMeterNodeIds,
+      input.localFrom,
+      input.localTo,
+    ),
+    limit: 1,
+  });
+  const row = result.rows[0];
+  if (!row || numberAt(row, 1) > 0) return null;
+  const firstReadingDate = optionalStringAt(row, 0);
+  return firstReadingDate && firstReadingDate > input.localFrom && firstReadingDate <= input.localTo
+    ? firstReadingDate
+    : null;
+};
+
 const runCurrentOverviewPeriodSelection = (
   input: EnergyPeriodSelectionInput & { periodBasis: EnergyCurrentOverviewPeriodBasis; minimumValidShare?: number },
   prepared: Awaited<ReturnType<typeof prepareEnergyPeriodSelection>>,
@@ -1141,6 +1181,7 @@ const prepareEnergyPeriodSelection = async (
   options: {
     latestProbeDays?: number;
     coverage?: EnergyFactCoverage;
+    from?: string;
   } = {},
 ) => {
   const databasePath = input.databasePath
@@ -1157,7 +1198,8 @@ const prepareEnergyPeriodSelection = async (
   const probeFrom = options.latestProbeDays
     ? new Date(Date.parse(coverage.to) - options.latestProbeDays * 86_400_000).toISOString()
     : coverage.from;
-  const selectionFrom = probeFrom > coverage.from ? probeFrom : coverage.from;
+  const requestedFrom = options.from && options.from > probeFrom ? options.from : probeFrom;
+  const selectionFrom = requestedFrom > coverage.from ? requestedFrom : coverage.from;
   const publishedMeterRoute = resolveEnergyPublishedMeterRoute({
     metadataStore: input.metadataStore,
     projectId: input.context.projectId,
@@ -5868,6 +5910,24 @@ const currentOverviewPeriodSelectionSql = (
   LIMIT 1
 `;
 };
+
+const firstReadingDaySql = (
+  viewName: string,
+  meterNodeIds: string[],
+  localFrom: string,
+  localTo: string,
+): string => `
+  SELECT
+    STRFTIME(MIN(local_date) FILTER (
+      WHERE local_date >= CAST(${sqlLiteral(localFrom)} AS DATE)
+    ), '%Y-%m-%d') AS first_reading_date,
+    COUNT(*) FILTER (WHERE local_date < CAST(${sqlLiteral(localFrom)} AS DATE)) AS earlier_reading_count
+  FROM ${quoteIdentifier(viewName)} source
+  WHERE ${meterNodeFilter(meterNodeIds)}
+    AND quality_status = 'ok'
+    AND local_date >= CAST(${sqlLiteral(localFrom)} AS DATE) - INTERVAL ${FIRST_READING_LOOKBACK_DAYS} DAY
+    AND local_date <= CAST(${sqlLiteral(localTo)} AS DATE)
+`;
 
 const goldenDaySelectionSql = (
   viewName: string,

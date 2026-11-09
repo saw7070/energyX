@@ -70,6 +70,7 @@ import {
   executeEnergyScopeAnalysisWithLatestAvailable,
   resolveEnergyCurrentOverviewPeriodBasis,
   selectEnergyCurrentOverviewPeriod,
+  selectEnergyFirstReadingDay,
   selectEnergyLatestAvailableDay,
   selectEnergyLatestCompleteDay,
   type EnergyScopeAnalysis,
@@ -319,6 +320,20 @@ type ExplorerPeriodSelectionInput = Parameters<typeof selectEnergyLatestComplete
 /** Share of a day's expected readings that must have arrived for an explorer window to end on it. */
 const EXPLORER_MINIMUM_VALID_SHARE = 0.5;
 
+/** A site that started sending partway through the window starts its window on its first reading, not before it. */
+const startExplorerWindowOnFirstReading = async (
+  input: ExplorerPeriodSelectionInput,
+  window: { localFrom: string; localTo: string },
+): Promise<{ localFrom: string; localTo: string }> => {
+  try {
+    const firstReadingDate = await selectEnergyFirstReadingDay({ ...input, ...window });
+    return firstReadingDate ? { ...window, localFrom: firstReadingDate } : window;
+  } catch (error) {
+    if (error instanceof Error && error.message === "ENERGYIQ_CURRENT_OVERVIEW_COVERAGE_NOT_FOUND") return window;
+    throw error;
+  }
+};
+
 const resolveExplorerAnchoredWindow = async (
   input: ExplorerPeriodSelectionInput & {
     analysisWindow: "latest-complete-day" | "current-overview-28d" | "current-month-to-date";
@@ -330,10 +345,10 @@ const resolveExplorerAnchoredWindow = async (
         ...input,
         periodBasis: resolveEnergyCurrentOverviewPeriodBasis(input.analysisWindow),
       });
-      return {
+      return await startExplorerWindowOnFirstReading(input, {
         localFrom: selected.period.localFrom,
         localTo: selected.cutoffLocalDate,
-      };
+      });
     } catch (error) {
       if (!(error instanceof Error) || (
         error.message !== "ENERGYIQ_CURRENT_OVERVIEW_COVERAGE_NOT_FOUND"
@@ -350,7 +365,10 @@ const resolveExplorerAnchoredWindow = async (
             periodBasis: resolveEnergyCurrentOverviewPeriodBasis(input.analysisWindow),
             minimumValidShare: EXPLORER_MINIMUM_VALID_SHARE,
           });
-          return { localFrom: mostly.period.localFrom, localTo: mostly.cutoffLocalDate };
+          return await startExplorerWindowOnFirstReading(input, {
+            localFrom: mostly.period.localFrom,
+            localTo: mostly.cutoffLocalDate,
+          });
         } catch (relaxed) {
           if (!(relaxed instanceof Error) || relaxed.message !== "ENERGYIQ_CURRENT_OVERVIEW_PERIOD_NOT_FOUND") throw relaxed;
         }
