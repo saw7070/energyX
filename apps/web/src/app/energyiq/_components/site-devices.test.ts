@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EnergyScopeAnalysisDto } from "../../../lib/config-api";
 import type { DeviceStatistics } from "./device-statistics";
-import { boardTotalNote, cardTitle, deviceBlocks, deviceFindings, energyBreakdown, formatPeriod, parseDevicesView, siteFindings, summariseDevices, tariffRate, withShortDays, type DeviceRow } from "./site-devices";
+import { boardTotalNote, cardTitle, dayCountText, deviceBlocks, deviceFindings, energyBreakdown, formatPeriod, parseDevicesView, periodDayCount, siteFindings, summariseDevices, tariffRate, withShortDays, type DeviceRow } from "./site-devices";
 
 const health = (coveragePct: number, validIntervalCount = 100) => ({ coveragePct, expectedMeterIntervalCount: 100, validIntervalCount, qualityEventCount: 0 });
 const circuit = (meterNodeId: string, usageKwh: number, coveragePct: number) => ({ meterNodeId, name: meterNodeId, appliance: "load", category: "load", meterRole: "component", usageKwh, sharePct: 0, peakKw: 0.5, qualityEventCount: 0, dataHealth: health(coveragePct) });
@@ -102,6 +102,7 @@ describe("siteFindings", () => {
     ]);
     expect(findings[1]!.detail).toContain("Worth checking");
     expect(findings[3]!.detail).toContain("Director Room Power");
+    expect(findings[0]!.detail).toContain("in these 28 days.");
   });
   it("names the meters that stopped sending and when the first one went quiet", () => {
     const rows = summariseDevices({
@@ -226,3 +227,21 @@ describe("device card titles", () => {
   });
 });
 
+
+describe("window length wording", () => {
+  it("counts the days a window covers, so a site that started recently is not described as 28 days", () => {
+    expect(periodDayCount("2026-10-11T16:00:00.000Z", "2026-11-08T16:00:00.000Z")).toBe(28);
+    expect(periodDayCount("2026-11-02T16:00:00.000Z", "2026-11-08T16:00:00.000Z")).toBe(6);
+    expect(periodDayCount("2026-11-07T16:00:00.000Z", "2026-11-08T16:00:00.000Z")).toBe(1);
+    expect(dayCountText(6)).toBe("6 days");
+    expect(dayCountText(1)).toBe("1 day");
+    expect(dayCountText(6, "zh-Hans")).toBe("6 天");
+    expect(dayCountText(6, "ms")).toBe("6 hari");
+  });
+
+  it("words findings with the real window length", () => {
+    const rows = summariseDevices(analysis).rows;
+    const findings = siteFindings({ rows, stats: new Map(), shares: energyBreakdown(rows, new Map()), siteKwh: 2309.07, rate: null, openingHours: null, periodDays: 6 });
+    expect(findings[0]!.detail).toContain("in these 6 days.");
+  });
+});
