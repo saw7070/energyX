@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EnergyScopeAnalysisDto } from "../../../lib/config-api";
 import type { DeviceStatistics } from "./device-statistics";
-import { boardTotalNote, cardTitle, dayCountText, deviceBlocks, deviceFindings, energyBreakdown, formatPeriod, parseDevicesView, periodDayCount, siteFindings, summariseDevices, tariffRate, withShortDays, type DeviceRow } from "./site-devices";
+import { boardTotalNote, cardTitle, dayCountText, legendStatus, deviceBlocks, deviceFindings, energyBreakdown, formatPeriod, parseDevicesView, periodDayCount, siteFindings, summariseDevices, tariffRate, withShortDays, type DeviceRow } from "./site-devices";
 
 const health = (coveragePct: number, validIntervalCount = 100) => ({ coveragePct, expectedMeterIntervalCount: 100, validIntervalCount, qualityEventCount: 0 });
 const circuit = (meterNodeId: string, usageKwh: number, coveragePct: number) => ({ meterNodeId, name: meterNodeId, appliance: "load", category: "load", meterRole: "component", usageKwh, sharePct: 0, peakKw: 0.5, qualityEventCount: 0, dataHealth: health(coveragePct) });
@@ -243,5 +243,14 @@ describe("window length wording", () => {
     const rows = summariseDevices(analysis).rows;
     const findings = siteFindings({ rows, stats: new Map(), shares: energyBreakdown(rows, new Map()), siteKwh: 2309.07, rate: null, openingHours: null, periodDays: 6 });
     expect(findings[0]!.detail).toContain("in these 6 days.");
+  });
+});
+
+describe("legendStatus", () => {
+  it("groups the card dots into the three colours the key explains", () => {
+    expect(legendStatus("reporting")).toBe("reporting");
+    expect(legendStatus("gaps")).toBe("gaps");
+    expect(legendStatus("stopped")).toBe("stopped");
+    expect(legendStatus("silent")).toBe("stopped");
   });
 });

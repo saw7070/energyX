@@ -206,6 +206,8 @@
 .deviceCard strong { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; font-size:15px; font-weight:650; line-height:1.3; color:#1c2a22; }
 .cardMeta { display:flex; align-items:center; gap:6px; min-width:0; font-size:12.5px; color:#6a786f; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .showAllCards { margin-top:10px; }
+.cardLegend { display:flex; flex-wrap:wrap; align-items:center; gap:6px 18px; margin:10px 0 0; padding:0; list-style:none; font-size:12.5px; color:#5c6a61; }
+.cardLegend li { display:inline-flex; align-items:center; gap:6px; }
 .picker { position:relative; margin-left:auto; }
 .pickerChevron { width:12px !important; height:12px !important; margin:0 0 0 8px !important; transform:rotate(90deg); color:#6a786f; }
 .pickerPanel { position:absolute; right:0; top:calc(100% + 6px); z-index:40; width:min(380px, 88vw); max-height:440px; overflow:auto; padding:8px; border:1px solid #d0dbd2; border-radius:12px; background:white; box-shadow:0 14px 34px rgba(20,40,30,.16); }
@@ -351,6 +353,7 @@
 :global(:where(html[data-energyiq-theme="dark"])) .cardIcon { border-radius:11px; background:#1b201c; color:#94caae; }
 :global(:where(html[data-energyiq-theme="dark"])) .deviceCard strong { color:#c1d2c8; }
 :global(:where(html[data-energyiq-theme="dark"])) .cardMeta { color:#9aa99f; }
+:global(:where(html[data-energyiq-theme="dark"])) .cardLegend { color:#a0afa6; }
 :global(:where(html[data-energyiq-theme="dark"])) .pickerChevron { color:#9aa99f; }
 :global(:where(html[data-energyiq-theme="dark"])) .pickerPanel { border:1px solid #323b34; border-radius:12px; background:#191919; box-shadow:0 14px 34px #14281e41; }
 :global(:where(html[data-energyiq-theme="dark"])) .pickerSearch { border:1px solid #323b34; border-radius:8px; background:#191919; color:#bfd1c6; }

@@ -357,6 +357,9 @@ export function deviceBlocks(rows: Array<Pick<DeviceRow, "id" | "boardId">>, boa
 }
 
 /** A card names the meter only; "264E GF Lobby Lighting · Groundfloor lift lobby" keeps what it powers for the device view. */
+/** The colour key under the device cards. Stopped and never-sent share red, so they share one entry. */
+const LEGEND_STATUSES = ["reporting", "gaps", "stopped"] as const;
+export const legendStatus = (status: DeviceStatus): typeof LEGEND_STATUSES[number] => status === "silent" ? "stopped" : status;
 export const cardTitle = (name: string): string => name.split(" · ")[0]!.trim() || name;
 
 /** How many device cards the whole site shows before "Show all". */
@@ -741,9 +744,12 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
       {shownCards.map(row => <button key={row.id} type="button" role="listitem" className={styles.deviceCard} aria-current={device?.id === row.id ? "true" : undefined} onClick={() => openDevice(row.id)}>
         <span className={styles.cardIcon} aria-hidden="true"><EnergyIcon name="meter" /></span>
         <strong title={row.name}>{cardTitle(row.name)}</strong>
-        <span className={styles.cardMeta}><span className={`${styles.dot} ${styles[row.status]}`} aria-label={statusText(row.status, t)} />{boardName(blockOf.get(row.id) ?? row.boardId)}{row.usageKwh === null ? "" : ` · ${kwh(row.usageKwh)}`}</span>
+        <span className={styles.cardMeta}><span className={`${styles.dot} ${styles[row.status]}`} aria-label={statusText(row.status, t)} title={statusText(row.status, t)} />{boardName(blockOf.get(row.id) ?? row.boardId)}{row.usageKwh === null ? "" : ` · ${kwh(row.usageKwh)}`}</span>
       </button>)}
     </div>
+    <ul className={styles.cardLegend} aria-label={t("cards.legend")}>
+      {LEGEND_STATUSES.map(status => <li key={status}><span className={`${styles.dot} ${styles[status]}`} aria-hidden="true" />{t(`cards.legend.${status}`, { count: cardRows.filter(row => legendStatus(row.status) === status).length })}</li>)}
+    </ul>
     {cardRows.length > CARD_PREVIEW && <button type="button" className={`${styles.secondary} ${styles.showAllCards}`} onClick={() => setAllCards(current => !current)}>{allCards ? t("cards.fewer") : t("cards.showAll", { count: cardRows.length })}</button>}
 
     {device ? deviceView(device)
