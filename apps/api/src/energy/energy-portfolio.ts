@@ -3,7 +3,9 @@ import {
   type EnergyIqAnalysisInterval,
   type EnergyIqCarbonSetting,
   type EnergyIqOvernightCheck,
+  type EnergyIqPeakDemandCheck,
   type EnergyIqProjectBudget,
+  type EnergyIqTariffScheduleEntry,
   type MetadataStore,
   type UserRecord,
 } from "@datafoundry/metadata";
@@ -261,9 +263,125 @@ export type OvernightFinding = {
   nightsCompared: number;
 };
 
+/**
+ * This month's maximum demand: the highest half-hour average power, as TNB bills it per kW and SP Group compares it
+ * with contracted capacity. When the tariff charges only peak-hour demand, only half-hours inside its peak windows count.
+ */
+export type PeakDemandStatus = {
+  month: string;
+  peakKw: number;
+  /** Start of the half-hour it was set in. */
+  peakAt: string;
+  /** True when only the tariff's peak hours were counted. */
+  peakHoursOnly: boolean;
+  /** The last day with readings, and its own highest half-hour. */
+  latestDay: string;
+  latestDayPeakKw: number;
+  /** Highest half-hour over the 30 days before the latest day, when there are at least 7 of them. */
+  previousPeakKw?: number;
+  /** The latest day set the highest demand in 30 days. */
+  newHigh: boolean;
+  limitKw?: number;
+  warnPct: number;
+  limitStatus?: "ok" | "near" | "over";
+  /** The tariff's per-kW monthly charges applied to this month's peak, before tax. */
+  demandCharge?: { perKwMonth: number; currency: string; amount: number };
+};
+
 export type SiteChecks = {
   budget?: PortfolioBudgetStatus;
   overnight?: OvernightFinding;
+  peak?: PeakDemandStatus;
+};
+
+const HALF_HOUR_MS = 30 * 60_000;
+const PEAK_HISTORY_DAYS = 30;
+const PEAK_MIN_HISTORY_DAYS = 7;
+/** A new high has to beat the previous 30 days by this much to be news. */
+const PEAK_NEW_HIGH_MARGIN = 1.03;
+
+/** Average power in each complete half-hour (aligned to :00 and :30), from 15-minute site intervals. */
+export const halfHourDemand = (intervals: EnergyIqAnalysisInterval[]): Array<{ start: number; kw: number }> => {
+  const buckets = new Map<number, { kwh: number; minutes: number }>();
+  for (const interval of intervals) {
+    const start = Date.parse(interval.start);
+    const minutes = (Date.parse(interval.end_exclusive) - start) / 60_000;
+    if (!(minutes > 0) || minutes > 30) continue;
+    const key = Math.floor(start / HALF_HOUR_MS) * HALF_HOUR_MS;
+    const bucket = buckets.get(key) ?? { kwh: 0, minutes: 0 };
+    bucket.kwh += interval.usage_kwh;
+    bucket.minutes += minutes;
+    buckets.set(key, bucket);
+  }
+  return [...buckets.entries()]
+    .filter(([, bucket]) => bucket.minutes >= 29.9)
+    .map(([start, bucket]) => ({ start, kw: bucket.kwh / (bucket.minutes / 60) }))
+    .sort((left, right) => left.start - right.start);
+};
+
+/** Whether a half-hour starting at `start` falls inside one of the tariff's peak windows, in the site's clock. */
+const inPeakWindow = (start: number, timezone: string, windows: NonNullable<EnergyIqTariffScheduleEntry["time_of_use"]>["peak_windows"]): boolean => {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: timezone, weekday: "long", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+    .formatToParts(new Date(start)).map((part) => [part.type, part.value]));
+  const day = String(parts.weekday).toLowerCase();
+  const minute = Number(parts.hour) * 60 + Number(parts.minute);
+  const toMinutes = (value: string) => { const [h, m] = value.split(":").map(Number); return (h ?? 0) * 60 + (m ?? 0); };
+  return windows.some((window) => (window.days as string[]).includes(day) && minute >= toMinutes(window.from) && minute < toMinutes(window.to));
+};
+
+/** The tariff entry in force on a local date, for the site as a whole. */
+export const activeTariffEntry = (metadataStore: MetadataStore, projectId: string, date: string): EnergyIqTariffScheduleEntry | undefined => {
+  const version = metadataStore.energyIq.operationalPolicy.getActivePolicyVersions(projectId).tariff_schedule_version;
+  if (!version) return undefined;
+  const entries = metadataStore.energyIq.operationalPolicy.getTariffSchedule(version).entries
+    .filter((entry) => entry.owner.kind === "project" && entry.effective_from.slice(0, 10) <= date && (!entry.effective_to || date < entry.effective_to.slice(0, 10)))
+    .sort((left, right) => left.effective_from.localeCompare(right.effective_from));
+  return entries.at(-1);
+};
+
+export const evaluatePeakDemand = (input: {
+  intervals: EnergyIqAnalysisInterval[];
+  timezone: string;
+  month: string;
+  check: EnergyIqPeakDemandCheck;
+  tariff?: EnergyIqTariffScheduleEntry;
+}): PeakDemandStatus | undefined => {
+  const perKw = (input.tariff?.fixed_charges ?? []).filter((charge) => charge.unit === "per_kw_month" && Number.isFinite(charge.amount));
+  const windows = input.tariff?.time_of_use?.peak_windows ?? [];
+  const peakHoursOnly = perKw.some((charge) => /peak[- ]hour/iu.test(charge.label)) && windows.length > 0;
+  const halfHours = halfHourDemand(input.intervals)
+    .filter((half) => !peakHoursOnly || inPeakWindow(half.start, input.timezone, windows))
+    .map((half) => ({ ...half, date: localDate(new Date(half.start), input.timezone) }));
+  const inMonth = halfHours.filter((half) => half.date.startsWith(input.month));
+  if (inMonth.length === 0) return undefined;
+  const top = inMonth.reduce((best, half) => (half.kw > best.kw ? half : best));
+  const latestDay = inMonth.at(-1)!.date;
+  const latestDayPeakKw = Math.max(...inMonth.filter((half) => half.date === latestDay).map((half) => half.kw));
+  const historyFrom = shiftDate(latestDay, -PEAK_HISTORY_DAYS);
+  const history = halfHours.filter((half) => half.date >= historyFrom && half.date < latestDay);
+  const historyDays = new Set(history.map((half) => half.date)).size;
+  const previousPeakKw = historyDays >= PEAK_MIN_HISTORY_DAYS ? Math.max(...history.map((half) => half.kw)) : undefined;
+  const round = (value: number) => Math.round(value * 100) / 100;
+  const limitKw = input.check.limitKw;
+  const perKwMonth = perKw.reduce((sum, charge) => sum + charge.amount, 0);
+  return {
+    month: input.month,
+    peakKw: round(top.kw),
+    peakAt: new Date(top.start).toISOString(),
+    peakHoursOnly,
+    latestDay,
+    latestDayPeakKw: round(latestDayPeakKw),
+    ...(previousPeakKw === undefined ? {} : { previousPeakKw: round(previousPeakKw) }),
+    newHigh: previousPeakKw !== undefined && latestDayPeakKw > previousPeakKw * PEAK_NEW_HIGH_MARGIN,
+    ...(limitKw ? {
+      limitKw,
+      limitStatus: top.kw >= limitKw ? "over" as const : top.kw >= limitKw * input.check.warnPct / 100 ? "near" as const : "ok" as const,
+    } : {}),
+    warnPct: input.check.warnPct,
+    ...(perKwMonth > 0 && input.tariff ? {
+      demandCharge: { perKwMonth: round(perKwMonth), currency: input.tariff.currency, amount: round(perKwMonth * top.kw) },
+    } : {}),
+  };
 };
 
 /**
@@ -277,6 +395,7 @@ export const evaluateSiteChecks = async (input: {
   projectId: string;
   budget?: EnergyIqProjectBudget;
   overnight: EnergyIqOvernightCheck;
+  peak?: EnergyIqPeakDemandCheck;
   now: Date;
   /** Treat this local date as today: readings up to the day before count. Defaults to the site's today. */
   asOfDate?: string;
@@ -288,7 +407,7 @@ export const evaluateSiteChecks = async (input: {
   // The month being judged is the one the last full day belongs to, so on the 1st it is the month just ended.
   const month = yesterday.slice(0, 7);
   const monthStart = `${month}-01`;
-  const fourWeeksBack = shiftDate(today, -OVERNIGHT_BASELINE_NIGHTS - 1);
+  const fourWeeksBack = shiftDate(today, -(input.peak?.enabled ? PEAK_HISTORY_DAYS + 1 : OVERNIGHT_BASELINE_NIGHTS) - 1);
   const historyFrom = monthStart < fourWeeksBack ? monthStart : fourWeeksBack;
   const history = await readSiteFigures({ ...input, from: historyFrom, to: yesterday });
   const daily = dailyUsage(history.figures.intervals, history.timezone);
@@ -296,6 +415,11 @@ export const evaluateSiteChecks = async (input: {
   if (input.overnight.enabled) {
     const finding = findUnusualNight({ intervals: history.figures.intervals, timezone: history.timezone, thresholdPct: input.overnight.thresholdPct });
     if (finding) checks.overnight = finding;
+  }
+  if (input.peak?.enabled) {
+    const tariff = activeTariffEntry(input.metadataStore, input.projectId, yesterday);
+    const peak = evaluatePeakDemand({ intervals: history.figures.intervals, timezone: history.timezone, month, check: input.peak, ...(tariff ? { tariff } : {}) });
+    if (peak) checks.peak = peak;
   }
   if (input.budget) {
     const dataDays = [...daily.keys()].sort();

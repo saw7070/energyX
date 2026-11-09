@@ -12,6 +12,8 @@ import { siteTargetsMessages } from "./site-targets-messages";
 import styles from "./site-targets.module.css";
 
 const THRESHOLDS = [20, 30, 50, 100];
+const WARN_LEVELS = [80, 90, 95];
+const EMAIL_PATTERN = /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/u;
 
 /** A site's monthly budget, carbon factor and overnight check, with where the budget stands this month. */
 export function SiteTargets({ projectId }: { projectId: string }) {
@@ -80,6 +82,10 @@ export function SiteTargetsView({ targets, busy, error, notice, onSave }: {
           <OvernightCard targets={targets} busy={busy} onSave={onSave} />
         </div>
       </div>
+      <div className={styles.lower}>
+        <PeakCard targets={targets} busy={busy} onSave={onSave} />
+        <AlertsCard targets={targets} busy={busy} onSave={onSave} />
+      </div>
     </section>
   );
 }
@@ -88,7 +94,7 @@ type CardProps = { targets: EnergyProjectTargetsDto; busy: boolean; onSave: (bod
 
 function Card({ icon, tone, title, subtitle, action, children, className }: {
   icon: EnergyIconName;
-  tone: "green" | "teal" | "indigo";
+  tone: "green" | "teal" | "indigo" | "amber" | "blue";
   title: string;
   subtitle?: string | undefined;
   action?: ReactNode;
@@ -305,6 +311,132 @@ function OvernightCard({ targets, busy, onSave }: CardProps) {
           ))}
         </>
       ) : <p className={`${styles.callout} ${styles.calloutOff}`}>{t("overnightPaused")}</p>}
+    </Card>
+  );
+}
+
+function PeakCard({ targets, busy, onSave }: CardProps) {
+  const t = useMessages(siteTargetsMessages);
+  const { locale } = useEnergyIqLocale();
+  const [editing, setEditing] = useState(false);
+  const [limit, setLimit] = useState("");
+  const [warn, setWarn] = useState(90);
+  const peak = targets.peak;
+  const status = targets.status?.peak;
+  const kw = (value: number) => value.toLocaleString(intlLocale(locale), { maximumFractionDigits: 1 });
+  const start = () => { setLimit(peak.limitKw ? String(peak.limitKw) : ""); setWarn(peak.warnPct); setEditing(true); };
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    const ok = await onSave({ peak: { limitKw: limit.trim() ? Number(limit) : null, warnPct: warn } });
+    if (ok) setEditing(false);
+  };
+  const toggle = (
+    <button type="button" role="switch" aria-checked={peak.enabled} aria-label={t("peakSwitch")} className={styles.switch} disabled={!targets.canEdit || busy}
+      onClick={() => void onSave({ peak: { enabled: !peak.enabled } })}>
+      <span />
+    </button>
+  );
+  const subtitle = !peak.enabled ? t("peakOff") : peak.limitKw ? t("peakSubtitleLimit", { limit: kw(peak.limitKw), pct: peak.warnPct }) : t("peakSubtitleNoLimit");
+  const when = status ? new Intl.DateTimeFormat(intlLocale(locale), { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: "Asia/Singapore" }).format(new Date(status.peakAt)) : "";
+  const share = status?.limitKw ? Math.min(100, status.peakKw / status.limitKw * 100) : 0;
+  return (
+    <Card icon="bolt" tone="amber" title={t("peakTitle")} subtitle={subtitle} action={toggle}>
+      <p className={styles.quiet}>{t("peakBody")}</p>
+      {!peak.enabled ? <p className={`${styles.callout} ${styles.calloutOff}`}>{t("peakPaused")}</p> : (
+        <>
+          {targets.status && (status ? (
+            <div className={styles.status}>
+              <span className={styles.hint}>{t("peakThisMonth")}</span>
+              <div className={styles.peakNow}><strong>{kw(status.peakKw)} kW</strong><span className={styles.hint}>{t("peakSetAt", { when })}</span></div>
+              {status.limitKw && <>
+                <div className={styles.peakMeter} role="img" aria-label={t(status.limitStatus === "over" ? "peakStatusOver" : status.limitStatus === "near" ? "peakStatusNear" : "peakStatusOk", { pct: Math.round(status.peakKw / status.limitKw * 100) })}>
+                  <span className={status.limitStatus === "over" ? styles.over : status.limitStatus === "near" ? styles.near : undefined} style={{ width: `${share}%` }} />
+                </div>
+                <small className={styles.hint}>{t(status.limitStatus === "over" ? "peakStatusOver" : status.limitStatus === "near" ? "peakStatusNear" : "peakStatusOk", { pct: Math.round(status.peakKw / status.limitKw * 100) })}</small>
+              </>}
+              {status.peakHoursOnly && <small className={styles.hint}>{t("peakHoursOnly")}</small>}
+              {status.demandCharge && <small className={styles.hint}>{t("peakCharge", {
+                amount: withCurrency(status.demandCharge.currency, status.demandCharge.amount.toLocaleString(intlLocale(locale), { maximumFractionDigits: 0 })),
+                rate: withCurrency(status.demandCharge.currency, status.demandCharge.perKwMonth.toLocaleString(intlLocale(locale), { minimumFractionDigits: 2, maximumFractionDigits: 2 })),
+              })}</small>}
+            </div>
+          ) : <p className={styles.quiet}>{t("peakNoData")}</p>)}
+          {editing ? (
+            <form className={styles.form} onSubmit={event => void submit(event)}>
+              <label className={styles.field}><span>{t("peakLimitLabel")}</span>
+                <span className={styles.money}><input inputMode="decimal" autoFocus value={limit} onChange={event => setLimit(event.target.value)} aria-label={t("peakLimitLabel")} placeholder="—" /><b className={styles.suffix}>kW</b></span>
+                <small>{t("peakLimitHint")}</small>
+              </label>
+              <div className={styles.sensitivity}>
+                <span>{t("peakWarnLabel")}</span>
+                <div role="radiogroup" aria-label={t("peakWarnLabel")} className={styles.chips}>
+                  {(WARN_LEVELS.includes(warn) ? WARN_LEVELS : [...WARN_LEVELS, warn].sort((a, b) => a - b)).map(pct => (
+                    <button key={pct} type="button" role="radio" aria-checked={warn === pct} onClick={() => setWarn(pct)}>{pct}%</button>
+                  ))}
+                </div>
+              </div>
+              <div className={styles.actions}>
+                <button type="button" className={styles.secondary} onClick={() => setEditing(false)}>{t("cancel")}</button>
+                <button type="submit" className={styles.primary} disabled={busy || (limit.trim() !== "" && !(Number(limit) > 0))}>{t("save")}</button>
+              </div>
+            </form>
+          ) : targets.canEdit && (
+            <div className={styles.actions}>
+              {peak.limitKw && <button type="button" className={styles.ghost} disabled={busy} onClick={() => void onSave({ peak: { limitKw: null } })}>{t("peakRemoveLimit")}</button>}
+              <button type="button" className={styles.secondary} onClick={start}>{t("edit")}</button>
+            </div>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
+function AlertsCard({ targets, busy, onSave }: CardProps) {
+  const t = useMessages(siteTargetsMessages);
+  const [other, setOther] = useState("");
+  const [invalid, setInvalid] = useState(false);
+  const custom = (targets.alertEmails?.length ?? 0) > 0;
+  const recipients = targets.alertRecipients;
+  const team = (targets.alertTeam ?? []).filter(member => !recipients.includes(member.email));
+  const saveList = (emails: string[]) => onSave({ alertEmails: emails.length > 0 ? [...new Set(emails)] : null });
+  const add = async (email: string) => {
+    const value = email.trim().toLowerCase();
+    if (!EMAIL_PATTERN.test(value)) { setInvalid(true); return; }
+    setInvalid(false);
+    if (await saveList([...recipients, value])) setOther("");
+  };
+  return (
+    <Card icon="bell" tone="blue" title={t("alertsTitle")} subtitle={custom ? t("alertsSubtitleCustom", { count: recipients.length }) : t("alertsSubtitleDefault")}>
+      <p className={styles.quiet}>{t("alertsBody")}</p>
+      {recipients.length === 0
+        ? <p className={`${styles.callout} ${styles.calloutWarn}`}><EnergyIcon name="alert" className="h-4 w-4 shrink-0" />{t("alertsNobody")}</p>
+        : <ul className={styles.recipients}>{recipients.map(email => (
+          <li key={email}><span>{email}</span>{targets.canEdit && custom && (
+            <button type="button" aria-label={t("alertsRemove", { email })} disabled={busy} onClick={() => void saveList(recipients.filter(item => item !== email))}><EnergyIcon name="close" className="h-3 w-3" /></button>
+          )}</li>
+        ))}</ul>}
+      {targets.canEdit && (
+        <form className={styles.form} noValidate onSubmit={event => { event.preventDefault(); void add(other); }}>
+          <div className={styles.addRow}>
+            {team.length > 0 && (
+              <label className={styles.field}><span>{t("alertsTeam")}</span>
+                <select value="" disabled={busy} onChange={event => event.target.value && void add(event.target.value)} aria-label={t("alertsTeam")}>
+                  <option value="">—</option>
+                  {team.map(member => <option key={member.email} value={member.email}>{member.name ? `${member.name} (${member.email})` : member.email}</option>)}
+                </select>
+              </label>
+            )}
+            <label className={styles.field}><span>{t("alertsOther")}</span>
+              <input type="email" value={other} onChange={event => { setOther(event.target.value); setInvalid(false); }} aria-label={t("alertsOther")} placeholder="name@company.com" aria-invalid={invalid} />
+            </label>
+            <button type="submit" className={styles.primary} disabled={busy || other.trim() === ""}>{t("alertsAdd")}</button>
+          </div>
+          {invalid && <small role="alert" className={styles.badText}>{t("alertsInvalid")}</small>}
+          {custom && <button type="button" className={styles.ghost} disabled={busy} onClick={() => void saveList([])}>{t("alertsUseDefault")}</button>}
+        </form>
+      )}
+      {targets.emailMode && targets.emailMode !== "smtp" && <small className={styles.hint}>{t("alertsEmailOff")}</small>}
     </Card>
   );
 }

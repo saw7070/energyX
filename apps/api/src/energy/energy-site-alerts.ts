@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { MetadataStore } from "@datafoundry/metadata";
 
 /**
- * What the notification bell tells a site's readers besides action results: automatic reports that are ready, budget
+ * What the notification bell tells a site's readers besides action results: automatic reports that are ready, budget,
  * and overnight-use alerts, and, for administrators, a daily live update that did not finish. Stopped meters come from the meter-health read the
  * pages already make. Each alert has a key; a reader who opens or dismisses it does not see that key again.
  */
@@ -24,7 +24,7 @@ export type SiteAlertSync = {
 /** A budget heading over (or gone over), or a night of unusual use, raised by the daily site check. */
 export type SiteAlertTarget = {
   key: string;
-  kind: "budget" | "overnight";
+  kind: "budget" | "overnight" | "peak";
   createdAt: string;
   details: Record<string, unknown>;
 };

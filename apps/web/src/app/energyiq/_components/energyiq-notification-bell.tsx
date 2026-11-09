@@ -13,12 +13,12 @@ import { notificationMessages } from "./notification-messages";
 
 type Notice = { actionId: string; title: string; runId: string };
 
-export type BellKind = "overnight" | "budget" | "meters" | "sync" | "report" | "action";
+export type BellKind = "overnight" | "budget" | "peak" | "meters" | "sync" | "report" | "action";
 export type BellEntry = { key: string; tone: "warning" | "info"; kind: BellKind; title: string; detail: string; href: string; at?: string; readKey?: string; runId?: string };
 
 /** The icon and colour each kind of alert gets in the list, so a reader can tell them apart at a glance. */
 const KIND_ICON: Record<BellKind, Parameters<typeof EnergyIcon>[0]["name"]> = {
-  overnight: "alert", budget: "dollar", meters: "meter-off", sync: "alert", report: "document", action: "spark",
+  overnight: "alert", budget: "dollar", peak: "bolt", meters: "meter-off", sync: "alert", report: "document", action: "spark",
 };
 
 /** "Today, 6:05 am", "Yesterday, 11:00 pm", "Wednesday, 4:15 pm" within a week, then "8 Oct, 4:15 pm". Singapore time. */
@@ -160,6 +160,16 @@ export function EnergyIqNotificationBell({ projectId }: { projectId: string }) {
           key: alert.key, readKey: alert.key, tone: "warning", kind: "budget", at: alert.createdAt,
           title: tn(details.status === "over" ? "budget.over" : "budget.at-risk", { month }),
           detail: tn("budget.detail", { forecast: amount(onMoney ? details.forecastCost : details.forecastKwh), budget: amount(onMoney ? details.budgetAmount : details.budgetKwh) }),
+          href: `/energyiq/project-configuration?${new URLSearchParams({ projectId, tab: "targets" })}`,
+        });
+      } else if (alert.kind === "peak") {
+        const reason = details.reason === "over" || details.reason === "near" ? details.reason : "high";
+        const kw = Number((reason === "high" ? details.latestDayPeakKw : details.peakKw) ?? 0).toLocaleString(intlLocale(locale), { maximumFractionDigits: 1 });
+        const limit = Number(details.limitKw ?? 0);
+        list.push({
+          key: alert.key, readKey: alert.key, tone: "warning", kind: "peak", at: alert.createdAt,
+          title: reason === "high" ? tn("peak.high") : tn(`peak.${reason}`, { pct: limit > 0 ? Math.round(Number(details.peakKw ?? 0) / limit * 100) : 0, limit: limit.toLocaleString(intlLocale(locale), { maximumFractionDigits: 1 }) }),
+          detail: tn("peak.detail", { kw, date: day(reason === "high" || typeof details.peakAt !== "string" ? String(details.latestDay ?? "") : new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Singapore" }).format(new Date(details.peakAt))) }),
           href: `/energyiq/project-configuration?${new URLSearchParams({ projectId, tab: "targets" })}`,
         });
       } else {

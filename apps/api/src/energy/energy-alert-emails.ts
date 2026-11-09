@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { readEnergyMeterDataHealth } from "@datafoundry/data-gateway";
-import type { MetadataStore } from "@datafoundry/metadata";
+import type { EnergyIqPeakDemandCheck, MetadataStore } from "@datafoundry/metadata";
 
 import { loadPasswordAuthConfig } from "../auth/config.js";
 import { createMailDelivery } from "../email/mail-delivery.js";
@@ -10,6 +10,7 @@ import { withEnergyProjectPublicationReadLock } from "./energy-project-materiali
 import { resolveEnergyPublishedMeterPoints } from "./energy-query-context.js";
 import { readSiteAlerts } from "./energy-site-alerts.js";
 import { readLiveSiteReadings } from "./energy-live-readings.js";
+import { siteAlertRecipients } from "./energy-recipients.js";
 
 /**
  * Alert emails: the same two site problems the bell shows, sent to the people who own the site's workspace, so a
@@ -18,6 +19,8 @@ import { readLiveSiteReadings } from "./energy-live-readings.js";
  * - a daily live update that did not finish;
  * - meters Tuya has reported offline for half an hour, from the 15-minute live check, so a fault is known within the
  *   hour rather than the next day.
+ * - demand at or above the site's warning level, from the same live check, so someone can switch a load off before
+ *   it sets the month's maximum demand (at most once a day for the warning and once for going over).
  * Each problem is emailed once: a new set of stopped or offline meters, or a new failure, is a new email. Off unless
  * ENERGYIQ_ALERT_EMAILS_ENABLED=true and SMTP is configured.
  */
@@ -35,6 +38,9 @@ export const collectSiteAlertEmails = (input: {
   meters: MeterHealthRow[];
   /** Meters offline right now, from the live check. */
   offline?: Array<{ meterPointId: string; name: string; since: string }>;
+  /** The site's power now, from the live check, and its peak demand setting. */
+  live?: { powerKw?: number; readAt?: string };
+  peak?: EnergyIqPeakDemandCheck;
   publicBaseUrl: string;
 }): AlertEmail[] => {
   const project = input.metadataStore.energyIq.getProject(input.projectId);
@@ -92,8 +98,26 @@ export const collectSiteAlertEmails = (input: {
       text: `The daily update for ${site} failed at ${formatTime(sync.failedAt)}, so the latest day's readings are not in EnergyX yet.\n\n${reason}` + link("/energyiq/project-configuration"),
     });
   }
+  const limitKw = input.peak?.enabled ? input.peak.limitKw : undefined;
+  const powerKw = input.live?.powerKw;
+  if (limitKw && powerKw !== undefined && input.live?.readAt && powerKw >= limitKw * input.peak!.warnPct / 100) {
+    const over = powerKw >= limitKw;
+    const day = new Intl.DateTimeFormat("en-CA", { timeZone: project.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(input.live.readAt));
+    const share = Math.round(powerKw / limitKw * 100);
+    emails.push({
+      key: `peak-live:${day}:${over ? "over" : "near"}`,
+      subject: over ? `${site}: demand is over its ${formatKw(limitKw)} limit right now` : `${site}: demand is at ${share}% of its limit right now`,
+      text: [
+        `At ${formatTime(input.live.readAt)}, ${site} was drawing ${formatKw(powerKw)}, ${share}% of its ${formatKw(limitKw)} limit.`,
+        "",
+        "Maximum demand is billed on the month's single highest half-hour. Switching off or delaying a large load now (air-conditioning, pumps, chillers, heaters) keeps it from setting a new peak.",
+      ].join("\n") + link("/energyiq/key-points"),
+    });
+  }
   return emails;
 };
+
+const formatKw = (value: number): string => `${new Intl.NumberFormat("en-SG", { maximumFractionDigits: 1 }).format(value)} kW`;
 
 /** The meters that were sending and went quiet, furthest behind first. Same rule as the Overview notice. */
 export const stoppedMeters = (meters: MeterHealthRow[]): MeterHealthRow[] => {
@@ -105,20 +129,8 @@ export const stoppedMeters = (meters: MeterHealthRow[]): MeterHealthRow[] => {
     .sort((left, right) => left.lastReadingAt!.localeCompare(right.lastReadingAt!));
 };
 
-/** The workspace's owners: the people who run the site, as opposed to everyone who can read its reports. */
-export const alertRecipients = (metadataStore: MetadataStore, projectId: string): string[] => {
-  const project = metadataStore.energyIq.getProject(projectId);
-  return [...new Set(metadataStore.workspaceMemberships.listByWorkspace({ workspace_id: project.workspace_id })
-    .filter((membership) => membership.role === "owner")
-    .flatMap((membership) => {
-      try {
-        const user = metadataStore.users.getById({ user_id: membership.user_id });
-        return user.email && !user.disabled_at ? [user.email.toLowerCase()] : [];
-      } catch {
-        return [];
-      }
-    }))].sort();
-};
+/** The same people as every other site alert: the site's chosen list, or the people who run it. */
+export const alertRecipients = (metadataStore: MetadataStore, projectId: string): string[] => siteAlertRecipients(metadataStore, projectId);
 
 /** Send what has not been sent yet; returns the keys that went out. */
 export const sendPendingAlertEmails = async (input: {
@@ -172,7 +184,7 @@ export const createEnergyAlertEmailer = (input: {
             metadataStore: input.metadataStore,
             projectId,
             meters: await readMeters(projectId),
-            offline: readLiveSiteReadings({ metadataStore: input.metadataStore, projectId }).offline,
+            ...liveForAlerts(input.metadataStore, projectId),
             publicBaseUrl: config.publicBaseUrl,
           });
           const sent = await sendPendingAlertEmails({
@@ -214,6 +226,15 @@ export const createEnergyAlertEmailer = (input: {
       timer = undefined;
     },
     runOnce,
+  };
+};
+
+const liveForAlerts = (metadataStore: MetadataStore, projectId: string) => {
+  const live = readLiveSiteReadings({ metadataStore, projectId });
+  return {
+    offline: live.offline,
+    live: { ...(live.powerKw === undefined ? {} : { powerKw: live.powerKw }), ...(live.readAt ? { readAt: live.readAt } : {}) },
+    peak: metadataStore.energyIq.targets.getTargets(projectId).peak,
   };
 };
 

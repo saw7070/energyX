@@ -483,8 +483,8 @@ export type EnergyLiveReadingsDto = {
 /** The bell's site alerts: automatic reports that are ready and, for administrators, a failed daily live update. */
 export type EnergyProjectAlertsDto = {
   reports: Array<{ key: string; reportId: string; cadence: "daily" | "weekly" | "monthly" | "other"; from: string; toExclusive: string; finishedAt: string }>;
-  /** Budget and overnight-use alerts from the daily site check. */
-  targets?: Array<{ key: string; kind: "budget" | "overnight"; createdAt: string; details: Record<string, unknown> }>;
+  /** Budget, overnight-use and peak demand alerts from the daily site check. */
+  targets?: Array<{ key: string; kind: "budget" | "overnight" | "peak"; createdAt: string; details: Record<string, unknown> }>;
   sync?: { key: string; failedAt: string; reason: "ip-blocked" | "sign-in" | "other" };
   readKeys: string[];
 };
@@ -518,22 +518,52 @@ export type EnergyBudgetStatusDto = {
 
 export type EnergyOvernightFindingDto = { night: string; nightKw: number; usualKw: number; abovePct: number; extraKwh: number; nightsCompared: number };
 
+/** A site's maximum-demand setting: an optional limit (contracted capacity or own target) and when to warn. */
+export type EnergyPeakDemandCheckDto = { enabled: boolean; limitKw?: number; warnPct: number };
+
+/** This month's highest half-hour demand, as the daily check sees it. */
+export type EnergyPeakDemandStatusDto = {
+  month: string;
+  peakKw: number;
+  peakAt: string;
+  peakHoursOnly: boolean;
+  latestDay: string;
+  latestDayPeakKw: number;
+  previousPeakKw?: number;
+  newHigh: boolean;
+  limitKw?: number;
+  warnPct: number;
+  limitStatus?: "ok" | "near" | "over";
+  demandCharge?: { perKwMonth: number; currency: string; amount: number };
+};
+
 export type EnergyProjectTargetsDto = {
   projectId: string;
   budget?: EnergyBudgetDto;
   carbon: EnergyCarbonFactorDto;
   gridCarbon: EnergyCarbonFactorDto;
   overnight: { enabled: boolean; thresholdPct: number };
+  peak: EnergyPeakDemandCheckDto;
+  /** The site's own alert list; absent means the default (the people who run the site). */
+  alertEmails?: string[];
+  /** Who the alerts go to now. */
+  alertRecipients: string[];
+  /** Team members an editor can pick from. */
+  alertTeam?: Array<{ email: string; name?: string }>;
+  /** "off" while email is not set up, "test" while it only logs. */
+  emailMode?: "off" | "test" | "smtp";
   currency: "SGD" | "MYR";
   canEdit: boolean;
   updatedAt?: string;
-  status?: { budget?: EnergyBudgetStatusDto; overnight?: EnergyOvernightFindingDto };
+  status?: { budget?: EnergyBudgetStatusDto; overnight?: EnergyOvernightFindingDto; peak?: EnergyPeakDemandStatusDto };
 };
 
 export type EnergyProjectTargetsInputDto = {
   budget?: EnergyBudgetDto | null;
   carbon?: { kgCo2ePerKwh: number; year?: number; source?: string } | null;
   overnight?: { enabled?: boolean; thresholdPct?: number };
+  peak?: { enabled?: boolean; limitKw?: number | null; warnPct?: number };
+  alertEmails?: string[] | null;
 };
 
 export type EnergyPortfolioSiteDto = {

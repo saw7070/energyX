@@ -17,14 +17,15 @@ import {
   shiftDate,
 } from "./energy-portfolio.js";
 import { deliverScheduledReport, latestReportPeriod } from "./energy-report-delivery.js";
-import { workspaceTeam } from "./energy-recipients.js";
+import { isDeliverableEmail, siteAlertRecipients, workspaceTeam } from "./energy-recipients.js";
 
 /**
  * Company-wide views and settings an energy manager uses:
  *   GET  portfolio?from&to                 every site side by side (JSON)
  *   GET  portfolio/pdf?from&to             the same as a PDF
  *   GET  portfolio/carbon.csv?from&to      monthly kWh and CO2e per site, for sustainability reporting
- *   GET  projects/:id/targets[?status=1]   a site's budget, carbon factor and overnight check (+ where it stands now)
+ *   GET  projects/:id/targets[?status=1]   a site's budget, carbon factor, overnight and peak demand checks and alert
+ *                                         recipients (+ where it stands now)
  *   PUT  projects/:id/targets              change them (people allowed to change hours and rates)
  *   GET|POST report-schedules, PUT|DELETE report-schedules/:id, POST report-schedules/:id/send
  *                                          scheduled report emails (people allowed to manage the client's people)
@@ -78,6 +79,8 @@ export const handlePortfolioApi = async (
         ...(body.budget === null ? { budget: null } : isRecord(body.budget) ? { budget: body.budget as never } : {}),
         ...(body.carbon === null ? { carbon: null } : isRecord(body.carbon) ? { carbon: body.carbon as never } : {}),
         ...(isRecord(body.overnight) ? { overnight: body.overnight as never } : {}),
+        ...(isRecord(body.peak) ? { peak: body.peak as never } : {}),
+        ...(body.alertEmails === null ? { alertEmails: null } : Array.isArray(body.alertEmails) ? { alertEmails: body.alertEmails } : {}),
       }, user.id);
     } else if (method !== "GET") {
       return undefined;
@@ -91,6 +94,7 @@ export const handlePortfolioApi = async (
           metadataStore, user, workspaceId: context.workspaceId, projectId,
           ...(targets.budget ? { budget: targets.budget } : {}),
           overnight: targets.overnight,
+          peak: targets.peak,
           now: new Date(),
         });
       } catch {
@@ -106,6 +110,17 @@ export const handlePortfolioApi = async (
         carbon: targets.carbon ?? gridFactor,
         gridCarbon: gridFactor,
         overnight: targets.overnight,
+        peak: targets.peak,
+        ...(targets.alertEmails ? { alertEmails: targets.alertEmails } : {}),
+        // Who gets the alerts now, and the team to pick from (people who can read reports, with an address mail reaches).
+        alertRecipients: siteAlertRecipients(metadataStore, projectId),
+        ...(canEdit ? {
+          alertTeam: workspaceTeam(metadataStore, context.workspaceId)
+            .filter((member) => can(member.permissions, "reports", "read") && isDeliverableEmail(member.email))
+            .map((member) => ({ email: member.email, ...(member.user.display_name ? { name: member.user.display_name } : {}) }))
+            .sort((left, right) => (left.name ?? left.email).localeCompare(right.name ?? right.email)),
+        } : {}),
+        emailMode: createMailDelivery().mode,
         currency: project.region?.country === "MY" ? "MYR" : "SGD",
         canEdit,
         ...(targets.updatedAt ? { updatedAt: targets.updatedAt } : {}),
