@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EnergyScopeAnalysisDto } from "../../../lib/config-api";
 import type { DeviceStatistics } from "./device-statistics";
-import { boardTotalNote, deviceBlocks, deviceFindings, energyBreakdown, formatPeriod, parseDevicesView, siteFindings, summariseDevices, tariffRate, withShortDays, type DeviceRow } from "./site-devices";
+import { boardTotalNote, cardTitle, deviceBlocks, deviceFindings, energyBreakdown, formatPeriod, parseDevicesView, siteFindings, summariseDevices, tariffRate, withShortDays, type DeviceRow } from "./site-devices";
 
 const health = (coveragePct: number, validIntervalCount = 100) => ({ coveragePct, expectedMeterIntervalCount: 100, validIntervalCount, qualityEventCount: 0 });
 const circuit = (meterNodeId: string, usageKwh: number, coveragePct: number) => ({ meterNodeId, name: meterNodeId, appliance: "load", category: "load", meterRole: "component", usageKwh, sharePct: 0, peakKw: 0.5, qualityEventCount: 0, dataHealth: health(coveragePct) });
@@ -217,3 +217,12 @@ describe("device blocks", () => {
     ]);
   });
 });
+
+describe("device card titles", () => {
+  it("names the meter only, leaving what it powers for the device view", () => {
+    expect(cardTitle("264E GF Lobby Lighting · Groundfloor lift lobby lighting 2")).toBe("264E GF Lobby Lighting");
+    expect(cardTitle("Pavilion DL & Fan")).toBe("Pavilion DL & Fan");
+    expect(cardTitle(" · only a note")).toBe(" · only a note");
+  });
+});
+
