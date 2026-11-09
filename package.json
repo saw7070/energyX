@@ -134,7 +134,7 @@
     "@ag-ui/mastra": "^1.0.3",
     "@ag-ui/mcp-middleware": "^0.0.1",
     "@ai-sdk/openai": "3.0.90",
-    "@copilotkit/runtime": "0.0.0-mme-ag-ui-0-0-46-20260227141603",
+    "@copilotkit/runtime": "1.81.0",
     "@huggingface/tokenizers": "^0.1.3",
     "@mastra/client-js": "^1.25.0",
     "@mastra/core": "^1.46.0",
