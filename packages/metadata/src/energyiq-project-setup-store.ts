@@ -40,6 +40,8 @@ export type EnergyIqMeterPresentation = {
   group?: string;
   /** Someone confirmed this meter is not used (why, in their words), so its zero readings are expected. */
   not_in_use?: string;
+  /** "yes": the meter is powered with the lights it measures, so being offline while they are off is expected. */
+  off_with_lights?: string;
 };
 
 export type EnergyIqMeterMappingRow = {
@@ -1501,7 +1503,7 @@ const requiredString = (row: Record<string, unknown>, key: string): string => {
 };
 
 function normalizeMeterPresentation(value: EnergyIqMeterPresentation): EnergyIqMeterPresentation {
-  return Object.fromEntries(["device_name", "circuit_name", "group", "not_in_use"].flatMap(key => {
+  return Object.fromEntries(["device_name", "circuit_name", "group", "not_in_use", "off_with_lights"].flatMap(key => {
     const label = value[key as keyof EnergyIqMeterPresentation];
     return typeof label === "string" && label.trim() ? [[key, label.trim().slice(0, 160)]] : [];
   }));

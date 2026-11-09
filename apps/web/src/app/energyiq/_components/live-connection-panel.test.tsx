@@ -154,6 +154,31 @@ describe("LiveConnectionPanel", () => {
     expect(container.textContent).toContain("All 2 matched devices send energy readings.");
   });
 
+  it("shows a meter that turns off with its lights as off, not broken, until it has been offline for 16 hours", async () => {
+    let offlineSince = new Date(Date.now() - 6 * 3_600_000).toISOString();
+    api.liveConnectionRequest.mockImplementation(async (_projectId: string, action = "") => {
+      if (action === "devices") return { devices };
+      return { connection: connection({
+        managedByServer: true,
+        connected: true,
+        ready: true,
+        matchedCount: 2,
+        meters: meters.map((meter, index) => ({ ...meter, device: { ref: devices[index]!.ref, name: "" }, ...(index === 1 ? { offWithLights: true, offlineSince } : {}) })),
+      }) };
+    });
+    await act(async () => root.render(<LiveConnectionPanel projectId="p" />));
+    await flush();
+    expect(container.querySelectorAll("tbody tr")[1]!.textContent).toContain("Off with the lights");
+    expect(container.querySelectorAll("tbody tr")[1]!.textContent).not.toContain("Device offline");
+
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    offlineSince = new Date(Date.now() - 17 * 3_600_000).toISOString();
+    await act(async () => root.render(<LiveConnectionPanel projectId="p" />));
+    await flush();
+    expect(container.querySelectorAll("tbody tr")[1]!.textContent).toContain("Device offline");
+  });
+
   it("shows whether each meter is live, and edits or removes one meter at a time", async () => {
     const matched = (refs: Record<string, string | undefined>) => connection({
       connected: true,

@@ -269,7 +269,7 @@ export type EnergyMeterRoleDto = "total" | "component" | "standalone";
 export type EnergyAggregationUsageDto = "official" | "excluded";
 
 export type EnergyMeterMappingRowDto = {
-  presentation?: { device_name?: string; circuit_name?: string; group?: string; not_in_use?: string };
+  presentation?: { device_name?: string; circuit_name?: string; group?: string; not_in_use?: string; off_with_lights?: string };
   id: string;
   source_label: string;
   scope_id: string;

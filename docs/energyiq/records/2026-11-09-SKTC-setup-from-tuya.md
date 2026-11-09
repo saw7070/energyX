@@ -151,3 +151,19 @@ happy with the wording.
 - Add the key questions above to Project notes.
 - Rename *Rubbish Strret Lamp* to *Rubbish Street Lamp* if SKTC wants (Facility → Devices).
 - The next morning: check Data availability and System health show the 02:00 daily update arrived.
+
+## The two Pavilion linkway meters (found the same day)
+
+After the site went live, both *Pavilion linkway* meters (264A) showed **Device offline**. Their Tuya history from
+3 to 9 November:
+
+- **Pavilion linkway 2** sends a reading every hour from about 19:25 to 06:25 and nothing for the 12–13 hours in
+  between, every day. It most likely takes its power from the linkway lights' switched supply, so it is offline every
+  daytime while the lights are off. No energy is missed: the lights use none while they are off. Mark it **Turns off
+  with its lights** (Facility → Floor layout → Edit on the meter) so it shows *Off with the lights* and is flagged only
+  if it stays off for 16 hours; or ask SKTC's electrician to power it from an always-on supply.
+- **Pavilion linkway 1** had the same pattern until 5 November 18:25 and has sent nothing since, by day or night. That
+  is a fault on site: check its breaker and whether the meter has power; if it does, re-pair it to the gateway in the
+  Smart Life app (it may be at the edge of the gateway's range outdoors).
+
+The other 17 meters, including *Pavilion DL & Fan* in the same pavilion, are online.

@@ -17,7 +17,8 @@ export type LiveConnectionDto = {
   connected: boolean;
   accountHint?: string;
   publishedSetup: boolean;
-  meters: Array<{ meterPointId: string; name: string; sourceLabel: string; device?: { ref: string; name: string; productName?: string } }>;
+  /** `offWithLights`: powered with the lights it measures, so offline while they are off is normal. */
+  meters: Array<{ meterPointId: string; name: string; sourceLabel: string; device?: { ref: string; name: string; productName?: string }; offWithLights?: boolean; offlineSince?: string }>;
   matchedCount: number;
   ready: boolean;
   schedule: { enabled: boolean; localHour: number; timezone: string };
@@ -42,6 +43,8 @@ export type LiveDeviceListRowDto = {
 
 type CheckDto = { ok: boolean; message?: string; deviceCount?: number; gateways?: { total: number; online: number; offline: string[] }; meters: Array<{ meterPointId: string; ok: boolean; reason?: string; phases?: 1 | 3 }> };
 type LiveKey = keyof (typeof liveConnectionMessages)["en"] & string;
+/** As the server's offline alert: a meter that turns off with its lights is offline only after missing a night too. */
+const OFF_WITH_LIGHTS_ALERT_MS = 16 * 3_600_000;
 type T = Translate<LiveKey>;
 
 const normalise = (value: string): string => value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
@@ -325,7 +328,13 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
     const withDetail = (tone: Tone, label: string) => ({ tone, label, ...(detail ? { detail } : {}) });
     if (!meter.device) return withDetail("grey", t("status.notConnected"));
     const device = deviceByRef.get(meter.device.ref);
-    if (device && !device.online) return withDetail("red", t("status.offline"));
+    if (device && !device.online) {
+      // Off with its lights for less than 16 hours: the lights are off, not the meter broken.
+      const offFor = meter.offlineSince ? Date.now() - Date.parse(meter.offlineSince) : 0;
+      return meter.offWithLights && offFor < OFF_WITH_LIGHTS_ALERT_MS
+        ? withDetail("grey", t("status.offWithLights"))
+        : withDetail("red", t("status.offline"));
+    }
     if (last && Date.now() - Date.parse(last) <= 3 * 86_400_000) return withDetail("green", t("status.live"));
     if (last) return withDetail("amber", t("status.stale"));
     return withDetail("amber", t("status.waiting"));
