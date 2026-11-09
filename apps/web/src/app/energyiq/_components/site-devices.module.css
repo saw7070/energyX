@@ -190,6 +190,8 @@
 .crumbs button { padding:1px 4px; border-radius:5px; color:#1d513a; font-weight:600; }
 .crumbs button:hover { background:#e4efe7; text-decoration:underline; }
 .crumbs [aria-current] { color:#3c4a42; }
+.locationPick select { min-height:36px; max-width:min(320px, 100%); padding:6px 32px 6px 12px; border:1px solid #d0dbd2; border-radius:8px; background:white; color:#1d513a; font-size:14px; font-weight:600; }
+.locationPick select:focus { outline:2px solid #2f7d5a; outline-offset:1px; }
 .picker { position:relative; margin-left:auto; }
 .pickerChevron { width:12px !important; height:12px !important; margin:0 0 0 8px !important; transform:rotate(90deg); color:#6a786f; }
 .pickerPanel { position:absolute; right:0; top:calc(100% + 6px); z-index:40; width:min(380px, 88vw); max-height:440px; overflow:auto; padding:8px; border:1px solid #d0dbd2; border-radius:12px; background:white; box-shadow:0 14px 34px rgba(20,40,30,.16); }
@@ -326,6 +328,8 @@
 :global(:where(html[data-energyiq-theme="dark"])) .crumbs button { border-radius:5px; color:#94caae; }
 :global(:where(html[data-energyiq-theme="dark"])) .crumbs button:hover { background:#1b231e; text-decoration:underline; }
 :global(:where(html[data-energyiq-theme="dark"])) .crumbs [aria-current] { color:#b0c0b6; }
+:global(:where(html[data-energyiq-theme="dark"])) .locationPick select { border:1px solid #323b34; border-radius:8px; background:#191919; color:#94caae; }
+:global(:where(html[data-energyiq-theme="dark"])) .locationPick select:focus { outline:2px solid #2f7d5a; }
 :global(:where(html[data-energyiq-theme="dark"])) .pickerChevron { color:#9aa99f; }
 :global(:where(html[data-energyiq-theme="dark"])) .pickerPanel { border:1px solid #323b34; border-radius:12px; background:#191919; box-shadow:0 14px 34px #14281e41; }
 :global(:where(html[data-energyiq-theme="dark"])) .pickerSearch { border:1px solid #323b34; border-radius:8px; background:#191919; color:#bfd1c6; }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EnergyScopeAnalysisDto } from "../../../lib/config-api";
 import type { DeviceStatistics } from "./device-statistics";
-import { boardTotalNote, deviceFindings, energyBreakdown, formatPeriod, parseDevicesView, siteFindings, summariseDevices, tariffRate, withShortDays, type DeviceRow } from "./site-devices";
+import { boardTotalNote, deviceFindings, groupLocations, energyBreakdown, formatPeriod, parseDevicesView, siteFindings, summariseDevices, tariffRate, withShortDays, type DeviceRow } from "./site-devices";
 
 const health = (coveragePct: number, validIntervalCount = 100) => ({ coveragePct, expectedMeterIntervalCount: 100, validIntervalCount, qualityEventCount: 0 });
 const circuit = (meterNodeId: string, usageKwh: number, coveragePct: number) => ({ meterNodeId, name: meterNodeId, appliance: "load", category: "load", meterRole: "component", usageKwh, sharePct: 0, peakKw: 0.5, qualityEventCount: 0, dataHealth: health(coveragePct) });
@@ -200,5 +200,18 @@ describe("withShortDays", () => {
 
   it("returns the original series when nothing fell short", () => {
     expect(withShortDays(daily, [], null)).toBe(daily);
+  });
+});
+
+describe("location drop-down", () => {
+  it("groups each location under the block above it, blocks in natural order, loose locations last", () => {
+    const names = new Map([["f", "264F"], ["e", "264E"], ["a", "264A"], ["f1", "264F Emergency Lighting"], ["f2", "264F GF Lobby Lighting"], ["e1", "264E Emergency Lighting"], ["a1", "Pavilion linkway 1"], ["main", "Main board"]]);
+    const parents = new Map([["f1", "f"], ["f2", "f"], ["e1", "e"], ["a1", "a"]]);
+    expect(groupLocations(["f1", "e1", "main", "f2", "a1"], parents, (id) => names.get(id) ?? id)).toEqual([
+      { name: "264A", ids: ["a1"] },
+      { name: "264E", ids: ["e1"] },
+      { name: "264F", ids: ["f1", "f2"] },
+      { name: "", ids: ["main"] },
+    ]);
   });
 });
