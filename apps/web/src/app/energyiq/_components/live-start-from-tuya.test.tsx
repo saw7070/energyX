@@ -7,6 +7,8 @@ const api = vi.hoisted(() => ({ liveConnectionRequest: vi.fn(), getEnergyProject
 const publish = vi.hoisted(() => ({ setUpAndPublishReadings: vi.fn() }));
 vi.mock("../../../lib/config-api", () => ({ configApi: api }));
 vi.mock("../admin/smart-import-publish", () => publish);
+const excel = vi.hoisted(() => ({ readSheet: vi.fn() }));
+vi.mock("read-excel-file/browser", () => excel);
 import { LiveConnectionPanel, type LiveConnectionDto } from "./live-connection-panel";
 
 let container: HTMLDivElement;
@@ -151,6 +153,49 @@ describe("Start from Tuya", () => {
     expect(body("matches")).toEqual({ matches: { "m-e1": "ref-e1", "m-f1": "ref-f1" } });
     expect(body("schedule")).toEqual({ enabled: true, localHour: 2 });
     expect(container.textContent).toContain("2 meters created and connected to Tuya");
+  });
+
+  it("loads the device list from an Excel file, and says an old .xls must be saved as .xlsx first", async () => {
+    api.liveConnectionRequest.mockImplementation(async (_project: string, path = "", init?: RequestInit) => {
+      if (path === "" && !init) return { connection: connection() };
+      if (path === "devices") return { devices: [] };
+      throw new Error(`unexpected ${path}`);
+    });
+    excel.readSheet.mockReset();
+    excel.readSheet.mockResolvedValue([
+      ["SKTC Energy Monitoring Meter Layout", null, null],
+      ["Block Number", "Meter Name", "Meter Device ID"],
+      ["264F", null, null],
+      [null, "Emergency Lighting", "bf0123456789abcdef01"],
+      [null, null, null],
+      ["Key Questions I want to address:", null, null],
+    ]);
+    await act(async () => root.render(<LiveConnectionPanel projectId="p" />));
+    await flush();
+    await act(async () => button("Paste your device list").click());
+    const input = container.querySelector("input[type=file]") as HTMLInputElement;
+    expect(input.accept).toContain(".xlsx");
+    const choose = async (file: File) => act(async () => {
+      Object.defineProperty(input, "files", { configurable: true, value: [file] });
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    const sheet = new File(["not read here"], "SKTC meters.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    await choose(sheet);
+    await flush();
+    expect(excel.readSheet).toHaveBeenCalledWith(sheet);
+    expect(container.querySelector("textarea")!.value).toBe([
+      "SKTC Energy Monitoring Meter Layout\t\t",
+      "Block Number\tMeter Name\tMeter Device ID",
+      "264F\t\t",
+      "\tEmergency Lighting\tbf0123456789abcdef01",
+    ].join("\n"));
+    expect(container.querySelector("[role=alert]")).toBeNull();
+
+    await choose(new File(["old"], "meters.xls"));
+    await flush();
+    expect(container.querySelector("[role=alert]")?.textContent).toContain(".xls");
+    expect(excel.readSheet).toHaveBeenCalledTimes(1);
   });
 
   it("says why a device list can't be used before asking Tuya", async () => {

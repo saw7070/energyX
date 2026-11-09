@@ -7,7 +7,7 @@ import type { Translate } from "@datafoundry/site-report";
 import { liveConnectionMessages } from "./live-connection-messages";
 import { setUpAndPublishReadings } from "../admin/smart-import-publish";
 import { smartImportMessages } from "../admin/smart-import-messages";
-import { DEVICE_LIST_MAX_ROWS, parseLiveDeviceList } from "./live-device-list";
+import { DEVICE_LIST_MAX_ROWS, deviceListTextFromSheet, parseLiveDeviceList } from "./live-device-list";
 
 export type LiveConnectionDto = {
   projectId: string;
@@ -792,9 +792,15 @@ function StartFromTuya({ projectId, connection, onConnection, onDone, t }: {
   const loadListFile = async (file: File | undefined) => {
     if (!file) return;
     setError(null);
-    if (/\.xls[xmb]?$/iu.test(file.name)) return setError(t("listFileExcel"));
+    // Old binary .xls (and .xlsb) can't be read in the browser; .xlsx/.xlsm can.
+    if (/\.xls[b]?$/iu.test(file.name)) return setError(t("listFileExcel"));
     try {
-      setListText(await file.text());
+      if (/\.xls[xm]$/iu.test(file.name)) {
+        const { readSheet } = await import("read-excel-file/browser");
+        setListText(deviceListTextFromSheet(await readSheet(file)));
+      } else {
+        setListText(await file.text());
+      }
       setChecked(null);
     } catch {
       setError(t("listFileUnreadable"));
@@ -976,7 +982,7 @@ function DeviceListStart({ text, onText, onFile, checked, found, step, onCheck, 
     <div className="flex flex-wrap items-center gap-3">
       <label className={`${secondaryButton} cursor-pointer`}>
         {t("listFile")}
-        <input type="file" accept=".csv,.tsv,.txt,text/csv,text/plain" className="sr-only" disabled={busy}
+        <input type="file" accept=".csv,.tsv,.txt,.xlsx,.xlsm,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="sr-only" disabled={busy}
           onChange={(event) => { onFile(event.target.files?.[0]); event.target.value = ""; }} />
       </label>
       <details className="text-xs text-muted">
