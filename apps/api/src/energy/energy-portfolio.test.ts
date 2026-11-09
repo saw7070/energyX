@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EnergyIqAnalysisInterval } from "@datafoundry/metadata";
-import { dailyUsage, findUnusualNight, parsePortfolioPeriod, projectMonthEnd } from "./energy-portfolio.js";
+import { dailyUsage, evaluatePeakDemand, findUnusualNight, halfHourDemand, parsePortfolioPeriod, projectMonthEnd } from "./energy-portfolio.js";
 
 /** Hourly intervals in Singapore time (UTC+8) for the given local dates, with kW chosen per local hour. */
 const hourly = (dates: string[], kwAt: (date: string, hour: number) => number): EnergyIqAnalysisInterval[] =>
@@ -93,5 +93,59 @@ describe("unusual overnight use", () => {
       .filter((interval) => !interval.start.startsWith(new Date(Date.parse(`${lastNight}T03:00:00+08:00`)).toISOString().slice(0, 13)));
     const finding = findUnusualNight({ intervals, timezone: "Asia/Singapore", thresholdPct: 30 });
     expect(finding?.night).not.toBe(lastNight);
+  });
+});
+
+/** 15-minute intervals in Singapore time for the given local dates, with kW chosen per local hour and quarter. */
+const quarterHourly = (dates: string[], kwAt: (date: string, hour: number, quarter: number) => number): EnergyIqAnalysisInterval[] =>
+  dates.flatMap((date) => Array.from({ length: 96 }, (_, index) => {
+    const start = new Date(Date.parse(`${date}T00:00:00+08:00`) + index * 900_000);
+    return { start: start.toISOString(), end_exclusive: new Date(start.getTime() + 900_000).toISOString(), usage_kwh: kwAt(date, Math.floor(index / 4), index % 4) / 4 };
+  }));
+
+describe("peak demand", () => {
+  it("averages each complete half-hour, so a single 15-minute spike counts at half its size", () => {
+    const halves = halfHourDemand(quarterHourly(["2026-11-03"], (_, hour, quarter) => (hour === 19 && quarter === 0 ? 100 : 10)));
+    expect(halves).toHaveLength(48);
+    expect(Math.max(...halves.map((half) => half.kw))).toBeCloseTo(55, 6);
+    // A half-hour missing one of its quarters is not counted.
+    expect(halfHourDemand(quarterHourly(["2026-11-03"], () => 10).slice(1))).toHaveLength(47);
+  });
+
+  it("reports this month's peak, a new 30-day high, the limit and the demand charge", () => {
+    const dates = datesFrom("2026-10-01", 40); // 1 Oct to 9 Nov
+    const intervals = quarterHourly(dates, (date, hour) => (date === "2026-11-09" && hour === 15 ? 60 : hour === 15 ? 40 : 20));
+    const status = evaluatePeakDemand({
+      intervals,
+      timezone: "Asia/Singapore",
+      month: "2026-11",
+      check: { enabled: true, limitKw: 64, warnPct: 90 },
+      tariff: { id: "t", owner: { kind: "project" }, effective_from: "2026-01-01", currency: "MYR", rate_per_kwh: 0.3, fixed_charges: [
+        { label: "Capacity charge (per kW of maximum demand)", amount: 29.43, unit: "per_kw_month" },
+        { label: "Network charge (per kW of maximum demand)", amount: 59.84, unit: "per_kw_month" },
+        { label: "Retail charge", amount: 200, unit: "per_month" },
+      ] },
+    })!;
+    expect(status).toMatchObject({
+      month: "2026-11", peakKw: 60, latestDay: "2026-11-09", latestDayPeakKw: 60, previousPeakKw: 40, newHigh: true,
+      limitKw: 64, limitStatus: "near", peakHoursOnly: false,
+      demandCharge: { perKwMonth: 89.27, currency: "MYR", amount: 5356.2 },
+    });
+    expect(new Date(status.peakAt).toISOString()).toBe("2026-11-09T07:00:00.000Z");
+  });
+
+  it("counts only the tariff's peak hours when it bills peak-hour demand", () => {
+    // A weekend spike outside the 2pm-10pm weekday window does not count.
+    const intervals = quarterHourly(datesFrom("2026-11-01", 9), (date, hour) => (date === "2026-11-08" && hour === 15 ? 90 : hour === 15 ? 30 : 10));
+    const status = evaluatePeakDemand({
+      intervals, timezone: "Asia/Singapore", month: "2026-11", check: { enabled: true, warnPct: 90 },
+      tariff: { id: "t", owner: { kind: "project" }, effective_from: "2026-01-01", currency: "MYR", rate_per_kwh: 0.3,
+        time_of_use: { peak_rate_per_kwh: 0.35, holidays_off_peak: true, peak_windows: [{ days: ["monday", "tuesday", "wednesday", "thursday", "friday"], from: "14:00", to: "22:00" }] },
+        fixed_charges: [{ label: "Capacity charge (per kW of peak-hour maximum demand)", amount: 30.19, unit: "per_kw_month" }] },
+    })!;
+    expect(status.peakHoursOnly).toBe(true);
+    expect(status.peakKw).toBe(30);
+    expect(status.limitStatus).toBeUndefined();
+    expect(status.newHigh).toBe(false);
   });
 });

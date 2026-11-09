@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { collectSiteAlertEmails, sendPendingAlertEmails, type MeterHealthRow } from "./energy-alert-emails.js";
+import { isDeliverableEmail, siteAlertRecipients } from "./energy-recipients.js";
 import { ensureEnergyIqBootstrap } from "./energy-bootstrap.js";
 import { TUYA_OFFICE_PROJECT_ID, TUYA_OFFICE_WORKSPACE_ID } from "./tuya-office-project.js";
 
@@ -90,6 +91,33 @@ describe("Alert emails", () => {
         send: async () => { sent += 1; },
       })).toEqual([]);
       expect(sent).toBe(0);
+    });
+  });
+});
+
+describe("Peak demand and recipients", () => {
+  it("warns when live demand reaches the warning level, once a day for the warning and once for going over", async () => {
+    await withMetadata(async (metadata) => {
+      const peak = { enabled: true, limitKw: 50, warnPct: 90 };
+      const at = (powerKw: number, readAt: string) => collectSiteAlertEmails({ metadataStore: metadata, projectId: TUYA_OFFICE_PROJECT_ID, meters: [], live: { powerKw, readAt }, peak, publicBaseUrl: "" });
+      expect(at(40, "2026-11-10T03:00:00.000Z")).toEqual([]);
+      const near = at(46, "2026-11-10T03:00:00.000Z");
+      expect(near).toHaveLength(1);
+      expect(near[0]).toMatchObject({ key: "peak-live:2026-11-10:near", subject: expect.stringContaining("92% of its limit") });
+      expect(near[0]!.text).toContain("46 kW, 92% of its 50 kW limit");
+      expect(at(52, "2026-11-10T04:00:00.000Z")[0]!.key).toBe("peak-live:2026-11-10:over");
+      // No limit, or the check turned off: nothing live.
+      expect(collectSiteAlertEmails({ metadataStore: metadata, projectId: TUYA_OFFICE_PROJECT_ID, meters: [], live: { powerKw: 99, readAt: "2026-11-10T03:00:00.000Z" }, peak: { enabled: false, limitKw: 50, warnPct: 90 }, publicBaseUrl: "" })).toEqual([]);
+    });
+  });
+
+  it("sends a site's alerts to its own list when it has one, leaving out addresses mail cannot reach", async () => {
+    await withMetadata(async (metadata) => {
+      metadata.energyIq.targets.setTargets(TUYA_OFFICE_PROJECT_ID, { alertEmails: ["fm@client.com", "admin@energyiq.local"] }, "dev-user");
+      expect(siteAlertRecipients(metadata, TUYA_OFFICE_PROJECT_ID)).toEqual(["fm@client.com"]);
+      expect(isDeliverableEmail("ops@client.com.sg")).toBe(true);
+      expect(isDeliverableEmail("admin@energyiq.local")).toBe(false);
+      expect(isDeliverableEmail("someone@localhost")).toBe(false);
     });
   });
 });

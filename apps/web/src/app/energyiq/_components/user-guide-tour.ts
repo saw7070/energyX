@@ -121,7 +121,7 @@ export const TOUR_PAGES: TourPage[] = [
     { title: "Rate periods", text: "Every rate saved, newest first. Costs use the rate in effect on each day, so past months keep their old prices." },
     { title: "Edit", text: "If your role allows it, enter the price and dates exactly as they appear on the bill. A warning appears when no rate is set for the coming month." },
   ] },
-  { id: "budget", href: `${FACILITY}?tab=targets`, title: "Budget & carbon", where: "Main menu → Facility → Budget & carbon", intro: "What the site should spend each month, how its carbon is worked out, and when to warn about unusual use overnight. Alerts show in the bell and are emailed to the people who run the site.", parts: [
+  { id: "budget", href: `${FACILITY}?tab=targets`, title: "Budget & carbon", where: "Main menu → Facility → Budget & carbon", intro: "What the site should spend each month, how its carbon is worked out, and when to warn about unusual nights. Below these, Peak demand warns before a new half-hour high sets the month's demand charge, and Alert emails sets who the alerts go to. Alerts show in the bell and are emailed too.", parts: [
     { title: "Monthly budget", text: "Set a monthly spending limit. The bar shows spend so far and the month-end forecast against it." },
     { title: "This month so far", text: "Spent so far, the forecast at month end, and how far over or under the budget it is likely to be." },
     { title: "Carbon emissions", text: "The grid emission factor used to turn electricity into Scope 2 carbon, with its official source. How it's worked out shows the formula." },
@@ -253,7 +253,7 @@ const TOUR_TEXT: Record<Exclude<EnergyIqLocale, "en">, TourText[]> = {
       { title: "电价时段", text: "所有已保存的电价，最新的在前。费用按每天当时有效的电价计算，因此过去月份保留原来的价格。" },
       { title: "编辑", text: "若您的角色允许，请按电费单上的价格和日期填写。若下个月尚未设定电价，会显示提醒。" },
     ] },
-    { title: "预算与碳排放", where: "主菜单 → 场地设施 → 预算与碳排放", intro: "站点每月应花多少钱、碳排放如何计算，以及何时提醒夜间用电异常。提醒会显示在铃铛中，并通过电子邮件发送给负责站点的人。", parts: [
+    { title: "预算与碳排放", where: "主菜单 → 场地设施 → 预算与碳排放", intro: "站点每月应花多少钱、碳排放如何计算，以及何时提醒夜间用电异常。下方的“最高需量”会在新的半小时高峰决定当月需量费用之前提醒您，“提醒邮件”可设定提醒发送给谁。提醒会显示在铃铛中，并通过电子邮件发送。", parts: [
       { title: "月度预算", text: "设定每月支出上限。横条显示目前的花费和月底预测与预算的对比。" },
       { title: "本月至今", text: "目前已花费、月底预测，以及可能超出或低于预算多少。" },
       { title: "碳排放", text: "用于把用电量换算为范围二碳排放的电网排放因子及其官方来源。“计算方式”会显示公式。" },
@@ -383,7 +383,7 @@ const TOUR_TEXT: Record<Exclude<EnergyIqLocale, "en">, TourText[]> = {
       { title: "Tempoh kadar", text: "Setiap kadar yang disimpan, terbaharu dahulu. Kos menggunakan kadar yang berkuat kuasa pada setiap hari, jadi bulan lepas mengekalkan harga lamanya." },
       { title: "Edit", text: "Jika peranan anda membenarkan, masukkan harga dan tarikh tepat seperti dalam bil. Amaran muncul apabila tiada kadar ditetapkan untuk bulan akan datang." },
     ] },
-    { title: "Bajet & karbon", where: "Menu utama → Premis → Bajet & karbon", intro: "Berapa yang patut dibelanjakan premis setiap bulan, cara karbonnya dikira, dan bila memberi amaran tentang penggunaan luar biasa pada waktu malam. Amaran dipaparkan pada loceng dan dihantar melalui e-mel kepada mereka yang mengendalikan premis.", parts: [
+    { title: "Bajet & karbon", where: "Menu utama → Premis → Bajet & karbon", intro: "Berapa yang patut dibelanjakan premis setiap bulan, cara karbonnya dikira, dan bila memberi amaran tentang penggunaan luar biasa pada waktu malam. Amaran dipaparkan pada loceng dan dihantar melalui e-mel kepada mereka yang mengendalikan premis. Di bawahnya, Permintaan maksimum memberi amaran sebelum setengah jam tertinggi baharu menentukan caj permintaan bulan itu, dan E-mel amaran menetapkan kepada siapa amaran dihantar.", parts: [
       { title: "Bajet bulanan", text: "Tetapkan had perbelanjaan bulanan. Bar menunjukkan perbelanjaan setakat ini dan ramalan hujung bulan berbanding bajet." },
       { title: "Bulan ini setakat ini", text: "Perbelanjaan setakat ini, ramalan pada hujung bulan, dan sejauh mana ia mungkin melebihi atau kurang daripada bajet." },
       { title: "Pelepasan karbon", text: "Faktor pelepasan grid yang digunakan untuk menukar elektrik kepada karbon Skop 2, dengan sumber rasminya. Cara ia dikira menunjukkan formulanya." },

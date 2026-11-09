@@ -21,6 +21,24 @@
 .icon.green { background:color-mix(in srgb, var(--primary) 14%, transparent); color:var(--primary); }
 .icon.teal { background:color-mix(in srgb, #0e9384 13%, transparent); color:#0e9384; }
 .icon.indigo { background:color-mix(in srgb, #4f63d2 13%, transparent); color:#4f63d2; }
+.icon.amber { background:color-mix(in srgb, #d97706 14%, transparent); color:#c26a05; }
+.icon.blue { background:color-mix(in srgb, #2563eb 12%, transparent); color:#2563eb; }
+.lower { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); gap:18px; align-items:start; margin-top:18px; }
+@media (max-width: 1100px) { .lower { grid-template-columns:minmax(0, 1fr); } }
+.peakNow { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 12px; }
+.peakNow strong { font-size:28px; font-variant-numeric:tabular-nums; }
+.peakMeter { position:relative; height:8px; border-radius:999px; background:var(--surface-subtle); overflow:hidden; margin-top:8px; }
+.peakMeter span { position:absolute; inset:0 auto 0 0; border-radius:999px; background:var(--step-success); }
+.peakMeter span.near { background:var(--step-warning); }
+.peakMeter span.over { background:#dc2626; }
+.recipients { display:flex; flex-wrap:wrap; gap:8px; margin:0; padding:0; list-style:none; }
+.recipients li { display:inline-flex; align-items:center; gap:6px; padding:4px 6px 4px 10px; border:1px solid var(--border); border-radius:999px; font-size:13px; max-width:100%; }
+.recipients li span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.recipients button { display:inline-grid; place-items:center; width:22px; height:22px; border-radius:50%; color:var(--text-secondary); }
+.recipients button:hover { background:var(--surface-subtle); color:var(--foreground); }
+.addRow { display:flex; flex-wrap:wrap; gap:8px; align-items:end; }
+.addRow .field { flex:1 1 14rem; min-width:0; }
+.addRow select { height:42px; padding:0 10px; border:1px solid var(--border); border-radius:10px; background:var(--surface); color:var(--foreground); font-size:14px; }
 .cardTitle { flex:1; min-width:0; padding-top:1px; }
 .cardTitle h4 { margin:0; font-size:15.5px; font-weight:650; }
 .cardTitle p { margin:2px 0 0; color:var(--text-secondary); font-size:13px; }

@@ -26,12 +26,30 @@ export type EnergyIqOvernightCheck = {
 
 export const DEFAULT_OVERNIGHT_CHECK: EnergyIqOvernightCheck = { enabled: true, thresholdPct: 30 };
 
+/**
+ * Maximum demand: the highest half-hour average power in a month, which TNB bills per kW and which SP Group compares
+ * with a site's contracted capacity. With a limit, a warning goes out once demand reaches `warnPct` of it, from the
+ * 15-minute live readings and from each morning's check. Without one, a new monthly high is still reported.
+ */
+export type EnergyIqPeakDemandCheck = {
+  enabled: boolean;
+  /** The site's contracted capacity or its own maximum-demand target, in kW. */
+  limitKw?: number;
+  /** Warn when demand reaches this share of the limit, in percent. */
+  warnPct: number;
+};
+
+export const DEFAULT_PEAK_DEMAND_CHECK: EnergyIqPeakDemandCheck = { enabled: true, warnPct: 90 };
+
 export type EnergyIqProjectTargets = {
   projectId: string;
   budget?: EnergyIqProjectBudget;
   /** A customer-entered factor; absent means the official grid factor for the site's region. */
   carbon?: EnergyIqCarbonSetting;
   overnight: EnergyIqOvernightCheck;
+  peak: EnergyIqPeakDemandCheck;
+  /** Who this site's alert emails go to. Absent means the people who run the site (owners and set-up editors). */
+  alertEmails?: string[];
   updatedAt?: string;
   updatedBy?: string;
 };
@@ -40,9 +58,13 @@ export type EnergyIqTargetsPatch = {
   budget?: EnergyIqProjectBudget | null;
   carbon?: { kgCo2ePerKwh: unknown; year?: unknown; source?: unknown } | null;
   overnight?: Partial<EnergyIqOvernightCheck>;
+  /** `limitKw: null` removes the limit. */
+  peak?: Partial<Omit<EnergyIqPeakDemandCheck, "limitKw">> & { limitKw?: number | null };
+  /** An empty list or null returns to the default recipients. */
+  alertEmails?: unknown[] | null;
 };
 
-export type EnergyIqTargetAlertKind = "budget" | "overnight";
+export type EnergyIqTargetAlertKind = "budget" | "overnight" | "peak";
 
 export type EnergyIqTargetAlertRecord = {
   projectId: string;
@@ -98,6 +120,8 @@ export const initializeEnergyIqTargetsSchema = (db: DatabaseSync): void => {
       budget_json TEXT,
       carbon_json TEXT,
       overnight_json TEXT,
+      peak_json TEXT,
+      alert_emails_json TEXT,
       updated_by TEXT,
       updated_at TEXT NOT NULL
     );
@@ -105,7 +129,7 @@ export const initializeEnergyIqTargetsSchema = (db: DatabaseSync): void => {
     CREATE TABLE IF NOT EXISTS energyiq_target_alerts (
       project_id TEXT NOT NULL,
       alert_key TEXT NOT NULL,
-      kind TEXT NOT NULL CHECK (kind IN ('budget', 'overnight')),
+      kind TEXT NOT NULL CHECK (kind IN ('budget', 'overnight', 'peak')),
       payload_json TEXT NOT NULL,
       created_at TEXT NOT NULL,
       PRIMARY KEY (project_id, alert_key)
@@ -143,6 +167,34 @@ export const initializeEnergyIqTargetsSchema = (db: DatabaseSync): void => {
   `);
 };
 
+/**
+ * Migration 0057: columns for the peak demand check and each site's alert recipients, and 'peak' as an alert kind. Safe on a database whose tables
+ * were created with both already (a new install), and on one that ran it before.
+ */
+export const migrateEnergyIqTargetsPeakDemand = (db: DatabaseSync): void => {
+  const columns = (db.prepare("PRAGMA table_info(energyiq_project_targets)").all() as Array<{ name: string }>).map((column) => column.name);
+  if (!columns.includes("peak_json")) db.exec("ALTER TABLE energyiq_project_targets ADD COLUMN peak_json TEXT");
+  if (!columns.includes("alert_emails_json")) db.exec("ALTER TABLE energyiq_project_targets ADD COLUMN alert_emails_json TEXT");
+  const alertsSql = String((db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'energyiq_target_alerts'").get() as { sql?: string } | undefined)?.sql ?? "");
+  if (alertsSql.includes("'peak'")) return;
+  db.exec(`
+    CREATE TABLE energyiq_target_alerts_next (
+      project_id TEXT NOT NULL,
+      alert_key TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('budget', 'overnight', 'peak')),
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (project_id, alert_key)
+    );
+    INSERT INTO energyiq_target_alerts_next (project_id, alert_key, kind, payload_json, created_at)
+      SELECT project_id, alert_key, kind, payload_json, created_at FROM energyiq_target_alerts;
+    DROP TABLE energyiq_target_alerts;
+    ALTER TABLE energyiq_target_alerts_next RENAME TO energyiq_target_alerts;
+    CREATE INDEX IF NOT EXISTS idx_energyiq_target_alerts_recent
+      ON energyiq_target_alerts(project_id, created_at DESC);
+  `);
+};
+
 const MAX_SCHEDULES_PER_WORKSPACE = 50;
 const MAX_RECIPIENTS = 100;
 
@@ -151,15 +203,19 @@ export class EnergyIqTargetsStore {
 
   getTargets(projectId: string): EnergyIqProjectTargets {
     const row = this.db.prepare("SELECT * FROM energyiq_project_targets WHERE project_id = ?").get(projectId) as Record<string, unknown> | undefined;
-    if (!row) return { projectId, overnight: { ...DEFAULT_OVERNIGHT_CHECK } };
+    if (!row) return { projectId, overnight: { ...DEFAULT_OVERNIGHT_CHECK }, peak: { ...DEFAULT_PEAK_DEMAND_CHECK } };
     const budget = parseJson<EnergyIqProjectBudget>(row.budget_json);
     const carbon = parseJson<EnergyIqCarbonSetting>(row.carbon_json);
     const overnight = parseJson<EnergyIqOvernightCheck>(row.overnight_json);
+    const peak = parseJson<EnergyIqPeakDemandCheck>(row.peak_json);
+    const alertEmails = parseJson<string[]>(row.alert_emails_json);
     return {
       projectId,
       ...(budget ? { budget } : {}),
       ...(carbon ? { carbon } : {}),
       overnight: overnight ?? { ...DEFAULT_OVERNIGHT_CHECK },
+      peak: peak ?? { ...DEFAULT_PEAK_DEMAND_CHECK },
+      ...(alertEmails && alertEmails.length > 0 ? { alertEmails } : {}),
       updatedAt: String(row.updated_at),
       ...(typeof row.updated_by === "string" ? { updatedBy: row.updated_by } : {}),
     };
@@ -171,13 +227,17 @@ export class EnergyIqTargetsStore {
     const budget = patch.budget === undefined ? current.budget : patch.budget === null ? undefined : normalizeBudget(patch.budget);
     const carbon = patch.carbon === undefined ? current.carbon : patch.carbon === null ? undefined : normalizeCustomEmissionFactor(patch.carbon);
     const overnight = patch.overnight === undefined ? current.overnight : normalizeOvernight({ ...current.overnight, ...patch.overnight });
+    const peak = patch.peak === undefined ? current.peak : normalizePeak(current.peak, patch.peak);
+    const alertEmails = patch.alertEmails === undefined ? current.alertEmails : normalizeAlertEmails(patch.alertEmails);
     this.db.prepare(`
-      INSERT INTO energyiq_project_targets (project_id, budget_json, carbon_json, overnight_json, updated_by, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO energyiq_project_targets (project_id, budget_json, carbon_json, overnight_json, peak_json, alert_emails_json, updated_by, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(project_id) DO UPDATE SET
         budget_json = excluded.budget_json,
         carbon_json = excluded.carbon_json,
         overnight_json = excluded.overnight_json,
+        peak_json = excluded.peak_json,
+        alert_emails_json = excluded.alert_emails_json,
         updated_by = excluded.updated_by,
         updated_at = excluded.updated_at
     `).run(
@@ -185,6 +245,8 @@ export class EnergyIqTargetsStore {
       budget ? JSON.stringify(budget) : null,
       carbon ? JSON.stringify(carbon) : null,
       JSON.stringify(overnight),
+      JSON.stringify(peak),
+      alertEmails && alertEmails.length > 0 ? JSON.stringify(alertEmails) : null,
       userId,
       now.toISOString(),
     );
@@ -311,6 +373,31 @@ const normalizeOvernight = (input: Partial<EnergyIqOvernightCheck>): EnergyIqOve
   const threshold = Number(input.thresholdPct ?? DEFAULT_OVERNIGHT_CHECK.thresholdPct);
   if (!Number.isFinite(threshold) || threshold < 10 || threshold > 300) throw new Error("ENERGYIQ_OVERNIGHT_THRESHOLD_INVALID");
   return { enabled: input.enabled !== false, thresholdPct: Math.round(threshold) };
+};
+
+const normalizePeak = (current: EnergyIqPeakDemandCheck, patch: NonNullable<EnergyIqTargetsPatch["peak"]>): EnergyIqPeakDemandCheck => {
+  const warnPct = Number(patch.warnPct ?? current.warnPct);
+  if (!Number.isFinite(warnPct) || warnPct < 50 || warnPct > 100) throw new Error("ENERGYIQ_PEAK_WARN_PCT_INVALID");
+  const rawLimit = patch.limitKw === undefined ? current.limitKw : patch.limitKw;
+  const limitKw = rawLimit === null || rawLimit === undefined || (rawLimit as unknown) === "" ? undefined : Number(rawLimit);
+  if (limitKw !== undefined && (!Number.isFinite(limitKw) || limitKw <= 0 || limitKw > 1_000_000)) throw new Error("ENERGYIQ_PEAK_LIMIT_INVALID");
+  return {
+    enabled: (patch.enabled ?? current.enabled) !== false,
+    ...(limitKw === undefined ? {} : { limitKw: Math.round(limitKw * 10) / 10 }),
+    warnPct: Math.round(warnPct),
+  };
+};
+
+const MAX_ALERT_EMAILS = 20;
+const EMAIL_PATTERN = /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/u;
+
+const normalizeAlertEmails = (value: unknown[] | null): string[] | undefined => {
+  if (value === null) return undefined;
+  if (!Array.isArray(value) || value.length > MAX_ALERT_EMAILS) throw new Error("ENERGYIQ_ALERT_EMAILS_INVALID");
+  const emails = value.map((item) => (typeof item === "string" ? item.trim().toLowerCase() : ""));
+  if (emails.some((email) => email.length > 254 || !EMAIL_PATTERN.test(email))) throw new Error("ENERGYIQ_ALERT_EMAILS_INVALID");
+  const unique = [...new Set(emails)].sort();
+  return unique.length > 0 ? unique : undefined;
 };
 
 const normalizeSchedule = (input: EnergyIqReportScheduleInput) => {

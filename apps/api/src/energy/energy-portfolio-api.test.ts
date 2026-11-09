@@ -148,11 +148,13 @@ describe("portfolio, budgets, overnight checks and scheduled reports", () => {
     await monitor.runOnce();
     await monitor.runOnce();
     const alerts = readSiteAlerts({ metadataStore: metadata, projectId: PROJECT, userId: "facilities", includeReports: true, includeSync: false, now: now.getTime() });
-    expect(alerts.targets.map((alert) => alert.key).sort()).toEqual(["budget:2026-10:at-risk", "overnight:2026-10-09"]);
+    // The unusual night was also the highest half-hour in 30 days, so the peak demand check reports it too.
+    expect(alerts.targets.map((alert) => alert.key).sort()).toEqual(["budget:2026-10:at-risk", "overnight:2026-10-09", "peak:2026-10-09:high"]);
     // One email per alert to the people who run the site, however often the check runs.
     const emails = readdirSync(outbox).map((folder) => JSON.parse(readFileSync(join(outbox, folder, "message.json"), "utf8")) as { to: string[]; subject: string });
     expect(emails.map((email) => email.subject).sort()).toEqual([
       "Ngee Ann Polytechnic: heading over budget for October 2026",
+      "Ngee Ann Polytechnic: highest demand in 30 days on Fri, 9 Oct",
       "Ngee Ann Polytechnic: unusual overnight use on Fri, 9 Oct",
     ].sort());
     expect(emails.every((email) => email.to.includes("facilities@example.test"))).toBe(true);

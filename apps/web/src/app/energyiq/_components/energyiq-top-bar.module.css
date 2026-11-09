@@ -54,6 +54,7 @@
 .entryIcon svg { width:18px; height:18px; }
 .entry[data-kind="overnight"] .entryIcon, .entry[data-kind="sync"] .entryIcon { background:#fdeedd; color:#c4600f; }
 .entry[data-kind="budget"] .entryIcon { background:#fce8e8; color:#c2353a; }
+.entry[data-kind="peak"] .entryIcon { background:#fdf3d7; color:#9a6a00; }
 .entry[data-kind="report"] .entryIcon { background:#e4f1ea; color:#23744f; }
 .entry[data-kind="action"] .entryIcon { background:#e8eefb; color:#3a5bc7; }
 .entryText { display:grid; gap:2px; min-width:0; }
@@ -100,6 +101,7 @@
 :global(:where(html[data-energyiq-theme="dark"])) .entryIcon { border-radius:10px; background:#1e201e; color:#a1afa5; }
 :global(:where(html[data-energyiq-theme="dark"])) .entry[data-kind="overnight"] .entryIcon, :global(:where(html[data-energyiq-theme="dark"])) .entry[data-kind="sync"] .entryIcon { background:#271d10; color:#d98755; }
 :global(:where(html[data-energyiq-theme="dark"])) .entry[data-kind="budget"] .entryIcon { background:#2a1c1c; color:#e88782; }
+:global(:where(html[data-energyiq-theme="dark"])) .entry[data-kind="peak"] .entryIcon { background:#251d07; color:#cc9a46; }
 :global(:where(html[data-energyiq-theme="dark"])) .entry[data-kind="report"] .entryIcon { background:#19231e; color:#72c096; }
 :global(:where(html[data-energyiq-theme="dark"])) .entry[data-kind="action"] .entryIcon { background:#1c2029; color:#89a8f7; }
 :global(:where(html[data-energyiq-theme="dark"])) .popover .entryText strong { color:#c6d3cb; }

@@ -54,7 +54,7 @@ import { initializeEnergyIqReportTimePolicySchema } from "./energyiq-report-time
 import { initializeEnergyIqSourceSyncSchema } from "./energyiq-source-sync-store.js";
 import { initializeEnergyIqLiveConnectorSchema } from "./energyiq-live-connector-store.js";
 import { ENERGYIQ_ORGANISATION_ADMIN_ROLE_ID, initializeEnergyIqAccessRoleSchema, upgradeSeededOrganisationAdminRole } from "./energyiq-access-role-store.js";
-import { initializeEnergyIqTargetsSchema } from "./energyiq-targets-store.js";
+import { initializeEnergyIqTargetsSchema, migrateEnergyIqTargetsPeakDemand } from "./energyiq-targets-store.js";
 import { initializeEnergyIqAiGovernanceSchema } from "./energyiq-ai-governance-store.js";
 import { initializeOrganisationIdentitySchema, OrganisationIdentityStore } from "./organisation-identity-store.js";
 import { AuthTwoStepStore, initializeAuthTwoStepSchema } from "./auth-two-step-store.js";
@@ -4872,6 +4872,15 @@ const runMigrations = (db: DatabaseSync): void => {
     "Start every open session's idle clock at upgrade, since reading pages did not count as activity before",
     () => {
       db.prepare("UPDATE auth_sessions SET last_seen_at = ? WHERE revoked_at IS NULL").run(new Date().toISOString());
+    },
+    { atomic: true },
+  );
+  runSchemaMigration(
+    db,
+    "0057_energyiq_peak_demand_check",
+    "Add each site's maximum-demand limit and warning, and peak demand as an alert kind",
+    () => {
+      migrateEnergyIqTargetsPeakDemand(db);
     },
     { atomic: true },
   );

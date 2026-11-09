@@ -25,11 +25,25 @@ export const workspaceTeam = (metadataStore: MetadataStore, workspaceId: string)
     }
   });
 
+/** Addresses mail cannot reach, such as the built-in admin account's: sending to them only bounces. */
+export const isDeliverableEmail = (email: string): boolean => {
+  const domain = email.split("@")[1]?.toLowerCase() ?? "";
+  return domain.includes(".") && !/\.(local|localhost|invalid)$/u.test(domain);
+};
+
+/**
+ * Who a site's alerts go to: the list chosen on its Budget & carbon page, or else the people who run it (owners and
+ * anyone allowed to change its facility set-up or hours and rates). Addresses mail cannot reach are left out.
+ */
 export const siteAlertRecipients = (metadataStore: MetadataStore, projectId: string): string[] => {
   const project = metadataStore.energyIq.getProject(projectId);
-  return [...new Set(workspaceTeam(metadataStore, project.workspace_id)
-    .filter((member) => member.owner || can(member.permissions, "hours_rate", "write") || can(member.permissions, "facility", "write"))
-    .map((member) => member.email))].sort();
+  const chosen = metadataStore.energyIq.targets.getTargets(projectId).alertEmails;
+  const emails = chosen && chosen.length > 0
+    ? chosen
+    : workspaceTeam(metadataStore, project.workspace_id)
+      .filter((member) => member.owner || can(member.permissions, "hours_rate", "write") || can(member.permissions, "facility", "write"))
+      .map((member) => member.email);
+  return [...new Set(emails.map((email) => email.toLowerCase()))].filter(isDeliverableEmail).sort();
 };
 
 /**
