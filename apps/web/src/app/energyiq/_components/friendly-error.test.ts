@@ -58,6 +58,7 @@ describe("friendlyErrorKey", () => {
     [new Error("REPORT_SETTINGS_CHANGED"), "conflict"],
     [apiError("BAD_REQUEST", "REPORT_ALREADY_RUNNING", 409), "reportAlreadyRunning"],
     [apiError("BAD_REQUEST", "REPORT_MODEL_NOT_CONFIGURED", 400), "advisorNotSetUp"],
+    [apiError("BAD_REQUEST", "REPORT_SKILL_REQUIRED_FOR_SCHEDULE", 400), "reportMethodRequired"],
     [apiError("BAD_REQUEST", "REPORT_FILE_TYPE_INVALID", 400), "fileTypeUnsupported"],
     [apiError("BAD_REQUEST", "ENERGYIQ_PROJECT_DATA_NOT_READY:no-readings", 409), "dataNotReady"],
     [new Error("ENERGYIQ_SETUP_INVALID:TIER_ORDINAL_GAP,NODE_SKIPS_TIER"), "setupIncomplete"],

@@ -76,6 +76,7 @@ const RULES: Array<[RegExp, FriendlyErrorKey]> = [
   [/\btoken\b[\s\S]*\b(?:invalid|expired)\b|\b(?:invalid|expired)\b[\s\S]*\btoken\b/i, "linkExpired"],
   [/REPORT_ALREADY_RUNNING/, "reportAlreadyRunning"],
   [/REPORT_MODEL_NOT_CONFIGURED/, "advisorNotSetUp"],
+  [/REPORT_SKILL_REQUIRED_FOR_SCHEDULE/, "reportMethodRequired"],
   [/ENERGYIQ_AI_DISABLED/, "aiDisabled"],
   [/ENERGYIQ_AI_LIMIT_REACHED/, "aiLimitReached"],
   [/ENERGYIQ_AI_MODEL_UNAVAILABLE/, "aiModelUnavailable"],
