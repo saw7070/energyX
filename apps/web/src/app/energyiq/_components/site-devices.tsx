@@ -349,6 +349,9 @@ export function deviceBlocks(rows: Array<Pick<DeviceRow, "id" | "boardId">>, boa
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 }
 
+/** A card names the meter only; "264E GF Lobby Lighting · Groundfloor lift lobby" keeps what it powers for the device view. */
+export const cardTitle = (name: string): string => name.split(" · ")[0]!.trim() || name;
+
 /** How many device cards the whole site shows before "Show all". */
 const CARD_PREVIEW = 24;
 
@@ -728,7 +731,7 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
     <div className={styles.cardGrid} role="list" aria-label={activeBlock ? t("cards.inBlock", { block: boardName(activeBlock) }) : t("cards.all")}>
       {shownCards.map(row => <button key={row.id} type="button" role="listitem" className={styles.deviceCard} aria-current={device?.id === row.id ? "true" : undefined} onClick={() => openDevice(row.id)}>
         <span className={styles.cardIcon} aria-hidden="true"><EnergyIcon name="meter" /></span>
-        <strong title={row.name}>{row.name}</strong>
+        <strong title={row.name}>{cardTitle(row.name)}</strong>
         <span className={styles.cardMeta}><span className={`${styles.dot} ${styles[row.status]}`} aria-label={statusText(row.status, t)} />{boardName(blockOf.get(row.id) ?? row.boardId)}{row.usageKwh === null ? "" : ` · ${kwh(row.usageKwh)}`}</span>
       </button>)}
     </div>
