@@ -204,6 +204,8 @@ export type {
   EnergyPortfolioDto,
   EnergyPortfolioSiteDto,
   EnergyProjectTargetsDto,
+  EnergySavingsCheckDto,
+  EnergySavingsChecksDto,
   EnergyProjectTargetsInputDto,
   EnergyReportScheduleDto,
   EnergyReportScheduleInputDto,

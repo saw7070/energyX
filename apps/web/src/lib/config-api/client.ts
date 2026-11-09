@@ -69,6 +69,7 @@ import type {
   EnergyAiOrganisationDto,
   EnergyPortfolioDto,
   EnergyProjectTargetsDto,
+  EnergySavingsChecksDto,
   EnergyProjectTargetsInputDto,
   EnergyReportScheduleInputDto,
   EnergyReportSchedulesDto,
@@ -374,6 +375,15 @@ export const configApi = {
   },
   updateEnergyProjectTargets(projectId: string, body: EnergyProjectTargetsInputDto): Promise<EnergyProjectTargetsDto> {
     return requestEnvelope<EnergyProjectTargetsDto>(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/targets`, { method: "PUT", body: JSON.stringify(body) });
+  },
+  listEnergySavingsChecks(projectId: string): Promise<EnergySavingsChecksDto> {
+    return requestEnvelope<EnergySavingsChecksDto>(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/savings-checks`);
+  },
+  createEnergySavingsCheck(projectId: string, body: { name: string; changeDate: string; meterIds: string[]; note?: string }): Promise<EnergySavingsChecksDto> {
+    return requestEnvelope<EnergySavingsChecksDto>(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/savings-checks`, { method: "POST", body: JSON.stringify(body) });
+  },
+  deleteEnergySavingsCheck(projectId: string, checkId: string): Promise<EnergySavingsChecksDto> {
+    return requestEnvelope<EnergySavingsChecksDto>(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/savings-checks/${encodeURIComponent(checkId)}`, { method: "DELETE" });
   },
   listEnergyReportSchedules(): Promise<EnergyReportSchedulesDto> {
     return requestEnvelope<EnergyReportSchedulesDto>("/api/v1/energy/report-schedules");

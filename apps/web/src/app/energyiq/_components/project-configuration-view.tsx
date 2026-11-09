@@ -25,6 +25,7 @@ import { DataAvailability } from "./data-availability";
 import { applyMeterTypes } from "./meter-type-review-model";
 import { meterTypeReviewMessages } from "./meter-type-review-messages";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
+import { SiteSavings } from "./site-savings";
 import { SiteTargets } from "./site-targets";
 import { projectConfigurationMessages } from "./project-configuration-messages";
 const label = (value: string) => value.replace(/_/g, " ").replace(/^./, char => char.toUpperCase());
@@ -177,7 +178,7 @@ export function ProjectConfigurationView({ setup, notes, policies, projectId, on
       </div>
     </section>
     {policyMessage && <p role="status" className={styles.statusMessage}>{policyMessage}</p>}
-    <nav className={styles.tabs} aria-label={t("sections")}>{[["structure",t("tabFloor"),String(meters.length)],["devices",t("tabDevices"),""],["availability",t("tabAvailability"),""],["context",t("tabNotes"),notes ? (factCount ? String(factCount) : "") : readOnly ? "" : t("stateAddNotes")],["policies",t("tabHours"),policies ? "" : t("stateUnavailable")],["holidays",t("tabHolidays"),!policies ? t("stateUnavailable") : holidayCount ? String(holidayCount) : ""],["tariff",t("tabRate"),!policies ? t("stateUnavailable") : tariff || readOnly ? "" : t("stateAddRate")],["targets",t("tabTargets"),""]].map(([id,title,state]) => <button key={id} aria-label={title} aria-pressed={tab === id} onClick={()=>setTab(id!)}><span>{title}</span>{state && <small>{state}</small>}</button>)}</nav>
+    <nav className={styles.tabs} aria-label={t("sections")}>{[["structure",t("tabFloor"),String(meters.length)],["devices",t("tabDevices"),""],["availability",t("tabAvailability"),""],["context",t("tabNotes"),notes ? (factCount ? String(factCount) : "") : readOnly ? "" : t("stateAddNotes")],["policies",t("tabHours"),policies ? "" : t("stateUnavailable")],["holidays",t("tabHolidays"),!policies ? t("stateUnavailable") : holidayCount ? String(holidayCount) : ""],["tariff",t("tabRate"),!policies ? t("stateUnavailable") : tariff || readOnly ? "" : t("stateAddRate")],["targets",t("tabTargets"),""],["savings",t("tabSavings"),""]].map(([id,title,state]) => <button key={id} aria-label={title} aria-pressed={tab === id} onClick={()=>setTab(id!)}><span>{title}</span>{state && <small>{state}</small>}</button>)}</nav>
     {tab === "structure" && editable && <MeterTotalsCheck document={doc} busy={setupBusy} onConfirm={() => doc.meter_mapping && void saveDraft({ ...doc, meter_mapping: { ...doc.meter_mapping, confirmed: true } }, t("totalsConfirmed"))} />}
     {tab === "structure" && editable && !editingPlan && (setupEdit?.kind === "types"
       ? <MeterTypeReview document={doc} busy={setupBusy} error={setupError} onCancel={() => setSetupEdit(null)} onSave={choices => { const next = applyMeterTypes(doc, choices, locale); if ("error" in next) setSetupError(next.error); else void saveDraft(next, typeText("saved")); }} />
@@ -202,6 +203,7 @@ export function ProjectConfigurationView({ setup, notes, policies, projectId, on
     </div>}
     {tab === "context" && <section className={styles.notes}><header className={styles.sectionHeader}><h3>{t("tabNotes")}</h3>{edit("context",t("updateNotesAdvisor"))}</header><AdvisorFacts projectId={projectId ?? setup.project.id} notes={notes} timezone={doc.project.timezone} canEdit={canEditNotes && !!projectId} onSaved={() => onPolicyChange?.()} />{withoutFacts(notes).trim() ? <ProjectSpatialPreview notes={notes} projectId={projectId ?? setup.project.id} meters={meters.map(meter => ({ id: meter.id, name: meterNames.get(meter.id) ?? meter.id, board: names.get(meter.scope_id) ?? t("unassigned") }))} /> : <div className={styles.empty}><strong>{t("noNotes")}</strong><p>{t("noNotesBody")}</p>{edit("context",t("addProjectInfo"))}</div>}</section>}
     {tab === "targets" && <SiteTargets projectId={projectId ?? setup.project.id} />}
+    {tab === "savings" && <SiteSavings projectId={projectId ?? setup.project.id} />}
     {tab === "devices" && <SiteDevices projectId={projectId ?? setup.project.id} boardNames={names} boardParents={parents} notInUse={new Set(meters.filter(meter => meter.presentation?.not_in_use).map(meter => meter.id))} />}
     {tab === "availability" && <DataAvailability projectId={projectId ?? setup.project.id} siteName={doc.project.name} document={doc} canEdit={editable} busy={setupBusy} error={setupError} onSave={(next, message) => void saveDraft(next, message)} />}
     {tab === "holidays" && (!policies ? <p role="status">{t("holidaysFailed")}</p> : <HolidayCalendar key={calendar?.version_id ?? "none"} projectId={projectId} timezone={doc.project.timezone} revision={calendar} scopeNames={names} canEdit={canEditPolicies} onSaved={message => void makeLive(message)} />)}

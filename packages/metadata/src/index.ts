@@ -54,7 +54,7 @@ import { initializeEnergyIqReportTimePolicySchema } from "./energyiq-report-time
 import { initializeEnergyIqSourceSyncSchema } from "./energyiq-source-sync-store.js";
 import { initializeEnergyIqLiveConnectorSchema } from "./energyiq-live-connector-store.js";
 import { ENERGYIQ_ORGANISATION_ADMIN_ROLE_ID, initializeEnergyIqAccessRoleSchema, upgradeSeededOrganisationAdminRole } from "./energyiq-access-role-store.js";
-import { initializeEnergyIqTargetsSchema, migrateEnergyIqTargetsPeakDemand } from "./energyiq-targets-store.js";
+import { initializeEnergyIqSavingsChecksSchema, initializeEnergyIqTargetsSchema, migrateEnergyIqTargetsPeakDemand } from "./energyiq-targets-store.js";
 import { initializeEnergyIqAiGovernanceSchema } from "./energyiq-ai-governance-store.js";
 import { initializeOrganisationIdentitySchema, OrganisationIdentityStore } from "./organisation-identity-store.js";
 import { AuthTwoStepStore, initializeAuthTwoStepSchema } from "./auth-two-step-store.js";
@@ -4881,6 +4881,15 @@ const runMigrations = (db: DatabaseSync): void => {
     "Add each site's maximum-demand limit and warning, and peak demand as an alert kind",
     () => {
       migrateEnergyIqTargetsPeakDemand(db);
+    },
+    { atomic: true },
+  );
+  runSchemaMigration(
+    db,
+    "0058_energyiq_savings_checks",
+    "Add the changes recorded on site for proof of savings",
+    () => {
+      initializeEnergyIqSavingsChecksSchema(db);
     },
     { atomic: true },
   );

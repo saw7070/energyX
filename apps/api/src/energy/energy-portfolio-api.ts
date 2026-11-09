@@ -27,6 +27,9 @@ import { isDeliverableEmail, siteAlertRecipients, workspaceTeam } from "./energy
  *   GET  projects/:id/targets[?status=1]   a site's budget, carbon factor, overnight and peak demand checks and alert
  *                                         recipients (+ where it stands now)
  *   PUT  projects/:id/targets              change them (people allowed to change hours and rates)
+ *   GET  projects/:id/savings-checks       changes recorded on site for proof of savings
+ *   POST projects/:id/savings-checks       record one (people allowed to change hours and rates)
+ *   DELETE projects/:id/savings-checks/:checkId
  *   GET|POST report-schedules, PUT|DELETE report-schedules/:id, POST report-schedules/:id/send
  *                                          scheduled report emails (people allowed to manage the client's people)
  * Returns undefined for any other path.
@@ -63,6 +66,40 @@ export const handlePortfolioApi = async (
     if (segments.length === 2 && segments[1] === "carbon.csv") {
       return { status: 200, headers: { ...NO_STORE, "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": "attachment; filename=\"energyx-carbon-scope2.csv\"" }, body: await carbonCsv(metadataStore, user, context.workspaceId, period) };
     }
+  }
+
+  if (segments[0] === "projects" && segments[2] === "savings-checks" && (segments.length === 3 || segments.length === 4)) {
+    const projectId = decodeURIComponent(segments[1] ?? "");
+    const project = metadataStore.energyIq.getProject(projectId);
+    if (project.workspace_id !== context.workspaceId) throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
+    const capabilities = resolveEnergyProjectCapabilities({ metadataStore, userId: user.id, workspaceId: context.workspaceId, projectId });
+    if (!capabilities.readProjectInformation) throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
+    const canEdit = can(resolveEnergyPermissions(metadataStore, user, context.workspaceId), "hours_rate", "write");
+    const store = metadataStore.energyIq.targets;
+    if (segments.length === 4) {
+      if (method !== "DELETE") return undefined;
+      if (!canEdit) throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
+      const check = store.getSavingsCheck(decodeURIComponent(segments[3] ?? ""));
+      if (!check || check.projectId !== projectId) throw new Error("ENERGYIQ_SAVINGS_CHECK_NOT_FOUND");
+      store.deleteSavingsCheck(check.id);
+    } else if (method === "POST") {
+      if (!canEdit) throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
+      const body = asRecord(await helpers.readJsonBody(request));
+      store.createSavingsCheck(projectId, { name: body.name, changeDate: body.changeDate, meterIds: body.meterIds, note: body.note }, user.id);
+    } else if (method !== "GET") {
+      return undefined;
+    }
+    const targets = store.getTargets(projectId);
+    return {
+      status: 200,
+      headers: NO_STORE,
+      body: createSuccessResult({
+        projectId,
+        checks: store.listSavingsChecks(projectId),
+        carbon: targets.carbon ?? gridEmissionFactorFor(project.region),
+        canEdit,
+      }),
+    };
   }
 
   if (segments[0] === "projects" && segments[2] === "targets" && segments.length === 3) {

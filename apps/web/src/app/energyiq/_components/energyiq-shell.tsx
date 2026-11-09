@@ -39,6 +39,7 @@ const navigation: Array<NavigationItem | NavigationGroup> = [
     { href: SITE_PROFILE, tab: "holidays", label: "nav.holidays", icon: "calendar", description: "nav.holidays.hint" },
     { href: SITE_PROFILE, tab: "tariff", label: "nav.electricityRate", icon: "bolt", description: "nav.electricityRate.hint" },
     { href: SITE_PROFILE, tab: "targets", label: "nav.targets", icon: "target", description: "nav.targets.hint" },
+    { href: SITE_PROFILE, tab: "savings", label: "nav.savings", icon: "spark", description: "nav.savings.hint" },
   ] },
   { id: "ai", label: "nav.advisor", icon: "ask", description: "nav.advisor.hint", items: [
     { href: "/energyiq/reports", label: "nav.askAdvisor", icon: "ask", description: "nav.askAdvisor.hint" },

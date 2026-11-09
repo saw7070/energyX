@@ -74,6 +74,22 @@ export type EnergyIqTargetAlertRecord = {
   createdAt: string;
 };
 
+/**
+ * A change made on site whose effect is to be proven: what was done, on which day, and to which devices (none listed
+ * means the whole site). The comparison itself is worked out from the readings each time it is shown.
+ */
+export type EnergyIqSavingsCheckRecord = {
+  id: string;
+  projectId: string;
+  name: string;
+  /** Local date the change was made. */
+  changeDate: string;
+  meterIds: string[];
+  note?: string;
+  createdBy?: string;
+  createdAt: string;
+};
+
 export type EnergyIqReportFrequency = "weekly" | "monthly";
 
 export type EnergyIqReportScheduleRecord = {
@@ -195,6 +211,26 @@ export const migrateEnergyIqTargetsPeakDemand = (db: DatabaseSync): void => {
   `);
 };
 
+/** Migration 0058: changes recorded on site for proof of savings. */
+export const initializeEnergyIqSavingsChecksSchema = (db: DatabaseSync): void => {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS energyiq_savings_checks (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      change_date TEXT NOT NULL,
+      meter_ids_json TEXT NOT NULL,
+      note TEXT,
+      created_by TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_energyiq_savings_checks_project
+      ON energyiq_savings_checks(project_id, change_date DESC);
+  `);
+};
+
+const MAX_SAVINGS_CHECKS_PER_PROJECT = 100;
+
 const MAX_SCHEDULES_PER_WORKSPACE = 50;
 const MAX_RECIPIENTS = 100;
 
@@ -278,6 +314,38 @@ export class EnergyIqTargetsStore {
       payload: parseJson<Record<string, unknown>>(row.payload_json) ?? {},
       createdAt: String(row.created_at),
     }));
+  }
+
+  listSavingsChecks(projectId: string): EnergyIqSavingsCheckRecord[] {
+    return (this.db.prepare("SELECT * FROM energyiq_savings_checks WHERE project_id = ? ORDER BY change_date DESC, created_at DESC").all(projectId) as Array<Record<string, unknown>>)
+      .map(mapSavingsCheck);
+  }
+
+  getSavingsCheck(id: string): EnergyIqSavingsCheckRecord | undefined {
+    const row = this.db.prepare("SELECT * FROM energyiq_savings_checks WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+    return row ? mapSavingsCheck(row) : undefined;
+  }
+
+  createSavingsCheck(projectId: string, input: { name: unknown; changeDate: unknown; meterIds?: unknown; note?: unknown }, userId: string, now = new Date()): EnergyIqSavingsCheckRecord {
+    const count = Number((this.db.prepare("SELECT COUNT(*) AS count FROM energyiq_savings_checks WHERE project_id = ?").get(projectId) as { count: number }).count);
+    if (count >= MAX_SAVINGS_CHECKS_PER_PROJECT) throw new Error("ENERGYIQ_SAVINGS_CHECK_LIMIT");
+    const name = typeof input.name === "string" ? input.name.trim().slice(0, 120) : "";
+    if (!name) throw new Error("ENERGYIQ_SAVINGS_CHECK_NAME_REQUIRED");
+    const changeDate = typeof input.changeDate === "string" ? input.changeDate.trim() : "";
+    if (!/^\d{4}-\d{2}-\d{2}$/u.test(changeDate) || Number.isNaN(Date.parse(`${changeDate}T00:00:00Z`))) throw new Error("ENERGYIQ_SAVINGS_CHECK_DATE_INVALID");
+    if (changeDate > now.toISOString().slice(0, 10)) throw new Error("ENERGYIQ_SAVINGS_CHECK_DATE_INVALID");
+    const meterIds = stringList(input.meterIds ?? [], 200, "ENERGYIQ_SAVINGS_CHECK_METERS_INVALID");
+    const note = typeof input.note === "string" && input.note.trim() ? input.note.trim().slice(0, 500) : undefined;
+    const id = `savings-check-${randomUUID()}`;
+    this.db.prepare(`
+      INSERT INTO energyiq_savings_checks (id, project_id, name, change_date, meter_ids_json, note, created_by, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, projectId, name, changeDate, JSON.stringify(meterIds), note ?? null, userId, now.toISOString());
+    return this.getSavingsCheck(id)!;
+  }
+
+  deleteSavingsCheck(id: string): boolean {
+    return Number(this.db.prepare("DELETE FROM energyiq_savings_checks WHERE id = ?").run(id).changes) > 0;
   }
 
   listSchedules(workspaceId: string): EnergyIqReportScheduleRecord[] {
@@ -436,6 +504,17 @@ const mapSchedule = (row: Record<string, unknown>): EnergyIqReportScheduleRecord
   ...(typeof row.created_by === "string" ? { createdBy: row.created_by } : {}),
   createdAt: String(row.created_at),
   updatedAt: String(row.updated_at),
+});
+
+const mapSavingsCheck = (row: Record<string, unknown>): EnergyIqSavingsCheckRecord => ({
+  id: String(row.id),
+  projectId: String(row.project_id),
+  name: String(row.name),
+  changeDate: String(row.change_date),
+  meterIds: parseJson<string[]>(row.meter_ids_json) ?? [],
+  ...(typeof row.note === "string" && row.note ? { note: row.note } : {}),
+  ...(typeof row.created_by === "string" ? { createdBy: row.created_by } : {}),
+  createdAt: String(row.created_at),
 });
 
 const mapDelivery = (row: Record<string, unknown>): EnergyIqReportDeliveryRecord => ({
