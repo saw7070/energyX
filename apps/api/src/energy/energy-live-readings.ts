@@ -125,6 +125,7 @@ export const readLiveSiteReadings = (input: {
   // The name people gave the meter, as everywhere else in the app; the panel label is the fallback.
   const names = new Map(rows.map((row) => [row.id, row.presentation?.device_name?.trim() || row.presentation?.circuit_name?.trim() || row.display_name]));
   const notInUse = new Set(rows.filter((row) => row.presentation?.not_in_use).map((row) => row.id));
+  const offWithLights = new Set(rows.filter((row) => row.presentation?.off_with_lights).map((row) => row.id));
   const official = officialProjectMeterIds(document);
   ensureTable(input.metadataStore.db);
   const stored = input.metadataStore.db
@@ -162,7 +163,7 @@ export const readLiveSiteReadings = (input: {
     officialMeterCount: official.size,
     reportingMeterCount: reporting.length,
     meters,
-    offline: readOfflineMeters({ db: input.metadataStore.db, projectId: input.projectId, now })
+    offline: readOfflineMeters({ db: input.metadataStore.db, projectId: input.projectId, now, offWithLights })
       .filter((meter) => names.has(meter.meterPointId) && !notInUse.has(meter.meterPointId))
       .map((meter) => ({ meterPointId: meter.meterPointId, name: names.get(meter.meterPointId)!, since: meter.offlineSince })),
     intervalMinutes: LIVE_READING_INTERVAL_MS / 60_000,

@@ -6,6 +6,11 @@ import type { DatabaseSync } from "node:sqlite";
  * check is not an alert. A meter that comes back is cleared at the next poll. Nothing here is published data.
  */
 export const OFFLINE_ALERT_AFTER_MS = 30 * 60_000;
+/**
+ * A meter that takes its power from the lights it measures (outdoor or linkway lighting on a timer) is offline every
+ * day while the lights are off, about 12 hours. It counts as offline only once it has missed a whole night as well.
+ */
+export const OFF_WITH_LIGHTS_ALERT_AFTER_MS = 16 * 3_600_000;
 /** Statuses older than this mean the poll itself stopped; say nothing rather than repeat an old answer. */
 const STATUS_STALE_MS = 45 * 60_000;
 
@@ -40,8 +45,11 @@ export const recordDeviceStatus = (input: {
   }
 };
 
-/** Meters offline for at least half an hour as of the latest poll, the longest-offline first. */
-export const readOfflineMeters = (input: { db: DatabaseSync; projectId: string; now?: number }): OfflineMeter[] => {
+/**
+ * Meters offline for at least half an hour as of the latest poll, the longest-offline first. Meters that turn off with
+ * their lights count only after 16 hours.
+ */
+export const readOfflineMeters = (input: { db: DatabaseSync; projectId: string; now?: number; offWithLights?: ReadonlySet<string> }): OfflineMeter[] => {
   ensureTable(input.db);
   const now = input.now ?? Date.now();
   const rows = input.db.prepare(`SELECT * FROM energyiq_live_device_status WHERE project_id = ? AND online = 0`)
@@ -49,9 +57,20 @@ export const readOfflineMeters = (input: { db: DatabaseSync; projectId: string; 
   return rows
     .filter((row) => row.offline_since
       && now - Date.parse(row.checked_at) <= STATUS_STALE_MS
-      && now - Date.parse(row.offline_since) >= OFFLINE_ALERT_AFTER_MS)
+      && now - Date.parse(row.offline_since) >= (input.offWithLights?.has(row.meter_point_id) ? OFF_WITH_LIGHTS_ALERT_AFTER_MS : OFFLINE_ALERT_AFTER_MS))
     .map((row) => ({ meterPointId: row.meter_point_id, offlineSince: row.offline_since! }))
     .sort((left, right) => left.offlineSince.localeCompare(right.offlineSince) || left.meterPointId.localeCompare(right.meterPointId));
+};
+
+/** Since when each meter Tuya says is offline has been offline, as of a recent poll; for showing, not for alerts. */
+export const readOfflineSince = (input: { db: DatabaseSync; projectId: string; now?: number }): Map<string, string> => {
+  ensureTable(input.db);
+  const now = input.now ?? Date.now();
+  const rows = input.db.prepare(`SELECT * FROM energyiq_live_device_status WHERE project_id = ? AND online = 0`)
+    .all(input.projectId) as StoredStatus[];
+  return new Map(rows
+    .filter((row) => row.offline_since && now - Date.parse(row.checked_at) <= STATUS_STALE_MS)
+    .map((row) => [row.meter_point_id, row.offline_since!]));
 };
 
 const ensureTable = (db: DatabaseSync): void => {

@@ -14,6 +14,7 @@ import {
   resolveEnergyTuyaProjectConnector,
 } from "./energy-tuya-connector.js";
 import { readEnergyTuyaArtifact } from "./energy-tuya-import.js";
+import { readOfflineSince } from "./energy-live-status.js";
 import {
   createTuyaOpenApiClientFromEnv,
   type TuyaCredentials,
@@ -40,6 +41,10 @@ export type LiveConnectionMeter = {
   name: string;
   sourceLabel: string;
   device?: { ref: string; name: string; productName?: string };
+  /** The meter is powered with the lights it measures, so being offline while they are off is expected. */
+  offWithLights?: true;
+  /** Since when the 15-minute live check has seen its device offline. */
+  offlineSince?: string;
 };
 
 export type LiveConnectionReadModel = {
@@ -109,6 +114,7 @@ export const readLiveConnection = (
   const managedByServer = environmentProject && !connection;
   const rows = publishedMeterRows(metadataStore, projectId);
   const serverBindings = managedByServer ? environmentBindings(dependencies, projectId) : new Map<string, string>();
+  const offlineSince = readOfflineSince({ db: metadataStore.db, projectId });
   const meters: LiveConnectionMeter[] = (rows ?? []).map((row) => {
     const binding = connection?.bindings[row.id];
     const serverDeviceId = serverBindings.get(row.id);
@@ -119,6 +125,8 @@ export const readLiveConnection = (
       ...(binding ? { device: toDeviceView(projectId, binding) } : {}),
       // The server settings hold only device ids; the device list supplies their names.
       ...(serverDeviceId ? { device: { ref: liveDeviceRef(projectId, serverDeviceId), name: "" } } : {}),
+      ...(row.presentation?.off_with_lights ? { offWithLights: true as const } : {}),
+      ...(offlineSince.has(row.id) ? { offlineSince: offlineSince.get(row.id)! } : {}),
     };
   });
   const matchedCount = meters.filter((meter) => meter.device).length;

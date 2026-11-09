@@ -1809,7 +1809,8 @@ export const handleEnergyApiRequest = async (
           })),
         });
         // Meters offline right now, from the 15-minute live check, so the fault can be chased before the hours add up.
-        const offlineNow = new Map(readOfflineMeters({ db: context.metadataStore.db, projectId }).map((meter) => [meter.meterPointId, meter.offlineSince]));
+        const offWithLights = new Set([...details].filter(([, detail]) => detail.offWithLights).map(([id]) => id));
+        const offlineNow = new Map(readOfflineMeters({ db: context.metadataStore.db, projectId, offWithLights }).map((meter) => [meter.meterPointId, meter.offlineSince]));
         const meters = summary.meters.map((meter) => offlineNow.has(meter.meterPointId) && meter.status !== "not_in_use"
           ? { ...meter, offlineSince: offlineNow.get(meter.meterPointId)! }
           : meter);
@@ -3316,12 +3317,12 @@ const toEnergySourceSyncRunDto = (run: EnergyIqSourceSyncRunRecord) => ({
 });
 
 /** Each meter's name as people gave it (the panel label is the fallback), its location and, if someone said so, why it is not in use. */
-const readPublishedMeterDetails = (metadataStore: Required<ConfigApiContext>["metadataStore"], projectId: string, hierarchyRevisionId: string): Map<string, { name: string; location?: string; notInUse?: string }> => {
+const readPublishedMeterDetails = (metadataStore: Required<ConfigApiContext>["metadataStore"], projectId: string, hierarchyRevisionId: string): Map<string, { name: string; location?: string; notInUse?: string; offWithLights?: true }> => {
   const revision = metadataStore.energyIq.projectSetup.listHierarchyRevisions(projectId).find((candidate: { id: string }) => candidate.id === hierarchyRevisionId);
   if (!revision) return new Map();
   const document = JSON.parse(revision.snapshot_json) as {
     nodes?: Array<{ id: string; name: string }>;
-    meter_mapping?: { rows?: Array<{ id: string; display_name?: string; source_label?: string; scope_id?: string; navigation_scope_id?: string; presentation?: { device_name?: string; not_in_use?: string } }> };
+    meter_mapping?: { rows?: Array<{ id: string; display_name?: string; source_label?: string; scope_id?: string; navigation_scope_id?: string; presentation?: { device_name?: string; not_in_use?: string; off_with_lights?: string } }> };
   };
   const nodeNames = new Map((document.nodes ?? []).map((node) => [node.id, node.name]));
   return new Map((document.meter_mapping?.rows ?? []).map((row) => {
@@ -3330,6 +3331,7 @@ const readPublishedMeterDetails = (metadataStore: Required<ConfigApiContext>["me
       name: row.presentation?.device_name || row.display_name || row.source_label || row.id,
       ...(location ? { location } : {}),
       ...(row.presentation?.not_in_use ? { notInUse: row.presentation.not_in_use } : {}),
+      ...(row.presentation?.off_with_lights ? { offWithLights: true as const } : {}),
     }];
   }));
 };
@@ -5320,7 +5322,7 @@ const parseTemplatePresentation = (
 
 const parseMeterPresentation = (value: unknown) => {
   const presentation = requireRecord(value, "ENERGYIQ_METER_PRESENTATION_INVALID");
-  return Object.fromEntries(["device_name", "circuit_name", "group", "not_in_use"].flatMap(key => {
+  return Object.fromEntries(["device_name", "circuit_name", "group", "not_in_use", "off_with_lights"].flatMap(key => {
     if (presentation[key] === undefined) return [];
     if (typeof presentation[key] !== "string") throw new Error(`ENERGYIQ_METER_PRESENTATION_INVALID:${key}`);
     const label = presentation[key].trim().slice(0, 160);

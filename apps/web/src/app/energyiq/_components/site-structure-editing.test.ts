@@ -50,6 +50,22 @@ describe("in-page site structure edits", () => {
     expect(applyMeterEdit(document, document.meter_mapping!.rows[1]!, { name: " ", scopeId: "db1", category: "load", counted: true })).toEqual({ error: "Enter a meter name." });
   });
 
+  it("marks a meter that turns off with its lights without asking for the totals again, and keeps the mark through other edits", () => {
+    const meter = document.meter_mapping!.rows[1]!;
+    const marked = applyMeterEdit(document, meter, { name: "Linkway lights", scopeId: meter.scope_id, category: meter.category, counted: meter.aggregation_usage === "official", offWithLights: true });
+    if ("error" in marked) throw new Error(marked.error);
+    expect(marked.meter_mapping!.confirmed).toBe(true);
+    expect(marked.meter_mapping!.rows[1]!.presentation).toEqual({ device_name: "Linkway lights", off_with_lights: "yes" });
+
+    // A move from elsewhere (no offWithLights in the draft) keeps it; unticking removes it.
+    const moved = applyMeterMoves(marked, [meter.id], "space-2");
+    if ("error" in moved) throw new Error(moved.error);
+    expect(moved.meter_mapping!.rows.find(row => row.id === meter.id)!.presentation).toMatchObject({ off_with_lights: "yes" });
+    const unticked = applyMeterEdit(marked, marked.meter_mapping!.rows[1]!, { name: "Linkway lights", scopeId: meter.scope_id, category: meter.category, counted: meter.aggregation_usage === "official", offWithLights: false });
+    if ("error" in unticked) throw new Error(unticked.error);
+    expect(unticked.meter_mapping!.rows[1]!.presentation).toEqual({ device_name: "Linkway lights" });
+  });
+
   it("moves chosen meters into an empty location by hand, keeping their names and counting", () => {
     const moved = applyMeterMoves(document, ["light", "power"], "space-2");
     if ("error" in moved) throw new Error(moved.error);

@@ -63,3 +63,21 @@ Device IDs are on the cloud project's Devices page, or in the Tuya app: open the
 Virtual ID. The browser only ever sends the IDs you typed; EnergyX sends back opaque references, not device IDs. To find
 pasted IDs in the tick list, the browser derives the same reference from each ID (`liveDeviceRefFor`, matching the
 server's `liveDeviceRef`), so device IDs are still never sent to the browser.
+
+## Meters that turn off with their lights
+
+Some lighting meters take their power from the circuit they measure, after the timer or photocell that switches the
+lights. They stop talking to Tuya every day while the lights are off (SKTC's *Pavilion linkway* meters report every
+hour from about 19:25 to 06:25 and go silent for 12–13 hours). Tuya reports them offline, so without a hint EnergyX
+shows **Device offline** all day and, once alert emails are on, sends a "went offline" email every morning.
+
+Mark such a meter in **Facility → Floor layout → Edit** on the meter: **Turns off with its lights** (stored as
+`presentation.off_with_lights: "yes"` on the meter mapping row; it changes no totals, so the confirmed totals stay).
+The meter then:
+
+- shows **Off with the lights** (grey) in Live connection while it has been offline for less than 16 hours;
+- counts as offline only after 16 hours (`OFF_WITH_LIGHTS_ALERT_AFTER_MS` in `energy-live-status.ts`), in the Live now
+  offline list, Data availability and the offline alert email. A meter still off after a whole night is a real fault.
+
+The real fix on site is to power the meter from an unswitched supply, so it stays online all day.
+
