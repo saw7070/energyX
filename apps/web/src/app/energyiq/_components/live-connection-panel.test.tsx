@@ -378,7 +378,11 @@ describe("LiveConnectionPanel", () => {
     const search = container.querySelector("input[type='search']") as HTMLInputElement;
 
     await act(async () => setValue(search, "bf0123456789abcdef01 bf0123456789abcdef02, bf0123456789abcdef04 bf0123456789abcdef99"));
-    await flush();
+    // The IDs are hashed with Web Crypto, which can finish a few ticks later on a busy machine.
+    await vi.waitFor(async () => {
+      await flush();
+      expect(container.textContent).toContain("Found 3 of 4 device IDs");
+    });
     expect([...container.querySelectorAll("ul label")].map((label) => label.textContent?.split(" · ")[0]))
       .toEqual(["264F GF Lobby Lighting", "264E Emergency Light"]);
     expect(container.textContent).toContain("Found 3 of 4 device IDs");
