@@ -32,7 +32,8 @@ column copied from Excel) shows exactly those devices, lists the IDs the account
 ## Connect from a device list
 
 Use this when the site gives you its own list, for example 20 meters across blocks 264E and 264F. Choose **Paste your
-device list** and paste the cells copied from Excel, or load a CSV file. One meter per line:
+device list** and paste the cells copied from Excel, or choose **Load an Excel or CSV file** and pick the site's sheet
+(`.xlsx`, `.xlsm`, `.csv`, `.tsv` or `.txt`). One meter per line:
 
 | Column | Needed | Example |
 | --- | --- | --- |
@@ -44,7 +45,11 @@ device list** and paste the cells copied from Excel, or load a CSV file. One met
 A header row is fine and the columns can be in any order when it names them (Device Name, Device ID, Block, What it
 powers; also Meter Name, Meter Device ID, Block Number and Meter Tracking Location); without a header the order above
 is used, and other columns such as daily readings are ignored. A sheet that names each block once, on its own row above
-that block's meters, works as it is: with a block column, a row holding only the block sets it for the meters below. A
+that block's meters, works as it is: with a block column, a row holding only the block sets it for the meters below.
+A title above the header row (up to five lines of a single piece of text) is skipped. An Excel file is read in the
+browser (`read-excel-file`, first sheet); rows after the last one holding a device ID, such as notes or questions
+below the meters, are dropped, and the XML escapes the reader leaves in cell text (`&amp;`) are decoded. Old binary
+`.xls` and `.xlsb` files can't be read: save them as `.xlsx` or CSV, or copy and paste the cells. A
 name used in more than one block gets the block in front ("264F Emergency Lighting") so meters stay tell-apart. **Check the list** asks Tuya about every ID and shows, per line,
 whether the device was found, is not in this account, is a gateway, is listed twice, or is missing a name or a valid
 ID. Lines not found are left out; fix the IDs or link the app account that holds them, then check again.

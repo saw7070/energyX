@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseLiveDeviceList } from "./live-device-list";
+import { deviceListTextFromSheet, parseLiveDeviceList } from "./live-device-list";
 
 describe("device list for starting a site from Tuya", () => {
   it("reads cells copied from Excel with a header, in any column order", () => {
@@ -71,5 +71,37 @@ describe("device list for starting a site from Tuya", () => {
       { line: 1, name: "264F", deviceId: "" },
       { line: 2, name: "264E Lighting L1", deviceId: "bf0123456789abcdef01" },
     ]);
+  });
+
+  it("skips a title above the headings, and reads an Excel sheet's rows without the notes below the meters", () => {
+    const rows = [
+      ["SKTC Energy Monitoring Meter Layout", null, null, null, null],
+      [null, null, null, null, null],
+      [null, "Block Number", "Meter Name", "Meter Device ID", "Meter Tracking Location"],
+      [null, "264F", null, null, null],
+      [null, null, "Emergency Lighting", "a1b2c3d4e5f6a7b8c9d0fa", "Block Emergency Lighting Consumption"],
+      [null, "264E", null, null, null],
+      [null, null, "Emergency Lighting", "a1b2c3d4e5f6a7b8c9d0fb", "Block Emergency Lighting Consumption"],
+      [null, null, "Rubbish Street Lamp", "a1b2c3d4e5f6a7b8c9d0fc", 0.4],
+      [null, "264A", null, null, null],
+      [null, null, "Pavilion DL &amp; Fan", "a1b2c3d4e5f6a7b8c9d0fd", "Downlight &lt;and&gt; fan &amp;amp; &#8364;1"],
+      [null, null, null, null, null],
+      [null, "Key Questions I want to address:", null, null, null],
+      [null, null, "Total this project use how much energy per month", null, null],
+    ];
+    const text = deviceListTextFromSheet(rows);
+    expect(text).not.toContain("Key Questions");
+    expect(parseLiveDeviceList(text)).toEqual([
+      { line: 5, name: "264F Emergency Lighting", deviceId: "a1b2c3d4e5f6a7b8c9d0fa", area: "264F", equipment: "Block Emergency Lighting Consumption" },
+      { line: 7, name: "264E Emergency Lighting", deviceId: "a1b2c3d4e5f6a7b8c9d0fb", area: "264E", equipment: "Block Emergency Lighting Consumption" },
+      { line: 8, name: "Rubbish Street Lamp", deviceId: "a1b2c3d4e5f6a7b8c9d0fc", area: "264E", equipment: "0.4" },
+      // The Excel reader leaves the file's XML escapes in; they are decoded once.
+      { line: 10, name: "Pavilion DL & Fan", deviceId: "a1b2c3d4e5f6a7b8c9d0fd", area: "264A", equipment: "Downlight <and> fan &amp; €1" },
+    ]);
+    // The same title above pasted cells is skipped too, but a lone first line without a heading below is still a meter.
+    expect(parseLiveDeviceList("Site meters\nName\tID\nLobby\tbf0123456789abcdef01")).toEqual([
+      { line: 3, name: "Lobby", deviceId: "bf0123456789abcdef01" },
+    ]);
+    expect(parseLiveDeviceList("264F\n264E Lighting L1,bf0123456789abcdef01")[0]).toEqual({ line: 1, name: "264F", deviceId: "" });
   });
 });

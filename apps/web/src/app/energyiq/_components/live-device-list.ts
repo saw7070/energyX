@@ -30,10 +30,11 @@ export function parseLiveDeviceList(text: string): LiveDeviceListEntry[] {
   const lines = text.replace(/^\uFEFF/u, "").split(/\r?\n/u);
   const entries: LiveDeviceListEntry[] = [];
   let columns: Partial<Record<Column, number>> | undefined;
+  const titleRows = leadingTitleRows(lines);
   // A sheet that names each block once, on its own row above that block's meters.
   let blockHeading: string | undefined;
   for (const [index, line] of lines.entries()) {
-    if (!line.trim()) continue;
+    if (!line.trim() || titleRows.has(index)) continue;
     const cells = splitLine(line).map((cell) => cell.replace(/\s+/gu, " ").trim());
     if (cells.every((cell) => !cell)) continue;
     if (columns === undefined) {
@@ -49,6 +50,49 @@ export function parseLiveDeviceList(text: string): LiveDeviceListEntry[] {
   }
   return withBlockInRepeatedNames(entries);
 }
+
+/**
+ * A sheet often starts with a title ("SKTC Energy Monitoring Meter Layout") above its headings. Lines holding a single
+ * piece of text and no device ID, before a heading line among the first few lines, are titles, not meters.
+ */
+const leadingTitleRows = (lines: string[]): Set<number> => {
+  const candidates: number[] = [];
+  for (const [index, line] of lines.entries()) {
+    if (!line.trim()) continue;
+    const cells = splitLine(line).map((cell) => cell.replace(/\s+/gu, " ").trim());
+    if (cells.every((cell) => !cell)) continue;
+    if (headerColumns(cells)) return new Set(candidates);
+    if (candidates.length >= 5 || cells.filter(Boolean).length !== 1 || cells.some(looksLikeDeviceId)) return new Set();
+    candidates.push(index);
+  }
+  return new Set();
+};
+
+/**
+ * The first sheet of an Excel device list, as the tab-separated text a copy from Excel gives. Rows after the last one
+ * holding a device ID are dropped: sheets often carry notes below the meters (SKTC's "Key Questions").
+ */
+export function deviceListTextFromSheet(rows: ReadonlyArray<ReadonlyArray<unknown>>): string {
+  const text = rows.map((row) => row.map((cell) => cell === null || cell === undefined ? ""
+    : cell instanceof Date ? cell.toISOString()
+    : (typeof cell === "string" ? decodeXmlText(cell) : String(cell)).replace(/[\t\r\n]+/gu, " ").trim()));
+  let last = -1;
+  text.forEach((cells, index) => { if (cells.some(looksLikeDeviceId)) last = index; });
+  return text.slice(0, last + 1).map((cells) => cells.join("\t")).join("\n");
+}
+
+const XML_ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+
+/**
+ * read-excel-file (9.3) hands over the sheet's text as written in the file's XML, so "Pavilion DL & Fan" arrives as
+ * "Pavilion DL &amp; Fan". Decode in one pass, so a cell that really says "&amp;" (stored as "&amp;amp;") stays so.
+ */
+const decodeXmlText = (value: string): string =>
+  value.replace(/&(?:(amp|lt|gt|quot|apos)|#(\d{1,7})|#x([\da-f]{1,6}));/giu, (match, name?: string, decimal?: string, hex?: string) => {
+    if (name) return XML_ENTITIES[name.toLowerCase()] ?? match;
+    const code = decimal ? Number(decimal) : Number.parseInt(hex!, 16);
+    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : match;
+  });
 
 /** Only the block column has text: the row names the block for the meters below it. */
 const isBlockHeading = (cells: string[], columns: Partial<Record<Column, number>>): boolean =>
