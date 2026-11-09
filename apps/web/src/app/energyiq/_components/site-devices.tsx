@@ -335,6 +335,18 @@ async function loadDevices(projectId: string, likelyBoardIds: string[] = []): Pr
 }
 
 /** Searchable list of every device, grouped by board, for opening one device on its own. */
+/** Locations under the one above them (a block, say), named groups in natural order, then any without one. */
+export function groupLocations(boardIds: string[], boardParents: ReadonlyMap<string, string>, boardName: (id: string) => string): Array<{ name: string; ids: string[] }> {
+  const groups = new Map<string, string[]>();
+  for (const id of boardIds) {
+    const parent = boardParents.get(id);
+    const name = parent ? boardName(parent) : "";
+    groups.set(name, [...(groups.get(name) ?? []), id]);
+  }
+  return [...groups].map(([name, ids]) => ({ name, ids }))
+    .sort((a, b) => Number(!a.name) - Number(!b.name) || a.name.localeCompare(b.name, undefined, { numeric: true }));
+}
+
 function DevicePicker({ rows, boardName, value, onPick }: { rows: DeviceRow[]; boardName: (id: string) => string; value: string | null; onPick: (id: string) => void }) {
   const t = useMessages(deviceMessages);
   const { locale } = useEnergyIqLocale();
@@ -448,6 +460,9 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
   const boardName = (boardId: string) => boardNames.get(boardId) ?? boardId;
   const byBoard = (boardId: string) => summary.rows.filter(row => row.boardId === boardId).sort((a, b) => Number(b.isBoardTotal) - Number(a.isBoardTotal) || (b.usageKwh ?? -1) - (a.usageKwh ?? -1));
   const ordered = boardIds.flatMap(byBoard);
+  // A site with many locations (often one per meter) gets a grouped drop-down instead of a wall of buttons.
+  const manyBoards = boardIds.length > 6;
+  const locationGroups = groupLocations(boardIds, boardParents ?? new Map(), boardName);
   const money = (value: number | null | undefined) => rate && value != null ? sgd(value * rate) : "—";
   const dayMap = new Map(loaded.days.map(day => [day.date, day]));
   const dateText = (date: string, withWeekday = true) => new Intl.DateTimeFormat(intlLocale(locale), { ...(withWeekday ? { weekday: "short" as const } : {}), day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`));
@@ -692,8 +707,17 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
       <span className={styles.viewLabel}>{t("show")}</span>
       <div className={styles.segmented} role="group" aria-label={t("showGroup")}>
         <button type="button" aria-pressed={view.kind === "site"} onClick={() => showView({ kind: "site" })}>{t("wholeSite")}</button>
-        {boardIds.map(id => <button key={id} type="button" aria-pressed={view.kind === "board" && view.id === id} className={view.kind === "device" && currentBoard === id ? styles.segmentWithin : undefined} onClick={() => showView({ kind: "board", id })}>{boardName(id)}</button>)}
+        {!manyBoards && boardIds.map(id => <button key={id} type="button" aria-pressed={view.kind === "board" && view.id === id} className={view.kind === "device" && currentBoard === id ? styles.segmentWithin : undefined} onClick={() => showView({ kind: "board", id })}>{boardName(id)}</button>)}
       </div>
+      {manyBoards && <label className={styles.locationPick}>
+        <span className={styles.srOnly}>{t("location.pick")}</span>
+        <select value={currentBoard ?? ""} onChange={event => showView(event.target.value ? { kind: "board", id: event.target.value } : { kind: "site" })}>
+          <option value="">{t("location.all")}</option>
+          {locationGroups.map(group => group.name
+            ? <optgroup key={group.name} label={group.name}>{group.ids.map(id => <option key={id} value={id}>{boardName(id)}</option>)}</optgroup>
+            : group.ids.map(id => <option key={id} value={id}>{boardName(id)}</option>))}
+        </select>
+      </label>}
       <DevicePicker rows={ordered} boardName={boardName} value={device?.id ?? null} onPick={openDevice} />
     </div>
 

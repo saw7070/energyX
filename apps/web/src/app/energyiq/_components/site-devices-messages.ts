@@ -304,6 +304,8 @@ export const deviceMessages = defineMessages({
   "finding.none.detail": "It mainly runs during operating hours and its readings are complete.",
 
   "picker.open": "Open a device",
+  "location.pick": "Show one location",
+  "location.all": "All locations",
   "picker.search": "Search devices",
   "picker.noMatch": "No device matches “{query}”.",
   "boardTotalShort": "board total",
@@ -502,6 +504,8 @@ export const deviceMessages = defineMessages({
     "finding.none.detail": "它主要在营业时间内运行，读数也完整。",
 
     "picker.open": "打开设备",
+    "location.pick": "显示一个位置",
+    "location.all": "所有位置",
     "picker.search": "搜索设备",
     "picker.noMatch": "没有与“{query}”匹配的设备。",
     "boardTotalShort": "配电箱总表",
@@ -700,6 +704,8 @@ export const deviceMessages = defineMessages({
     "finding.none.detail": "Ia kebanyakannya beroperasi dalam waktu operasi dan bacaannya lengkap.",
 
     "picker.open": "Buka peranti",
+    "location.pick": "Tunjuk satu lokasi",
+    "location.all": "Semua lokasi",
     "picker.search": "Cari peranti",
     "picker.noMatch": "Tiada peranti sepadan dengan “{query}”.",
     "boardTotalShort": "jumlah papan agihan",
