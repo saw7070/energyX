@@ -190,8 +190,22 @@
 .crumbs button { padding:1px 4px; border-radius:5px; color:#1d513a; font-weight:600; }
 .crumbs button:hover { background:#e4efe7; text-decoration:underline; }
 .crumbs [aria-current] { color:#3c4a42; }
-.locationPick select { min-height:36px; max-width:min(320px, 100%); padding:6px 32px 6px 12px; border:1px solid #d0dbd2; border-radius:8px; background:white; color:#1d513a; font-size:14px; font-weight:600; }
-.locationPick select:focus { outline:2px solid #2f7d5a; outline-offset:1px; }
+/* Block tabs and device cards, laid out like the rooms and devices of a home app. */
+.blockBar { display:flex; align-items:center; gap:12px; margin-top:18px; }
+.blockTabs { display:flex; gap:22px; flex:1 1 auto; min-width:0; overflow-x:auto; scrollbar-width:none; padding:4px 2px 6px; }
+.blockTabs::-webkit-scrollbar { display:none; }
+.blockTabs button { flex:none; padding:2px 0; font-size:17px; font-weight:600; color:#8a968f; white-space:nowrap; }
+.blockTabs button:hover { color:#3c4a42; }
+.blockTabs button[aria-pressed=true] { color:#1c2a22; font-weight:750; }
+.cardGrid { display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:12px; margin-top:10px; }
+.deviceCard { display:grid; grid-template-rows:auto 1fr auto; align-items:start; gap:8px; min-height:124px; padding:14px 16px; border:1px solid #e3e9e4; border-radius:16px; background:white; box-shadow:0 1px 2px rgba(20,40,30,.05); text-align:left; }
+.deviceCard:hover { border-color:#b9d0c1; box-shadow:0 6px 16px rgba(20,40,30,.08); }
+.deviceCard[aria-current=true] { border-color:#1d513a; box-shadow:inset 0 0 0 1px #1d513a; }
+.cardIcon { display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:11px; background:#eef4ef; color:#1d513a; }
+.cardIcon svg { width:18px; height:18px; }
+.deviceCard strong { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; font-size:15px; font-weight:650; line-height:1.3; color:#1c2a22; }
+.cardMeta { display:flex; align-items:center; gap:6px; min-width:0; font-size:12.5px; color:#6a786f; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.showAllCards { margin-top:10px; }
 .picker { position:relative; margin-left:auto; }
 .pickerChevron { width:12px !important; height:12px !important; margin:0 0 0 8px !important; transform:rotate(90deg); color:#6a786f; }
 .pickerPanel { position:absolute; right:0; top:calc(100% + 6px); z-index:40; width:min(380px, 88vw); max-height:440px; overflow:auto; padding:8px; border:1px solid #d0dbd2; border-radius:12px; background:white; box-shadow:0 14px 34px rgba(20,40,30,.16); }
@@ -328,8 +342,15 @@
 :global(:where(html[data-energyiq-theme="dark"])) .crumbs button { border-radius:5px; color:#94caae; }
 :global(:where(html[data-energyiq-theme="dark"])) .crumbs button:hover { background:#1b231e; text-decoration:underline; }
 :global(:where(html[data-energyiq-theme="dark"])) .crumbs [aria-current] { color:#b0c0b6; }
-:global(:where(html[data-energyiq-theme="dark"])) .locationPick select { border:1px solid #323b34; border-radius:8px; background:#191919; color:#94caae; }
-:global(:where(html[data-energyiq-theme="dark"])) .locationPick select:focus { outline:2px solid #2f7d5a; }
+:global(:where(html[data-energyiq-theme="dark"])) .blockTabs button { color:#8a968f; }
+:global(:where(html[data-energyiq-theme="dark"])) .blockTabs button:hover { color:#b0c0b6; }
+:global(:where(html[data-energyiq-theme="dark"])) .blockTabs button[aria-pressed=true] { color:#c1d2c8; }
+:global(:where(html[data-energyiq-theme="dark"])) .deviceCard { border:1px solid #313632; border-radius:16px; background:#191919; box-shadow:0 1px 2px #14281e14; }
+:global(:where(html[data-energyiq-theme="dark"])) .deviceCard:hover { border-color:#2e4236; box-shadow:0 6px 16px #14281e21; }
+:global(:where(html[data-energyiq-theme="dark"])) .deviceCard[aria-current=true] { border-color:#1d513a; box-shadow:inset 0 0 0 1px #1d513a; }
+:global(:where(html[data-energyiq-theme="dark"])) .cardIcon { border-radius:11px; background:#1b201c; color:#94caae; }
+:global(:where(html[data-energyiq-theme="dark"])) .deviceCard strong { color:#c1d2c8; }
+:global(:where(html[data-energyiq-theme="dark"])) .cardMeta { color:#9aa99f; }
 :global(:where(html[data-energyiq-theme="dark"])) .pickerChevron { color:#9aa99f; }
 :global(:where(html[data-energyiq-theme="dark"])) .pickerPanel { border:1px solid #323b34; border-radius:12px; background:#191919; box-shadow:0 14px 34px #14281e41; }
 :global(:where(html[data-energyiq-theme="dark"])) .pickerSearch { border:1px solid #323b34; border-radius:8px; background:#191919; color:#bfd1c6; }
