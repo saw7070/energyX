@@ -27,6 +27,7 @@ import {
   resolveEnergyReportingHealth,
   selectEnergyLatestCompleteDay,
   selectEnergyCurrentOverviewPeriod,
+  firstFullReadingDay,
   selectEnergyFirstReadingDay,
   selectEnergyGoldenPeriod,
   selectEnergyLatestCompletePeriod,
@@ -37,6 +38,32 @@ import { resolveEnergyQueryContext } from "./energy-query-context.js";
 import { NGEE_ANN_GOLDEN } from "./ngee-ann-golden.fixture.js";
 import { materializePreschoolGoldenFixture, PRESCHOOL_GOLDEN } from "./preschool-golden.fixture.js";
 import { materializeTestProjectSnapshot } from "./energy-test-materialization.js";
+
+describe("firstFullReadingDay", () => {
+  const day = (localDate: string, validCount: number) => ({ localDate, validCount });
+
+  it("starts a new site on its first full day, not the afternoon it was connected", () => {
+    // Connected about 3:30 pm on 3 Nov: that day has a third of a normal day's readings.
+    const days = [day("2026-11-03", 600), day("2026-11-04", 1_700), day("2026-11-05", 1_650), day("2026-11-08", 1_600)];
+    expect(firstFullReadingDay(days, "2026-10-12", "2026-11-08")).toBe("2026-11-04");
+  });
+
+  it("starts on the first reading when that day is already a full one", () => {
+    expect(firstFullReadingDay([day("2026-11-04", 1_700), day("2026-11-05", 1_650)], "2026-10-12", "2026-11-08"))
+      .toBe("2026-11-04");
+  });
+
+  it("keeps the window of a site that was already sending before it", () => {
+    const days = [day("2026-10-10", 1_700), day("2026-10-14", 300), day("2026-10-15", 1_700)];
+    expect(firstFullReadingDay(days, "2026-10-12", "2026-11-08")).toBeNull();
+  });
+
+  it("keeps the window when it already opens on the first full day, or when there are no readings", () => {
+    expect(firstFullReadingDay([day("2026-10-12", 1_700), day("2026-10-13", 1_700)], "2026-10-12", "2026-11-08"))
+      .toBeNull();
+    expect(firstFullReadingDay([], "2026-10-12", "2026-11-08")).toBeNull();
+  });
+});
 
 describe("Energy current Overview window contract", () => {
   it("keeps rolling 7 days, rolling 28 days and calendar month-to-date as distinct public contracts", () => {
