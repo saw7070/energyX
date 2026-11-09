@@ -1113,12 +1113,34 @@ export const selectEnergyCurrentOverviewPeriod = async (
 
 /** How far back a window's first day looks for earlier readings before it counts the site as new. */
 const FIRST_READING_LOOKBACK_DAYS = 7 as const;
+/** A new site's first day counts once it has at least this share of its busiest day's readings. */
+const FIRST_FULL_DAY_SHARE = 0.5;
+
+/**
+ * Where a new site's window should start, from its valid readings per local day. Null when readings arrived in the
+ * lookback before `localFrom` (an established site keeps its full window, outages included) or when the window
+ * already opens on the first full day. A first day that only caught the last hours (connected mid-afternoon) is not a
+ * full day: counting it as one pulls per-day averages and yearly estimates down.
+ */
+export const firstFullReadingDay = (
+  days: ReadonlyArray<{ localDate: string; validCount: number }>,
+  localFrom: string,
+  localTo: string,
+): string | null => {
+  if (days.some((day) => day.localDate < localFrom && day.validCount > 0)) return null;
+  const inWindow = days
+    .filter((day) => day.localDate >= localFrom && day.localDate <= localTo && day.validCount > 0)
+    .sort((a, b) => a.localDate.localeCompare(b.localDate));
+  const busiest = Math.max(0, ...inWindow.map((day) => day.validCount));
+  const first = inWindow.find((day) => day.validCount >= busiest * FIRST_FULL_DAY_SHARE);
+  return first && first.localDate > localFrom ? first.localDate : null;
+};
 
 /**
  * A site that started sending partway through a window has no data on the days before. Counting them anyway spreads
  * its energy over days it was not connected, so per-day averages and yearly estimates come out too low. Returns the
- * first local date with a valid reading when the window opens on days without any and nothing arrived in the week
- * before it; otherwise null, so an established site with a short outage keeps its full window.
+ * site's first full day of readings when the window opens before it and nothing arrived in the week before the
+ * window; otherwise null, so an established site with a short outage keeps its full window.
  */
 export const selectEnergyFirstReadingDay = async (
   input: EnergyPeriodSelectionInput & { localFrom: string; localTo: string },
@@ -1135,20 +1157,19 @@ export const selectEnergyFirstReadingDay = async (
     user_id: input.userId,
     workspace_id: input.context.workspaceId,
     datasource_id: prepared.scoped.datasourceId,
-    sql: firstReadingDaySql(
+    sql: readingDaysSql(
       prepared.scoped.viewName,
       prepared.aggregateMeterNodeIds,
       input.localFrom,
       input.localTo,
     ),
-    limit: 1,
+    limit: 200,
   });
-  const row = result.rows[0];
-  if (!row || numberAt(row, 1) > 0) return null;
-  const firstReadingDate = optionalStringAt(row, 0);
-  return firstReadingDate && firstReadingDate > input.localFrom && firstReadingDate <= input.localTo
-    ? firstReadingDate
-    : null;
+  return firstFullReadingDay(
+    result.rows.map((row) => ({ localDate: stringAt(row, 0), validCount: numberAt(row, 1) })),
+    input.localFrom,
+    input.localTo,
+  );
 };
 
 const runCurrentOverviewPeriodSelection = (
@@ -5911,22 +5932,22 @@ const currentOverviewPeriodSelectionSql = (
 `;
 };
 
-const firstReadingDaySql = (
+const readingDaysSql = (
   viewName: string,
   meterNodeIds: string[],
   localFrom: string,
   localTo: string,
 ): string => `
   SELECT
-    STRFTIME(MIN(local_date) FILTER (
-      WHERE local_date >= CAST(${sqlLiteral(localFrom)} AS DATE)
-    ), '%Y-%m-%d') AS first_reading_date,
-    COUNT(*) FILTER (WHERE local_date < CAST(${sqlLiteral(localFrom)} AS DATE)) AS earlier_reading_count
+    STRFTIME(local_date, '%Y-%m-%d') AS local_date,
+    COUNT(*) AS valid_count
   FROM ${quoteIdentifier(viewName)} source
   WHERE ${meterNodeFilter(meterNodeIds)}
     AND quality_status = 'ok'
     AND local_date >= CAST(${sqlLiteral(localFrom)} AS DATE) - INTERVAL ${FIRST_READING_LOOKBACK_DAYS} DAY
     AND local_date <= CAST(${sqlLiteral(localTo)} AS DATE)
+  GROUP BY local_date
+  ORDER BY local_date
 `;
 
 const goldenDaySelectionSql = (
