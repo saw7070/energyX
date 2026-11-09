@@ -725,6 +725,56 @@ describe("writeEnergyFactProjectMaterialization", () => {
     }
   });
 
+  it("reads a lighting meter that is quiet all day as idle, with the evening's first reading in its last hour", async () => {
+    const databasePath = ":memory:";
+    const projectId = "project-tuya-idle-daytime";
+    const batch = eventBatch({
+      databasePath,
+      projectId,
+      importBatchId: "tuya-idle-daytime",
+      sourceSha256: "tuya-idle-daytime-sha",
+      readings: [
+        // Lights on overnight: about 0.31 kWh in each hourly report.
+        ["2026-11-06T21:00:00.000Z", 13.23],
+        ["2026-11-06T22:00:00.000Z", 13.54],
+        // Lights off: the total barely moves, then stops moving, so the meter sends nothing for eleven hours.
+        ["2026-11-06T23:00:00.000Z", 13.55],
+        // Lights back on in the evening: the first report carries only the last hour's use.
+        ["2026-11-07T10:00:00.000Z", 13.76],
+        ["2026-11-07T11:00:00.000Z", 14.08],
+      ],
+    });
+
+    await writeProjectSnapshot(batch, [batch], "snapshot-tuya-idle-daytime", [batch.sourceSha256], "unavailable");
+
+    const facts = await readCanonicalIntervals(databasePath, projectId);
+    const quiet = facts.filter((fact) => {
+      const start = (fact.interval_start as Date).toISOString();
+      return start >= "2026-11-06T23:00:00.000Z" && start < "2026-11-07T09:00:00.000Z";
+    });
+    expect(facts.some((fact) => fact.quality_status !== "ok")).toBe(false);
+    expect(quiet.length).toBeGreaterThan(30);
+    expect(quiet.reduce((sum, fact) => sum + Number(fact.usage_kwh), 0)).toBeCloseTo(0, 6);
+    const lastHour = facts.filter((fact) => {
+      const start = (fact.interval_start as Date).toISOString();
+      return start >= "2026-11-07T09:00:00.000Z" && start < "2026-11-07T10:00:00.000Z";
+    });
+    expect(lastHour.reduce((sum, fact) => sum + Number(fact.usage_kwh), 0)).toBeCloseTo(0.21, 6);
+    expect(facts.reduce((sum, fact) => sum + Number(fact.usage_kwh), 0)).toBeCloseTo(14.08 - 13.23, 6);
+
+    const database = await getDuckDbDatabase(databasePath);
+    const connection = database.connect();
+    try {
+      const events = await new Promise<Array<Record<string, unknown>>>((resolve, reject) => {
+        connection.all(`SELECT code FROM energy_quality_events WHERE project_id = ? AND code = 'gap'`, projectId,
+          (error, rows) => error ? reject(error) : resolve(rows as Array<Record<string, unknown>>));
+      });
+      expect(events).toHaveLength(0);
+    } finally {
+      await new Promise<void>((resolve, reject) => connection.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
   it("keeps project-wide cumulative gaps aggregate-eligible without making them cadence-eligible", async () => {
     const databasePath = ":memory:";
     const projectId = "project-cross-batch-quality";

@@ -1370,6 +1370,14 @@ const rebuildProjectCumulativeQualityEvents = async (
  */
 export const TUYA_OUTAGE_MIN_HOURS = 3;
 export const TUYA_OUTAGE_MIN_KWH = 0.05;
+/**
+ * A lighting circuit is idle all day and its meter, still online, sends nothing because its total does not move. The
+ * evening's first reading then carries only what the lights used since the last hourly report slot. When that is no
+ * more than this many of the meter's busiest hours, the spell was idle, not an outage: nothing was used until the final
+ * hour, which holds the whole delta. Real outages carry far more than one hour's worth.
+ */
+export const TUYA_IDLE_CLOSING_MAX_HOURLY_PEAKS = 1.5;
+const TUYA_REPORT_SLOT_MS = 3_600_000;
 
 const rebuildProjectEventCumulativeIntervals = async (
   connection: DuckDbModule.Connection,
@@ -1388,15 +1396,52 @@ const rebuildProjectEventCumulativeIntervals = async (
         PARTITION BY project_id, resource, meter_node_id
         ORDER BY event_time
       )
+    ), pair_values AS (
+      SELECT *,
+        date_diff('millisecond', previous_event_time, event_time) AS elapsed_milliseconds,
+        active_energy_kwh - previous_active_energy_kwh AS raw_delta_kwh
+      FROM ordered_readings
+      WHERE previous_event_time IS NOT NULL
+    ), classified AS (
+      SELECT *,
+        elapsed_milliseconds > ${TUYA_OUTAGE_MIN_HOURS * 3_600_000}
+          AND raw_delta_kwh >= ${TUYA_OUTAGE_MIN_KWH} AS is_quiet_with_use,
+        MAX(CASE WHEN elapsed_milliseconds BETWEEN 1800000 AND 5400000 THEN raw_delta_kwh END) OVER (
+          PARTITION BY project_id, resource, meter_node_id
+        ) AS hourly_peak_kwh
+      FROM pair_values
     )
-    SELECT *,
-      date_diff('millisecond', previous_event_time, event_time) AS elapsed_milliseconds,
-      active_energy_kwh - previous_active_energy_kwh AS raw_delta_kwh,
-      date_diff('millisecond', previous_event_time, event_time) > ${TUYA_OUTAGE_MIN_HOURS * 3_600_000}
-        AND active_energy_kwh - previous_active_energy_kwh >= ${TUYA_OUTAGE_MIN_KWH} AS is_outage
-    FROM ordered_readings
-    WHERE previous_event_time IS NOT NULL
+    SELECT * EXCLUDE (is_quiet_with_use, hourly_peak_kwh),
+      COALESCE(
+        is_quiet_with_use
+          AND hourly_peak_kwh > 0
+          AND raw_delta_kwh <= ${TUYA_IDLE_CLOSING_MAX_HOURLY_PEAKS} * hourly_peak_kwh,
+        FALSE
+      ) AS is_idle_then_use,
+      COALESCE(is_quiet_with_use, FALSE)
+        AND NOT COALESCE(
+          hourly_peak_kwh > 0 AND raw_delta_kwh <= ${TUYA_IDLE_CLOSING_MAX_HOURLY_PEAKS} * hourly_peak_kwh,
+          FALSE
+        ) AS is_outage
+    FROM classified
   `, [projectId]);
+
+  // An idle spell becomes two segments: nothing used until the final report slot, then the whole delta in it.
+  await duckDbRun(connection, `
+    CREATE OR REPLACE TEMP TABLE canonical_event_segments AS
+    SELECT * FROM canonical_event_pairs WHERE NOT is_idle_then_use
+    UNION ALL BY NAME
+    SELECT * REPLACE (
+      event_time - INTERVAL '1 hour' AS event_time,
+      elapsed_milliseconds - ${TUYA_REPORT_SLOT_MS} AS elapsed_milliseconds,
+      CAST(0 AS DOUBLE) AS raw_delta_kwh
+    ) FROM canonical_event_pairs WHERE is_idle_then_use
+    UNION ALL BY NAME
+    SELECT * REPLACE (
+      event_time - INTERVAL '1 hour' AS previous_event_time,
+      CAST(${TUYA_REPORT_SLOT_MS} AS BIGINT) AS elapsed_milliseconds
+    ) FROM canonical_event_pairs WHERE is_idle_then_use
+  `);
 
   await duckDbRun(connection, `
     CREATE OR REPLACE TEMP TABLE canonical_event_interval_contributions AS
@@ -1411,7 +1456,7 @@ const rebuildProjectEventCumulativeIntervals = async (
         greatest(pairs.previous_event_time, grid.interval_start),
         least(pairs.event_time, grid.interval_start + INTERVAL '15 minutes')
       ) AS overlap_milliseconds
-    FROM canonical_event_pairs pairs
+    FROM canonical_event_segments pairs
     CROSS JOIN LATERAL generate_series(
       time_bucket(INTERVAL '15 minutes', pairs.previous_event_time),
       time_bucket(INTERVAL '15 minutes', pairs.event_time - INTERVAL '1 microsecond'),
@@ -1592,6 +1637,7 @@ const rebuildProjectEventCumulativeQualityEvents = async (
     FROM meter_summary
   `, [projectId]);
   await duckDbRun(connection, "DROP TABLE canonical_event_interval_contributions");
+  await duckDbRun(connection, "DROP TABLE IF EXISTS canonical_event_segments");
   await duckDbRun(connection, "DROP TABLE canonical_event_pairs");
 };
 
