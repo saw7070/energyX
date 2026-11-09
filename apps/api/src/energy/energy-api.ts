@@ -412,7 +412,7 @@ export const handleEnergyApiRequest = async (
       if (response) return response;
     }
     if (segments[0] === "portfolio" || segments[0] === "report-schedules"
-      || (segments[0] === "projects" && segments[2] === "targets")) {
+      || (segments[0] === "projects" && (segments[2] === "targets" || segments[2] === "savings-checks"))) {
       const { handlePortfolioApi } = await import("./energy-portfolio-api.js");
       const response = await handlePortfolioApi(request, segments, context, user, { readJsonBody });
       if (response) return response;

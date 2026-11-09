@@ -160,6 +160,19 @@ describe("portfolio, budgets, overnight checks and scheduled reports", () => {
     expect(emails.every((email) => email.to.includes("facilities@example.test"))).toBe(true);
   }, 120_000);
 
+  it("records changes for proof of savings, refuses bad ones and removes them", async () => {
+    const created = await call("POST", ["projects", PROJECT, "savings-checks"], "", { name: "LED corridors", changeDate: "2026-10-05", meterIds: [], note: "Block A" });
+    expect(created.status).toBe(200);
+    const data = (created.body as { data: { checks: Array<{ id: string; name: string; changeDate: string }>; carbon: { kgCo2ePerKwh: number }; canEdit: boolean } }).data;
+    expect(data.checks).toMatchObject([{ name: "LED corridors", changeDate: "2026-10-05", meterIds: [], note: "Block A" }]);
+    expect(data.carbon.kgCo2ePerKwh).toBe(0.402);
+    expect(data.canEdit).toBe(true);
+    expect((await call("POST", ["projects", PROJECT, "savings-checks"], "", { name: "", changeDate: "2026-10-05" })).status).toBe(400);
+    expect((await call("POST", ["projects", PROJECT, "savings-checks"], "", { name: "Future", changeDate: "2999-01-01" })).status).toBe(400);
+    const removed = await call("DELETE", ["projects", PROJECT, "savings-checks", data.checks[0]!.id]);
+    expect((removed.body as { data: { checks: unknown[] } }).data.checks).toEqual([]);
+  });
+
   it("emails a scheduled PDF report once per period to team members who can read the sites", async () => {
     const created = await call("POST", ["report-schedules"], "", { name: "Monthly summary", frequency: "monthly", recipientUserIds: ["facilities"] });
     expect(created.status).toBe(201);

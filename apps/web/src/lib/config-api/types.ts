@@ -558,6 +558,10 @@ export type EnergyProjectTargetsDto = {
   status?: { budget?: EnergyBudgetStatusDto; overnight?: EnergyOvernightFindingDto; peak?: EnergyPeakDemandStatusDto };
 };
 
+/** A change made on site whose effect is being proven; no meters means the whole site. */
+export type EnergySavingsCheckDto = { id: string; projectId: string; name: string; changeDate: string; meterIds: string[]; note?: string; createdAt: string };
+export type EnergySavingsChecksDto = { projectId: string; checks: EnergySavingsCheckDto[]; carbon: EnergyCarbonFactorDto; canEdit: boolean };
+
 export type EnergyProjectTargetsInputDto = {
   budget?: EnergyBudgetDto | null;
   carbon?: { kgCo2ePerKwh: number; year?: number; source?: string } | null;

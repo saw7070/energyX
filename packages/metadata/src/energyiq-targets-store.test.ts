@@ -69,6 +69,20 @@ describe("EnergyIQ targets store", () => {
     expect(targets.listRecentAlerts("site-a", "2026-01-01T00:00:00.000Z").map((alert) => alert.key)).toContain("budget:2026-10:over");
   });
 
+  it("keeps the changes recorded for proof of savings, newest change first", () => {
+    const targets = metadata.energyIq.targets;
+    const now = new Date("2026-11-10T00:00:00.000Z");
+    targets.createSavingsCheck("site-a", { name: " Timer moved ", changeDate: "2026-10-01" }, "user-1", now);
+    const led = targets.createSavingsCheck("site-a", { name: "LED fittings", changeDate: "2026-11-01", meterIds: ["m1", "m2", "m1"], note: "264E" }, "user-1", now);
+    expect(led).toMatchObject({ name: "LED fittings", changeDate: "2026-11-01", meterIds: ["m1", "m2"], note: "264E", createdBy: "user-1" });
+    expect(targets.listSavingsChecks("site-a").map((check) => check.name)).toEqual(["LED fittings", "Timer moved"]);
+    expect(() => targets.createSavingsCheck("site-a", { name: "x", changeDate: "2026-11-11" }, "user-1", now)).toThrow("ENERGYIQ_SAVINGS_CHECK_DATE_INVALID");
+    expect(() => targets.createSavingsCheck("site-a", { name: "x", changeDate: "1 Nov" }, "user-1", now)).toThrow("ENERGYIQ_SAVINGS_CHECK_DATE_INVALID");
+    expect(() => targets.createSavingsCheck("site-a", { name: " ", changeDate: "2026-11-01" }, "user-1", now)).toThrow("ENERGYIQ_SAVINGS_CHECK_NAME_REQUIRED");
+    expect(targets.deleteSavingsCheck(led.id)).toBe(true);
+    expect(targets.listSavingsChecks("site-a")).toHaveLength(1);
+  });
+
   it("records each alert once and lists recent ones newest first", () => {
     const targets = metadata.energyIq.targets;
     expect(targets.recordAlert({ projectId: "site-a", key: "budget:2026-10:at-risk", kind: "budget", payload: { forecast: 13000 }, now: new Date("2026-10-05T00:00:00Z") })).toBe(true);
