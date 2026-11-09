@@ -335,17 +335,22 @@ async function loadDevices(projectId: string, likelyBoardIds: string[] = []): Pr
 }
 
 /** Searchable list of every device, grouped by board, for opening one device on its own. */
-/** Locations under the one above them (a block, say), named groups in natural order, then any without one. */
-export function groupLocations(boardIds: string[], boardParents: ReadonlyMap<string, string>, boardName: (id: string) => string): Array<{ name: string; ids: string[] }> {
-  const groups = new Map<string, string[]>();
-  for (const id of boardIds) {
-    const parent = boardParents.get(id);
-    const name = parent ? boardName(parent) : "";
-    groups.set(name, [...(groups.get(name) ?? []), id]);
+/**
+ * The blocks or areas a site's devices sit in, like the rooms of a home app: the location above a device's own
+ * location when there is one (a block above its circuits), else the device's own location. Natural name order.
+ */
+export function deviceBlocks(rows: Array<Pick<DeviceRow, "id" | "boardId">>, boardParents: ReadonlyMap<string, string>, boardName: (id: string) => string): Array<{ id: string; name: string; deviceIds: string[] }> {
+  const blocks = new Map<string, string[]>();
+  for (const row of rows) {
+    const id = boardParents.get(row.boardId) ?? row.boardId;
+    blocks.set(id, [...(blocks.get(id) ?? []), row.id]);
   }
-  return [...groups].map(([name, ids]) => ({ name, ids }))
-    .sort((a, b) => Number(!a.name) - Number(!b.name) || a.name.localeCompare(b.name, undefined, { numeric: true }));
+  return [...blocks].map(([id, deviceIds]) => ({ id, name: boardName(id), deviceIds }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 }
+
+/** How many device cards the whole site shows before "Show all". */
+const CARD_PREVIEW = 24;
 
 function DevicePicker({ rows, boardName, value, onPick }: { rows: DeviceRow[]; boardName: (id: string) => string; value: string | null; onPick: (id: string) => void }) {
   const t = useMessages(deviceMessages);
@@ -397,6 +402,9 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
   const likelyBoards = useRef<string[]>([]);
   likelyBoards.current = [...boardNames.keys()];
   const [error, setError] = useState<ReportProblem | null>(null);
+  // The block tab someone chose; until then it follows the device or board on show.
+  const [pickedBlock, setPickedBlock] = useState<string | null | undefined>(undefined);
+  const [allCards, setAllCards] = useState(false);
   const problemText = translatorFor(siteReportMessages, locale);
   const [refresh, setRefresh] = useState(0);
   const panelRef = useRef<HTMLElement>(null);
@@ -460,9 +468,8 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
   const boardName = (boardId: string) => boardNames.get(boardId) ?? boardId;
   const byBoard = (boardId: string) => summary.rows.filter(row => row.boardId === boardId).sort((a, b) => Number(b.isBoardTotal) - Number(a.isBoardTotal) || (b.usageKwh ?? -1) - (a.usageKwh ?? -1));
   const ordered = boardIds.flatMap(byBoard);
-  // A site with many locations (often one per meter) gets a grouped drop-down instead of a wall of buttons.
-  const manyBoards = boardIds.length > 6;
-  const locationGroups = groupLocations(boardIds, boardParents ?? new Map(), boardName);
+  const blocks = deviceBlocks(ordered, boardParents ?? new Map(), boardName);
+  const blockOf = new Map(blocks.flatMap(block => block.deviceIds.map(id => [id, block.id] as const)));
   const money = (value: number | null | undefined) => rate && value != null ? sgd(value * rate) : "—";
   const dayMap = new Map(loaded.days.map(day => [day.date, day]));
   const dateText = (date: string, withWeekday = true) => new Intl.DateTimeFormat(intlLocale(locale), { ...(withWeekday ? { weekday: "short" as const } : {}), day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`));
@@ -680,6 +687,10 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
   const boardData = view.kind === "board" ? loaded.boards.get(view.id) : null;
   const currentBoard = view.kind === "board" ? view.id : device?.boardId ?? null;
   const title = device ? device.name : view.kind === "board" ? boardName(view.id) : t("title");
+  const viewBlock = device ? blockOf.get(device.id) ?? null : view.kind === "board" ? (boardParents?.get(view.id) ?? view.id) : null;
+  const activeBlock = pickedBlock !== undefined && (pickedBlock === null ? view.kind === "site" : true) ? pickedBlock : viewBlock;
+  const cardRows = activeBlock ? ordered.filter(row => blockOf.get(row.id) === activeBlock) : ordered;
+  const shownCards = activeBlock || allCards ? cardRows : cardRows.slice(0, CARD_PREVIEW);
   const description = device ? t("description.device", { details: [typeName(device), device.isBoardTotal ? boardTotalNote(device.type, locale) : "", boardName(device.boardId), device.circuit ? t("circuit", { circuit: device.circuit }) : ""].filter(Boolean).join(" · "), period })
     : view.kind === "board" ? t("description.board", { count: byBoard(view.id).length, period })
     : t("description.site", { period });
@@ -703,23 +714,25 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
       </div>
     </header>
 
-    <div className={styles.viewBar}>
-      <span className={styles.viewLabel}>{t("show")}</span>
-      <div className={styles.segmented} role="group" aria-label={t("showGroup")}>
-        <button type="button" aria-pressed={view.kind === "site"} onClick={() => showView({ kind: "site" })}>{t("wholeSite")}</button>
-        {!manyBoards && boardIds.map(id => <button key={id} type="button" aria-pressed={view.kind === "board" && view.id === id} className={view.kind === "device" && currentBoard === id ? styles.segmentWithin : undefined} onClick={() => showView({ kind: "board", id })}>{boardName(id)}</button>)}
+    <div className={styles.blockBar}>
+      <div className={styles.blockTabs} role="group" aria-label={t("showGroup")}>
+        <button type="button" aria-pressed={activeBlock === null} onClick={() => { setPickedBlock(null); setAllCards(false); showView({ kind: "site" }); }}>{t("wholeSite")}</button>
+        {blocks.length > 1 && blocks.map(block => <button key={block.id} type="button" aria-pressed={activeBlock === block.id} onClick={() => {
+          setPickedBlock(block.id);
+          // A block that is itself a board has its own figures; a block above several circuits just narrows the cards.
+          if (boardIds.includes(block.id)) showView({ kind: "board", id: block.id });
+        }}>{block.name}</button>)}
       </div>
-      {manyBoards && <label className={styles.locationPick}>
-        <span className={styles.srOnly}>{t("location.pick")}</span>
-        <select value={currentBoard ?? ""} onChange={event => showView(event.target.value ? { kind: "board", id: event.target.value } : { kind: "site" })}>
-          <option value="">{t("location.all")}</option>
-          {locationGroups.map(group => group.name
-            ? <optgroup key={group.name} label={group.name}>{group.ids.map(id => <option key={id} value={id}>{boardName(id)}</option>)}</optgroup>
-            : group.ids.map(id => <option key={id} value={id}>{boardName(id)}</option>))}
-        </select>
-      </label>}
-      <DevicePicker rows={ordered} boardName={boardName} value={device?.id ?? null} onPick={openDevice} />
+      <DevicePicker rows={ordered} boardName={boardName} value={device?.id ?? null} onPick={id => { setPickedBlock(undefined); openDevice(id); }} />
     </div>
+    <div className={styles.cardGrid} role="list" aria-label={activeBlock ? t("cards.inBlock", { block: boardName(activeBlock) }) : t("cards.all")}>
+      {shownCards.map(row => <button key={row.id} type="button" role="listitem" className={styles.deviceCard} aria-current={device?.id === row.id ? "true" : undefined} onClick={() => openDevice(row.id)}>
+        <span className={styles.cardIcon} aria-hidden="true"><EnergyIcon name="meter" /></span>
+        <strong title={row.name}>{row.name}</strong>
+        <span className={styles.cardMeta}><span className={`${styles.dot} ${styles[row.status]}`} aria-label={statusText(row.status, t)} />{boardName(blockOf.get(row.id) ?? row.boardId)}{row.usageKwh === null ? "" : ` · ${kwh(row.usageKwh)}`}</span>
+      </button>)}
+    </div>
+    {cardRows.length > CARD_PREVIEW && <button type="button" className={`${styles.secondary} ${styles.showAllCards}`} onClick={() => setAllCards(current => !current)}>{allCards ? t("cards.fewer") : t("cards.showAll", { count: cardRows.length })}</button>}
 
     {device ? deviceView(device)
       : view.kind === "board" ? boardData ? scopeView(boardData, byBoard(view.id), view.id) : <p role="alert" className={styles.emptyDevice}>{t("boardFailed", { board: boardName(view.id) })} <button type="button" className={styles.link} onClick={() => { setLoaded(null); setRefresh(n => n + 1); }}>{t("tryAgain")}</button></p>

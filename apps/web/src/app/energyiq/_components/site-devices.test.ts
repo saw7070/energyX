@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EnergyScopeAnalysisDto } from "../../../lib/config-api";
 import type { DeviceStatistics } from "./device-statistics";
-import { boardTotalNote, deviceFindings, groupLocations, energyBreakdown, formatPeriod, parseDevicesView, siteFindings, summariseDevices, tariffRate, withShortDays, type DeviceRow } from "./site-devices";
+import { boardTotalNote, deviceBlocks, deviceFindings, energyBreakdown, formatPeriod, parseDevicesView, siteFindings, summariseDevices, tariffRate, withShortDays, type DeviceRow } from "./site-devices";
 
 const health = (coveragePct: number, validIntervalCount = 100) => ({ coveragePct, expectedMeterIntervalCount: 100, validIntervalCount, qualityEventCount: 0 });
 const circuit = (meterNodeId: string, usageKwh: number, coveragePct: number) => ({ meterNodeId, name: meterNodeId, appliance: "load", category: "load", meterRole: "component", usageKwh, sharePct: 0, peakKw: 0.5, qualityEventCount: 0, dataHealth: health(coveragePct) });
@@ -203,15 +203,17 @@ describe("withShortDays", () => {
   });
 });
 
-describe("location drop-down", () => {
-  it("groups each location under the block above it, blocks in natural order, loose locations last", () => {
-    const names = new Map([["f", "264F"], ["e", "264E"], ["a", "264A"], ["f1", "264F Emergency Lighting"], ["f2", "264F GF Lobby Lighting"], ["e1", "264E Emergency Lighting"], ["a1", "Pavilion linkway 1"], ["main", "Main board"]]);
-    const parents = new Map([["f1", "f"], ["f2", "f"], ["e1", "e"], ["a1", "a"]]);
-    expect(groupLocations(["f1", "e1", "main", "f2", "a1"], parents, (id) => names.get(id) ?? id)).toEqual([
-      { name: "264A", ids: ["a1"] },
-      { name: "264E", ids: ["e1"] },
-      { name: "264F", ids: ["f1", "f2"] },
-      { name: "", ids: ["main"] },
+describe("device blocks", () => {
+  it("puts each device in the block above its own location, or in its own location when there is none", () => {
+    const names = new Map([["f", "264F"], ["e", "264E"], ["a", "264A"], ["c-f1", "264F emergency"], ["c-f2", "264F lobby"], ["c-e1", "264E emergency"], ["c-a1", "Pavilion linkway 1"], ["db10", "DB10"], ["db2", "DB2"]]);
+    const parents = new Map([["c-f1", "f"], ["c-f2", "f"], ["c-e1", "e"], ["c-a1", "a"]]);
+    const rows = [{ id: "m1", boardId: "c-f1" }, { id: "m2", boardId: "c-e1" }, { id: "m3", boardId: "c-f2" }, { id: "m4", boardId: "c-a1" }, { id: "m5", boardId: "db10" }, { id: "m6", boardId: "db2" }];
+    expect(deviceBlocks(rows, parents, (id) => names.get(id) ?? id)).toEqual([
+      { id: "a", name: "264A", deviceIds: ["m4"] },
+      { id: "e", name: "264E", deviceIds: ["m2"] },
+      { id: "f", name: "264F", deviceIds: ["m1", "m3"] },
+      { id: "db2", name: "DB2", deviceIds: ["m6"] },
+      { id: "db10", name: "DB10", deviceIds: ["m5"] },
     ]);
   });
 });
