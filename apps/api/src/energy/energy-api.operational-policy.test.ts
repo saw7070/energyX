@@ -301,6 +301,26 @@ describe("EnergyIQ operational policy Admin interface", () => {
       expect(prewarm).toHaveBeenNthCalledWith(1, expect.objectContaining({ projectId }));
       expect(prewarm).toHaveBeenNthCalledWith(2, expect.objectContaining({ projectId }));
       expect(prewarm).toHaveBeenNthCalledWith(3, expect.objectContaining({ projectId }));
+
+      // Lights-on hours that run past midnight are saved as entered; an unknown meaning is refused.
+      const nights = { monday: [{ from: "19:00", to: "07:00" }], tuesday: [], wednesday: [], thursday: [], friday: [], saturday: [], sunday: [] };
+      const lightsResponse = await handleEnergyApiRequest(
+        request("POST", { entries: [{ owner: { kind: "project" }, effectiveFrom: "2026-07-01", hoursMeaning: "lights_on", weekly: nights }] }),
+        ["projects", projectId, "operational-policies", "calendar"],
+        context,
+        dependencies,
+      );
+      expect(lightsResponse).toMatchObject({
+        status: 201,
+        body: { success: true, data: { revision: { entries: [{ hours_meaning: "lights_on", weekly: { monday: [{ from: "19:00", to: "07:00" }] } }] } } },
+      });
+      const unknownMeaning = await handleEnergyApiRequest(
+        request("POST", { entries: [{ owner: { kind: "project" }, effectiveFrom: "2026-07-01", hoursMeaning: "evening", weekly: nights }] }),
+        ["projects", projectId, "operational-policies", "calendar"],
+        context,
+        dependencies,
+      );
+      expect(unknownMeaning).toMatchObject({ status: 400, body: { success: false } });
     } finally {
       metadata.close();
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
