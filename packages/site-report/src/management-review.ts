@@ -88,11 +88,11 @@ const sentences = (parts: string[], locale: EnergyIqLocale) => parts.filter(Bool
 
 // ---------- groups of the same kind ----------
 const tokens = (name: string) => name.toLowerCase().replace(/[(),:;]/g, " ").split(/\s+/).filter(Boolean);
-/** "264F", "A", "2": the part of a name that tells one group of a kind from another. */
+/** "12A", "A", "2": the part of a name that tells one group of a kind from another. */
 const isIdentifier = (token: string) => /\d/.test(token) || token.length === 1;
-/** What kind of group a name is: "Block 264F" and "Block A" are both "block"; "Common area" is its own kind. */
+/** What kind of group a name is: "Block 12A" and "Block A" are both "block"; "Common area" is its own kind. */
 export const groupKind = (name: string) => tokens(name).filter(token => !isIdentifier(token)).join(" ");
-/** A part's name without its group's own identifier: "264F lift lobby lighting" in Block 264F is "lift lobby lighting". */
+/** A part's name without its group's own identifier: "12A lift lobby lighting" in Block 12A is "lift lobby lighting". */
 const partKey = (name: string, group: string) => { const own = new Set(tokens(group).filter(isIdentifier)); return tokens(name).filter(token => !own.has(token)).join(" "); };
 const partLabel = (name: string, group: string) => {
   const own = new Set(tokens(group).filter(isIdentifier));
@@ -382,7 +382,7 @@ function compareGroups(groups: MeterGroupNode[], helpers: { t: T; locale: Energy
   const rows = groups.map((group, index) => ({ key: group.id, name: group.name, colour: helpers.colourOf(group, index), perDay: perDayOf(group.kwh) }));
   const sorted = [...rows].sort((a, b) => b.perDay - a.perDay);
   const kwhDay = (value: number) => kwhText(value);
-  // Parts matched by name once each group's own identifier is taken out ("264F lift lobby" ↔ "264E lift lobby").
+  // Parts matched by name once each group's own identifier is taken out ("12A lift lobby" ↔ "12B lift lobby").
   const keyed = groups.map(group => {
     const map = new Map<string, { label: string; kwh: number }>();
     for (const part of partsOf(group)) {

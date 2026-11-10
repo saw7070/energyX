@@ -136,7 +136,7 @@ describe("management review: sections", () => {
   });
 
   it("tells groups of the same kind apart from groups of different kinds", () => {
-    expect(groupKind("Block 264F")).toBe("block");
+    expect(groupKind("Block 12A")).toBe("block");
     expect(groupKind("Block A")).toBe("block");
     expect(groupKind("Common area")).toBe("common area");
     const tree = buildMeterGroupTree({ name: "Site", groups: [{ id: "t1", name: "Tower 1", parentId: null }, { id: "t2", name: "Tower 2", parentId: null }, { id: "t3", name: "Tower 3", parentId: null }, { id: "c", name: "Car park", parentId: null }],
