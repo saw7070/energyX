@@ -118,3 +118,18 @@
 .footnote { padding:4px 2px 0; border-radius:0; background:transparent; }
 .footnote summary { cursor:pointer; font-size:13px; font-weight:700; color:var(--primary); list-style-position:inside; }
 .footnote[open] summary { margin-bottom:6px; }
+
+/* Average a day and the daily trend line. The line uses the theme's primary colour, so it follows light and dark. */
+.cellNote { display:block; margin-top:2px; font-size:11.5px; font-weight:500; color:var(--text-tertiary); }
+.trendCell { padding-top:6px !important; padding-bottom:6px !important; }
+.spark { display:block; width:104px; height:28px; overflow:visible; }
+.spark polyline { fill:none; stroke:var(--primary); stroke-width:1.5; stroke-linejoin:round; stroke-linecap:round; }
+.spark circle { fill:var(--primary); }
+/* On a phone the table scrolls sideways; the site name stays in view so every figure can be matched to its site. */
+@media (max-width: 640px) {
+  .table tr > :first-child { position:sticky; left:0; z-index:1; background:var(--surface); }
+  .siteCell { min-width:150px; }
+  .siteCell .bar { margin-left:0; }
+  .siteBadge { display:none; }
+  .table th, .table td { padding:9px 10px; }
+}

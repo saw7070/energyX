@@ -579,7 +579,12 @@ export type EnergyPortfolioSiteDto = {
   status: "ok" | "unavailable";
   reason?: string;
   usageKwh: number;
+  /** kWh on an average day, over the days with readings (from the site's first reading); 0 with less than a day of them. */
   averageDailyKwh: number;
+  /** Days of readings behind averageDailyKwh. Absent from an older server. */
+  readingDays?: number;
+  /** Each local date's kWh from period.from to period.to; null on a day with no readings. Absent from an older server. */
+  dailyKwh?: Array<number | null>;
   peakKw: number;
   peakAt?: string;
   previousUsageKwh: number;
@@ -607,6 +612,8 @@ export type EnergyPortfolioDto = {
   totals: {
     usageKwh: number;
     previousUsageKwh: number;
+    /** All sites together on an average day: each site's average a day, added up. Absent from an older server. */
+    averageDailyKwh?: number;
     carbonKg: number;
     costByCurrency: Record<string, number>;
     sitesWithData: number;
