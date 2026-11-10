@@ -3357,13 +3357,13 @@ const readPublishedMeterDetails = (metadataStore: Required<ConfigApiContext>["me
   if (!revision) return new Map();
   const document = JSON.parse(revision.snapshot_json) as {
     nodes?: Array<{ id: string; name: string }>;
-    meter_mapping?: { rows?: Array<{ id: string; display_name?: string; source_label?: string; scope_id?: string; navigation_scope_id?: string; presentation?: { device_name?: string; not_in_use?: string; off_with_lights?: string } }> };
+    meter_mapping?: { rows?: Array<{ id: string; display_name?: string; source_label?: string; scope_id?: string; navigation_scope_id?: string; presentation?: { device_name?: string; short_name?: string; not_in_use?: string; off_with_lights?: string } }> };
   };
   const nodeNames = new Map((document.nodes ?? []).map((node) => [node.id, node.name]));
   return new Map((document.meter_mapping?.rows ?? []).map((row) => {
     const location = nodeNames.get(row.navigation_scope_id ?? row.scope_id ?? "");
     return [row.id, {
-      name: row.presentation?.device_name || row.display_name || row.source_label || row.id,
+      name: row.presentation?.short_name?.trim() || row.presentation?.device_name || row.display_name || row.source_label || row.id,
       ...(location ? { location } : {}),
       ...(row.presentation?.not_in_use ? { notInUse: row.presentation.not_in_use } : {}),
       ...(row.presentation?.off_with_lights ? { offWithLights: true as const } : {}),
@@ -5357,7 +5357,7 @@ const parseTemplatePresentation = (
 
 const parseMeterPresentation = (value: unknown) => {
   const presentation = requireRecord(value, "ENERGYIQ_METER_PRESENTATION_INVALID");
-  return Object.fromEntries(["device_name", "circuit_name", "group", "not_in_use", "off_with_lights"].flatMap(key => {
+  return Object.fromEntries(["device_name", "circuit_name", "group", "not_in_use", "off_with_lights", "short_name", "panel"].flatMap(key => {
     if (presentation[key] === undefined) return [];
     if (typeof presentation[key] !== "string") throw new Error(`ENERGYIQ_METER_PRESENTATION_INVALID:${key}`);
     const label = presentation[key].trim().slice(0, 160);

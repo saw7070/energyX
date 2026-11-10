@@ -3,11 +3,15 @@
  * only has to read them). Loading lives in apps/web's analysis-data.ts, which re-exports these types unchanged.
  */
 import type { AnalysisCategory, HoursByDay } from "./analysis-model.js";
+import type { GroupedMeter, MeterGroup } from "./meter-groups.js";
 
 export type TrendCell = [string, number, number | null, number, number];
 export type TrendSeries = { id: string; expectedMinutesPerHour: number; cells: TrendCell[] };
-export type ScopeMeter = { id: string; name: string; location: string; category: AnalysisCategory | "overall"; official: boolean; series: TrendSeries | null };
-export type ScopeCircuit = { id: string; name: string; location: string; category: AnalysisCategory | "overall"; kwh: number; previousKwh: number | null };
+/** `name` is the short name when one is set; `fullName` is then the installer's full label, shown underneath. */
+export type ScopeMeter = { id: string; name: string; fullName?: string | undefined; location: string; category: AnalysisCategory | "overall"; official: boolean; series: TrendSeries | null };
+export type ScopeCircuit = { id: string; name: string; fullName?: string | undefined; location: string; category: AnalysisCategory | "overall"; kwh: number; previousKwh: number | null };
+/** The project's groups and, for the chosen dates, every meter's energy filed in the group it serves. */
+export type AnalysisGroups = { list: MeterGroup[]; meters: GroupedMeter[] };
 /** One space (or the whole project) for one period, straight from the Energy consumption engine. */
 export type ScopeData = {
   id: string; name: string; dates: string[]; timezone: string;
@@ -23,4 +27,6 @@ export type AnalysisData = {
   projectId: string; projectName: string; timezone: string; snapshotId: string | null;
   current: LoadedPeriod; previous: LoadedPeriod | null; history: ScopeData | null; circuits: ScopeCircuit[];
   holidays: Map<string, string>; openingHours: HoursByDay | null; actions: ProjectAction[];
+  /** Missing on readings saved before groups existed; everything then falls back to the old per-space view. */
+  groups?: AnalysisGroups | undefined;
 };

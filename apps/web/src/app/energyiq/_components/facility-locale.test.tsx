@@ -75,7 +75,7 @@ describe("facility wording helpers in other languages", () => {
     } as unknown as EnergyProjectSetupDocumentDto;
     expect(applyLocationEdit(document, "p", { node: document.nodes[0]! }, { name: " ", area: "", occupants: "" })).toEqual({ error: "Enter a name." });
     expect(applyLocationEdit(document, "p", { node: document.nodes[0]! }, { name: " ", area: "", occupants: "" }, "zh-Hans")).toEqual({ error: "请输入名称。" });
-    expect(locationRemoval(document, "db1", "ms")).toEqual({ error: "Alihkan 1 meter di lokasi ini ke lokasi lain dahulu." });
+    expect(locationRemoval(document, "db1", "ms")).toEqual({ error: "Alihkan 1 meter dalam kumpulan ini ke kumpulan lain dahulu." });
     expect(applyMeterMoves(document, [], "db1")).toEqual({ error: "Tick at least one meter to move." });
     expect(applyMeterMoves(document, [], "db1", "zh-Hans")).toEqual({ error: "请至少勾选一个要移动的电表。" });
   });
@@ -145,6 +145,6 @@ describe("Facility pages in other languages", () => {
       meter_mapping: { schema_version: 2, source_kind: "tuya", confirmed: false, rows: [{ id: "m1", scope_id: "gone", navigation_scope_id: "gone", display_name: "Fridge", resource: "electricity", category: "light", coverage: "partial", meter_role: "component", aggregation_usage: "official" }], official_aggregation_routes: [] },
     } as unknown as EnergyProjectSetupDocumentDto;
     await render("zh-Hans", <><MeterTotalsCheck document={document} busy={false} onConfirm={() => undefined} /><MoveMetersForm document={document} targetId="db2" busy={false} error="" onSave={() => undefined} onCancel={() => undefined} /></>);
-    for (const phrase of ["发布前请核对电表总量", "有 1 个电表没有位置。", "确认电表总量", "把电表移到 DB2", "目前在 尚无位置", "照明", "取消", "保存"]) expect(container.textContent).toContain(phrase);
+    for (const phrase of ["发布前请核对电表总量", "有 1 个电表不在任何分组中。", "确认电表总量", "把电表移到 DB2", "目前在 尚未分组", "照明", "取消", "保存"]) expect(container.textContent).toContain(phrase);
   });
 });

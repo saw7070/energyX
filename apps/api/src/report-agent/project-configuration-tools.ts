@@ -14,7 +14,7 @@ const text = z.string().min(1);
 const category = z.enum(["overall", "load", "light", "aircon", "it", "kitchen", "plug", "other"]);
 const resource = z.enum(["electricity", "water"]);
 const object = <T extends z.ZodRawShape>(shape: T) => z.object(shape).strict();
-const presentation = object({ device_name: z.string().max(160).optional(), circuit_name: z.string().max(160).optional(), group: z.string().max(160).optional() }).optional();
+const presentation = object({ device_name: z.string().max(160).optional(), circuit_name: z.string().max(160).optional(), group: z.string().max(160).optional(), short_name: z.string().max(160).optional(), panel: z.string().max(160).optional(), not_in_use: z.string().max(160).optional(), off_with_lights: z.string().max(160).optional() }).optional();
 const documentSchema = object({
   project: object({ name: text, timezone: text }), tier_structure_locked: z.boolean(),
   tiers: z.array(object({ id: text, ordinal: z.number().int(), alias: text, description: z.string().optional() })),

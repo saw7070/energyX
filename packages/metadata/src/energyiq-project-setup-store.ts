@@ -42,6 +42,10 @@ export type EnergyIqMeterPresentation = {
   not_in_use?: string;
   /** "yes": the meter is powered with the lights it measures, so being offline while they are off is expected. */
   off_with_lights?: string;
+  /** A short name readers see first ("Pavilion 1"); the installer's full label stays underneath. */
+  short_name?: string;
+  /** The electrical panel the meter is wired from, kept as a detail once the meter is grouped by what it serves. */
+  panel?: string;
 };
 
 export type EnergyIqMeterMappingRow = {
@@ -1503,7 +1507,7 @@ const requiredString = (row: Record<string, unknown>, key: string): string => {
 };
 
 function normalizeMeterPresentation(value: EnergyIqMeterPresentation): EnergyIqMeterPresentation {
-  return Object.fromEntries(["device_name", "circuit_name", "group", "not_in_use", "off_with_lights"].flatMap(key => {
+  return Object.fromEntries(["device_name", "circuit_name", "group", "not_in_use", "off_with_lights", "short_name", "panel"].flatMap(key => {
     const label = value[key as keyof EnergyIqMeterPresentation];
     return typeof label === "string" && label.trim() ? [[key, label.trim().slice(0, 160)]] : [];
   }));

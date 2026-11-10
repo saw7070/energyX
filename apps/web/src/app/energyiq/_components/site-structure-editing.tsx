@@ -48,9 +48,12 @@ export function applyMeterEdit(document: EnergyProjectSetupDocumentDto, meter: E
   const name = draft.name.trim().replace(/\s+/g, " ");
   if (!name) return { error: t("error.meterName") };
   if (!document.nodes.some(node => node.id === draft.scopeId)) return { error: t("error.meterLocation") };
-  const { off_with_lights: wasOffWithLights, ...presentation } = meter.presentation ?? {};
+  const { off_with_lights: wasOffWithLights, short_name: wasShortName, panel: wasPanel, ...presentation } = meter.presentation ?? {};
   const offWithLights = draft.offWithLights === undefined ? wasOffWithLights : draft.offWithLights ? "yes" : undefined;
-  const renamed = { ...meter, presentation: { ...presentation, device_name: name, ...(offWithLights ? { off_with_lights: offWithLights } : {}) } };
+  // Left out: unchanged. Emptied: removed, so the full name shows again.
+  const shortName = draft.shortName === undefined ? wasShortName : draft.shortName.trim().replace(/\s+/g, " ") || undefined;
+  const panel = draft.panel === undefined ? wasPanel : draft.panel.trim().replace(/\s+/g, " ") || undefined;
+  const renamed = { ...meter, presentation: { ...presentation, device_name: name, ...(shortName ? { short_name: shortName } : {}), ...(panel ? { panel } : {}), ...(offWithLights ? { off_with_lights: offWithLights } : {}) } };
   const aggregation = draft.counted ? "official" as const : "excluded" as const;
   const changesTotals = draft.scopeId !== meter.scope_id || draft.category !== meter.category || aggregation !== meter.aggregation_usage;
   return { ...document, meter_mapping: changesTotals
@@ -115,16 +118,19 @@ export function LocationForm({ initial, title, busy, error, onSave, onCancel }: 
   </form>;
 }
 
-export type MeterDraft = { name: string; scopeId: string; category: EnergyMeterCategoryDto; counted: boolean; offWithLights?: boolean };
+/** `shortName` and `panel` left out keep what the meter has; an empty one clears it. */
+export type MeterDraft = { name: string; scopeId: string; category: EnergyMeterCategoryDto; counted: boolean; offWithLights?: boolean; shortName?: string; panel?: string };
 
 export function MeterForm({ meter, document, busy, error, onSave, onCancel }: { meter: EnergyMeterMappingRowDto; document: EnergyProjectSetupDocumentDto; busy: boolean; error: string; onSave: (draft: MeterDraft) => void; onCancel: () => void }) {
   const t = useMessages(structureMessages);
   const { locale } = useEnergyIqLocale();
-  const [draft, setDraft] = useState({ name: meter.presentation?.device_name?.trim() || meter.presentation?.circuit_name?.trim() || meter.display_name, scopeId: meter.scope_id, category: meter.category, counted: meter.aggregation_usage === "official", offWithLights: Boolean(meter.presentation?.off_with_lights) });
+  const [draft, setDraft] = useState({ name: meter.presentation?.device_name?.trim() || meter.presentation?.circuit_name?.trim() || meter.display_name, shortName: meter.presentation?.short_name ?? "", panel: meter.presentation?.panel ?? "", scopeId: meter.scope_id, category: meter.category, counted: meter.aggregation_usage === "official", offWithLights: Boolean(meter.presentation?.off_with_lights) });
   const locations = document.nodes.map(node => ({ id: node.id, label: nodePathLabel(document, node.id) })).sort((a, b) => a.label.localeCompare(b.label));
   return <form className={styles.inlineForm} aria-label={draft.name ? t("meter.editNamed", { name: draft.name }) : t("meter.edit")} onSubmit={event => { event.preventDefault(); onSave(draft); }}>
     <div className={styles.formGrid}>
       <label>{t("meter.name")}<input value={draft.name} onChange={event => setDraft({ ...draft, name: event.target.value })} autoFocus /></label>
+      <label>{t("meter.shortName")}<input value={draft.shortName} placeholder={t("meter.shortNamePlaceholder")} maxLength={60} onChange={event => setDraft({ ...draft, shortName: event.target.value })} /></label>
+      <label>{t("meter.panel")}<input value={draft.panel} placeholder={t("optional")} maxLength={80} onChange={event => setDraft({ ...draft, panel: event.target.value })} /></label>
       <label>{t("meter.location")}<select value={document.nodes.some(node => node.id === draft.scopeId) ? draft.scopeId : ""} onChange={event => setDraft({ ...draft, scopeId: event.target.value })}>
         {!document.nodes.some(node => node.id === draft.scopeId) && <option value="">{t("meter.chooseLocation")}</option>}
         {locations.map(location => <option key={location.id} value={location.id}>{location.label}</option>)}
@@ -133,6 +139,7 @@ export function MeterForm({ meter, document, busy, error, onSave, onCancel }: { 
         {Object.keys(MEASUREMENT_LABELS).map(value => <option key={value} value={value}>{measurementLabel(value, locale)}</option>)}
       </select></label>
     </div>
+    <p className={styles.formHint}>{t("meter.shortNameHint")}</p>
     <label className={styles.checkboxField}><input type="checkbox" checked={draft.counted} onChange={event => setDraft({ ...draft, counted: event.target.checked })} />{t("meter.counted")}</label>
     <label className={styles.checkboxField}><input type="checkbox" checked={draft.offWithLights} onChange={event => setDraft({ ...draft, offWithLights: event.target.checked })} />{t("meter.offWithLights")}</label>
     <p className={styles.formHint}>{t("meter.offWithLightsHint")}</p>

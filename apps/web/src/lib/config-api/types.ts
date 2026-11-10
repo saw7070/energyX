@@ -269,7 +269,7 @@ export type EnergyMeterRoleDto = "total" | "component" | "standalone";
 export type EnergyAggregationUsageDto = "official" | "excluded";
 
 export type EnergyMeterMappingRowDto = {
-  presentation?: { device_name?: string; circuit_name?: string; group?: string; not_in_use?: string; off_with_lights?: string };
+  presentation?: { device_name?: string; circuit_name?: string; group?: string; not_in_use?: string; off_with_lights?: string; short_name?: string; panel?: string };
   id: string;
   source_label: string;
   scope_id: string;
@@ -295,7 +295,7 @@ export type EnergyVirtualMeterTermDto = {
 };
 
 export type EnergyVirtualMeterDto = {
-  presentation?: { device_name?: string; circuit_name?: string; group?: string };
+  presentation?: { device_name?: string; circuit_name?: string; group?: string; short_name?: string; panel?: string };
   id: string;
   display_name: string;
   scope_id: string;
@@ -1429,6 +1429,8 @@ export type EnergyScopeAnalysisDto = {
     id: string; name: string; scopeId: string; kind: "physical" | "virtual";
     role: string; coverage: string; category: string; includedInOfficialTotal: boolean; formula?: string;
     displayGroup?: string; circuitName?: string;
+    /** Set when a short name replaces the installer's full label; `name` is then the short name. */
+    fullName?: string; panel?: string;
   }>;
   topCircuits: EnergyScopeAnalysisDto["circuits"];
   designatedTotals?: EnergyCircuitAnalysisDto[];
