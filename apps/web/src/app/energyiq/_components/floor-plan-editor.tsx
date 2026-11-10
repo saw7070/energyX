@@ -4,9 +4,9 @@ import { configApi } from "../../../lib/config-api";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { floorPlanMessages } from "./floor-plan-messages";
 import { EnergyIcon } from "./icons";
-import { boardColours, DeviceBox, mapDevices, PANEL_COLOURS, pinLabel, roomHasPins, SiteFloorMap, wrapLabel } from "./site-floor-map";
+import { boardColours, boardlessColours, DeviceBox, mapDevices, PANEL_COLOURS, pinLabel, roomHasPins, SiteFloorMap, wrapLabel } from "./site-floor-map";
 import {
-  autoPlace, centre, clampPoint, clampRect, contains, NO_PASSENGERS, settleRooms, defaultDeviceSize, deviceRect, moveSelection, resizeCanvas, notesWithReference, passengers, planFromReference, referenceFromPlan, removeSelection, resizeRect, snap, starterPlan,
+  asOwnArea, autoPlace, centre, clampPoint, clampRect, contains, NO_PASSENGERS, settleRooms, defaultDeviceSize, deviceRect, moveSelection, resizeCanvas, notesWithReference, passengers, planFromReference, referenceFromPlan, removeSelection, resizeRect, snap, starterPlan,
   type FloorPlan, type Handle, type PlanArea, type Point, type Rect, type Selection, type StoredSpatialReference,
 } from "./floor-plan-model";
 import mapStyles from "./site-floor-map.module.css";
@@ -27,7 +27,7 @@ export function FloorPlanView({ reference, meters, highlight, focusDevice, canEd
   const placed = reference ? mapDevices(reference, meters) : [];
   return <section className={styles.embedded} aria-label={t("view.title")}>
     <header className={styles.embeddedHeader}>
-      <div><h4>{t("view.title")}</h4><p>{reference ? t("view.summary", { placed: placed.length, total: meters.length }) : t("view.empty")}</p></div>
+      <div><h4>{t("view.title")}</h4><p>{reference ? t("view.summary", { placed: placed.length, total: meters.length }) : t("view.empty")}</p><p>{t("view.drawingOnly")}</p></div>
       <div className={styles.actions}>
         {canEdit && <button type="button" className={styles.secondary} onClick={onEdit}><EnergyIcon name="map" />{reference ? t("view.edit") : t("view.draw")}</button>}
         {reference && <button type="button" className={styles.secondary} aria-expanded={open} onClick={toggle}>{open ? t("view.hide") : t("view.show")}</button>}
@@ -56,8 +56,12 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   const drag = useRef<Drag | null>(null);
   const [vx, vy, vw, vh] = plan.viewBox;
   const unit = vw / 100;
-  const allBoards = [...new Set([...boards, ...plan.areas.map(item => item.board)])];
+  // Panels are optional: an area may name none (""), and it is never offered as a panel to choose.
+  const allBoards = [...new Set([...boards, ...plan.areas.map(item => item.board)].filter(Boolean))];
   const colours = boardColours(allBoards, plan.colours);
+  const noBoardColours = boardlessColours(allBoards, plan.areas.filter(item => !item.board).map(item => item.key));
+  /** An area's colour: its own, else its panel's, else (no panel) the next colour after the panels. */
+  const areaColour = (item: PlanArea) => item.colour ?? (item.board ? colours.get(item.board) : noBoardColours.get(item.key)) ?? "var(--zone-6)";
   /** Each area, equipment box, room and device can have its own colour; without one it follows its panel (a room, its area). */
   const recolour = <T extends { colour?: string }>(item: T, hex: string | null): T => { const { colour: _old, ...rest } = item; return (hex ? { ...rest, colour: hex } : rest) as T; };
   const colourPicker = (value: string | undefined, autoLabel: string, onChange: (hex: string | null) => void) => <fieldset className={styles.colourField}><legend>{t("panel.colour")}</legend>
@@ -210,7 +214,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   const selectedPlacement = selection?.kind === "device" ? plan.devices.find(item => item.meterId === selection.key) : undefined;
   const selectedRect = selectedArea?.rect ?? selectedRoom?.rect ?? (selectedPlacement && deviceRect(selectedPlacement)) ?? undefined;
   const setDeviceShape = (meterId: string, box: boolean) => commit({ ...plan, devices: plan.devices.map(item => { if (item.meterId !== meterId) return item; const { size: _size, ...dot } = item; return box ? { ...dot, size: item.size ?? defaultDeviceSize(plan.viewBox) } : dot; }) });
-  const roomColour = (rect: Rect) => { const host = plan.areas.filter(item => !item.insideRoom && contains(item.rect, centre(rect))).sort((a, b) => a.rect[2] * a.rect[3] - b.rect[2] * b.rect[3])[0]; return host ? colours.get(host.board) : undefined; };
+  const roomColour = (rect: Rect) => { const host = plan.areas.filter(item => !item.insideRoom && contains(item.rect, centre(rect))).sort((a, b) => a.rect[2] * a.rect[3] - b.rect[2] * b.rect[3])[0]; return host ? (host.board ? colours.get(host.board) : noBoardColours.get(host.key)) : undefined; };
   const waiting = meters.filter(meter => !placedIds.has(meter.id));
   const placingName = placing ? meterById.get(placing)?.name : null;
   const own = plan.areas.filter(item => !item.insideRoom), groups = plan.areas.filter(item => item.insideRoom);
@@ -221,7 +225,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
 
   return <section className={`${styles.card} ${styles.editing}`} aria-label={t("editor.title")}>
     <header className={styles.cardHeader}>
-      <div><h4>{t("editor.title")}</h4><p>{t("editor.help", { undoKey: typeof navigator !== "undefined" && /Mac/.test(navigator.platform) ? "⌘Z" : "Ctrl+Z" })}</p></div>
+      <div><h4>{t("editor.title")}</h4><p>{t("editor.help", { undoKey: typeof navigator !== "undefined" && /Mac/.test(navigator.platform) ? "⌘Z" : "Ctrl+Z" })}</p><p>{t("editor.drawingOnly")}</p></div>
       <div className={styles.actions}>
         <button type="button" className={styles.secondary} disabled={saving} onClick={onCancel}>{t("editor.cancel")}</button>
         <button type="button" className={styles.primary} disabled={saving} onClick={() => void save()}>{saving ? t("editor.saving") : t("editor.save")}</button>
@@ -229,7 +233,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     </header>
 
     <div className={styles.toolbar} role="toolbar" aria-label={t("editor.tools")}>
-      <label className={styles.toolSelect} title={t("editor.hintArea")}><span>{t("editor.addAreaFor")}</span><select value="" onChange={event => { if (event.target.value) addArea(event.target.value); }}><option value="">{t("editor.chooseBoard")}</option>{allBoards.map(board => <option key={board} value={board}>{board}</option>)}</select></label>
+      <button type="button" className={styles.tool} title={t("editor.hintArea")} onClick={() => addArea("")}>{t("editor.addArea")}</button>
       <button type="button" className={styles.tool} title={t("editor.hintRoom")} onClick={addRoom}>{t("editor.addRoom")}</button>
       <button type="button" className={styles.tool} disabled={!plan.rooms.length} title={plan.rooms.length ? t("editor.hintEquipment") : t("editor.addRoomFirst")} onClick={addEquipment}>{t("editor.addEquipment")}</button>
       {!plan.entrance && <button type="button" className={styles.tool} title={t("editor.hintEntrance")} onClick={addEntrance}>{t("editor.addEntrance")}</button>}
@@ -250,18 +254,18 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
           onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); const id = event.dataTransfer.getData("text/plain"); if (meterById.has(id)) place(id, toPoint(event.clientX, event.clientY)); }}>
           <defs><pattern id="floor-plan-grid" width={GRID * 2} height={GRID * 2} patternUnits="userSpaceOnUse"><path d={`M${GRID * 2} 0 L0 0 0 ${GRID * 2}`} className={styles.gridLine} /></pattern></defs>
           <rect data-grid="1" x={vx} y={vy} width={vw} height={vh} fill="url(#floor-plan-grid)" />
-          {own.map(item => { const colour = item.colour ?? colours.get(item.board)!; const [x, y, w, h] = item.rect; return <g key={item.key} className={styles.item} onPointerDown={event => startDrag(event, { kind: "area", key: item.key })}>
+          {own.map(item => { const colour = areaColour(item); const [x, y, w, h] = item.rect; return <g key={item.key} className={styles.item} onPointerDown={event => startDrag(event, { kind: "area", key: item.key })}>
             <rect x={x} y={y} width={w} height={h} rx={unit * 1.4} className={mapStyles.zone} style={{ fill: colour, stroke: colour }} />
             <circle cx={x + unit * 2.4} cy={y + unit * 2.6} r={unit * 0.9} style={{ fill: colour }} />
-            <text x={x + unit * 4} y={y + unit * 3.3} className={mapStyles.zoneLabel} style={{ fontSize: unit * 2.1 }}>{item.board}<tspan className={mapStyles.zoneSub} dx={unit * 0.8}>{areaName(item.label)}</tspan></text>
+            <text x={x + unit * 4} y={y + unit * 3.3} className={mapStyles.zoneLabel} style={{ fontSize: unit * 2.1 }}>{item.board ? <>{item.board}<tspan className={mapStyles.zoneSub} dx={unit * 0.8}>{areaName(item.label)}</tspan></> : areaName(item.label)}</text>
           </g>; })}
           {plan.rooms.map(room => { const [x, y, w, h] = room.rect; const colour = room.colour ?? roomColour(room.rect); return <g key={room.key} className={styles.item} onPointerDown={event => startDrag(event, { kind: "room", key: room.key })}>
             <rect x={x} y={y} width={w} height={h} rx={unit * 0.8} className={`${mapStyles.room} ${colour ? "" : styles.orphan}`} style={room.colour ? { stroke: room.colour, fill: `color-mix(in srgb, ${room.colour} 12%, white)` } : colour ? { stroke: colour } : undefined} />
             {(() => { const size = Math.min(unit * 1.75, w / 7), lines = wrapLabel(room.name, Math.max(6, Math.floor(w / (size * 0.56)))); const top = roomHasPins(room.rect, positions) ? y + size * 1.5 : y + h / 2 + size * 0.35 - (lines.length - 1) * size * 0.6; return <text x={x + w / 2} y={top} textAnchor="middle" className={mapStyles.roomLabel} style={{ fontSize: size }}>{lines.map((line, index) => <tspan key={index} x={x + w / 2} dy={index ? size * 1.2 : 0}>{line}</tspan>)}</text>; })()}
           </g>; })}
-          {groups.map(item => { const colour = item.colour ?? colours.get(item.board)!; const [x, y, w, h] = item.rect; const pinned = roomHasPins(item.rect, positions); return <g key={item.key} className={styles.item} onPointerDown={event => startDrag(event, { kind: "area", key: item.key })}>
+          {groups.map(item => { const colour = areaColour(item); const [x, y, w, h] = item.rect; const pinned = roomHasPins(item.rect, positions); return <g key={item.key} className={styles.item} onPointerDown={event => startDrag(event, { kind: "area", key: item.key })}>
             <rect x={x} y={y} width={w} height={h} rx={unit * 0.8} className={mapStyles.subgroup} style={{ stroke: colour, fill: colour }} />
-            <text x={pinned ? x + unit * 0.8 : x + w / 2} y={pinned ? y + unit * 1.6 : y + h / 2 + unit * 0.6} textAnchor={pinned ? "start" : "middle"} className={mapStyles.subgroupLabel} style={{ fontSize: unit * (pinned ? 1.15 : 1.5) }}>{item.board} · {item.equipment || t("panel.groupFallback")}</text>
+            <text x={pinned ? x + unit * 0.8 : x + w / 2} y={pinned ? y + unit * 1.6 : y + h / 2 + unit * 0.6} textAnchor={pinned ? "start" : "middle"} className={mapStyles.subgroupLabel} style={{ fontSize: unit * (pinned ? 1.15 : 1.5) }}>{item.board ? `${item.board} · ` : ""}{item.equipment || t("panel.groupFallback")}</text>
           </g>; })}
           {plan.entrance && (() => { const [x, y] = plan.entrance.position; return <g className={styles.item} onPointerDown={event => startDrag(event, { kind: "entrance", key: "entrance" })}>
             <path d={`M${x - unit * 1.4},${y + unit * 2.2} L${x},${y} L${x + unit * 1.4},${y + unit * 2.2} Z`} className={mapStyles.entrance} />
@@ -289,9 +293,9 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
         {selectedArea && <div className={styles.panel}>
           <h5>{selectedArea.insideRoom ? t("panel.group") : t("panel.area")}</h5>
           <label>{t("panel.label")}<input value={selectedArea.label} maxLength={40} onChange={event => updateArea(selectedArea.key, { label: event.target.value })} /></label>
-          <label>{t("panel.board")}<select value={selectedArea.board} onChange={event => updateArea(selectedArea.key, { board: event.target.value })}>{allBoards.map(board => <option key={board} value={board}>{board}</option>)}</select></label>
-          {colourPicker(selectedArea.colour, t("panel.colourAuto", { board: selectedArea.board }), hex => commit({ ...plan, areas: plan.areas.map(item => item.key === selectedArea.key ? recolour(item, hex) : item) }))}
-          <label>{t("panel.shownAs")}<select value={selectedArea.insideRoom ?? ""} onChange={event => { const room = plan.rooms.find(item => item.key === event.target.value); if (!room) { commit({ ...plan, areas: plan.areas.map(item => item.key === selectedArea.key ? { key: item.key, label: item.label, board: item.board, rect: item.rect, ...(item.colour ? { colour: item.colour } : {}) } : item) }); return; } const [rx, ry, rw, rh] = room.rect; updateArea(selectedArea.key, { insideRoom: room.key, rect: [rx + 12, ry + rh - Math.min(60, rh * 0.4) - 12, Math.max(20, rw - 24), Math.min(60, rh * 0.4)] }); }}>
+          <label>{t("panel.board")}<select value={selectedArea.board} onChange={event => updateArea(selectedArea.key, { board: event.target.value })}><option value="">{t("panel.noBoard")}</option>{allBoards.map(board => <option key={board} value={board}>{board}</option>)}</select></label>
+          {colourPicker(selectedArea.colour, selectedArea.board ? t("panel.colourAuto", { board: selectedArea.board }) : t("panel.colourAutoNone"), hex => commit({ ...plan, areas: plan.areas.map(item => item.key === selectedArea.key ? recolour(item, hex) : item) }))}
+          <label>{t("panel.shownAs")}<select value={selectedArea.insideRoom ?? ""} onChange={event => { const room = plan.rooms.find(item => item.key === event.target.value); if (!room) { commit({ ...plan, areas: plan.areas.map(item => item.key === selectedArea.key ? asOwnArea(item) : item) }); return; } const [rx, ry, rw, rh] = room.rect; updateArea(selectedArea.key, { insideRoom: room.key, rect: [rx + 12, ry + rh - Math.min(60, rh * 0.4) - 12, Math.max(20, rw - 24), Math.min(60, rh * 0.4)] }); }}>
             <option value="">{t("panel.ownArea")}</option>{plan.rooms.map(room => <option key={room.key} value={room.key}>{t("panel.insideRoom", { room: room.name })}</option>)}
           </select></label>
           {selectedArea.insideRoom && <label>{t("panel.supplies")}<input value={selectedArea.equipment ?? ""} maxLength={80} placeholder={t("panel.suppliesExample")} onChange={event => updateArea(selectedArea.key, { equipment: event.target.value })} /></label>}

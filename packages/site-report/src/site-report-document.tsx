@@ -10,7 +10,7 @@ import { holidayName, joinText } from "./analysis-messages.js";
 import { shortDate } from "./analysis-model.js";
 import { forHoursMeaning, translatorFor, type EnergyIqLocale } from "./locale.js";
 import { rich, Rich } from "./rich.js";
-import { clock, hourRange, moneyText, pctText, REPORT_COLOURS as C, type ProfileNote, type ReportDay, type ReportZone, type SiteReport } from "./site-report-model.js";
+import { clock, hourRange, kwhText, moneyText, pctText, REPORT_COLOURS as C, type ProfileNote, type ReportDay, type ReportZone, type SiteReport } from "./site-report-model.js";
 import { siteReportMessages } from "./site-report-messages.js";
 import { REPORT_CSS } from "./site-report-styles.js";
 import { wrapLabel } from "./wrap-label.js";
@@ -96,7 +96,8 @@ function FloorPlan({ report }: { report: SiteReport }) {
   const leftEdge = Math.max(...areas.filter(zone => zone.rect![0] + zone.rect![2] <= ex).map(zone => zone.rect![0] + zone.rect![2]), -Infinity);
   const rightEdge = Math.min(...areas.filter(zone => zone.rect![0] >= ex).map(zone => zone.rect![0]), Infinity);
   const hasCorridor = !!entrance && Number.isFinite(leftEdge) && Number.isFinite(rightEdge);
-  const est = (zone: ReportZone) => t("plan.estimate", { kwh: whole(zone.monthKwh) });
+  // With groups the plan is a drawing only: figures come from the groups, not from where an area's panel is.
+  const est = (zone: ReportZone) => report.groups ? "" : t("plan.estimate", { kwh: whole(zone.monthKwh) });
   const circuitsOf = (board: string) => report.circuits.filter(circuit => circuit.board === board);
   const markers = Object.entries(reference.layout.boardMarkers ?? {});
   const parentOf = (zone: ReportZone) => areas.find(area => zone.parentRoom && area.rooms.includes(zone.parentRoom));
@@ -177,6 +178,21 @@ function FloorPlan({ report }: { report: SiteReport }) {
     <text className="svgt legend-text" x={badgeX + 38} y={legendY + 11}>{panelLabel}</text>
     <text className="svgt rsub" x={noteOnOwnLine ? vx + 4 : vx + vw - 4} y={legendY + (noteOnOwnLine ? 32 : 11)} textAnchor={noteOnOwnLine ? "start" : "end"}>{note}</text>
   </svg>;
+}
+
+/** Every group with what it used over the dates and its share of the group above it, groups inside groups indented. */
+function GroupTable({ report }: { report: SiteReport }) {
+  const t = reportText(report.locale);
+  const groups = report.groups!;
+  return <div className="table-wrap"><table>
+    <thead><tr><th>{t("doc.col.group")}</th><th className="r">{t("doc.col.used")}</th><th className="r">{t("doc.col.share")}</th><th>{t("doc.col.meters")}</th></tr></thead>
+    <tbody>{groups.rows.map(row => <tr key={row.key}>
+      <td style={{ paddingLeft: 8 + row.depth * 16 }}>{row.depth > 0 ? "└ " : ""}{row.name}</td>
+      <td className="r">{kwhText(row.kwh)}</td>
+      <td className="r">{pctText(row.share)}</td>
+      <td>{joinText(row.meters, report.locale)}</td>
+    </tr>)}</tbody>
+  </table></div>;
 }
 
 // ---------- 2. donuts ----------
@@ -379,8 +395,9 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
         <div className="sec-head"><span className="num">1</span><h2>{t("doc.section.profile")}</h2></div>
         <p><Rich text={report.profile.intro} /></p>
         <div className="zones">{report.profile.zones.map(zone => <p key={zone.heading}><strong>{zone.heading}</strong>{t("doc.zoneSeparator")}<Rich text={zone.text} /></p>)}</div>
+        {report.groups && <GroupTable report={report} />}
         {report.reference ? <div className="figure"><div className="plan-wrap"><FloorPlan report={report} /></div><div className="caption">{report.profile.caption}</div></div>
-          : <div className="table-wrap"><table><thead><tr><th>{t("doc.col.zone")}</th><th>{t("doc.col.board")}</th><th>{t("doc.col.circuits")}</th><th className="r">{t("doc.col.zoneEstimate")}</th></tr></thead>
+          : report.groups ? null : <div className="table-wrap"><table><thead><tr><th>{t("doc.col.zone")}</th><th>{t("doc.col.board")}</th><th>{t("doc.col.circuits")}</th><th className="r">{t("doc.col.zoneEstimate")}</th></tr></thead>
             <tbody>{report.zones.map(zone => <tr key={zone.key}><td>{zone.label}</td><td>{zone.board}</td><td>{joinText(zone.circuitKeys.map(key => report.circuits.find(circuit => circuit.key === key)?.name ?? ""), locale)}</td><td className="r">{whole(zone.monthKwh)}</td></tr>)}</tbody></table></div>}
       </section>
 
@@ -400,7 +417,9 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
         </table></div>
         {estimate.comparison && <p><Rich text={estimate.comparison} /></p>}
         <div className="pies">
-          <Donut title={t("donut.bySpace")} report={report} caption={estimate.spaceCaption} slices={report.zones.map(zone => ({ key: zone.key, label: zone.area && zone.area !== zone.label ? `${zone.label} · ${zone.area}` : zone.label, value: zone.monthKwh, colour: zone.colour }))} />
+          {report.groups
+            ? <Donut title={t("donut.byGroup")} report={report} caption={estimate.spaceCaption} slices={report.groups.top.map(group => ({ key: group.key, label: group.name, value: group.monthKwh, colour: group.colour }))} />
+            : <Donut title={t("donut.bySpace")} report={report} caption={estimate.spaceCaption} slices={report.zones.map(zone => ({ key: zone.key, label: zone.area && zone.area !== zone.label ? `${zone.label} · ${zone.area}` : zone.label, value: zone.monthKwh, colour: zone.colour }))} />}
           <Donut title={t("donut.byLoad")} report={report} caption={estimate.loadCaption} slices={report.circuits.map(circuit => ({ key: circuit.key, label: circuit.label, value: circuit.monthKwh, colour: circuit.colour }))} />
         </div>
         <p className="note">{estimate.note}</p>

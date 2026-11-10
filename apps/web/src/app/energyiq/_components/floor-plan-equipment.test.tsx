@@ -2,6 +2,8 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
+import { readProjectSpatialReference } from "@datafoundry/contracts";
+import { configApi } from "../../../lib/config-api";
 import { EnergyIqLocaleProvider } from "./energyiq-locale";
 import { FloorPlanEditor } from "./floor-plan-editor";
 import { contentExtent, moveSelection, passengers, planFromReference, referenceFromPlan, resizeCanvas, settleRooms, type FloorPlan, type StoredSpatialReference } from "./floor-plan-model";
@@ -152,5 +154,34 @@ it("gives each area, equipment box, room and device its own colour, saved with t
     expect(group().style.fill).toBe("#1b9aaa");
   } finally {
     await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals();
+  }
+});
+
+it("adds an area with no electrical panel and saves it, saying the plan is a drawing only", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); vi.stubGlobal("React", React);
+  const filed: StoredSpatialReference = { ...previous, layout: { ...previous.layout, zones: [{ ...previous.layout.zones[0]!, meterLocations: ["Showroom Area"] }] } };
+  const request = vi.spyOn(configApi, "reportAgentRequest").mockImplementation(async (_project, action) => (action === "settings" ? {} : { settings: { contextNotes: "" } }) as never);
+  const saved = vi.fn();
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(<EnergyIqLocaleProvider><FloorPlanEditor projectId="office" notes="" block={null} previous={filed} meters={meters} boards={["DB2", "DB3"]} onCancel={() => undefined} onSaved={saved} /></EnergyIqLocaleProvider>));
+    expect(host.querySelector("header")?.textContent).toContain("This is a drawing only: moving areas or devices here changes no totals.");
+    const button = (label: string) => [...host.querySelectorAll("button")].find(item => item.textContent === label)!;
+    await act(async () => button("+ Add area").click());
+    const board = [...host.querySelectorAll("aside label")].find(label => label.textContent?.startsWith("Electrical panel (optional)"))!.querySelector("select") as HTMLSelectElement;
+    expect(board.value).toBe("");
+    expect(board.selectedOptions[0]?.textContent).toBe("No panel");
+    expect([...host.querySelectorAll('svg[role="application"] text')].map(text => text.textContent)).toContain("Area A");
+    expect(button("Automatic").getAttribute("aria-pressed")).toBe("true");
+    await act(async () => button("Save layout").click());
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(saved).toHaveBeenCalledOnce();
+    const put = request.mock.calls.find(call => call[1] === "settings")!;
+    const notes = (JSON.parse(String(put[2]!.body)) as { contextNotes: string }).contextNotes;
+    const zones = readProjectSpatialReference(notes, "office")!.reference.layout.zones;
+    expect(zones.map(zone => [zone.id, zone.referenceBoard, zone.meterLocations ?? null])).toEqual([["B", "DB2", ["Showroom Area"]], ["A", "", null]]);
+  } finally {
+    await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks();
   }
 });

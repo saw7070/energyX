@@ -14,10 +14,14 @@
  * - A day with missing readings is never compared and never blamed on a meter.
  * - Meters: each meter's own usual day is the median of its complete days among the same comparison days. A meter
  *   whose readings are incomplete on the day is left out (its share stays in "everything else"), so the named meters
- *   plus `otherKwh` always add up to the whole difference.
+ *   plus `otherKwh` always add up to the whole difference. Meters go by the name readers see first (the short name
+ *   when one is set) and their group, as everywhere else.
+ *
+ * The same usual day is the Analysis chart's expected-day line and what its "unusually high" check measures against
+ * (usualDayBaselines), so the page shows one usual figure.
  */
 import type { AnalysisBaseline, AnalysisDay, AnalysisDayType } from "./analysis-model.js";
-import type { ScopeData, ScopeMeter, TrendSeries } from "./analysis-types.js";
+import type { AnalysisGroups, ScopeData, ScopeMeter, TrendSeries } from "./analysis-types.js";
 
 /** Smallest difference from a usual day worth calling out, in percent of it. */
 export const STANDOUT_MIN_PCT = 3;
@@ -38,7 +42,12 @@ const MAD_TO_SPREAD = 1.4826;
 
 /** The kind of day a day is compared within. "any": every day, at a lights-on site. */
 export type DayKind = AnalysisDayType | "any";
-export type StandoutContributor = { id: string; name: string; location: string; kwh: number; usualKwh: number; deltaKwh: number };
+/**
+ * One meter's change on a day. `name` is the name readers see first (the short name when one is set) and `fullName`
+ * the installer's full label behind it; `place` is the meter's group ("Block 264F › Ground floor"), or its location
+ * for readings saved before groups existed, or empty when it is in no group.
+ */
+export type StandoutContributor = { id: string; name: string; fullName?: string | undefined; place: string; kwh: number; usualKwh: number; deltaKwh: number };
 export type DayExplanation = {
   date: string; kind: DayKind; totalKwh: number;
   /** missing: readings were missing, not compared. few-days: too few complete days of this kind. usual: no clear difference. standout: a clear difference. */
@@ -98,29 +107,68 @@ export function standoutMeters(scopes: ScopeData[]): ScopeMeter[] {
 }
 
 /**
- * Every day of the period with its explanation. `days` are one scope's days (from scopeDays) and `meters` the meters
- * inside that scope (from standoutMeters). `lighting` makes every day the same kind.
+ * Each meter's group as readers see it, the groups above it first ("Common area › Pavilion"), from the readings'
+ * groups. Null when the readings carry no groups (saved before groups existed); a meter in no group has an empty place.
  */
-export function explainDays(input: { days: AnalysisDay[]; meters?: ScopeMeter[]; lighting?: boolean }): DayExplanation[] {
+export function meterGroupPlaces(groups: AnalysisGroups | undefined): Map<string, string> | null {
+  if (!groups?.list.length) return null;
+  const byId = new Map(groups.list.map(group => [group.id, group]));
+  const path = (id: string | null) => {
+    const names: string[] = [], seen = new Set<string>();
+    for (let group = id ? byId.get(id) : undefined; group && !seen.has(group.id); group = group.parentId ? byId.get(group.parentId) : undefined) {
+      seen.add(group.id);
+      names.unshift(group.name);
+    }
+    return names.join(" › ");
+  };
+  return new Map(groups.meters.map(meter => [meter.id, path(meter.groupId)]));
+}
+
+/** The usual day of each kind of day present: the median of its complete days, and their day-to-day spread. */
+function usualDays(days: AnalysisDay[], lighting: boolean): Map<DayKind, { dates: string[]; usual: number | null; spread: number | null }> {
+  const groups = new Map<DayKind, { dates: string[]; usual: number | null; spread: number | null }>();
+  for (const kind of new Set(days.map(day => dayKindOf(day, lighting)))) {
+    const samples = days.filter(day => day.complete && dayKindOf(day, lighting) === kind);
+    const dates = samples.map(day => day.date);
+    if (samples.length < STANDOUT_MIN_DAYS) { groups.set(kind, { dates, usual: null, spread: null }); continue; }
+    const usual = median(samples.map(day => day.totalKwh))!;
+    groups.set(kind, { dates, usual, spread: median(samples.map(day => Math.abs(day.totalKwh - usual)))! * MAD_TO_SPREAD });
+  }
+  return groups;
+}
+
+/**
+ * The usual day for each day type, shaped as the chart's expected-day line and the unusual-day check use it. At a
+ * lights-on site every day type has the same usual day. Null for a type with fewer than STANDOUT_MIN_DAYS complete days.
+ */
+export function usualDayBaselines(days: AnalysisDay[], lighting = false): AnalysisBaseline[] {
+  const groups = usualDays(days, lighting);
+  return (["weekday", "weekend", "public_holiday"] as const).map(dayType => {
+    const group = groups.get(lighting ? "any" : dayType);
+    return { dayType, samples: group?.dates.length ?? 0, expectedKwh: group?.usual ?? null };
+  });
+}
+
+/**
+ * Every day of the period with its explanation. `days` are one scope's days (from scopeDays) and `meters` the meters
+ * inside that scope (from standoutMeters). `lighting` makes every day the same kind. `places` names each meter's group
+ * (from meterGroupPlaces); without it a meter's location is shown.
+ */
+export function explainDays(input: { days: AnalysisDay[]; meters?: ScopeMeter[]; lighting?: boolean; places?: Map<string, string> | null }): DayExplanation[] {
   const lighting = input.lighting ?? false;
   const kindOf = (day: AnalysisDay) => dayKindOf(day, lighting);
   const meters = (input.meters ?? []).map(meter => ({ meter, days: dailyValues(meter.series) }));
+  const placeOf = (meter: ScopeMeter) => input.places ? input.places.get(meter.id) ?? "" : meter.location;
   // The usual day of each kind, its spread, and each meter's own usual day over the same comparison days.
-  const groups = new Map<DayKind, { dates: string[]; usual: number | null; spread: number | null; meterUsual: Map<string, number> }>();
-  for (const kind of new Set(input.days.map(kindOf))) {
-    const samples = input.days.filter(day => day.complete && kindOf(day) === kind);
-    const dates = samples.map(day => day.date);
-    if (samples.length < STANDOUT_MIN_DAYS) { groups.set(kind, { dates, usual: null, spread: null, meterUsual: new Map() }); continue; }
-    const usual = median(samples.map(day => day.totalKwh))!;
-    const spread = median(samples.map(day => Math.abs(day.totalKwh - usual)))! * MAD_TO_SPREAD;
+  const groups = new Map([...usualDays(input.days, lighting)].map(([kind, group]) => {
     const meterUsual = new Map<string, number>();
-    for (const { meter, days } of meters) {
-      const own = dates.map(date => days.get(date)).filter(day => day?.complete).map(day => day!.kwh);
+    if (group.usual != null) for (const { meter, days } of meters) {
+      const own = group.dates.map(date => days.get(date)).filter(day => day?.complete).map(day => day!.kwh);
       // A meter needs most of the comparison days itself before its usual day means anything.
-      if (own.length >= Math.max(3, Math.ceil(dates.length / 2))) meterUsual.set(meter.id, median(own)!);
+      if (own.length >= Math.max(3, Math.ceil(group.dates.length / 2))) meterUsual.set(meter.id, median(own)!);
     }
-    groups.set(kind, { dates, usual, spread, meterUsual });
-  }
+    return [kind, { ...group, meterUsual }];
+  }));
   return input.days.map((day): DayExplanation => {
     const kind = kindOf(day);
     const group = groups.get(kind)!;
@@ -135,7 +183,8 @@ export function explainDays(input: { days: AnalysisDay[]; meters?: ScopeMeter[];
     // Each meter's own change on this day; a meter with missing readings that day is never blamed.
     const moves: StandoutContributor[] = meters.flatMap(({ meter, days }) => {
       const own = days.get(day.date), usual = group.meterUsual.get(meter.id);
-      return own?.complete && usual !== undefined ? [{ id: meter.id, name: meter.name, location: meter.location, kwh: own.kwh, usualKwh: usual, deltaKwh: own.kwh - usual }] : [];
+      return own?.complete && usual !== undefined
+        ? [{ id: meter.id, name: meter.name, ...(meter.fullName ? { fullName: meter.fullName } : {}), place: placeOf(meter), kwh: own.kwh, usualKwh: usual, deltaKwh: own.kwh - usual }] : [];
     });
     const sign = Math.sign(deltaKwh);
     const contributors = moves.filter(move => move.deltaKwh * sign >= Math.max(NAMED_MIN_KWH, Math.abs(deltaKwh) * NAMED_SHARE))
@@ -149,13 +198,3 @@ export function explainDays(input: { days: AnalysisDay[]; meters?: ScopeMeter[];
 /** Standout days only, the clearest first (largest difference in percent). */
 export const standoutDays = (explanations: DayExplanation[]) =>
   explanations.filter(item => item.status === "standout").sort((a, b) => Math.abs(b.deltaPct ?? 0) - Math.abs(a.deltaPct ?? 0) || a.date.localeCompare(b.date));
-
-/**
- * The expected day for a lights-on site's daily chart, where every day is one kind: the mean of complete days of any
- * kind, repeated for each day type so the existing chart lines and the unusual-day check keep working.
- */
-export function everyDayBaselines(days: AnalysisDay[], minSamples = 3): AnalysisBaseline[] {
-  const samples = days.filter(day => day.complete).map(day => day.totalKwh);
-  const expectedKwh = samples.length >= minSamples ? samples.reduce((sum, value) => sum + value, 0) / samples.length : null;
-  return (["weekday", "weekend", "public_holiday"] as const).map(dayType => ({ dayType, samples: samples.length, expectedKwh }));
-}

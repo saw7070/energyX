@@ -6,17 +6,23 @@
  */
 import { useId, useMemo } from "react";
 import {
-  contributorsLead, dateWithDay, dayHeadline, explainDays, meterPlace, signedKwh, standoutKwh, standoutMeters, standoutRule, standoutText,
-  type AnalysisDay, type DayExplanation, type ScopeData,
+  contributorsLead, dateWithDay, dayHeadline, explainDays, meterGroupPlaces, meterPlace, signedKwh, standoutKwh, standoutMeters, standoutRule, standoutText,
+  type AnalysisDay, type AnalysisGroups, type DayExplanation, type LoadedPeriod, type ScopeData,
 } from "@datafoundry/site-report";
 import { useEnergyIqLocale } from "./energyiq-locale";
 
 /** Outline of a bar that stood out; the amber of the chart's holiday mark, visible in both themes. */
 export const STANDOUT_STROKE = "#b45309";
 
-/** Each day's explanation by date, for one scope's days and the meters inside the given scopes. */
-export function useDayExplanations(days: AnalysisDay[], scopes: ScopeData[], lighting: boolean): Map<string, DayExplanation> {
-  return useMemo(() => new Map(explainDays({ days, meters: standoutMeters(scopes), lighting }).map(item => [item.date, item])), [days, scopes, lighting]);
+/**
+ * Each day's explanation by date, for one scope's days: a chosen space and its meters, or (with no space) the whole
+ * site and the meters of every space. Meters are named with their group.
+ */
+export function useDayExplanations(days: AnalysisDay[], space: ScopeData | null, current: LoadedPeriod, lighting: boolean, groups?: AnalysisGroups): Map<string, DayExplanation> {
+  return useMemo(() => {
+    const meters = standoutMeters(space ? [space] : [current.project, ...current.spaces]);
+    return new Map(explainDays({ days, meters, lighting, places: meterGroupPlaces(groups) }).map(item => [item.date, item]));
+  }, [days, space, current, lighting, groups]);
 }
 
 /** One day's explanation: how it compares with a usual day, and the meters that account for most of the difference. */
@@ -30,9 +36,9 @@ export function DayExplanationView({ item, siteName }: { item: DayExplanation; s
     {lead && <div>
       <p className="font-medium text-slate-900">{lead}</p>
       <ul className="mt-0.5 space-y-0.5">{item.contributors.map(contributor => {
-        const place = meterPlace(contributor.location, siteName);
+        const place = meterPlace(contributor.place, siteName);
         return <li key={contributor.id} className="flex flex-wrap items-baseline gap-x-1.5">
-          <span>{contributor.name}</span>
+          <span title={contributor.fullName}>{contributor.name}</span>
           {place && <small className="text-[11px] text-slate-500">{place}</small>}
           <span className="font-semibold tabular-nums text-slate-900">{signedKwh(contributor.deltaKwh)}</span>
         </li>;

@@ -7,7 +7,8 @@
  */
 import type { AnalysisCategory } from "./analysis-model.js";
 import { PLANNED_CLOSURE_SUFFIX } from "./analysis-messages.js";
-import type { AnalysisData, LoadedPeriod, ProjectAction, ScopeCircuit, ScopeData, TrendCell, TrendSeries } from "./analysis-types.js";
+import type { AnalysisData, AnalysisGroups, LoadedPeriod, ProjectAction, ScopeCircuit, ScopeData, TrendCell, TrendSeries } from "./analysis-types.js";
+import { groupsFromLocations } from "./meter-groups.js";
 
 /**
  * The part of one Energy consumption result this mapping reads. Both the browser's response type and the server's
@@ -20,7 +21,7 @@ export type AnalysisSource = {
   };
   summary: { usageKwh: number; peakKw: number; peakAt?: string | undefined; validIntervalCount: number };
   explorerTrends?: Array<{ id: string; expectedMinutesPerHour: number; cells: Array<[string, number, number | null, number, number]> }> | undefined;
-  explorerMeters?: Array<{ id: string; name: string; scopeId: string; kind: "physical" | "virtual"; category: string; includedInOfficialTotal: boolean }> | undefined;
+  explorerMeters?: Array<{ id: string; name: string; fullName?: string | undefined; scopeId: string; kind: "physical" | "virtual"; category: string; includedInOfficialTotal: boolean }> | undefined;
   categories: Array<{ category: string; usageKwh: number }>;
   childScopes: Array<{ nodeId: string; name: string }>;
   circuits: Array<{ meterNodeId: string; name: string; category: string; meterRole: string; usageKwh: number; includedInOfficialTotal?: boolean | undefined; scopeId?: string | undefined }>;
@@ -32,7 +33,9 @@ export type AnalysisSource = {
 /** The calendar and meter facts the readings are labelled with, however the caller happens to have loaded them. */
 export type ProjectInformationSource = {
   name?: string | undefined;
-  meters?: Array<{ id: string; location: string }> | undefined;
+  meters?: Array<{ id: string; location: string; locationId?: string | undefined; panel?: string | undefined }> | undefined;
+  /** The project's Locations tree; the project itself has no parent. Older servers leave it out. */
+  locations?: Array<{ id: string; name: string; parentId?: string | null | undefined }> | undefined;
   calendar: null | { entries: Array<{ location: string; from: string; toExclusive: string | null; weekly: unknown; hoursMeaning?: string | undefined; exceptions: Array<{ date: string; label: string; classification?: string | undefined }> }> };
 } | null;
 
@@ -124,7 +127,7 @@ export function toScope(analysis: AnalysisSource, locations: Map<string, string>
     id: analysis.context.scopeId, name: name ?? analysis.context.scopeName, dates, timezone: analysis.context.timezone,
     total, types,
     meters: (analysis.explorerMeters ?? []).filter(meter => meter.kind === "physical").map(meter => ({
-      id: meter.id, name: meter.name, location: locations.get(meter.id) ?? "", category: categoryOf(meter.category), official: meter.includedInOfficialTotal,
+      id: meter.id, name: meter.name, ...(meter.fullName ? { fullName: meter.fullName } : {}), location: locations.get(meter.id) ?? "", category: categoryOf(meter.category), official: meter.includedInOfficialTotal,
       series: trends.find(item => item.id === meter.id) ?? null,
     })),
     usageKwh: analysis.summary.validIntervalCount > 0 ? analysis.summary.usageKwh : null,
@@ -157,7 +160,7 @@ export function rankCircuits(sources: AnalysisSource[], previous: { circuits?: A
   const circuits = physical.filter(circuit => !isTotal(circuit));
   return (circuits.length ? circuits : physical).map(circuit => {
     const meter = meters.get(circuit.meterNodeId);
-    return { id: circuit.meterNodeId, name: meter?.name ?? circuit.name, location: meterLocations.get(circuit.meterNodeId) ?? "", category: categoryOf(meter?.category ?? circuit.category), kwh: circuit.usageKwh, previousKwh: previousUsage.get(circuit.meterNodeId) ?? null };
+    return { id: circuit.meterNodeId, name: meter?.name ?? circuit.name, ...(meter?.fullName ? { fullName: meter.fullName } : {}), location: meterLocations.get(circuit.meterNodeId) ?? "", category: categoryOf(meter?.category ?? circuit.category), kwh: circuit.usageKwh, previousKwh: previousUsage.get(circuit.meterNodeId) ?? null };
   }).sort((a, b) => b.kwh - a.kwh);
 }
 
@@ -190,6 +193,7 @@ export function assembleAnalysisData(input: {
   const lastDate = analysisScopeDates(project).at(-1) ?? "";
   const projectEntry = entries.find(entry => entry.location === information?.name && entry.from <= lastDate && (!entry.toExclusive || entry.toExclusive > lastDate)) ?? entries.find(entry => entry.location === information?.name) ?? entries[0];
   const hasPrevious = !!input.previousProject && input.previousProject.summary.validIntervalCount > 0;
+  const groups = analysisGroups(project, information);
   const loadedSpaces = input.spaceCurrent.filter((item): item is AnalysisSource => !!item);
   const period = (project: AnalysisSource, loaded: Array<AnalysisSource | null>): LoadedPeriod => ({
     project: toScope(project, locations),
@@ -205,5 +209,24 @@ export function assembleAnalysisData(input: {
     holidays, openingHours: (projectEntry?.weekly ?? null) as AnalysisData["openingHours"], actions: input.actions,
     // Only lights-on hours are marked, so opening-hours sites keep exactly the readings they had before.
     ...(projectEntry?.hoursMeaning === "lights_on" ? { hoursMeaning: "lights_on" as const } : {}),
+    ...(groups ? { groups } : {}),
   };
+}
+
+/**
+ * The project's groups with every meter's energy for the chosen dates, from the whole-project result so a site with
+ * more top-level groups than the Analysis page looks at still counts every meter. Main meters are left out exactly
+ * as in the circuit ranking: the groups are the parts, and the official total stays the whole.
+ */
+export function analysisGroups(project: AnalysisSource, information: ProjectInformationSource): AnalysisGroups | undefined {
+  if (!information?.locations?.length) return undefined;
+  const list = groupsFromLocations(information.locations);
+  if (!list.length) return undefined;
+  const groupOf = new Map((information.meters ?? []).flatMap(meter => meter.locationId ? [[meter.id, meter.locationId] as const] : []));
+  const panelOf = new Map((information.meters ?? []).flatMap(meter => meter.panel ? [[meter.id, meter.panel] as const] : []));
+  const meters = rankCircuits([project], null, new Map()).map(circuit => ({
+    id: circuit.id, name: circuit.name, ...(circuit.fullName ? { fullName: circuit.fullName } : {}), groupId: groupOf.get(circuit.id) ?? null, kwh: circuit.kwh,
+    ...(panelOf.get(circuit.id) ? { panel: panelOf.get(circuit.id) } : {}),
+  }));
+  return { list, meters };
 }

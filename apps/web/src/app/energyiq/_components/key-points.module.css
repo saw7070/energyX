@@ -16,6 +16,7 @@
 .heroEyebrow{font-size:12px;font-weight:650;letter-spacing:.14em;text-transform:uppercase;color:#a9cdb9}
 .hero .heroLinks{display:flex;flex-wrap:wrap;gap:8px 24px;margin-top:20px}
 .hero .heroForecast{margin-top:12px;font-size:14px;color:#c6ddd0}
+.hero .heroGroups{margin-top:12px;font-size:14px;font-weight:600;color:var(--hero-quiet)}
 .hero .heroForecast a{font-weight:600}
 
 /* Which report the Overview comes from, and a note when newer readings exist. */
@@ -166,6 +167,7 @@
 :global(:where(html[data-energyiq-theme="dark"])) .hero a:hover { border-bottom-color:#2e2e2e; }
 :global(:where(html[data-energyiq-theme="dark"])) .heroEyebrow { color:#a9cdb9; }
 :global(:where(html[data-energyiq-theme="dark"])) .hero .heroForecast { color:#c6ddd0; }
+:global(:where(html[data-energyiq-theme="dark"])) .hero .heroGroups { color:var(--hero-quiet); }
 :global(:where(html[data-energyiq-theme="dark"])) .source { border:1px solid #303733; border-radius:12px; background:#1a1d1b; color:#a8bcb0; }
 :global(:where(html[data-energyiq-theme="dark"])) .source svg { color:#72bb99; }
 :global(:where(html[data-energyiq-theme="dark"])) .source>svg { border-radius:50%; background:#1a221d; }

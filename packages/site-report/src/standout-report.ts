@@ -7,7 +7,7 @@ import { listText } from "./analysis-messages.js";
 import { scopeDays, shortDate } from "./analysis-model.js";
 import type { AnalysisData } from "./analysis-types.js";
 import type { EnergyIqLocale } from "./locale.js";
-import { explainDays, standoutDays, standoutMeters } from "./standout-days.js";
+import { explainDays, meterGroupPlaces, standoutDays, standoutMeters } from "./standout-days.js";
 import { daySentence, sharedMeterNames, standoutRule, standoutText } from "./standout-messages.js";
 
 /** At most this many days are written out; the rest are counted. */
@@ -37,7 +37,7 @@ export function standoutReport(data: AnalysisData, locale: EnergyIqLocale = "en"
   const t = standoutText(locale);
   const lighting = data.hoursMeaning === "lights_on";
   const meters = standoutMeters([data.current.project, ...data.current.spaces]);
-  const explained = explainDays({ days: scopeDays(data.current.project, data.holidays), meters, lighting });
+  const explained = explainDays({ days: scopeDays(data.current.project, data.holidays), meters, lighting, places: meterGroupPlaces(data.groups) });
   const shared = sharedMeterNames(meters);
   const found = standoutDays(explained);
   const shown = found.slice(0, REPORT_STANDOUT_DAYS);

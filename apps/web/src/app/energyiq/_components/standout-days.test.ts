@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildSiteReport, daySentence, dayKindOf, everyDayBaselines, explainDays, scopeDays, sharedMeterNames, standoutDays, standoutMeters, standoutReport, standoutRule,
-  type AnalysisDay,
+  buildSiteReport, daySentence, dayKindOf, explainDays, findAnomalies, meterGroupPlaces, scopeDays, sharedMeterNames, standoutDays, standoutMeters, standoutReport, standoutRule,
+  usualDayBaselines, type AnalysisDay,
 } from "@datafoundry/site-report";
 import { DAILY, DATA, DATES, GAP_DAY, IDS, meter, series, site, THURSDAY } from "./standout-days.test-fixture";
 
 const days = scopeDays(site, DATA.holidays);
-const explained = explainDays({ days, meters: standoutMeters([site]), lighting: true });
+const explained = explainDays({ days, meters: standoutMeters([site]), lighting: true, places: meterGroupPlaces(DATA.groups) });
 const on = (date: string) => explained.find(item => item.date === date)!;
 
 describe("why a day was different", () => {
@@ -64,8 +64,8 @@ describe("why a day was different", () => {
     expect(split.find(item => item.date === "2026-11-07")).toMatchObject({ kind: "weekend", status: "few-days", samples: 4 });
     expect(daySentence(split.find(item => item.date === "2026-11-07")!)).toBe("Too few complete weekend days in these dates to say what is usual.");
     expect(split.find(item => item.date === THURSDAY)).toMatchObject({ kind: "weekday", status: "standout" });
-    // The chart's expected day for a lights-on site is one value for every day type.
-    expect(new Set(everyDayBaselines(days).map(item => item.expectedKwh)).size).toBe(1);
+    // The chart's usual-day line for a lights-on site is one value for every day type.
+    expect(usualDayBaselines(days, true).map(item => [item.dayType, Number(item.expectedKwh!.toFixed(6)), item.samples])).toEqual([["weekday", 46.1, 13], ["weekend", 46.1, 13], ["public_holiday", 46.1, 13]]);
   });
 
   it("splits a difference only between real circuits, not the totals above them", () => {
@@ -74,6 +74,30 @@ describe("why a day was different", () => {
     const sub = { ...meter("lobby-e"), id: "sub", official: false, location: "Plant room" };
     expect(standoutMeters([{ ...site, meters: [main, board, sub, meter("lobby-f")] }]).map(item => item.id)).toEqual(["sub", "lobby-f"]);
     expect([...sharedMeterNames(site.meters)]).toEqual(["Lift lobby lights"]);
+  });
+
+  it("names meters as everywhere else: the short name when one is set, and the group they serve", () => {
+    const thursday = on(THURSDAY);
+    expect(thursday.contributors.map(item => [item.name, item.place])).toEqual([["Compassvale Bow entrance", "Common area"], ["Pavilion DL & fan", "Common area › Pavilion"]]);
+    // Readings saved before groups existed still show where the meter is.
+    const ungrouped = explainDays({ days, meters: standoutMeters([site]), lighting: true }).find(item => item.date === THURSDAY)!;
+    expect(ungrouped.contributors.map(item => item.place)).toEqual(["Outdoor", "Outdoor"]);
+    // A short name is the name readers see; the installer's full label stays behind it.
+    const short = { ...site, meters: site.meters.map(item => item.id === "bow" ? { ...item, name: "Bow entrance", fullName: "Compassvale Bow entrance" } : item) };
+    const renamed = explainDays({ days, meters: standoutMeters([short]), lighting: true, places: meterGroupPlaces(DATA.groups) }).find(item => item.date === THURSDAY)!;
+    expect(renamed.contributors[0]).toMatchObject({ name: "Bow entrance", fullName: "Compassvale Bow entrance", place: "Common area" });
+    expect(daySentence(renamed)).toContain("Most of the extra: Bow entrance +1.5 kWh and Pavilion DL & fan +0.6 kWh.");
+  });
+
+  it("is the one usual day the chart line and its unusually-high check use", () => {
+    // Read as opening hours: weekdays have a usual day, the four weekend days are too few.
+    const baselines = usualDayBaselines(days);
+    expect(baselines.map(item => [item.dayType, item.expectedKwh === null ? null : Number(item.expectedKwh.toFixed(6)), item.samples])).toEqual([["weekday", 46.1, 9], ["weekend", null, 4], ["public_holiday", null, 0]]);
+    expect(explainDays({ days }).find(item => item.date === THURSDAY)!.usualKwh).toBeCloseTo(baselines[0]!.expectedKwh!, 9);
+    // Thursday is 5% above the usual day: explained, but well under the 15% "unusually high" mark.
+    expect(findAnomalies(days, baselines)).toEqual([]);
+    const spike = days.map(day => day.date === THURSDAY ? { ...day, totalKwh: 55 } : day);
+    expect(findAnomalies(spike, usualDayBaselines(spike))).toEqual([{ date: THURSDAY, dayType: "weekday", totalKwh: 55, expectedKwh: baselines[0]!.expectedKwh, deltaPct: (55 / baselines[0]!.expectedKwh! - 1) * 100 }]);
   });
 
   it("writes the report block with the standout days, missing days and the rule", () => {
@@ -93,7 +117,7 @@ describe("why a day was different", () => {
   it("words the block in Chinese and Malay, and adds the place when two meters share a name", () => {
     const zh = standoutReport(DATA, "zh-Hans");
     expect(zh.title).toBe("与平常不同的日子");
-    expect(zh.items[0]!.text).toBe("11月5日 周四用电 48.4 kWh，比平常的一天（46.1 kWh）多 2.3 kWh。多用的电主要来自：Compassvale Bow entrance +1.5 kWh和Pavilion DL & fan +0.6 kWh。");
+    expect(zh.items[0]!.text).toBe("11月5日 周四用电 48.4 kWh，比正常日子（46.1 kWh）多 2.3 kWh。多用的电主要来自：Compassvale Bow entrance +1.5 kWh和Pavilion DL & fan +0.6 kWh。");
     expect(zh.note).toBe("11月10日读数缺失，因此这一天不作比较。");
     const ms = standoutReport(DATA, "ms");
     expect(ms.items[0]!.text).toBe("Kha 5 Nov menggunakan 48.4 kWh, 2.3 kWh lebih daripada hari biasa (46.1 kWh). Kebanyakan lebihan daripada: Compassvale Bow entrance +1.5 kWh dan Pavilion DL & fan +0.6 kWh.");

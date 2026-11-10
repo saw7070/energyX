@@ -99,7 +99,7 @@ it("lets publishers edit hours and holidays on the page and saves a pending cale
   } finally { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); }
 });
 
-it("lets editors rename a meter and add a location on the page, saving to the setup draft", async () => {
+it("lets editors rename a meter and add a group on the page, saving to the setup draft", async () => {
   vi.stubGlobal("React", React); globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
   const setup = { project: { id: "office", has_unpublished_changes: false, root_scope_id: "root" }, draft: { revision: 7, document: { project: { name: "Office", timezone: "Asia/Singapore" }, tier_structure_locked: true,
@@ -130,10 +130,10 @@ it("lets editors rename a meter and add a location on the page, saving to the se
     expect(apply).toHaveBeenCalledWith("office");
     expect(host.textContent).toContain("Pantry sockets saved. The whole app now uses it.");
 
-    await click("+ Add Space");
-    const nameInput = host.querySelector<HTMLInputElement>('form[aria-label="New Space"] input')!;
+    await click("+ New group");
+    const nameInput = host.querySelector<HTMLInputElement>('form[aria-label="New group"] input')!;
     await type(nameInput, "Space 2");
-    await act(async () => host.querySelector<HTMLFormElement>('form[aria-label="New Space"]')!.requestSubmit());
+    await act(async () => host.querySelector<HTMLFormElement>('form[aria-label="New group"]')!.requestSubmit());
     expect(save).toHaveBeenLastCalledWith("office", { expectedRevision: 7, document: expect.objectContaining({
       nodes: expect.arrayContaining([expect.objectContaining({ name: "Space 2", tier_definition_id: "space" })]),
     }) });
@@ -198,4 +198,65 @@ it("makes saved changes live by itself, and only asks when applying fails", asyn
   } finally {
     await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks();
   }
+});
+
+it("lets editors build groups and move a meter into one by Move to… or by dragging it", async () => {
+  vi.stubGlobal("React", React); globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
+  const row = (id: string, name: string, scope: string, shortName?: string) => ({ id, source_label: id, display_name: id, presentation: { device_name: name, ...(shortName ? { short_name: shortName } : {}) }, scope_id: scope, navigation_scope_id: scope, resource: "electricity", category: "light", coverage: "partial", meter_role: "component", aggregation_usage: "official" });
+  const doc = { project: { name: "SKTC", timezone: "Asia/Singapore" }, tier_structure_locked: true,
+    tiers: [{ id: "area", ordinal: 1, alias: "Area" }],
+    nodes: [{ id: "f", tier_definition_id: "area", name: "264F Area F", sort_order: 10, metadata_status: "confirmed" }, { id: "common", tier_definition_id: "area", name: "Common area", sort_order: 20, metadata_status: "confirmed" }],
+    meter_mapping: { schema_version: 2, source_kind: "tuya", confirmed: true, rows: [row("sign", "264F Compassvale Bow signboard", "f", "Entrance"), row("lobby", "264F GF Lobby Lighting", "f"), row("pav", "Pavilion 1 light", "common")], virtual_meters: [] } };
+  const setup = { project: { id: "sktc", has_unpublished_changes: false, root_scope_id: "root" }, draft: { revision: 3, document: doc } } as unknown as EnergyProjectSetupDto;
+  const save = vi.spyOn(configApi, "saveEnergyProjectSetupDraft").mockResolvedValue({} as Awaited<ReturnType<typeof configApi.saveEnergyProjectSetupDraft>>);
+  vi.spyOn(configApi, "applyEnergyProjectChanges").mockResolvedValue({ hierarchy_revision_id: "h", template_revision_id: "t" });
+  const button = (text: string) => Array.from(host.querySelectorAll("button")).find(item => item.textContent?.trim() === text || item.textContent?.includes(text));
+  const type = async (input: HTMLInputElement, value: string) => { await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }); };
+  const savedRows = () => (save.mock.lastCall![1].document.meter_mapping!.rows as Array<{ id: string; scope_id: string; presentation?: Record<string, string> }>);
+  try {
+    await act(async () => root.render(<ProjectConfigurationView setup={setup} notes="" policies={null} projectId="sktc" canEditSetup />));
+    expect(host.textContent).toContain("Groups");
+    expect(host.textContent).toContain("Drag a meter onto a group, or use Move to.");
+    // The short name shows first, with the installer's full label underneath.
+    const signRow = host.querySelector<HTMLElement>("#meter-row-sign")!;
+    expect(signRow.querySelector("strong")!.textContent).toBe("Entrance");
+    expect(signRow.querySelector("small")!.textContent).toBe("264F Compassvale Bow signboard");
+
+    // A new group inside Common area.
+    await act(async () => button("Common area")!.click());
+    await act(async () => button("+ Group inside")!.click());
+    await type(host.querySelector<HTMLInputElement>('form[aria-label="New group in Common area"] input')!, "Entrance");
+    await act(async () => host.querySelector<HTMLFormElement>('form[aria-label="New group in Common area"]')!.requestSubmit());
+    const created = save.mock.lastCall![1].document;
+    const entrance = created.nodes.find(node => node.name === "Entrance")!;
+    expect(entrance.parent_id).toBe("common");
+    expect(created.tiers).toHaveLength(2);
+
+    // Renaming a group uses its own form.
+    await act(async () => button("264F Area F")!.click());
+    await act(async () => button("Rename")!.click());
+    await type(host.querySelector<HTMLInputElement>('form[aria-label="Edit 264F Area F"] input')!, "Block 264F");
+    await act(async () => host.querySelector<HTMLFormElement>('form[aria-label="Edit 264F Area F"]')!.requestSubmit());
+    expect(save.mock.lastCall![1].document.nodes.find(node => node.id === "f")!.name).toBe("Block 264F");
+
+    // The click and keyboard way: Move to… on the meter itself.
+    const moveTo = host.querySelector<HTMLSelectElement>('select[aria-label="Move Entrance to another group"]')!;
+    expect(Array.from(moveTo.options).map(option => option.textContent)).toEqual(["Move to…", "Common area"]);
+    await act(async () => { moveTo.value = "common"; moveTo.dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(savedRows().find(item => item.id === "sign")).toEqual(expect.objectContaining({ scope_id: "common", presentation: { device_name: "264F Compassvale Bow signboard", short_name: "Entrance", panel: "264F Area F" } }));
+    expect(host.textContent).toContain("Moved Entrance to Common area.");
+
+    // Dragging a meter onto a group in the list moves it the same way.
+    const lobby = host.querySelector<HTMLElement>("#meter-row-lobby")!;
+    expect(lobby.getAttribute("draggable")).toBe("true");
+    const target = button("Common area")!;
+    await act(async () => { lobby.dispatchEvent(new Event("dragstart", { bubbles: true })); });
+    await act(async () => { target.dispatchEvent(new Event("dragover", { bubbles: true, cancelable: true })); });
+    await act(async () => { target.dispatchEvent(new Event("drop", { bubbles: true, cancelable: true })); });
+    expect(savedRows().find(item => item.id === "lobby")).toEqual(expect.objectContaining({ scope_id: "common" }));
+  } finally { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); }
 });

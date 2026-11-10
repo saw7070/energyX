@@ -63,6 +63,8 @@ export const storyMessages = defineMessages({
   "money.unmeteredHint": "Measured by the main meter, but no sub-meter shows which equipment used it.",
   "money.takeawayUnmetered": "{pct}% of the electricity is measured only by the main meter: no sub-meter shows where it goes.",
   "money.byType": "By type of use",
+  "money.byGroup": "By group",
+  "money.byGroupNote": "Each group's total and its share of the group above it. A meter counts only in its own group.",
 
   "when.title": "When the energy is used",
   "when.takeaway": "Operating hours are {hours}. {pct}% of the energy is used outside them, most of it on {bucket}.",
@@ -141,12 +143,12 @@ export const storyMessages = defineMessages({
 
   "health.title": "Health check",
   "health.unusual": "Unusual days",
-  "health.unusualSome": "{days} used more than 15% above a normal day of the same kind.",
+  "health.unusualSome": "{days} used more than 15% above a usual day of the same kind.",
   "health.openDay": "Open {day} hour by hour",
   "health.seeStaysOn": "See what stays on",
   "health.compareDays": "Compare day by day",
   "health.checkDevices": "Check which devices are missing",
-  "health.unusualNone": "Every complete day stayed within 15% of a normal day of the same kind.",
+  "health.unusualNone": "Every complete day stayed within 15% of a usual day of the same kind.",
   "health.closedShare": "Share of energy used after working hours",
   "health.closedHigh": "A large part of the bill is spent when nobody should need it. See step 3.",
   "health.closedHighEnergy": "A large share of the electricity is used when nobody should need it. See step 3.",
@@ -276,6 +278,8 @@ export const storyMessages = defineMessages({
     "money.unmeteredHint": "总电表计量到了这部分用电，但没有分表显示是哪些设备用的。",
     "money.takeawayUnmetered": "{pct}% 的用电只由总电表计量：没有分表显示这部分电用在哪里。",
     "money.byType": "按用电类型",
+    "money.byGroup": "按分组",
+    "money.byGroupNote": "每个分组的总量，以及它占上一级分组的比例。每个电表只计入它所在的分组。",
 
     "when.title": "什么时候用电",
     "when.takeaway": "营业时间为 {hours}。有 {pct}% 的用电发生在营业时间以外，其中大部分在{bucket}。",
@@ -489,6 +493,8 @@ export const storyMessages = defineMessages({
     "money.unmeteredHint": "Diukur oleh meter utama, tetapi tiada sub-meter yang menunjukkan peralatan mana yang menggunakannya.",
     "money.takeawayUnmetered": "{pct}% elektrik hanya diukur oleh meter utama: tiada sub-meter yang menunjukkan ke mana ia digunakan.",
     "money.byType": "Mengikut jenis penggunaan",
+    "money.byGroup": "Mengikut kumpulan",
+    "money.byGroupNote": "Jumlah setiap kumpulan dan bahagiannya daripada kumpulan di atasnya. Setiap meter dikira dalam kumpulannya sendiri sahaja.",
 
     "when.title": "Bila tenaga digunakan",
     "when.takeaway": "Waktu operasi ialah {hours}. {pct}% daripada tenaga digunakan di luar waktu itu, kebanyakannya pada {bucket}.",

@@ -14,7 +14,9 @@ export { categoryOf, toScope } from "@datafoundry/site-report";
 
 export type AnalysisRange = { kind: "latest-28" } | { kind: "all" } | { kind: "custom"; from: string; to: string };
 type ProjectInformation = {
-  name: string; meters?: Array<{ id: string; location: string }>;
+  name: string; meters?: Array<{ id: string; location: string; locationId?: string }>;
+  /** The Locations tree the groups come from; the project itself has no parent. */
+  locations?: Array<{ id: string; name: string; parentId: string | null }>;
   calendar: null | { entries: Array<{ location: string; from: string; toExclusive: string | null; weekly: HoursByDay; hoursMeaning?: string; exceptions: Array<{ date: string; label: string; classification?: string }> }> };
 };
 

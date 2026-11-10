@@ -2,7 +2,7 @@
 import React, { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { explainDays, scopeDays, standoutMeters } from "@datafoundry/site-report";
+import { explainDays, meterGroupPlaces, scopeDays, standoutMeters } from "@datafoundry/site-report";
 
 const mock = vi.hoisted(() => ({ load: vi.fn() }));
 vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams("") }));
@@ -14,7 +14,7 @@ import { EnergyIqLocaleProvider } from "./energyiq-locale";
 import { LANGUAGE_STORAGE_KEY, type EnergyIqLocale } from "./energyiq-messages";
 import { DATA, GAP_DAY, site, THURSDAY } from "./standout-days.test-fixture";
 
-const explained = explainDays({ days: scopeDays(site, DATA.holidays), meters: standoutMeters([site]), lighting: true });
+const explained = explainDays({ days: scopeDays(site, DATA.holidays), meters: standoutMeters([site]), lighting: true, places: meterGroupPlaces(DATA.groups) });
 const on = (date: string) => explained.find(item => item.date === date)!;
 const totalLabel = (kwh: string, whole: boolean) => `Daily Total: ${kwh}${whole ? "" : " (missing readings)"}`;
 
@@ -35,13 +35,13 @@ async function render(locale: EnergyIqLocale, node: ReactNode) {
 }
 
 describe("why a day was different, on the Analysis daily chart", () => {
-  it("explains a bar that stood out in its tooltip, naming the meters and their places", async () => {
+  it("explains a bar that stood out in its tooltip, naming the meters and their groups", async () => {
     const page = await render("en", <DayTip date={THURSDAY} item={on(THURSDAY)} siteName="SKTC" totalLabel={totalLabel} />);
     expect(page.host.querySelector("p")?.textContent).toBe("Thu 5 Nov");
     expect(page.text()).toContain("Thu 5 Nov used 48.4 kWh, 2.3 kWh more than a usual day (46.1 kWh).");
     expect(page.text()).toContain("Most of the extra:");
     const items = [...page.host.querySelectorAll("li")].map(item => [...item.children].map(child => child.textContent));
-    expect(items).toEqual([["Compassvale Bow entrance", "Outdoor", "+1.5 kWh"], ["Pavilion DL & fan", "Outdoor", "+0.6 kWh"]]);
+    expect(items).toEqual([["Compassvale Bow entrance", "Common area", "+1.5 kWh"], ["Pavilion DL & fan", "Common area › Pavilion", "+0.6 kWh"]]);
     expect(page.host.querySelector("li small")?.className).toContain("text-[11px]");
     await page.unmount();
   });
@@ -79,11 +79,15 @@ describe("why a day was different, on the Analysis daily chart", () => {
     const trend = [...en.host.querySelectorAll("section")].find(section => section.querySelector("button")?.textContent === "Daily Total Trend")!;
     expect(trend.textContent).toContain("Days that stood out");
     expect(trend.querySelector('[role="group"][aria-label="Kind of day"]')).toBeNull();
+    // The chart's usual-day line is the same 46.1 kWh the explanations compare with: one usual figure on the page.
+    expect(trend.textContent).toContain("13 complete days · usual day: 46.1 kWh per day.");
+    expect(trend.textContent).toContain("Unusual days: 0 of 13 complete days");
     await en.unmount();
 
     const zh = await render("zh-Hans", <AnalysisView projectId="sktc" />);
     expect(zh.text()).toContain("与平常不同的日子");
-    expect(zh.text()).toContain("11月5日 周四用电 48.4 kWh，比平常的一天（46.1 kWh）多 2.3 kWh。");
+    expect(zh.text()).toContain("11月5日 周四用电 48.4 kWh，比正常日子（46.1 kWh）多 2.3 kWh。");
+    expect(zh.text()).toContain("正常日子：46.1 kWh");
     expect(zh.text()).toContain("每日总用电 · kWh · 每一天");
     await zh.unmount();
   });

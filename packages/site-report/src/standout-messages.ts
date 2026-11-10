@@ -44,10 +44,10 @@ export const standoutMessages = defineMessages({
   "missingDays.other": "Readings were missing on {dates}, so those days are not compared.",
 }, {
   "zh-Hans": {
-    "kind.weekday": "平常的工作日",
-    "kind.weekend": "平常的周末日",
-    "kind.public_holiday": "平常的公共假期",
-    "kind.any": "平常的一天",
+    "kind.weekday": "正常的工作日",
+    "kind.weekend": "正常的周末日",
+    "kind.public_holiday": "正常的公共假期",
+    "kind.any": "正常日子",
     "kinds.weekday": "工作日",
     "kinds.weekend": "周末日",
     "kinds.public_holiday": "公共假期",
@@ -55,8 +55,8 @@ export const standoutMessages = defineMessages({
     "day.more": "{date}用电 {kwh}，比{kind}（{usual}）多 {delta}。",
     "day.less": "{date}用电 {kwh}，比{kind}（{usual}）少 {delta}。",
     "day.close": "{date}用电 {kwh}，与{kind}（{usual}）相近。",
-    "day.missing": "这一天读数缺失，因此不与平常的日子比较。",
-    "day.fewDays": "所选日期内读数完整的{kinds}太少，无法判断平常用电。",
+    "day.missing": "这一天读数缺失，因此不与正常日子比较。",
+    "day.fewDays": "所选日期内读数完整的{kinds}太少，无法判断正常用电。",
     "lead.most.more": "多用的电主要来自：",
     "lead.most.less": "少用的电主要来自：",
     "lead.spread.more": "增加最多的是：",
@@ -69,11 +69,11 @@ export const standoutMessages = defineMessages({
     "contrib.spread.less": "减少最多的是：{items}。其余分散在其他电表上。",
     "item": "{name} {delta}",
     "item.where": "{name}（{where}）{delta}",
-    "rule": "某天与同类平常日子（所选日期内完整日子的中间值）相差超过 {pct}%，并且超过日常波动的两倍，才会被指出。",
-    "lights.rule": "某天与平常日子（所选日期内完整日子的中间值）相差超过 {pct}%，并且超过日常波动的两倍，才会被指出。",
+    "rule": "某天与同类正常日子（所选日期内完整日子的中间值）相差超过 {pct}%，并且超过日常波动的两倍，才会被指出。",
+    "lights.rule": "某天与正常日子（所选日期内完整日子的中间值）相差超过 {pct}%，并且超过日常波动的两倍，才会被指出。",
     "title": "与平常不同的日子",
-    "none": "没有哪一天与同类平常日子明显不同。",
-    "lights.none": "没有哪一天与平常日子明显不同。",
+    "none": "没有哪一天与同类正常日子明显不同。",
+    "lights.none": "没有哪一天与正常日子明显不同。",
     "moreDays.one": "另有 {count} 天。",
     "moreDays.other": "另有 {count} 天。",
     "missingDays.one": "{dates}读数缺失，因此这一天不作比较。",
@@ -127,8 +127,8 @@ export const signedKwh = (value: number) => `${value >= 0 ? "+" : "−"}${stando
 /** Sentences of one paragraph; Chinese runs them together without spaces. */
 const joinSentences = (parts: Array<string | null>, locale: EnergyIqLocale) => parts.filter(Boolean).join(locale === "zh-Hans" ? "" : " ");
 
-/** A meter's place, worth showing beside its name: not the project root ("Project") or the site itself. */
-export const meterPlace = (location: string, siteName = "") => location && location !== "Project" && location !== siteName ? location : "";
+/** A meter's group (or location), worth showing beside its name: not the project root ("Project") or the site itself. */
+export const meterPlace = (place: string, siteName = "") => place && place !== "Project" && place !== siteName ? place : "";
 
 /** The first sentence: how the day compares with a usual day of its kind, or why it is not compared. */
 export function dayHeadline(item: DayExplanation, locale: EnergyIqLocale = "en"): string {
@@ -148,7 +148,7 @@ export function contributorsLead(item: DayExplanation, locale: EnergyIqLocale = 
 /** One meter and its change, with its place in brackets when another meter has the same name. */
 export function contributorText(contributor: StandoutContributor, locale: EnergyIqLocale = "en", sharedNames: ReadonlySet<string> = new Set()) {
   const t = standoutText(locale);
-  const where = sharedNames.has(contributor.name) ? meterPlace(contributor.location) : "";
+  const where = sharedNames.has(contributor.name) ? meterPlace(contributor.place) : "";
   return t(where ? "item.where" : "item", { name: contributor.name, where, delta: signedKwh(contributor.deltaKwh) });
 }
 

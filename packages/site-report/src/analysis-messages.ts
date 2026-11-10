@@ -74,7 +74,7 @@ export const analysisMessages = defineMessages({
   "plan.unusual.one": "Find out what happened on {count} unusual day",
   "plan.unusual.other": "Find out what happened on {count} unusual days",
   "plan.unusualDay": "{date} (+{pct}%)",
-  "plan.unusualDetail": "{days} used more than {pct}% above a normal day of the same type.",
+  "plan.unusualDetail": "{days} used more than {pct}% above a usual day of the same type.",
   "lights.plan.cutType": "Cut {name} left on in the daytime",
   "lights.plan.switchOff": "Keep {name} off in the daytime",
   "lights.plan.draws": "Draws {kw} on average in the daytime — {pct}% of its energy. Lights on by day, switched on too early or off too late all add to this.",

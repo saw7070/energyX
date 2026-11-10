@@ -123,7 +123,7 @@ export const readLiveSiteReadings = (input: {
   const timezone = document?.project.timezone ?? "Asia/Singapore";
   const rows = document?.meter_mapping?.rows.filter((row) => row.resource === "electricity") ?? [];
   // The name people gave the meter, as everywhere else in the app; the panel label is the fallback.
-  const names = new Map(rows.map((row) => [row.id, row.presentation?.device_name?.trim() || row.presentation?.circuit_name?.trim() || row.display_name]));
+  const names = new Map(rows.map((row) => [row.id, row.presentation?.short_name?.trim() || row.presentation?.device_name?.trim() || row.presentation?.circuit_name?.trim() || row.display_name]));
   const notInUse = new Set(rows.filter((row) => row.presentation?.not_in_use).map((row) => row.id));
   const offWithLights = new Set(rows.filter((row) => row.presentation?.off_with_lights).map((row) => row.id));
   const official = officialProjectMeterIds(document);

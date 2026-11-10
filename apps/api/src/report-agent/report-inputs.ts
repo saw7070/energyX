@@ -1,5 +1,6 @@
 import { projectExplorerMeters, projectMeterNamingReadiness } from "../energy/energy-explorer-meters.js";
 import { writeAnalysisContract } from "./analysis-package.js";
+import { advisorMeterGroups, meterUsageFromCsv, type MeterUsage } from "./report-meter-groups.js";
 import type { EnergyIqProjectSetupDocument } from "@datafoundry/metadata";
 import { authorizeReportExecution } from "./report-access.js";
 import { assertActionFeedbackCurrent } from "./action-feedback.js";
@@ -68,6 +69,8 @@ export async function prepareReportInputs(run: ReportRun, directory: string, met
   // An existing but broken snapshot still fails normally; do not mask query failures.
   // Initialization must continue after readings are staged but before the first configuration publication.
   const preparingProject = run.kind === "chat" && run.settings.useProjectData && !published;
+  // Each meter's energy in the analysis period, read from the advisor's own CSV, for the group totals below.
+  let analysisUsage: MeterUsage | null = null;
   // Extraction needs published meter identities, but must not re-query interval data.
   if (run.actionExtraction) {
     const context = resolveEnergyQueryContext({metadataStore:metadata,user:metadata.users.getById({user_id:run.actorUserId}),workspaceId:run.workspaceId,
@@ -108,6 +111,8 @@ export async function prepareReportInputs(run: ReportRun, directory: string, met
       const namingDocument = JSON.parse(namingRevision.snapshot_json) as EnergyIqProjectSetupDocument;
       const names = projectExplorerMeters({document:namingDocument,resource:"electricity",officialMeterIds:new Set(),scopeIds:new Set(namingDocument.meter_mapping?.rows.map(r=>r.navigation_scope_id??r.scope_id)??[])});
       const evidence = await exportEnergyScopedCsv(scoped, join(inputDir, filename), Object.fromEntries(names.map(m=>[m.id,m.name])));
+      // Read before compression may replace the file; a CSV that cannot be read only leaves the group totals out.
+      if (name === "analysis") analysisUsage = await meterUsageFromCsv(join(inputDir, filename)).catch(() => null);
       if (metadata.energyIq.getProject(run.projectId).data_snapshot_id !== context.dataSnapshotId) throw new Error("REPORT_DATA_CHANGED_RETRY");
       const transfer = await compressReportDataset(inputDir, filename, evidence);
       const expectedMinutes = (Date.parse(context.to) - Date.parse(context.from)) / 60_000;
@@ -171,6 +176,8 @@ export async function prepareReportInputs(run: ReportRun, directory: string, met
     meterDisplayNames: displayMeters.map(m=>({meterId:m.id,displayName:m.name,scopeId:m.scopeId})),
     meterNamingInstructions: "Use meterDisplayNames exactly as Project Explorer does in every visible headline, chart, finding and action. IDs are for joins and tools only. Never guess equipment from an ID. If a published name is generic, state that its equipment identity needs confirmation.",
     hierarchy: manifest.hierarchy ?? [], meterAttachments: manifest.meterAttachments ?? [],
+    // Meters filed by what they serve, with each group's energy and share, and which groups one meter measures alone.
+    meterGroups: advisorMeterGroups(nameDocument, analysisUsage),
     tariff: readPolicy("tariff", tariffVersion), calendar: readPolicy("calendar", calendarVersion),
     instructions: "Only published rules are included. Missing tariffs do not imply zero cost. Academic term breaks do not automatically mean closure. Project notes are separate reference information and must not silently override these published rules. Ask for clarification if they conflict. "
       + "Calendar hours are local times. A range whose to is earlier than its from runs past midnight (19:00-07:00 means 7 pm to 7 am the next morning) and belongs to the day it starts on, which decides weekday, weekend and holiday. "
@@ -188,7 +195,7 @@ export async function prepareReportInputs(run: ReportRun, directory: string, met
     manifest.spatialReference = {
       dataFile: "project-spatial-reference.json", imageFile: "project-spatial-reference.svg",
       source: spatial.reference.provenance,
-      instructions: "For a complete project report include a compact Spaces and meter distribution figure after the key findings. Embed the supplied SVG inline or as a data image so the report works offline. Preserve its spatial relationships; project-style.md may restyle its colours and typography. Label it illustrative and not to scale. Published meter mappings override reference annotations. Never infer room-level energy, wiring or physical independence from this figure. Short answers do not require a map; explain explicit full-report omissions in review.json.",
+      instructions: "For a complete project report include a compact Spaces and meter distribution figure after the key findings. Embed the supplied SVG inline or as a data image so the report works offline. Preserve its spatial relationships; project-style.md may restyle its colours and typography. Label it illustrative and not to scale. Published meter mappings override reference annotations. Never infer room-level energy, wiring or physical independence from this figure; energy by group comes from meterGroups in project-configuration.json. Short answers do not require a map; explain explicit full-report omissions in review.json.",
     };
   }
   writeFileSync(join(inputDir, "report-presentation.md"), REPORT_PRESENTATION_METHOD);

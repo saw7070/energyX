@@ -7,6 +7,8 @@ import type { Translate } from "@datafoundry/site-report";
 import { liveConnectionMessages } from "./live-connection-messages";
 import { setUpAndPublishReadings } from "../admin/smart-import-publish";
 import { smartImportMessages } from "../admin/smart-import-messages";
+import { suggestMeterCategory } from "../admin/meter-category-suggestion";
+import { inferMeterCategory } from "../admin/project-setup-model";
 import { DEVICE_LIST_MAX_ROWS, deviceListTextFromSheet, parseLiveDeviceList } from "./live-device-list";
 
 export type LiveConnectionDto = {
@@ -28,6 +30,16 @@ export type LiveConnectionDto = {
 
 /** `usedBy`: another site already reads this device; its name is given only for the same client. */
 export type LiveDeviceDto = { ref: string; name: string; productName?: string; category?: string; online: boolean; matchedTo?: string; usedBy?: { siteName?: string } };
+
+/**
+ * Devices in the Tuya project that no meter of this site reads yet, and the places a new meter can go (tree order,
+ * `depth` 0 at the top). `suggestedLocationId`: where meters on the same product already sit.
+ */
+export type LiveNewDevicesDto = {
+  devices: Array<LiveDeviceDto & { suggestedLocationId?: string }>;
+  locations: Array<{ id: string; name: string; depth: number }>;
+  defaultLocationId?: string;
+};
 
 /** One line of a site's own device list, as checked against the Tuya account. */
 export type LiveDeviceListRowDto = {
@@ -80,8 +92,15 @@ export function liveErrorKey(message: string): LiveKey {
     if (/:1114|ip\(|_ip_|allow/iu.test(message)) return "error.ip";
     if (/permission|28841|1106|subscri/iu.test(message)) return "error.permission";
     if (/TIMEOUT|UNREACHABLE|HTTP_ERROR|REQUEST_FAILED|fetch/iu.test(message)) return "error.unreachable";
+    if (/token|:1010\b|:1011\b|expire/iu.test(message)) return "error.expired";
     return "error.signIn";
   }
+  if (message.includes("ENERGYIQ_LIVE_DEVICE_USED_ELSEWHERE")) return "error.usedElsewhere";
+  if (message.includes("ENERGYIQ_LIVE_DEVICE_ALREADY_MATCHED")) return "error.alreadyHere";
+  if (message.includes("ENERGYIQ_LIVE_DEVICE_GATEWAY")) return "error.gateway";
+  if (message.includes("ENERGYIQ_LIVE_LOCATION_UNKNOWN")) return "error.locationGone";
+  if (message.includes("ENERGYIQ_LIVE_SYNC_RUNNING") || message.includes("ENERGYIQ_SOURCE_SYNC_IN_PROGRESS")) return "error.syncRunning";
+  if (message.includes("ENERGYIQ_LIVE_NEW_METERS_DATA_NOT_READY") || message.includes("ENERGYIQ_LIVE_NEW_METERS_SETUP_INVALID")) return "error.addNotReady";
   if (message.includes("ENERGYIQ_LIVE_TAKEOVER_DEVICES_MISSING")) return "error.takeOverMissing";
   if (message.includes("ENERGYIQ_LIVE_TAKEOVER_UNAVAILABLE")) return "error.takeOverUnavailable";
   if (message.includes("ENERGYIQ_LIVE_SERVER_KEY_REQUIRED")) return "error.serverKey";
@@ -99,6 +118,17 @@ export function liveErrorKey(message: string): LiveKey {
   return "error.generic";
 }
 
+/** As liveErrorKey, for Add new meters: a refusal there also means this person may not change the site's setup. */
+export function addMetersErrorKey(message: string): LiveKey {
+  if (/ENERGYIQ_PROJECT_FORBIDDEN|ENERGYIQ_ADMIN_REQUIRED/u.test(message)) return "error.notAllowed";
+  if (/ENERGYIQ_PROJECT_DATA_NOT_READY|ENERGYIQ_SETUP_INVALID|ENERGYIQ_SETUP_REVISION_CONFLICT/u.test(message)) return "error.addNotReady";
+  return liveErrorKey(message);
+}
+
+/** What a new meter is used for, from its name, else its Tuya product name; it can be changed later in Facility. */
+export const newMeterCategory = (name: string, productName?: string) =>
+  suggestMeterCategory(name) ?? (productName ? suggestMeterCategory(productName) : null) ?? inferMeterCategory(name);
+
 export function checkReasonKey(reason = ""): LiveKey {
   if (reason.includes("PROPERTY_REQUIRED:total_forward_energy")) return "reason.energy";
   if (reason.includes("PROPERTY_REQUIRED:cur_power")) return "reason.power";
@@ -108,8 +138,11 @@ export function checkReasonKey(reason = ""): LiveKey {
 
 const messageOf = (reason: unknown): string => reason instanceof Error ? reason.message : String(reason);
 
-/** Facility → Live connection: account, device per meter, then check and daily update. */
-export function LiveConnectionPanel({ projectId, onChanged }: { projectId: string; onChanged?: () => void }) {
+/**
+ * Facility → Live connection: account, device per meter, then check and daily update. `canAddMeters`: this person
+ * may change the site's setup, so the matching step offers Add new meters for devices the site doesn't have yet.
+ */
+export function LiveConnectionPanel({ projectId, onChanged, canAddMeters = true }: { projectId: string; onChanged?: () => void; canAddMeters?: boolean }) {
   const t = useMessages(liveConnectionMessages);
   const { locale } = useEnergyIqLocale();
   const [connection, setConnection] = useState<LiveConnectionDto | null>(null);
@@ -130,6 +163,8 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
   // "all": every meter shows a drop-down (first setup); a meter id: only that row is being changed.
   const [editing, setEditing] = useState<"all" | string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  // Add new meters is open in the matching step.
+  const [adding, setAdding] = useState(false);
   const [lastReadings, setLastReadings] = useState<Map<string, string>>(new Map());
   const accessIdInput = useRef<HTMLInputElement>(null);
 
@@ -416,7 +451,7 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
           const reason = failedChecks.get(meter.meterPointId);
           const status = statusOf(meter);
           const rowEditing = kind === "app" && (editing === "all" || editing === meter.meterPointId);
-          const locked = busy !== null || (editing !== null && editing !== meter.meterPointId);
+          const locked = busy !== null || adding || (editing !== null && editing !== meter.meterPointId);
           return <tr key={meter.meterPointId} className={reason ? "bg-amber-50" : rowEditing && editing !== "all" ? "bg-primary/5" : undefined}>
             <td className="px-4 py-3 align-top">
               <span className="font-medium">{meter.name}</span>
@@ -549,10 +584,20 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
             setDraft(next);
             setNotice(added > 0 ? t("matchByNameDone", { count: added }) : t("matchByNameNone"));
           }}>{t("matchByName")}</button>
-            : <button type="button" className={secondaryButton} disabled={!devices?.length || busy !== null || editing !== null} onClick={() => { setConfirmRemove(null); setEditing("all"); }}>{t("editAll")}</button>}
+            : <button type="button" className={secondaryButton} disabled={!devices?.length || busy !== null || editing !== null || adding} onClick={() => { setConfirmRemove(null); setEditing("all"); }}>{t("editAll")}</button>}
           <button type="button" className={secondaryButton} disabled={busy !== null} onClick={() => void loadDevices()}>{t("refreshDevices")}</button>
+          {canAddMeters && editing === null ? <button type="button" className={secondaryButton} disabled={busy !== null || adding} aria-expanded={adding} onClick={() => { setConfirmRemove(null); setNotice(null); setAdding(true); }}>{t("add.open")}</button> : null}
         </div>
       </div>
+      {adding ? <AddNewMeters projectId={projectId} t={t} onCancel={() => setAdding(false)} onAdded={(next, count) => {
+        adopt(next);
+        setAdding(false);
+        setDevices(null);
+        setCheck(null);
+        setNotice(count === 1 ? t("add.doneOne") : t("add.done", { count }));
+        loadReadings();
+        onChanged?.();
+      }} /> : null}
       {devicesNote}
       {meterTable("app")}
       {editing === "all" ? <div className="mt-3 flex justify-end gap-2">
@@ -597,6 +642,162 @@ export function LiveConnectionPanel({ projectId, onChanged }: { projectId: strin
         : confirmDisconnect ? t("disconnectConfirm") : t("disconnect")}</button>
     </div> : null}
   </div>;
+}
+
+type NewMeterDraft = { name: string; locationId: string; offWithLights: boolean };
+
+/**
+ * Add new meters to a site that already has some: the Tuya devices no meter here reads yet, each ticked one with a
+ * meter name (its Tuya name to start with), where it goes in the site's locations and whether it is off with the
+ * lights. The server creates and publishes the meters, matches each to its device, and reads its last 7 days.
+ */
+function AddNewMeters({ projectId, t, onAdded, onCancel }: {
+  projectId: string;
+  t: T;
+  onAdded: (next: LiveConnectionDto, count: number) => void;
+  onCancel: () => void;
+}) {
+  const [data, setData] = useState<LiveNewDevicesDto | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  // Ticked devices by ref, in the order they were ticked.
+  const [chosen, setChosen] = useState<Record<string, NewMeterDraft>>({});
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const next = await configApi.liveConnectionRequest<LiveNewDevicesDto>(projectId, "new-devices");
+      setLoadFailed(false);
+      setError(null);
+      setData(next);
+      // A device that has since gone, or become another site's, can no longer be ticked.
+      const addable = new Set(next.devices.filter((device) => !device.usedBy).map((device) => device.ref));
+      setChosen((current) => Object.fromEntries(Object.entries(current).filter(([ref]) => addable.has(ref))));
+    } catch (reason) {
+      setLoadFailed(true);
+      setError(t(addMetersErrorKey(messageOf(reason))));
+    }
+  }, [projectId, t]);
+  useEffect(() => { void load(); }, [load]);
+
+  const devices = data?.devices ?? [];
+  const locations = data?.locations ?? [];
+  const usedByLabel = (device: LiveDeviceDto) => device.usedBy
+    ? device.usedBy.siteName ? t("usedByNamed", { site: device.usedBy.siteName }) : t("usedByOther")
+    : "";
+  const words = query.trim().toLocaleLowerCase().split(/\s+/u).filter(Boolean);
+  const shown = words.length === 0 ? devices : devices.filter((device) => {
+    const haystack = `${device.name} ${device.productName ?? ""}`.toLocaleLowerCase();
+    return words.every((word) => haystack.includes(word));
+  });
+  const refs = Object.keys(chosen);
+  const toggle = (device: LiveNewDevicesDto["devices"][number]) => setChosen((current) => {
+    if (current[device.ref]) {
+      const next = { ...current };
+      delete next[device.ref];
+      return next;
+    }
+    return {
+      ...current,
+      [device.ref]: {
+        name: device.name.trim() || device.productName?.trim() || "",
+        locationId: device.suggestedLocationId ?? data?.defaultLocationId ?? locations[0]?.id ?? "",
+        offWithLights: false,
+      },
+    };
+  });
+  const update = (ref: string, patch: Partial<NewMeterDraft>) => setChosen((current) => current[ref] ? { ...current, [ref]: { ...current[ref]!, ...patch } } : current);
+
+  const save = async () => {
+    if (refs.some((ref) => !chosen[ref]!.name.trim())) return setError(t("add.nameMissing"));
+    const productOf = new Map(devices.map((device) => [device.ref, device.productName]));
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await configApi.liveConnectionRequest<{ connection: LiveConnectionDto; added: number }>(projectId, "new-meters", {
+        method: "POST",
+        body: JSON.stringify({
+          meters: refs.map((ref) => {
+            const draft = chosen[ref]!;
+            const name = draft.name.trim();
+            return {
+              deviceRef: ref,
+              name,
+              locationId: draft.locationId,
+              category: newMeterCategory(name, productOf.get(ref)),
+              ...(draft.offWithLights ? { offWithLights: true } : {}),
+            };
+          }),
+        }),
+      });
+      onAdded(result.connection, result.added);
+    } catch (reason) {
+      setError(t(addMetersErrorKey(messageOf(reason))));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return <section aria-label={t("add.title")} className="mb-4 space-y-3 rounded-xl border border-border bg-surface-subtle p-4">
+    <div className="flex flex-wrap items-start justify-between gap-2">
+      <div>
+        <h4 className="text-sm font-extrabold">{t("add.title")}</h4>
+        <p className="mt-0.5 text-xs leading-5 text-muted">{t("add.hint")}</p>
+      </div>
+      <button type="button" className={secondaryButton} disabled={saving || (data === null && !loadFailed)} onClick={() => {
+        setData(null);
+        setLoadFailed(false);
+        setError(null);
+        void load();
+      }}>{t("refreshDevices")}</button>
+    </div>
+    {error ? <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">{error}</p> : null}
+    {data === null
+      ? loadFailed ? null : <p role="status" className="text-sm text-muted">{t("add.loading")}</p>
+      : devices.length === 0
+        ? <p role="status" className="rounded-lg bg-surface px-3 py-2 text-sm text-muted">{t("add.none")}</p>
+        : <>
+          <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} aria-label={t("add.search")}
+            placeholder={t("add.searchPlaceholder")} autoComplete="off" spellCheck={false} className={`${inputClass} mt-0`} />
+          {devices.every((device) => device.usedBy) ? <p className="text-xs text-amber-900">{t("add.onlyElsewhere")}</p> : null}
+          {shown.length === 0
+            ? <p className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-muted">{t("add.searchNone", { query: query.trim() })}</p>
+            : <ul className="max-h-[28rem] divide-y divide-border overflow-y-auto rounded-xl border border-border bg-surface">
+              {shown.map((device) => {
+                const draft = chosen[device.ref];
+                return <li key={device.ref} className="px-4 py-2.5">
+                  <label className={`flex items-center gap-3 text-sm ${device.usedBy ? "cursor-not-allowed" : "cursor-pointer"}`}>
+                    <input type="checkbox" checked={Boolean(draft)} disabled={saving || Boolean(device.usedBy)} onChange={() => toggle(device)} className="h-4 w-4 accent-[var(--color-primary,#0f6b4b)]" />
+                    <span className={`flex-1 ${device.usedBy ? "text-muted" : ""}`}>{device.name}{device.productName ? <span className="text-muted"> · {device.productName}</span> : null}{device.usedBy ? <span className="font-semibold text-amber-800"> · {usedByLabel(device)}</span> : null}</span>
+                    <span className={`text-xs font-semibold ${device.online ? "text-emerald-700" : "text-rose-700"}`}>{t(device.online ? "online" : "offline")}</span>
+                  </label>
+                  {draft ? <div className="mt-2 grid gap-2 pl-7 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
+                    <label className="block text-xs font-semibold text-muted">{t("add.name")}
+                      <input value={draft.name} maxLength={120} disabled={saving} aria-label={`${t("add.name")}: ${device.name}`} onChange={(event) => update(device.ref, { name: event.target.value })} className={inputClass} />
+                    </label>
+                    <label className="block text-xs font-semibold text-muted">{t("add.location")}
+                      <select value={draft.locationId} disabled={saving} aria-label={`${t("add.location")}: ${device.name}`} onChange={(event) => update(device.ref, { locationId: event.target.value })} className={inputClass}>
+                        {locations.map((location) => <option key={location.id} value={location.id}>{`${" ".repeat(location.depth)}${location.name}`}</option>)}
+                      </select>
+                    </label>
+                    <label className="flex items-center gap-2 pb-2.5 text-sm font-medium">
+                      <input type="checkbox" checked={draft.offWithLights} disabled={saving} aria-label={`${t("add.offWithLights")}: ${device.name}`} onChange={(event) => update(device.ref, { offWithLights: event.target.checked })} className="h-4 w-4 accent-[var(--color-primary,#0f6b4b)]" />
+                      {t("add.offWithLights")}
+                    </label>
+                  </div> : null}
+                </li>;
+              })}
+            </ul>}
+        </>}
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      {saving ? <p role="status" className="mr-auto text-xs text-muted">{t("add.savingHint")}</p> : null}
+      <button type="button" className={secondaryButton} disabled={saving} onClick={onCancel}>{t("cancel")}</button>
+      <button type="button" className={primaryButton} disabled={saving || refs.length === 0} onClick={() => void save()}>
+        {saving ? t("add.saving") : refs.length === 0 ? t("add.saveNone") : refs.length === 1 ? t("add.saveOne") : t("add.save", { count: refs.length })}
+      </button>
+    </div>
+  </section>;
 }
 
 /** One figure in the Start from Tuya status box. */

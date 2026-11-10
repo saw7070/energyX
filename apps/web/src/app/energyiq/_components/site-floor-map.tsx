@@ -24,13 +24,22 @@ export const isColour = (value: unknown): value is string => typeof value === "s
 export const chosenColours = (reference: ProjectSpatialReference): Record<string, string> => Object.fromEntries(Object.entries((reference as ProjectSpatialReference & Extras).layout.boardColours ?? {}).filter(([, value]) => isColour(value)));
 /** Colour for each board name: the colour chosen for it, else the next in a fixed order. The same board gets the same colour on the map, legend and editor. */
 export function boardColours(boards: string[], chosen: Record<string, string> = {}): Map<string, string> {
-  const sorted = [...new Set(boards)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const sorted = [...new Set(boards.filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   return new Map(sorted.map((board, index) => [board, isColour(chosen[board]) ? chosen[board] : ZONE_COLOURS[index % ZONE_COLOURS.length]!]));
+}
+/**
+ * Colours for areas that name no panel (keyed by the area's own key or id): they carry on the fixed order after the
+ * boards, so each still stands apart and adding one never changes a board's colour.
+ */
+export function boardlessColours(boards: string[], keys: string[]): Map<string, string> {
+  const offset = new Set(boards.filter(Boolean)).size;
+  return new Map([...new Set(keys)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).map((key, index) => [key, ZONE_COLOURS[(offset + index) % ZONE_COLOURS.length]!]));
 }
 export function zoneColours(zones: Zone[], chosen: Record<string, string> = {}): Map<string, string> {
   const byBoard = boardColours(zones.map(zone => zone.referenceBoard), chosen);
+  const noBoard = boardlessColours(zones.map(zone => zone.referenceBoard), zones.filter(zone => !zone.referenceBoard).map(zone => zone.id));
   // An area or equipment box can have its own colour; otherwise it takes its board's colour.
-  return new Map(zones.map(zone => { const own = (zone as { colour?: unknown }).colour; return [zone.id, isColour(own) ? own : byBoard.get(zone.referenceBoard)!]; }));
+  return new Map(zones.map(zone => { const own = (zone as { colour?: unknown }).colour; return [zone.id, isColour(own) ? own : (zone.referenceBoard ? byBoard.get(zone.referenceBoard) : noBoard.get(zone.id))!]; }));
 }
 /** "A" reads as "Area A" (Chinese "区域 A", Malay "Kawasan A"); a longer label such as "Office wing" is shown as written. */
 export const areaLabel = (id: string, locale: EnergyIqLocale = "en") => id.length <= 2 ? mapText(locale)("area", { id }) : id;
@@ -109,12 +118,13 @@ export function SiteFloorMap({ reference, large = false, devices = [], onOpenDev
   const text = (lines: string[], cx: number, cy: number, size: number, className: string) => <text x={cx} y={cy - (lines.length - 1) * size * 0.6} textAnchor="middle" className={className} style={{ fontSize: size }}>{lines.map((line, index) => <tspan key={index} x={cx} dy={index ? size * 1.2 : 0}>{line}</tspan>)}</text>;
   const interactive = (!!onOpenDevice && devices.length > 0) || !!onSelectBoard;
   const faded = (board: string) => highlight !== null && !highlight.includes(board);
-  const clickable = (board: string, label: string) => onSelectBoard ? { role: "button", tabIndex: 0, "aria-label": label, "aria-pressed": highlight?.includes(board) ?? false, className: `${styles.areaLink} ${faded(board) ? styles.faded : ""}`, onClick: () => onSelectBoard(board), onKeyDown: (event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelectBoard(board); } } } : { className: faded(board) ? styles.faded : undefined };
+  // An area that names no panel is part of the drawing only: there is no panel to select.
+  const clickable = (board: string, label: string) => onSelectBoard && board ? { role: "button", tabIndex: 0, "aria-label": label, "aria-pressed": highlight?.includes(board) ?? false, className: `${styles.areaLink} ${faded(board) ? styles.faded : ""}`, onClick: () => onSelectBoard(board), onKeyDown: (event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelectBoard(board); } } } : { className: faded(board) ? styles.faded : undefined };
   return <svg viewBox={`${x} ${y} ${w} ${h + unit * 4}`} className={`${styles.map} ${large ? styles.large : ""}`} role={interactive ? "group" : "img"} aria-label={devices.length ? t("ariaDevices", { count: devices.length }) : t("aria")}>
-    {areas.map(zone => { const [zx, zy, zw, zh] = zone.rect as Rect; const colour = colours.get(zone.id)!; return <g key={zone.id} {...clickable(zone.referenceBoard, t("selectArea", { board: zone.referenceBoard, area: areaLabel(zone.id, locale) }))}>
+    {areas.map(zone => { const [zx, zy, zw, zh] = zone.rect as Rect; const colour = colours.get(zone.id)!; return <g key={zone.id} {...clickable(zone.referenceBoard, zone.referenceBoard ? t("selectArea", { board: zone.referenceBoard, area: areaLabel(zone.id, locale) }) : areaLabel(zone.id, locale))}>
       <rect x={zx} y={zy} width={zw} height={zh} rx={unit * 1.4} className={`${styles.zone} ${highlight?.includes(zone.referenceBoard) ? styles.zoneActive : ""}`} style={{ fill: colour, stroke: colour }} />
       <circle cx={zx + unit * 2.4} cy={zy + unit * 2.6} r={unit * 0.9} style={{ fill: colour }} />
-      <text x={zx + unit * 4} y={zy + unit * 3.3} className={styles.zoneLabel} style={{ fontSize: unit * 2.1 }}>{zone.referenceBoard}<tspan className={styles.zoneSub} dx={unit * 0.8}>{areaLabel(zone.id, locale)}</tspan></text>
+      <text x={zx + unit * 4} y={zy + unit * 3.3} className={styles.zoneLabel} style={{ fontSize: unit * 2.1 }}>{zone.referenceBoard ? <>{zone.referenceBoard}<tspan className={styles.zoneSub} dx={unit * 0.8}>{areaLabel(zone.id, locale)}</tspan></> : areaLabel(zone.id, locale)}</text>
     </g>; })}
     {reference.layout.rooms.map(room => { const [rx, ry, rw, rh] = room.rect as Rect; const colour = colours.get(room.zone); const size = Math.min(unit * 1.75, rw / 7); const board = reference.layout.zones.find(zone => zone.id === room.zone)?.referenceBoard ?? ""; return <g key={room.name} {...clickable(board, t("selectRoom", { board, room: room.name }))}>
       {(() => { const own = (room as { colour?: unknown }).colour; return <rect x={rx} y={ry} width={rw} height={rh} rx={unit * 0.8} className={styles.room} style={isColour(own) ? { stroke: own, fill: `color-mix(in srgb, ${own} 12%, white)` } : colour ? { stroke: colour } : undefined} />; })()}
@@ -126,7 +136,7 @@ export function SiteFloorMap({ reference, large = false, devices = [], onOpenDev
       const pinned = roomHasPins(box, positions);
       return <g key={zone.id} {...clickable(zone.referenceBoard, zone.equipment ? t("selectGroup", { board: zone.referenceBoard, equipment: zone.equipment }) : t("selectBoard", { board: zone.referenceBoard }))}>
         <rect x={gx} y={gy} width={gw} height={gh} rx={unit * 0.8} className={`${styles.subgroup} ${highlight?.includes(zone.referenceBoard) ? styles.zoneActive : ""}`} style={{ stroke: colour, fill: colour }} />
-        <text x={pinned ? gx + unit * 0.8 : gx + gw / 2} y={pinned ? gy + unit * 1.6 : gy + gh / 2 + unit * 0.6} textAnchor={pinned ? "start" : "middle"} className={styles.subgroupLabel} style={{ fontSize: unit * (pinned ? 1.15 : 1.5) }}>{zone.referenceBoard} · {zone.equipment ?? t("equipmentInRoom")}</text>
+        <text x={pinned ? gx + unit * 0.8 : gx + gw / 2} y={pinned ? gy + unit * 1.6 : gy + gh / 2 + unit * 0.6} textAnchor={pinned ? "start" : "middle"} className={styles.subgroupLabel} style={{ fontSize: unit * (pinned ? 1.15 : 1.5) }}>{zone.referenceBoard ? `${zone.referenceBoard} · ` : ""}{zone.equipment ?? t("equipmentInRoom")}</text>
       </g>;
     })}
     {entrance?.position && <g>
@@ -171,7 +181,7 @@ export function BoardLegend({ reference }: { reference: ProjectSpatialReference 
     return <li key={zone.id}>
       <span className={styles.swatch} style={{ background: colours.get(zone.id) }} aria-hidden="true" />
       <div>
-        <strong>{zone.referenceBoard}<span> · {zone.independentSpace === false ? t("inside", { room: zone.physicalParentRoom ?? t("aRoom") }) : areaLabel(zone.id, locale)}</span></strong>
+        <strong>{zone.referenceBoard}<span>{zone.referenceBoard ? " · " : ""}{zone.independentSpace === false ? t("inside", { room: zone.physicalParentRoom ?? t("aRoom") }) : areaLabel(zone.id, locale)}</span></strong>
         {zone.independentSpace === false ? <p>{t("subgroup", { equipment: zone.equipment ?? t("subgroupDefault"), room: zone.physicalParentRoom ?? t("roomAbove") })}</p> : <p className={styles.chips}>{rooms.map(room => <span key={room}>{room}</span>)}</p>}
       </div>
     </li>;

@@ -1,8 +1,18 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  createEnergyIqSourceManifest,
+  resolveEnergyIqSnapshotFactScope,
+  validateProjectSetupDocument,
+} from "@datafoundry/metadata";
 import type {
+  EnergyIqImportBatchRecord,
   EnergyIqLiveConnectorBinding,
   EnergyIqLiveConnectorRecord,
+  EnergyIqMeterCategory,
+  EnergyIqMeterMappingRow,
+  EnergyIqOfficialAggregationRoute,
   EnergyIqProjectSetupDocument,
+  EnergyIqProjectSetupNode,
   MetadataStore,
   UserRecord,
 } from "@datafoundry/metadata";
@@ -486,6 +496,387 @@ export const saveLiveConnectionMatches = async (
     });
   }
   return readLiveConnection(dependencies, input.projectId);
+};
+
+/** A place in the site's Locations tree a new meter can go, in tree order; `depth` 0 is a top-level location. */
+export type LiveConnectionLocation = { id: string; name: string; depth: number };
+
+export type LiveConnectionNewDevices = {
+  /**
+   * Devices in the connected Tuya project that no meter of this site reads yet (gateways left out). A device another
+   * site already reads keeps `usedBy` and cannot be added here. `suggestedLocationId` is where meters with the same
+   * product already sit, else where most of the site's meters sit.
+   */
+  devices: Array<LiveConnectionDevice & { suggestedLocationId?: string }>;
+  locations: LiveConnectionLocation[];
+  defaultLocationId?: string;
+};
+
+/** What adding meters needs from the rest of the app: the same steps Start from Tuya, uploads and Facility saves use. */
+export type LiveNewMetersPipeline = {
+  /** Why the site's current setup could not be made live now, if anything; adding meters would stop at the same place. */
+  blockingReasons: (document: EnergyIqProjectSetupDocument) => Promise<string[]>;
+  /** Keep the new devices' readings file as an import batch, as Start from Tuya does. */
+  registerReadings: (file: { filename: string; content: Buffer }) => Promise<EnergyIqImportBatchRecord>;
+  /** Read the batch into the site's data under the saved setup, with exactly these sources, as an upload does. */
+  materialize: (batchId: string, sourceSha256: readonly string[]) => Promise<void>;
+  /** Make the saved setup live, as saving a Facility change does. */
+  applyChanges: () => Promise<void>;
+};
+
+const NEW_METERS_MAX = 50;
+const NEW_METER_CATEGORIES = new Set<EnergyIqMeterCategory>(["load", "light", "aircon", "it", "kitchen", "plug", "other"]);
+
+/**
+ * The devices that could become new meters of a site that already has meters, with the places they could go. Device ids
+ * stay on the server: the browser gets each device's opaque ref, as for matching.
+ */
+export const listLiveConnectionNewDevices = async (
+  dependencies: LiveConnectionDependencies,
+  input: { projectId: string; userId: string },
+): Promise<LiveConnectionNewDevices> => {
+  const { metadataStore } = dependencies;
+  const connection = requireConnection(dependencies, input.projectId);
+  if (!publishedMeterRows(metadataStore, input.projectId)) throw new Error("ENERGYIQ_LIVE_PUBLISHED_SETUP_REQUIRED");
+  const devices = (await listLiveConnectionDevices(dependencies, input.projectId))
+    .filter((device) => !device.matchedTo && !isTuyaGateway(device));
+  const { document } = metadataStore.energyIq.projectSetup.getDraft({ project_id: input.projectId, user_id: input.userId });
+  const suggest = locationSuggester(document, connection);
+  return {
+    devices: devices.map((device) => {
+      const suggestedLocationId = suggest(device.productName);
+      return { ...device, ...(suggestedLocationId ? { suggestedLocationId } : {}) };
+    }),
+    locations: locationTree(document),
+    ...(suggest(undefined) ? { defaultLocationId: suggest(undefined)! } : {}),
+  };
+};
+
+/**
+ * Add meters for devices in the connected Tuya project to a site that already has meters, and match each to its device.
+ * Each meter is placed where the person chose in the Locations tree and goes through the same steps as Start from Tuya:
+ * its devices' last 7 days become an import batch, the setup draft gains the meters, the readings are read in, and the
+ * setup is made live like any Facility change. Their next readings then come with the daily update. Everything that
+ * can be checked is checked before anything changes, so a refusal leaves the site as it was.
+ */
+export const addLiveConnectionMeters = async (
+  dependencies: LiveConnectionDependencies,
+  input: { projectId: string; user: UserRecord; meters: unknown; pipeline: LiveNewMetersPipeline },
+): Promise<{ connection: LiveConnectionReadModel; added: number }> => {
+  const { metadataStore } = dependencies;
+  const connection = requireConnection(dependencies, input.projectId);
+  if (!publishedMeterRows(metadataStore, input.projectId)) throw new Error("ENERGYIQ_LIVE_PUBLISHED_SETUP_REQUIRED");
+  if (dependencies.isSyncRunning?.(input.projectId)) throw new Error("ENERGYIQ_LIVE_SYNC_RUNNING");
+  const requested = parseNewMeters(input.meters);
+
+  const credentials = readLiveConnectionCredentials(metadataStore, connection);
+  const visible = new Map((await listWith(dependencies, credentials)).map((device) => [liveDeviceRef(input.projectId, device.id), device]));
+  const matchedHere = new Set(Object.values(connection.bindings).map((binding) => binding.device_id));
+  const usedBy = devicesUsedElsewhere(dependencies, input.projectId);
+  const chosen = requested.map((meter) => {
+    const device = visible.get(meter.deviceRef);
+    if (!device) throw new Error("ENERGYIQ_LIVE_DEVICE_NOT_FOUND");
+    if (isTuyaGateway(device)) throw new Error("ENERGYIQ_LIVE_DEVICE_GATEWAY");
+    if (matchedHere.has(device.id)) throw new Error("ENERGYIQ_LIVE_DEVICE_ALREADY_MATCHED");
+    if (usedBy.has(device.id)) throw new Error("ENERGYIQ_LIVE_DEVICE_USED_ELSEWHERE");
+    return { ...meter, device };
+  });
+
+  const draft = metadataStore.energyIq.projectSetup.getDraft({ project_id: input.projectId, user_id: input.user.id });
+  const blocked = (await input.pipeline.blockingReasons(draft.document)).filter((reason) => reason !== "SNAPSHOT_MAPPING_MISMATCH");
+  if (blocked.length > 0) throw new Error(`ENERGYIQ_LIVE_NEW_METERS_DATA_NOT_READY:${blocked.join(",")}`);
+  const planned = withNewLiveMeters(draft.document, input.projectId, chosen);
+  const invalid = validateProjectSetupDocument(planned.document).issues.filter((issue) => issue.severity === "error");
+  if (invalid.length > 0) throw new Error(`ENERGYIQ_LIVE_NEW_METERS_SETUP_INVALID:${[...new Set(invalid.map((issue) => issue.code))].join(",")}`);
+
+  const endTime = dependencies.now?.() ?? Date.now();
+  const startTime = endTime - STARTER_DEFAULT_DAYS * 86_400_000;
+  let artifact: Awaited<ReturnType<TuyaOpenApiClient["syncEnergyReadings"]>>;
+  try {
+    artifact = await dependencies.createClient(credentials).syncEnergyReadings({
+      startTime,
+      endTime,
+      devices: chosen.map(({ device }, index) => ({ deviceId: device.id, sourceLabel: planned.rows[index]!.source_label })),
+      credentials,
+    });
+  } catch (error) {
+    throw new Error(`ENERGYIQ_LIVE_ACCOUNT_REJECTED:${providerErrorCode(error)}`, { cause: error });
+  }
+  const batch = await input.pipeline.registerReadings({
+    filename: `tuya-new-meters-${new Date(endTime).toISOString().slice(0, 10)}.json`,
+    content: Buffer.from(JSON.stringify(artifact), "utf8"),
+  });
+
+  // The site keeps every reading it already has; the new batch joins them.
+  const snapshot = metadataStore.energyIq.findCurrentDataSnapshot(input.projectId);
+  const sources = [...new Set([
+    ...(snapshot ? resolveEnergyIqSnapshotFactScope(snapshot).sourceSha256 : draft.document.source_manifest?.source_sha256 ?? []),
+    batch.source_sha256,
+  ].map((sha) => sha.toLocaleLowerCase()))].sort();
+  const saved = metadataStore.energyIq.projectSetup.saveDraft({
+    project_id: input.projectId,
+    expected_revision: draft.revision,
+    user_id: input.user.id,
+    document: { ...planned.document, source_manifest: createEnergyIqSourceManifest(sources, true) },
+  });
+
+  // A site that has had a daily update judges its data by the sources that update kept. Record this read as a run too,
+  // so those sources include the new batch; ending it at the current watermark leaves the next daily update's start
+  // where it was, so no existing meter misses a day.
+  const state = metadataStore.energyIq.sourceSync.findState({ project_id: input.projectId, source_kind: "tuya" });
+  const watermark = state?.active_source_sha256.length ? state.watermark_ms : undefined;
+  const claim = watermark === undefined ? undefined : metadataStore.energyIq.sourceSync.claim({
+    id: `energy-source-sync-${randomUUID()}`,
+    workspace_id: metadataStore.energyIq.getProject(input.projectId).workspace_id,
+    project_id: input.projectId,
+    source_kind: "tuya",
+    connector_fingerprint: createHash("sha256").update(`energyiq-live-new-meters:${input.projectId}:${batch.source_sha256}`).digest("hex"),
+    trigger: "manual",
+    window_start_ms: Math.min(startTime, watermark - 3_600_000),
+    window_end_ms: watermark,
+    actor_user_id: input.user.id,
+    started_at: new Date(endTime).toISOString(),
+  });
+  const run = claim && !claim.reused ? claim.run : undefined;
+  try {
+    await input.pipeline.materialize(batch.id, sources);
+    if (run) {
+      const current = metadataStore.energyIq.findCurrentDataSnapshot(input.projectId);
+      if (!current) throw new Error("ENERGYIQ_SNAPSHOT_REQUIRED");
+      metadataStore.energyIq.sourceSync.completeSuccess({
+        run_id: run.id,
+        import_batch_id: batch.id,
+        data_snapshot_id: current.id,
+        active_source_sha256: resolveEnergyIqSnapshotFactScope(current).sourceSha256,
+        completed_at: nowIso(dependencies),
+      });
+    }
+  } catch (error) {
+    if (run) {
+      try {
+        metadataStore.energyIq.sourceSync.completeFailure({
+          run_id: run.id,
+          error_code: providerErrorCode(error).replace(/[^A-Za-z0-9_:-]+/gu, "_").slice(0, 160),
+          completed_at: nowIso(dependencies),
+        });
+      } catch {
+        // The run is marked interrupted at the next start-up instead.
+      }
+    }
+    // Put the draft back so trying again starts from the site as it was.
+    try {
+      metadataStore.energyIq.projectSetup.saveDraft({
+        project_id: input.projectId,
+        expected_revision: saved.revision,
+        user_id: input.user.id,
+        document: draft.document,
+      });
+    } catch {
+      // Someone saved the draft in the meantime; theirs wins.
+    }
+    throw error;
+  }
+  await input.pipeline.applyChanges();
+
+  const bindings: Record<string, EnergyIqLiveConnectorBinding> = { ...connection.bindings };
+  chosen.forEach(({ device }, index) => {
+    bindings[planned.rows[index]!.id] = {
+      device_id: device.id,
+      device_name: device.name,
+      ...(device.productName ? { product_name: device.productName } : {}),
+    };
+  });
+  metadataStore.energyIq.liveConnectors.saveBindings({
+    project_id: input.projectId,
+    bindings,
+    actor_user_id: input.user.id,
+    updated_at: nowIso(dependencies),
+  });
+  return { connection: readLiveConnection(dependencies, input.projectId), added: chosen.length };
+};
+
+type NewMeterRequest = { deviceRef: string; name: string; locationId: string; offWithLights: boolean; category: EnergyIqMeterCategory };
+
+const parseNewMeters = (value: unknown): NewMeterRequest[] => {
+  if (!Array.isArray(value) || value.length === 0 || value.length > NEW_METERS_MAX) throw new Error("ENERGYIQ_LIVE_NEW_METERS_INVALID");
+  const refs = new Set<string>();
+  return value.map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("ENERGYIQ_LIVE_NEW_METERS_INVALID");
+    const record = item as Record<string, unknown>;
+    const deviceRef = typeof record.deviceRef === "string" ? record.deviceRef.trim() : "";
+    const name = listText(record.name, DEVICE_LIST_NAME_MAX);
+    const locationId = typeof record.locationId === "string" ? record.locationId : "";
+    if (!deviceRef || refs.has(deviceRef) || !locationId) throw new Error("ENERGYIQ_LIVE_NEW_METERS_INVALID");
+    if (!name) throw new Error("ENERGYIQ_LIVE_STARTER_LABELS_INVALID");
+    if (record.offWithLights !== undefined && typeof record.offWithLights !== "boolean") throw new Error("ENERGYIQ_LIVE_NEW_METERS_INVALID");
+    const category = record.category === undefined ? "other" : record.category;
+    if (typeof category !== "string" || !NEW_METER_CATEGORIES.has(category as EnergyIqMeterCategory)) throw new Error("ENERGYIQ_LIVE_NEW_METERS_INVALID");
+    refs.add(deviceRef);
+    return { deviceRef, name, locationId, offWithLights: record.offWithLights === true, category: category as EnergyIqMeterCategory };
+  });
+};
+
+const labelKey = (value: string): string => value.trim().replace(/\s+/gu, " ").toLocaleLowerCase();
+const slugOf = (value: string): string => value.toLocaleLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-|-$/gu, "") || "device";
+const uniqueIn = (base: string, taken: Set<string>, key: (value: string) => string = (value) => value): string => {
+  let candidate = base;
+  for (let suffix = 2; taken.has(key(candidate)); suffix += 1) candidate = `${base} (${suffix})`;
+  taken.add(key(candidate));
+  return candidate;
+};
+const uniqueId = (base: string, taken: Set<string>): string => {
+  let candidate = base;
+  for (let suffix = 2; taken.has(candidate); suffix += 1) candidate = `${base}-${suffix}`;
+  taken.add(candidate);
+  return candidate;
+};
+
+/**
+ * The setup with new meters added where the person chose. A meter placed in a location that has a level below it gets
+ * its own location there, named after it, as Smart setup builds a site; in a bottom-level location it sits directly.
+ * Each meter counts towards its location and every location above it, except where a whole-site or whole-location
+ * meter already measures that place, so nothing is counted twice. Existing meters, locations and totals are untouched.
+ */
+export const withNewLiveMeters = (
+  document: EnergyIqProjectSetupDocument,
+  projectId: string,
+  meters: Array<{ name: string; locationId: string; offWithLights: boolean; category: EnergyIqMeterCategory }>,
+): { document: EnergyIqProjectSetupDocument; rows: EnergyIqMeterMappingRow[] } => {
+  const mapping = document.meter_mapping;
+  if (!mapping) throw new Error("ENERGYIQ_LIVE_PUBLISHED_SETUP_REQUIRED");
+  const nodes: EnergyIqProjectSetupNode[] = [...document.nodes];
+  const rows: EnergyIqMeterMappingRow[] = [...mapping.rows];
+  const routes: EnergyIqOfficialAggregationRoute[] = (mapping.official_aggregation_routes ?? [])
+    .map((route) => ({ ...route, meter_point_ids: [...route.meter_point_ids] }));
+  const tiersById = new Map(document.tiers.map((tier) => [tier.id, tier]));
+  const labels = new Set(rows.map((row) => labelKey(row.source_label)));
+  const rowIds = new Set([...rows.map((row) => row.id), ...(mapping.virtual_meters ?? []).map((meter) => meter.id)]);
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const added: EnergyIqMeterMappingRow[] = [];
+  const routesHere = (scope: string) => routes.filter((route) => route.scope_id === scope && route.resource === "electricity");
+  const coveredHere = (scope: string) => routesHere(scope).some((route) => route.category === "overall");
+  /** The location and every location above it, then the whole site. */
+  const scopesFrom = (scopeId: string): string[] => {
+    const byId = new Map(nodes.map((node) => [node.id, node]));
+    const scopes = [scopeId];
+    let parent = byId.get(scopeId)?.parent_id;
+    while (parent && !scopes.includes(parent)) {
+      scopes.push(parent);
+      parent = byId.get(parent)?.parent_id;
+    }
+    return [...scopes, "project"];
+  };
+  for (const meter of meters) {
+    const location = nodes.find((node) => node.id === meter.locationId);
+    const tier = location ? tiersById.get(location.tier_definition_id) : undefined;
+    if (!location || !tier) throw new Error("ENERGYIQ_LIVE_LOCATION_UNKNOWN");
+    const label = uniqueIn(meter.name.replace(/\s+/gu, " ").trim(), labels, labelKey);
+    const childTier = document.tiers.find((candidate) => candidate.ordinal === tier.ordinal - 1);
+    let scopeId = location.id;
+    if (childTier) {
+      const siblings = nodes.filter((node) => node.parent_id === location.id && node.tier_definition_id === childTier.id);
+      const own: EnergyIqProjectSetupNode = {
+        id: uniqueId(`${projectId}-smart-circuit-${slugOf(label)}`, nodeIds),
+        tier_definition_id: childTier.id,
+        parent_id: location.id,
+        name: uniqueIn(label, new Set(siblings.map((node) => labelKey(node.name))), labelKey),
+        sort_order: siblings.reduce((highest, node) => Math.max(highest, node.sort_order + 1), 0),
+        metadata_status: "provisional",
+      };
+      nodes.push(own);
+      scopeId = own.id;
+    }
+    const row: EnergyIqMeterMappingRow = {
+      id: uniqueId(`mapping-${slugOf(label)}-${rows.length + 1}`, rowIds),
+      source_label: label,
+      scope_id: scopeId,
+      navigation_scope_id: scopeId,
+      display_name: label,
+      resource: "electricity",
+      category: meter.category,
+      coverage: "partial",
+      meter_role: "component",
+      // A location measured by its own whole-location meter already includes this one.
+      aggregation_usage: coveredHere(scopeId) ? "excluded" : "official",
+      ...(meter.offWithLights ? { presentation: { off_with_lights: "yes" } } : {}),
+    };
+    rows.push(row);
+    added.push(row);
+    if (row.aggregation_usage !== "official") continue;
+    for (const scope of scopesFrom(scopeId)) {
+      if (coveredHere(scope)) continue;
+      const route = routesHere(scope).find((candidate) => candidate.category === row.category);
+      if (route) route.meter_point_ids = [...route.meter_point_ids, row.id].sort();
+      else routes.push({ scope_id: scope, resource: "electricity", category: row.category, meter_point_ids: [row.id] });
+    }
+  }
+  return {
+    document: { ...document, nodes, meter_mapping: { ...mapping, rows, official_aggregation_routes: routes, confirmed: true } },
+    rows: added,
+  };
+};
+
+/** Every location in tree order: each top-level location, then the locations inside it. */
+const locationTree = (document: EnergyIqProjectSetupDocument): LiveConnectionLocation[] => {
+  const ids = new Set(document.nodes.map((node) => node.id));
+  const byOrder = (left: EnergyIqProjectSetupNode, right: EnergyIqProjectSetupNode) =>
+    left.sort_order - right.sort_order || left.name.localeCompare(right.name, undefined, { numeric: true });
+  const result: LiveConnectionLocation[] = [];
+  const seen = new Set<string>();
+  const visit = (parentId: string | undefined, depth: number) => {
+    for (const node of document.nodes.filter((candidate) => (candidate.parent_id && ids.has(candidate.parent_id) ? candidate.parent_id : undefined) === parentId).sort(byOrder)) {
+      if (seen.has(node.id)) continue;
+      seen.add(node.id);
+      result.push({ id: node.id, name: node.name, depth });
+      visit(node.id, depth + 1);
+    }
+  };
+  visit(undefined, 0);
+  return result;
+};
+
+/**
+ * Where a new meter most likely goes: where meters on the same Tuya product sit, else where most of the site's meters
+ * sit, else the first top-level location. A meter alone in its own bottom-level location (as Smart setup builds a site)
+ * sits in the location above it, so a new meter gets its own location there too rather than sharing another's.
+ */
+const locationSuggester = (
+  document: EnergyIqProjectSetupDocument,
+  connection: EnergyIqLiveConnectorRecord,
+): (productName: string | undefined) => string | undefined => {
+  const rows = document.meter_mapping?.rows ?? [];
+  const nodesById = new Map(document.nodes.map((node) => [node.id, node]));
+  const lowest = Math.min(...document.tiers.map((tier) => tier.ordinal));
+  const ordinalOf = (node: EnergyIqProjectSetupNode) => document.tiers.find((tier) => tier.id === node.tier_definition_id)?.ordinal;
+  const meterCount = new Map<string, number>();
+  for (const row of rows) {
+    const scope = row.navigation_scope_id ?? row.scope_id;
+    meterCount.set(scope, (meterCount.get(scope) ?? 0) + 1);
+  }
+  const homeOf = (row: EnergyIqMeterMappingRow): string | undefined => {
+    const node = nodesById.get(row.navigation_scope_id ?? row.scope_id);
+    if (!node) return undefined;
+    const ownLocation = document.tiers.length > 1 && node.parent_id && nodesById.has(node.parent_id)
+      && ordinalOf(node) === lowest && meterCount.get(node.id) === 1
+      && !document.nodes.some((candidate) => candidate.parent_id === node.id);
+    return ownLocation ? node.parent_id : node.id;
+  };
+  const tally = (filter: (row: EnergyIqMeterMappingRow) => boolean): string | undefined => {
+    const counts = new Map<string, number>();
+    for (const row of rows.filter(filter)) {
+      const home = homeOf(row);
+      if (home) counts.set(home, (counts.get(home) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0];
+  };
+  const fallback = tally(() => true) ?? locationTree(document)[0]?.id;
+  return (productName) => {
+    const product = productName?.trim().toLocaleLowerCase();
+    const similar = product
+      ? tally((row) => connection.bindings[row.id]?.product_name?.trim().toLocaleLowerCase() === product)
+      : undefined;
+    return similar ?? fallback;
+  };
 };
 
 /** Sign in, then ask Tuya whether each matched device reports the readings a daily update needs. */

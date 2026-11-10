@@ -6,7 +6,7 @@ import {
   Area, AreaChart, Bar, CartesianGrid, Cell, ComposedChart, Legend, Line, Pie, PieChart, ReferenceArea, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import {
-  ANOMALY_THRESHOLD_PCT, CATEGORY_COLORS, CATEGORY_ORDER, average, dateWithDay, dayTypeBaselines,
+  ANOMALY_THRESHOLD_PCT, CATEGORY_COLORS, CATEGORY_ORDER, average, dateWithDay,
   findAnomalies, hourlyProfile, meterHeatmap, openingLabel, overnightFloor, percentChange, quietHours, scopeDays, shortDate, topHours, weekdayShort, weekdayWindows,
   type AnalysisCategory, type AnalysisDay, type AnalysisDayType, type PeakHour,
 } from "./analysis-model";
@@ -27,7 +27,8 @@ import { analysisCsvFilename, analysisHourlyCsv } from "./analysis-export";
 import { downloadText } from "./explorer-export";
 import { breakdownSpaces } from "./site-total";
 import { DayTip, STANDOUT_STROKE, StandoutDayList, useDayExplanations } from "./analysis-standout";
-import { everyDayBaselines } from "@datafoundry/site-report";
+import { analysisGroupTree, STANDOUT_MIN_DAYS, usualDayBaselines } from "@datafoundry/site-report";
+import { MeterGroupTree } from "./meter-group-tree";
 import { currencyMark } from "./money";
 
 // Layout of the approved NetZero analysis page on a light surface: white panels, slate borders.
@@ -75,14 +76,16 @@ type Derived = ReturnType<typeof derive>;
 function derive(data: AnalysisData) {
   const days = scopeDays(data.current.project, data.holidays);
   const previousDays = data.previous ? scopeDays(data.previous.project, data.holidays) : [];
-  const calibration = [...previousDays, ...days];
-  const baselines = dayTypeBaselines(calibration);
+  // One usual day for the whole page: the median of complete days of the same kind in these dates, the same figure the
+  // "why was this day different" explanations use. Every day is one kind at a lights-on site.
+  const lighting = data.hoursMeaning === "lights_on";
+  const calibration = days;
+  const baselines = usualDayBaselines(days, lighting);
   const spaces = data.current.spaces.map(space => {
     const previous = data.previous?.spaces.find(item => item.id === space.id) ?? null;
     const spaceDays = scopeDays(space, data.holidays);
-    const spaceCalibration = [...(previous ? scopeDays(previous, data.holidays) : []), ...spaceDays];
-    const spaceBaselines = dayTypeBaselines(spaceCalibration);
-    return { scope: space, previous, days: spaceDays, calibration: spaceCalibration, baselines: spaceBaselines, anomalies: findAnomalies(spaceDays, spaceBaselines) };
+    const spaceBaselines = usualDayBaselines(spaceDays, lighting);
+    return { scope: space, previous, days: spaceDays, calibration: spaceDays, baselines: spaceBaselines, anomalies: findAnomalies(spaceDays, spaceBaselines) };
   });
   const project = data.current.project;
   const rate = project.cost && project.usageKwh ? project.cost.amount / project.usageKwh : null;
@@ -333,16 +336,14 @@ function DailyTotalTrend({ data, derived }: { data: AnalysisData; derived: Deriv
   const lt = forHoursMeaning(t, viewMessages, data.hoursMeaning);
   const spaceItem = derived.spaces.find(item => item.scope.id === space);
   const selected = spaceItem ? { ...spaceItem, name: spaceItem.scope.name } : { days: derived.days, baselines: derived.baselines, anomalies: derived.anomalies, calibration: derived.calibration, name: t("allSpaces") };
-  const everyDay = useMemo(() => lighting ? everyDayBaselines(selected.calibration) : null, [lighting, selected.calibration]);
-  const baseline = (everyDay ?? selected.baselines).find(item => item.dayType === dayType)!;
+  const baseline = selected.baselines.find(item => item.dayType === dayType)!;
   const shown = lighting ? selected.days : selected.days.filter(day => day.dayType === dayType);
   const complete = shown.filter(day => day.complete);
   const incomplete = shown.filter(day => !day.complete && day.totalKwh > 0).length;
-  const anomalies = everyDay ? findAnomalies(selected.days, everyDay) : selected.anomalies.filter(item => item.dayType === dayType);
+  const anomalies = lighting ? selected.anomalies : selected.anomalies.filter(item => item.dayType === dayType);
   const threshold = baseline.expectedKwh == null ? null : baseline.expectedKwh * (1 + ANOMALY_THRESHOLD_PCT / 100);
   // Why each day was different: against a usual day of its kind, split by the meters inside the chosen location.
-  const meterScopes = useMemo(() => spaceItem ? [spaceItem.scope] : [data.current.project, ...data.current.spaces], [spaceItem, data]);
-  const explanations = useDayExplanations(selected.days, meterScopes, lighting);
+  const explanations = useDayExplanations(selected.days, spaceItem?.scope ?? null, data.current, lighting, data.groups);
   const rows = shown.map(day => ({ date: day.date, total: day.totalKwh > 0 ? day.totalKwh : null, complete: day.complete, expected: baseline.expectedKwh, threshold, standout: explanations.get(day.date)?.status === "standout" }));
   const calibrationDates = selected.calibration.map(day => day.date).sort();
   // The area that only holds the main meter is the site total, not a part of it; it is already the daily total column.
@@ -354,10 +355,10 @@ function DailyTotalTrend({ data, derived }: { data: AnalysisData; derived: Deriv
   return <section className={`${PANEL} p-4`}>
     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
       <div>
-        <Title guide={{ summary: lt("trend.summary"), dataAcquisition: [t("trend.data1"), t("trend.data2")], chartGeneration: [lt("trend.chart1"), t("trend.chart2", { pct: ANOMALY_THRESHOLD_PCT })] }}>{t("trend.title")}</Title>
+        <Title guide={{ summary: lt("trend.summary"), dataAcquisition: [t("trend.data1"), t("trend.data2")], chartGeneration: [lt("trend.chart1", { count: STANDOUT_MIN_DAYS }), t("trend.chart2", { pct: ANOMALY_THRESHOLD_PCT })] }}>{t("trend.title")}</Title>
         <p className="text-sm text-slate-600">{t("trend.meta", {
           samples: lt(complete.length === 1 ? "trend.samples.one" : "trend.samples.other", { count: complete.length, type: label }),
-          baseline: baseline.expectedKwh == null ? t("trend.baselineNeeds") : t("unit.perDay", { value: num(baseline.expectedKwh) }),
+          baseline: baseline.expectedKwh == null ? t("trend.baselineNeeds", { count: STANDOUT_MIN_DAYS }) : t("unit.perDay", { value: num(baseline.expectedKwh) }),
           calibrated: calibrationDates.length ? `${dateWithDay(calibrationDates[0]!, locale)} – ${dateWithDay(calibrationDates.at(-1)!, locale)}` : "—",
           pct: ANOMALY_THRESHOLD_PCT,
         })}</p>
@@ -450,7 +451,7 @@ function BreakdownModal({ data, derived, card, kind, previousLabel, onClose }: {
   const meterRow = (meter: ScopeMeter, previous: ScopeData | null, muted = false) => {
     const now = seriesKwh(meter.series), before = previous ? seriesKwh(previous.meters.find(item => item.id === meter.id)?.series) : null;
     return <li key={meter.id} className={`flex items-center justify-between gap-3 text-xs ${muted ? "text-slate-500" : "text-slate-800"}`}>
-      <span className="flex min-w-0 items-center gap-2"><span className="inline-block h-2 w-2 shrink-0 rounded-sm" style={{ background: meter.category === "overall" ? "#8B95A5" : CATEGORY_COLORS[meter.category] }} /><span className="truncate" title={meter.name}>{meter.name}</span></span>
+      <span className="flex min-w-0 items-center gap-2"><span className="inline-block h-2 w-2 shrink-0 rounded-sm" style={{ background: meter.category === "overall" ? "#8B95A5" : CATEGORY_COLORS[meter.category] }} /><span className="truncate" title={meter.fullName ?? meter.name}>{meter.name}</span></span>
       <span className="shrink-0">{show(now, days)}<InlineChange change={percentChange(now, before || null)} /></span>
     </li>;
   };
@@ -529,7 +530,7 @@ function PeakModal({ data, peaks, onClose }: { data: AnalysisData; peaks: PeakHo
         {space && <><p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">{t("peak.circuitsIn", { space: space.name })}</p>
           {meterRows.length > 0 && spaceHourKwh > 0 && <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4"><PeakShareDonut spaceName={space.name} total={spaceHourKwh} slices={circuitSlices(meters.map(meter => ({ id: meter.id, name: meter.name, kwh: cellKwh(meter.series, peak.date, peak.hour) ?? 0, periodKwh: meter.series?.cells.reduce((sum, cell) => sum + (cell[2] ?? 0), 0) ?? 0 })), spaceHourKwh, locale)} /></div>}
           {meterRows.length ? <table className="w-full text-xs"><thead className="bg-slate-100 text-slate-700"><tr><th className="px-3 py-2 text-left">{t("col.circuit")}</th><th className="px-3 py-2 text-left">{t("col.type")}</th><th className="px-3 py-2 text-right">kWh</th><th className="px-3 py-2 text-right">{t("col.shareOfSpace")}</th></tr></thead>
-            <tbody>{meterRows.map(row => <tr key={row.meter.id} className="border-t border-slate-200 text-slate-800"><td className="px-3 py-2">{row.meter.name}</td><td className="px-3 py-2 text-slate-500">{row.meter.category === "overall" ? t("type.total") : categoryLabel(row.meter.category, locale)}</td><td className="px-3 py-2 text-right">{num(row.kwh, 2)}</td><td className="px-3 py-2 text-right">{spaceHourKwh > 0 ? `${num(row.kwh / spaceHourKwh * 100)}%` : "—"}</td></tr>)}</tbody></table>
+            <tbody>{meterRows.map(row => <tr key={row.meter.id} className="border-t border-slate-200 text-slate-800"><td className="px-3 py-2" title={row.meter.fullName}>{row.meter.name}</td><td className="px-3 py-2 text-slate-500">{row.meter.category === "overall" ? t("type.total") : categoryLabel(row.meter.category, locale)}</td><td className="px-3 py-2 text-right">{num(row.kwh, 2)}</td><td className="px-3 py-2 text-right">{spaceHourKwh > 0 ? `${num(row.kwh / spaceHourKwh * 100)}%` : "—"}</td></tr>)}</tbody></table>
             : <p className="text-sm text-slate-600">{t("peak.noCircuitReadings")}</p>}</>}
       </> : <p className="text-sm text-slate-600">{t("peak.noSpaces")}</p>}
     </div>
@@ -632,6 +633,11 @@ function EnergyDistribution({ data, derived }: { data: AnalysisData; derived: De
   const [tag, setTag] = useState<AnalysisCategory | null>(null);
   const { locale } = useEnergyIqLocale();
   const t = useMessages(viewMessages);
+  // Sites whose meters are grouped by what they serve can also split the energy by group, nested, with each group's
+  // share of the one above it. Readings saved before groups existed only split by type.
+  const groupTree = useMemo(() => analysisGroupTree(data, t("ed.unmetered")), [data, t]);
+  const [split, setSplit] = useState<"type" | "group">("type");
+  const byGroup = split === "group" && !!groupTree;
   const spaceItem = derived.spaces.find(item => item.scope.id === space);
   const scope: ScopeData = spaceItem?.scope ?? data.current.project;
   const sourceDays = spaceItem?.days ?? derived.days;
@@ -645,6 +651,14 @@ function EnergyDistribution({ data, derived }: { data: AnalysisData; derived: De
   const pickTag = (category: AnalysisCategory) => setTag(tag === category ? null : category);
   return <section className={`${PANEL} mt-4 p-4`}>
     <div className="mb-2"><Title className="text-xs font-semibold text-slate-900" guide={{ summary: t("ed.summary"), dataAcquisition: [t("ed.data1"), t("ed.data2")], chartGeneration: [t("ed.chart1")] }}>{t("ed.title")}</Title></div>
+    {groupTree && <div className={`${SUB} mb-3 inline-flex items-center gap-1 px-1 py-0.5`}>
+      <span className="px-1 text-[10px] text-slate-500">{t("ed.splitBy")}</span>
+      <div className="inline-flex gap-0.5 text-[10px]" role="group" aria-label={t("ed.splitBy")}>{([["type", t("ed.byType")], ["group", t("ed.byGroup")]] as const).map(([id, text]) => <button key={id} type="button" aria-pressed={split === id} onClick={() => setSplit(id)} className={`whitespace-nowrap rounded px-2 py-0.5 ${split === id ? "bg-emerald-100 text-emerald-800" : "text-slate-500 hover:bg-slate-50 hover:text-slate-800"}`}>{text}</button>)}</div>
+    </div>}
+    {byGroup ? <div>
+      <p className="mb-3 text-[11px] text-slate-600">{t("ed.groupNote", { count: derived.days.length })}</p>
+      <MeterGroupTree tree={groupTree} kwh={value => kwh(value, value < 20 ? 1 : 0)} pct={share => `${num(share * 100, 0)}%`} />
+    </div> : <>
     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
       <div className={`${SUB} w-full min-w-[160px] max-w-[220px] p-2 sm:w-auto`}>
         <p className="mb-1.5 text-[10px] text-slate-500">{t("spaceFilter")}</p>
@@ -685,12 +699,13 @@ function EnergyDistribution({ data, derived }: { data: AnalysisData; derived: De
         <div className="mb-2 flex items-center justify-between"><p className="text-[11px] font-medium text-slate-800">{tag ? spaceItem ? t("ed.circuitsOfIn", { type: categoryLabel(tag, locale), space: scope.name }) : t("ed.circuitsOf", { type: categoryLabel(tag, locale) }) : t("ed.selectTag")}</p>{tag && <button type="button" onClick={() => setTag(null)} className="text-[10px] text-slate-500 hover:text-slate-900">{t("ed.clear")}</button>}</div>
         {!tag ? <div className="flex h-60 items-center justify-center rounded border border-dashed border-slate-100 text-sm text-slate-600">{t("ed.clickHint")}</div>
           : ranked.length ? <ol className="space-y-1.5">{ranked.slice(0, 10).map((circuit, index) => <li key={circuit.id} className="text-[11px] text-slate-700">
-            <div className="flex justify-between gap-2"><span className="truncate">{index + 1}. {circuit.name}{circuit.location && !spaceItem ? ` · ${circuit.location}` : ""}</span><span className="shrink-0 text-slate-900">{num(circuit.kwh)} kWh</span></div>
+            <div className="flex justify-between gap-2"><span className="truncate" title={circuit.fullName ?? circuit.name}>{index + 1}. {circuit.name}{circuit.location && !spaceItem ? ` · ${circuit.location}` : ""}</span><span className="shrink-0 text-slate-900">{num(circuit.kwh)} kWh</span></div>
             <div className="mt-0.5 h-1.5 rounded bg-slate-100"><div className="h-full rounded" style={{ width: `${circuit.kwh / rankMax * 100}%`, background: CATEGORY_COLORS[tag] }} /></div>
           </li>)}</ol>
             : <div className="flex h-60 items-center justify-center rounded border border-dashed border-slate-100 px-4 text-center text-sm text-slate-600">{spaceItem ? t("ed.noCircuitsIn", { space: scope.name }) : t("ed.noCircuits")}</div>}
       </div>
     </div>
+    </>}
   </section>;
 }
 
@@ -948,7 +963,7 @@ function CircuitRanking({ data }: { data: AnalysisData }) {
     {top.length ? <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm">
       <thead className="bg-slate-100 text-slate-700"><tr><th className="px-3 py-2 text-left">{t("cr.rank")}</th><th className="px-3 py-2 text-left">{t("col.circuit")}</th><th className="px-3 py-2 text-left">{t("cr.floor")}</th><th className="px-3 py-2 text-left">{t("cr.category")}</th><th className="px-3 py-2 text-right">{t("cr.consumption")}</th><th className="px-3 py-2 text-right">{t("cr.vsAvg")}</th></tr></thead>
       <tbody>{top.map((circuit, index) => { const delta = avgTop > 0 ? Math.round((circuit.kwh / avgTop - 1) * 100) : 0; return <tr key={circuit.id} className="border-t border-slate-200">
-        <td className="px-3 py-2 text-slate-900">{index + 1}</td><td className="px-3 py-2 text-slate-900">{circuit.name}</td><td className="px-3 py-2 text-slate-700">{circuit.location || "—"}</td>
+        <td className="px-3 py-2 text-slate-900">{index + 1}</td><td className="px-3 py-2 text-slate-900" title={circuit.fullName}>{circuit.name}{circuit.fullName && <small className="block text-xs text-slate-500">{circuit.fullName}</small>}</td><td className="px-3 py-2 text-slate-700">{circuit.location || "—"}</td>
         <td className="px-3 py-2 text-slate-700">{circuit.category === "overall" ? t("type.total") : <TypeHint category={circuit.category} />}</td><td className="px-3 py-2 text-right text-slate-800">{kwh(circuit.kwh)}</td>
         <td className={`px-3 py-2 text-right ${delta > 0 ? "text-amber-700" : "text-emerald-700"}`}>{delta > 0 ? "+" : ""}{delta}%</td>
       </tr>; })}</tbody>

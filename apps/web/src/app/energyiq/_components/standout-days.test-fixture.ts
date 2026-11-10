@@ -2,6 +2,7 @@
  * A lighting site like SKTC for the "why was this day different?" tests: two weeks from Monday 2 Nov 2026, lights on
  * 7 pm to 7 am every night. A usual day is 46.1 kWh; on Thursday 5 Nov the Compassvale Bow entrance (+1.5 kWh), the
  * Pavilion (+0.6 kWh) and one lift lobby (+0.2 kWh) make it 48.4 kWh. On Tuesday 10 Nov readings went missing.
+ * Meters are filed in groups: Common area (the Bow entrance), Common area › Pavilion, Block 264E and Block 264F.
  */
 import type { AnalysisData, ScopeData, ScopeMeter, TrendSeries } from "@datafoundry/site-report";
 
@@ -32,4 +33,8 @@ const nights = Object.fromEntries(["monday", "tuesday", "wednesday", "thursday",
 export const DATA: AnalysisData = {
   projectId: "sktc", projectName: "SKTC", timezone: "Asia/Singapore", snapshotId: null, current: { project: site, spaces: [] }, previous: null, history: null,
   circuits: [], holidays: new Map(), openingHours: nights, actions: [], hoursMeaning: "lights_on",
+  groups: {
+    list: [{ id: "common", name: "Common area", parentId: null }, { id: "pavilion-area", name: "Pavilion", parentId: "common" }, { id: "264e", name: "Block 264E", parentId: null }, { id: "264f", name: "Block 264F", parentId: null }],
+    meters: [["bow", "common"], ["pavilion", "pavilion-area"], ["lobby-e", "264e"], ["lobby-f", "264f"]].map(([id, groupId]) => ({ id: id!, name: NAMES[id!]![0], groupId: groupId!, kwh: 14 * DAILY[id!]!(DATES[0]!) })),
+  },
 };
