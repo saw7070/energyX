@@ -5,7 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({ liveConnectionRequest: vi.fn(), getEnergyProjectMeterHealth: vi.fn() }));
 vi.mock("../../../lib/config-api", () => ({ configApi: api }));
-import { checkReasonKey, LiveConnectionPanel, liveDeviceRefFor, liveErrorKey, suggestMatches, type LiveConnectionDto } from "./live-connection-panel";
+import { addMetersErrorKey, checkReasonKey, LiveConnectionPanel, liveDeviceRefFor, liveErrorKey, newMeterCategory, suggestMatches, type LiveConnectionDto, type LiveNewDevicesDto } from "./live-connection-panel";
+import { EnergyIqLocaleProvider } from "./energyiq-locale";
+import { LANGUAGE_STORAGE_KEY } from "./energyiq-messages";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -420,5 +422,152 @@ describe("LiveConnectionPanel", () => {
     expect(button("Create 2 meters")).toBeTruthy();
     const office = [...container.querySelectorAll("ul label")].find((label) => label.textContent?.includes("DB1 L1 Light"))!;
     expect((office.querySelector("input") as HTMLInputElement).checked).toBe(false);
+  });
+});
+
+describe("Add new meters", () => {
+  const live = (rows: LiveConnectionDto["meters"]) => connection({
+    connected: true,
+    accountHint: "abcd…ijkl",
+    matchedCount: rows.length,
+    ready: true,
+    schedule: { enabled: true, localHour: 2, timezone: "Asia/Singapore" },
+    meters: rows,
+  });
+  const matchedMeters = meters.map((meter, index) => ({ ...meter, device: { ref: devices[index]!.ref, name: devices[index]!.name } }));
+  const newDevices: LiveNewDevicesDto = {
+    devices: [
+      { ref: "ref-new-aircon", name: "Aircon L3", productName: "Smart meter", online: true, suggestedLocationId: "board-a" },
+      { ref: "ref-new-rack", name: "Rack 2", productName: "Din rail meter", online: false, suggestedLocationId: "board-b" },
+      { ref: "ref-office", name: "DB1 L1 Light", productName: "Smart meter", online: true, usedBy: { siteName: "Tuya Office" } },
+    ],
+    locations: [
+      { id: "board-a", name: "Board A", depth: 0 },
+      { id: "circuit-pantry", name: "Pantry", depth: 1 },
+      { id: "board-b", name: "Board B", depth: 0 },
+    ],
+    defaultLocationId: "board-a",
+  };
+  const section = () => container.querySelector("section[aria-label='Add new meters']") as HTMLElement | null;
+  const row = (name: string) => [...section()!.querySelectorAll("li")].find((item) => item.querySelector("label")?.textContent?.includes(name))!;
+
+  it("lists the new Tuya devices, names and places the ticked ones, adds them and says when readings arrive", async () => {
+    let current = live(matchedMeters);
+    const sent: unknown[] = [];
+    api.liveConnectionRequest.mockImplementation(async (_projectId: string, action = "", init?: RequestInit) => {
+      if (action === "devices") return { devices };
+      if (action === "new-devices") return newDevices;
+      if (action === "new-meters") {
+        sent.push(JSON.parse(String(init?.body)));
+        current = live([
+          ...matchedMeters,
+          { meterPointId: "m-aircon", name: "Aircon L3", sourceLabel: "Aircon L3", device: { ref: "ref-new-aircon", name: "Aircon L3" } },
+          { meterPointId: "m-server", name: "Server room", sourceLabel: "Server room", device: { ref: "ref-new-rack", name: "Rack 2" }, offWithLights: true },
+        ]);
+        return { connection: current, added: 2 };
+      }
+      return { connection: current };
+    });
+    await act(async () => root.render(<LiveConnectionPanel projectId="p" />));
+    await flush();
+    expect(section()).toBeNull();
+    await act(async () => { button("Add new meters").click(); });
+    await flush();
+
+    // A device another site reads is marked and can't be ticked.
+    expect(row("DB1 L1 Light").textContent).toContain("Connected to Tuya Office");
+    expect((row("DB1 L1 Light").querySelector("input") as HTMLInputElement).disabled).toBe(true);
+    expect(button("Add meters").disabled).toBe(true);
+
+    await act(async () => { (row("Aircon L3").querySelector("input") as HTMLInputElement).click(); });
+    await act(async () => { (row("Rack 2").querySelector("input") as HTMLInputElement).click(); });
+    // Each starts with its Tuya name, in the place meters like it already sit.
+    expect((row("Aircon L3").querySelector("input[aria-label='Meter name: Aircon L3']") as HTMLInputElement).value).toBe("Aircon L3");
+    expect((row("Aircon L3").querySelector("select") as HTMLSelectElement).value).toBe("board-a");
+    expect((row("Rack 2").querySelector("select") as HTMLSelectElement).value).toBe("board-b");
+    expect([...(row("Rack 2").querySelector("select") as HTMLSelectElement).options].map((option) => option.textContent)).toEqual(["Board A", " Pantry", "Board B"]);
+
+    const search = section()!.querySelector("input[type='search']") as HTMLInputElement;
+    await act(async () => setValue(search, "din rail"));
+    expect([...section()!.querySelectorAll("li")].map((item) => item.querySelector("label")!.textContent!.split(" · ")[0])).toEqual(["Rack 2"]);
+    await act(async () => setValue(row("Rack 2").querySelector("input[aria-label='Meter name: Rack 2']") as HTMLInputElement, "Server room"));
+    await act(async () => setValue(row("Rack 2").querySelector("select") as HTMLSelectElement, "circuit-pantry"));
+    await act(async () => { (row("Rack 2").querySelector("input[aria-label='Off with the lights: Rack 2']") as HTMLInputElement).click(); });
+    await act(async () => setValue(search, ""));
+
+    await act(async () => { button("Add 2 meters").click(); });
+    await flush();
+    expect(sent).toEqual([{
+      meters: [
+        { deviceRef: "ref-new-aircon", name: "Aircon L3", locationId: "board-a", category: "aircon" },
+        { deviceRef: "ref-new-rack", name: "Server room", locationId: "circuit-pantry", category: "it", offWithLights: true },
+      ],
+    }]);
+    expect(container.textContent).toContain("Added 2 meters. Their readings arrive with the next daily update, or press Fetch now.");
+    expect(section()).toBeNull();
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(4);
+    expect(container.textContent).toContain("4 of 4 meters matched");
+  });
+
+  it("says when nothing is new, and explains a refused add in plain words", async () => {
+    let listed: LiveNewDevicesDto = { ...newDevices, devices: [] };
+    api.liveConnectionRequest.mockImplementation(async (_projectId: string, action = "") => {
+      if (action === "devices") return { devices };
+      if (action === "new-devices") return listed;
+      if (action === "new-meters") throw new Error("ENERGYIQ_LIVE_DEVICE_USED_ELSEWHERE");
+      return { connection: live(matchedMeters) };
+    });
+    await act(async () => root.render(<LiveConnectionPanel projectId="p" />));
+    await flush();
+    await act(async () => { button("Add new meters").click(); });
+    await flush();
+    expect(section()!.textContent).toContain("All devices in the Tuya project are already in this site.");
+
+    listed = newDevices;
+    await act(async () => { (section()!.querySelector("button") as HTMLButtonElement).click(); });
+    await flush();
+    await act(async () => { (row("Aircon L3").querySelector("input") as HTMLInputElement).click(); });
+    await act(async () => { button("Add 1 meter").click(); });
+    await flush();
+    expect(section()!.querySelector("[role='alert']")?.textContent).toBe("A chosen device is now used by another site. Refresh the list and pick again.");
+
+    await act(async () => { [...section()!.querySelectorAll("button")].find((candidate) => candidate.textContent === "Cancel")!.click(); });
+    expect(section()).toBeNull();
+  });
+
+  it("is offered only to people who can change the site's setup", async () => {
+    api.liveConnectionRequest.mockImplementation(async (_projectId: string, action = "") => action === "devices" ? { devices } : { connection: live(matchedMeters) });
+    await act(async () => root.render(<LiveConnectionPanel projectId="p" canAddMeters={false} />));
+    await flush();
+    expect(button("Add new meters")).toBeUndefined();
+    expect(addMetersErrorKey("ENERGYIQ_PROJECT_FORBIDDEN")).toBe("error.notAllowed");
+    expect(addMetersErrorKey("ENERGYIQ_ADMIN_REQUIRED")).toBe("error.notAllowed");
+    expect(addMetersErrorKey("ENERGYIQ_LIVE_ACCOUNT_REJECTED:ENERGYIQ_TUYA_API_ERROR:1010:token_invalid")).toBe("error.expired");
+    expect(liveErrorKey("ENERGYIQ_LIVE_DEVICE_ALREADY_MATCHED")).toBe("error.alreadyHere");
+    expect(liveErrorKey("ENERGYIQ_LIVE_NEW_METERS_DATA_NOT_READY:INVALID_RAW_ROWS")).toBe("error.addNotReady");
+    expect(newMeterCategory("Meter 7", "Smart Plug")).toBe("plug");
+    expect(newMeterCategory("Main lighting", "Smart Plug")).toBe("light");
+  });
+
+  it("speaks Chinese and Malay", async () => {
+    api.liveConnectionRequest.mockImplementation(async (_projectId: string, action = "") => {
+      if (action === "devices") return { devices };
+      if (action === "new-devices") return { ...newDevices, devices: [] };
+      return { connection: live(matchedMeters) };
+    });
+    for (const [locale, open, none] of [
+      ["zh-Hans", "添加新电表", "涂鸦项目中的所有设备都已在此场地中。"],
+      ["ms", "Tambah meter baharu", "Semua peranti dalam projek Tuya sudah ada dalam tapak ini."],
+    ] as const) {
+      localStorage.setItem(LANGUAGE_STORAGE_KEY, locale);
+      await act(async () => root.render(<EnergyIqLocaleProvider><LiveConnectionPanel projectId="p" /></EnergyIqLocaleProvider>));
+      await flush();
+      await act(async () => { button(open).click(); });
+      await flush();
+      expect(container.querySelector(`section[aria-label='${open}']`)?.textContent).toContain(none);
+      await act(async () => root.unmount());
+      root = createRoot(container);
+    }
+    localStorage.removeItem(LANGUAGE_STORAGE_KEY);
   });
 });

@@ -104,10 +104,12 @@ import {
 import { markSiteAlertRead, readSiteAlerts } from "./energy-site-alerts.js";
 import { readLiveSiteReadings } from "./energy-live-readings.js";
 import {
+  addLiveConnectionMeters,
   buildLiveConnectionStarter,
   checkLiveConnection,
   disconnectLiveConnection,
   listLiveConnectionDevices,
+  listLiveConnectionNewDevices,
   readLiveConnection,
   requireSyncable,
   resolveLiveConnectionDeviceList,
@@ -1530,6 +1532,37 @@ export const handleEnergyApiRequest = async (
         requireProjectArea(context, user, projectId, ["facility"], "write");
         const body = requireRecord(await readJsonBody(request));
         return respond(await resolveLiveConnectionDeviceList(live, { projectId, rows: body.rows }));
+      }
+      // Add meters to a site that already has them: devices in the Tuya project no meter here reads yet, then add some.
+      if (segments.length === 4 && action === "new-devices" && request.method === "GET") {
+        requireProjectArea(context, user, projectId, ["facility"], "write");
+        return respond(await listLiveConnectionNewDevices(live, { projectId, userId: user.id }));
+      }
+      if (segments.length === 4 && action === "new-meters" && request.method === "POST") {
+        requireProjectArea(context, user, projectId, ["facility"], "write");
+        // Adding meters makes the setup live, which only an administrator may do; check before anything changes.
+        requireEnergyAdminProject(context, user, projectId);
+        const body = requireRecord(await readJsonBody(request));
+        const project = context.metadataStore.energyIq.getProject(projectId);
+        return respond(await addLiveConnectionMeters(live, {
+          projectId,
+          user,
+          meters: body.meters,
+          pipeline: {
+            blockingReasons: async (document) => (await createProjectDataReadiness(context, projectId, document)).blockingReasons,
+            registerReadings: async (file) => (await createReadingsImportBatch(context, project, user, {
+              ...file,
+              mimeType: "application/json",
+              kind: "tuya",
+            })).batch,
+            materialize: async (batchId, sourceSha256) => {
+              await materializeAgentProjectSource(context, projectId, batchId, dependencies, sourceSha256);
+            },
+            applyChanges: async () => {
+              await applyProjectChangesNow(context, projectId, dependencies);
+            },
+          },
+        }), 201);
       }
       if (segments.length === 4 && action === "sync" && request.method === "POST") {
         requireSyncable(live, projectId);
