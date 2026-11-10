@@ -7,7 +7,7 @@ import {
 } from "recharts";
 import {
   ANOMALY_THRESHOLD_PCT, CATEGORY_COLORS, CATEGORY_ORDER, average, dateWithDay, dayTypeBaselines,
-  findAnomalies, hourlyProfile, meterHeatmap, openingLabel, overnightFloor, percentChange, scopeDays, shortDate, topHours, weekdayShort, weekdayWindows,
+  findAnomalies, hourlyProfile, meterHeatmap, openingLabel, overnightFloor, percentChange, quietHours, scopeDays, shortDate, topHours, weekdayShort, weekdayWindows,
   type AnalysisCategory, type AnalysisDay, type AnalysisDayType, type PeakHour,
 } from "./analysis-model";
 import { loadAnalysis, recentAnalysis, type AnalysisData, type AnalysisRange, type ScopeData, type ScopeMeter, type TrendSeries } from "./analysis-data";
@@ -85,8 +85,9 @@ function derive(data: AnalysisData) {
   const rate = project.cost && project.usageKwh ? project.cost.amount / project.usageKwh : null;
   const complete = days.filter(day => day.complete);
   const avgOf = (type: AnalysisDayType) => average(complete.filter(day => day.dayType === type).map(day => day.totalKwh));
-  const windows = weekdayWindows(project, days, data.openingHours);
-  const floor = overnightFloor(data.history ?? project);
+  const windows = weekdayWindows(project, days, data.openingHours, data.hoursMeaning);
+  // The lowest quiet-hours level already held: overnight, or the daytime for a lights-on site.
+  const floor = overnightFloor(data.history ?? project, quietHours(data.openingHours, data.hoursMeaning));
   const anomalies = findAnomalies(days, baselines);
   return { days, previousDays, calibration, baselines, anomalies, spaces, rate, avgOf, windows, floor, complete };
 }
@@ -728,7 +729,7 @@ function SummaryOfFindings({ data, derived }: { data: AnalysisData; derived: Der
         : t("sf.highestCircuit", { name: data.circuits[0].name, kwh: kwh(data.circuits[0].kwh) })] : []),
     ]],
     [t("sf.behaviour"), [
-      t("sf.openHours", { hours: openingLabel(data.openingHours), kwh: kwh(w.open), pct: share(w.openShare) }),
+      t("sf.openHours", { hours: openingLabel(data.openingHours, locale, data.hoursMeaning), kwh: kwh(w.open), pct: share(w.openShare) }),
       t("sf.afterHours", { kwh: kwh(w.night), pct: share(w.nightShare) }),
       ...(weekdayAvg && weekendAvg ? [t("sf.weekendShare", { pct: num(weekendAvg / weekdayAvg * 100, 0) })] : []),
       ...(derived.floor && derived.floor.latestKw - derived.floor.bestKw >= 0.5 ? [t("sf.overnight", { now: num(derived.floor.latestKw, 2), best: num(derived.floor.bestKw, 2), date: shortDate(derived.floor.bestTo, locale) })] : []),
@@ -905,13 +906,14 @@ function LevelPattern({ derived }: { derived: Derived }) {
 // ---------- Behaviour, circuits, recommendations ----------
 function HealthSummary({ data, derived }: { data: AnalysisData; derived: Derived }) {
   const t = useMessages(viewMessages);
+  const { locale } = useEnergyIqLocale();
   const w = derived.windows;
   const avg = (type: AnalysisDayType, empty = "—") => { const value = derived.avgOf(type); return value == null ? empty : t("unit.perDay", { value: num(value) }); };
   const items: Array<[string, string]> = [
     [t("hs.weekday"), avg("weekday")],
     [t("hs.weekend"), avg("weekend")],
     [t("hs.holiday"), avg("public_holiday", t("hs.noHoliday"))],
-    [t("hs.openHours", { hours: openingLabel(data.openingHours) }), `${kwh(w.open)}${w.openShare == null ? "" : ` (${num(w.openShare * 100)}%)`}`],
+    [t("hs.openHours", { hours: openingLabel(data.openingHours, locale, data.hoursMeaning) }), `${kwh(w.open)}${w.openShare == null ? "" : ` (${num(w.openShare * 100)}%)`}`],
     [t("hs.afterHours"), `${kwh(w.night)}${w.nightShare == null ? "" : ` (${num(w.nightShare * 100)}%)`}`],
     ...data.current.spaces.map(space => [t("hs.spaceTotal", { name: space.name }), kwh(space.usageKwh)] as [string, string]),
     ...(derived.floor ? [[t("hs.overnight"), t("hs.overnightValue", { now: num(derived.floor.latestKw, 2), best: num(derived.floor.bestKw, 2) })] as [string, string]] : []),

@@ -5,7 +5,7 @@ import { EnergySelect } from "./energy-select";
 import { useMessages } from "./energyiq-locale";
 import { withCurrency } from "./money";
 import { newSiteMessages } from "./new-site-messages";
-import { choosePlan, CUSTOM_PLAN, DAYS, includeHolidays, type SiteSettings } from "./new-site-settings";
+import { chooseHoursMeaning, choosePlan, CUSTOM_PLAN, DAYS, includeHolidays, type SiteSettings } from "./new-site-settings";
 import { COUNTRY_DEFAULTS, usualOpeningDays, type TariffPlanId } from "./site-region";
 import styles from "./new-site.module.css";
 
@@ -42,12 +42,18 @@ export function NewSiteSettingsPanel({ settings, onChange, disabled }: {
         : { ...settings, hours: null })}
       later={t("hoursLater")}>
       {settings.hours && <>
-        <div><span className={styles.fieldLabel}>{t("openOn")}</span>
+        <label><span className={styles.fieldLabel}>{t("hoursMeaning")}</span>
+          <EnergySelect ariaLabel={t("hoursMeaning")} disabled={disabled} value={settings.hours.meaning ?? "opening"} className="w-full"
+            options={(["opening", "lights_on"] as const).map(meaning => ({ value: meaning, label: t(`hoursMeaning.${meaning}`) }))}
+            onValueChange={meaning => onChange(chooseHoursMeaning(settings, meaning === "lights_on" ? "lights_on" : "opening"))} /></label>
+        <div><span className={styles.fieldLabel}>{t(settings.hours.meaning === "lights_on" ? "lightsOnOn" : "openOn")}</span>
           <DayPicker days={settings.hours.days} disabled={disabled} onChange={days => update({ hours: { ...settings.hours!, days } })} /></div>
         <div className={styles.row}>
           <TimeField label={t("from")} value={settings.hours.from} disabled={disabled} onChange={from => update({ hours: { ...settings.hours!, from } })} />
           <TimeField label={t("to")} value={settings.hours.to} disabled={disabled} onChange={to => update({ hours: { ...settings.hours!, to } })} />
         </div>
+        {/* An end earlier than the start runs past midnight: 19:00 to 07:00 the next morning. */}
+        {settings.hours.from && settings.hours.to && settings.hours.to !== "00:00" && settings.hours.to < settings.hours.from && <p className={styles.hint}>{t("nextDay")}</p>}
       </>}
     </Section>
 

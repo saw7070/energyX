@@ -33,7 +33,8 @@ const sameText = (left: string, right: string): boolean => {
  * when known: the headline may be in Chinese or Malay, so the English wording test is only a fallback.
  */
 export function analysisHref(projectId: string, period: { from: string; toExclusive: string } | null, headline: string, topic?: string): string {
-  const alwaysOn = topic ? topic === "always-on" : /around the clock|always[- ]on|stays? on|left on|after working hours|nobody|never (really )?switch/i.test(headline);
+  // Daytime use at a lights-on site, like an always-on load, is explained in "What stays on".
+  const alwaysOn = topic ? topic === "always-on" || topic === "daytime" : /around the clock|always[- ]on|stays? on|left on|after working hours|nobody|never (really )?switch/i.test(headline);
   const section = alwaysOn ? "story-on" : "story-title";
   return `/energyiq/analysis?${new URLSearchParams({ projectId, ...(period ? { from: period.from, to: shiftDate(period.toExclusive, -1) } : {}), section })}`;
 }
