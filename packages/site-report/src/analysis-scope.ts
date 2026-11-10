@@ -33,7 +33,7 @@ export type AnalysisSource = {
 export type ProjectInformationSource = {
   name?: string | undefined;
   meters?: Array<{ id: string; location: string }> | undefined;
-  calendar: null | { entries: Array<{ location: string; from: string; toExclusive: string | null; weekly: unknown; exceptions: Array<{ date: string; label: string; classification?: string | undefined }> }> };
+  calendar: null | { entries: Array<{ location: string; from: string; toExclusive: string | null; weekly: unknown; hoursMeaning?: string | undefined; exceptions: Array<{ date: string; label: string; classification?: string | undefined }> }> };
 } | null;
 
 const CATEGORY_OF: Record<string, AnalysisCategory | "overall"> = { light: "light", load: "load", aircon: "aircon", it: "it", kitchen: "kitchen", plug: "plug", overall: "overall" };
@@ -203,5 +203,7 @@ export function assembleAnalysisData(input: {
     history: input.history && input.history.summary.validIntervalCount > 0 ? toScope(input.history, locations) : null,
     circuits: rankCircuits(loadedSpaces.length ? loadedSpaces : [project], hasPrevious ? input.previousProject : null, locations),
     holidays, openingHours: (projectEntry?.weekly ?? null) as AnalysisData["openingHours"], actions: input.actions,
+    // Only lights-on hours are marked, so opening-hours sites keep exactly the readings they had before.
+    ...(projectEntry?.hoursMeaning === "lights_on" ? { hoursMeaning: "lights_on" as const } : {}),
   };
 }

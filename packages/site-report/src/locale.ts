@@ -19,5 +19,15 @@ export function defineMessages<const E extends Record<string, string>>(en: E, ot
 export const translatorFor = <K extends string>(book: Translations<K>, locale: EnergyIqLocale): Translate<K> => (key, values) =>
   (book[locale][key] ?? book.en[key]).replace(/\{(\w+)\}/g, (placeholder, name: string) => values && name in values ? String(values[name]) : placeholder);
 
+/**
+ * For a site whose hours are lights-on hours (lighting that should run at night), words each sentence with its
+ * "lights." variant when the book has one, e.g. "lights.head.closed" instead of "head.closed". Opening hours use the
+ * book unchanged.
+ */
+export function forHoursMeaning<K extends string>(t: Translate<K>, book: Translations<K>, meaning: "opening" | "lights_on" | undefined): Translate<K> {
+  if (meaning !== "lights_on") return t;
+  return (key, values) => t(`lights.${key}` in book.en ? `lights.${key}` as K : key, values);
+}
+
 /** The locale to hand to Intl / toLocaleString for numbers and dates; Singapore conventions in every language. */
 export const intlLocale = (locale: EnergyIqLocale) => ({ en: "en-SG", "zh-Hans": "zh-Hans-SG", ms: "ms-SG" } as const)[locale];

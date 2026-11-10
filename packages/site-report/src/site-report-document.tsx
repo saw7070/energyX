@@ -8,7 +8,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { holidayName, joinText } from "./analysis-messages.js";
 import { shortDate } from "./analysis-model.js";
-import { translatorFor, type EnergyIqLocale } from "./locale.js";
+import { forHoursMeaning, translatorFor, type EnergyIqLocale } from "./locale.js";
 import { rich, Rich } from "./rich.js";
 import { clock, hourRange, moneyText, pctText, REPORT_COLOURS as C, type ProfileNote, type ReportDay, type ReportZone, type SiteReport } from "./site-report-model.js";
 import { siteReportMessages } from "./site-report-messages.js";
@@ -21,6 +21,8 @@ const num = (value: number | null, digits = 1) => value == null ? "—" : value.
 const whole = (value: number) => Math.round(value).toLocaleString("en-SG");
 /** The document's wording follows the language its sentences were written in, so a downloaded copy never mixes languages. */
 const reportText = (locale: EnergyIqLocale) => translatorFor(siteReportMessages, locale);
+/** The report's wording; a lights-on site's hours sections say "lights-on hours" and "daytime" instead of open and closed. */
+const reportHoursText = (report: Pick<SiteReport, "locale" | "hoursMeaning">) => forHoursMeaning(reportText(report.locale), siteReportMessages, report.hoursMeaning);
 
 /** Axis ticks at a round step (1, 2, 2.5 or 5 × 10ⁿ) from zero to just above the maximum. */
 export function niceTicks(max: number, target = 5) {
@@ -285,8 +287,9 @@ function BenchChart({ benchmark, locale, standalone }: { benchmark: SiteReport["
 }
 
 // ---------- 4. weekday hour by hour ----------
-function ProfileChart({ pattern, locale, standalone }: { pattern: NonNullable<SiteReport["pattern"]>; locale: EnergyIqLocale; standalone?: boolean | undefined }) {
-  const t = reportText(locale);
+function ProfileChart({ pattern, report, standalone }: { pattern: NonNullable<SiteReport["pattern"]>; report: SiteReport; standalone?: boolean | undefined }) {
+  const { locale } = report;
+  const t = reportHoursText(report);
   const [ref, width] = useWidth(780);
   const [hover, setHover] = useState<number | null>(null);
   const height = Math.round(Math.min(380, Math.max(280, width * 0.46)));
@@ -300,6 +303,11 @@ function ProfileChart({ pattern, locale, standalone }: { pattern: NonNullable<Si
   const line = monotonePath(points);
   const every = pw / 23 >= 26 ? 2 : pw / 23 >= 14 ? 3 : 4;
   const bandFrom = x(pattern.openFrom), bandTo = x(Math.min(23, pattern.openTo));
+  // Hours that run past midnight (19 → 7) shade the evening and the early morning of the same average day.
+  const bands = pattern.openTo > pattern.openFrom ? [[bandFrom, bandTo]] : [[bandFrom, x(23)], [x(0), bandTo]];
+  // The label sits in the wider part; in the evening part it ends at the chart's right edge so it stays inside.
+  const bandLabel = pattern.openTo > pattern.openFrom ? { x: bandFrom + 8 }
+    : pattern.openTo >= 23 - pattern.openFrom ? { x: x(0) + 8 } : { x: x(23) - 8, textAnchor: "end" as const };
   const place = (note: ProfileNote) => {
     const px = x(note.hour), py = y(note.kw), w = textWidth(note.text, 10.5);
     if (note.place === "below") return { px, py, tx: Math.min(Math.max(px, m.l + w / 2), width - m.r - w / 2), ty: py + 20, anchor: "middle" as const };
@@ -310,11 +318,11 @@ function ProfileChart({ pattern, locale, standalone }: { pattern: NonNullable<Si
   return <div className="figure">
     <div className="chart-scroll" ref={ref}><div className="chart-wrap" style={{ minWidth: width }} onMouseLeave={() => setHover(null)}>
       <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={t("profile.aria", { kw: Math.max(...pattern.hours).toFixed(2) })}>
-        <rect x={bandFrom} y={m.t} width={bandTo - bandFrom} height={ph} fill={C.ember} fillOpacity={0.06} />
+        {bands.map(([from, to]) => <rect key={from} x={from} y={m.t} width={Math.max(0, to! - from!)} height={ph} fill={C.ember} fillOpacity={0.06} />)}
         <line x1={bandFrom} x2={bandFrom} y1={m.t} y2={m.t + ph} stroke={C.ember} strokeOpacity={0.35} strokeDasharray="4 4" />
         <line x1={bandTo} x2={bandTo} y1={m.t} y2={m.t + ph} stroke={C.ember} strokeOpacity={0.35} strokeDasharray="4 4" />
         {ticks.map(tick => <g key={tick}><line x1={m.l} x2={width - m.r} y1={y(tick)} y2={y(tick)} stroke={C.line} /><text className="tick" x={m.l - 8} y={y(tick) + 4} textAnchor="end">{tick}</text></g>)}
-        <text className="chart-label" x={bandFrom + 8} y={m.t + 14} fill={C.muted}>{t("profile.band", { range: hourRange(pattern.openFrom, pattern.openTo, locale) })}</text>
+        <text className="chart-label" {...bandLabel} y={m.t + 14} fill={C.muted}>{t("profile.band", { range: hourRange(pattern.openFrom, pattern.openTo, locale) })}</text>
         <text className="axis-title" transform={`translate(13 ${m.t + ph / 2}) rotate(-90)`} textAnchor="middle">{t("profile.axis")}</text>
         {pattern.hours.map((_, hour) => hour % every === 0 && <text key={hour} className="tick dark" x={x(hour)} y={height - 10} textAnchor="middle">{String(hour).padStart(2, "0")}:00</text>)}
         <path d={`${line}L${x(23).toFixed(1)},${y(0).toFixed(1)}L${x(0).toFixed(1)},${y(0).toFixed(1)}Z`} fill={C.ember} fillOpacity={0.1} />
@@ -343,7 +351,7 @@ function ProfileChart({ pattern, locale, standalone }: { pattern: NonNullable<Si
  */
 export function SiteReportDocument({ report, standalone }: { report: SiteReport; standalone?: boolean | undefined }) {
   const { estimate, benchmark, pattern, screening, locale } = report;
-  const t = reportText(locale);
+  const t = reportHoursText(report);
   const rate = report.rate;
   return <article className="eiq-report" aria-label={t("doc.aria", { name: report.projectName })}>
     <div className="page">
@@ -404,7 +412,7 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
         {pattern ? <>
           <p><Rich text={pattern.intro} /></p>
           {pattern.cause && <p><strong>{t("doc.lunchCause")}</strong> <Rich text={pattern.cause} /></p>}
-          <ProfileChart pattern={pattern} locale={locale} standalone={standalone} />
+          <ProfileChart pattern={pattern} report={report} standalone={standalone} />
         </> : <p>{t("doc.noPattern")}</p>}
       </section>
 

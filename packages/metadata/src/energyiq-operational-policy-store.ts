@@ -56,10 +56,21 @@ export type EnergyIqOperatingDay =
   | "saturday"
   | "sunday";
 
+/**
+ * One stretch of hours in local time. When `to` is earlier than `from` the stretch runs past midnight into the next
+ * morning (19:00–07:00) and belongs to the day it starts on. `to` may be "24:00" for the end of the day.
+ */
 export type EnergyIqOperatingTimeRange = {
   from: string;
   to: string;
 };
+
+/**
+ * What a site's hours mean. "opening" (the default, also when absent): the building is in use during them.
+ * "lights_on": lighting that should run during them (usually at night), so use outside them is daytime use, and
+ * weekends, public holidays and closures do not switch the lights off.
+ */
+export type EnergyIqHoursMeaning = "opening" | "lights_on";
 
 export type EnergyIqCalendarExceptionClassification =
   | "public_holiday"
@@ -96,6 +107,8 @@ export type EnergyIqOperatingCalendarEntry = {
     label?: string;
     classification?: EnergyIqCalendarExceptionClassification;
   }>;
+  /** Stored only for "lights_on"; absent means "opening", so earlier revisions read unchanged. */
+  hours_meaning?: EnergyIqHoursMeaning;
 };
 
 export type EnergyIqOperatingCalendarRevision = {
@@ -1173,14 +1186,20 @@ const canonicalizeOperatingCalendarEntries = (
         ...(exception.classification ? { classification: exception.classification } : {}),
       };
     }).sort((left, right) => left.date.localeCompare(right.date));
+    const { hours_meaning: hoursMeaning, ...rest } = entry;
+    if (hoursMeaning !== undefined && hoursMeaning !== "opening" && hoursMeaning !== "lights_on") {
+      throw new Error(`ENERGYIQ_OPERATING_HOURS_MEANING_INVALID:${entry.id}`);
+    }
     return {
-      ...entry,
+      ...rest,
       id: requiredText(entry.id, "operating calendar entry id"),
       owner: canonicalizeOwner(entry.owner),
       effective_from: effectiveFrom,
       ...(effectiveTo !== undefined ? { effective_to: effectiveTo } : {}),
       weekly,
       ...(exceptions.length > 0 ? { exceptions } : {}),
+      // The default is not stored, so opening-hours revisions keep exactly their earlier shape.
+      ...(hoursMeaning === "lights_on" ? { hours_meaning: hoursMeaning } : {}),
     };
   });
 
@@ -1261,19 +1280,29 @@ const canonicalizeTimeRanges = (
   if (!Array.isArray(ranges)) throw new Error(`ENERGYIQ_OPERATING_TIME_RANGES_REQUIRED:${field}`);
   const canonical = ranges.map((range) => {
     const fromMinutes = parseLocalTime(range.from, `${field}:from`);
-    const toMinutes = parseLocalTime(range.to, `${field}:to`, true);
-    if (toMinutes <= fromMinutes) throw new Error(`ENERGYIQ_OPERATING_TIME_RANGE_INVALID:${field}`);
+    let toMinutes = parseLocalTime(range.to, `${field}:to`, true);
+    // An empty stretch is never valid. Ending at 00:00 means the end of the start day (19:00–00:00 is 19:00–24:00).
+    if (toMinutes === fromMinutes) throw new Error(`ENERGYIQ_OPERATING_TIME_RANGE_INVALID:${field}`);
+    if (toMinutes === 0) toMinutes = 24 * 60;
+    // An end earlier than the start runs past midnight into the next morning.
     return { from: formatMinutes(fromMinutes), to: formatMinutes(toMinutes) };
   }).sort((left, right) => parseLocalTime(left.from, field) - parseLocalTime(right.from, field));
   for (let index = 1; index < canonical.length; index += 1) {
     const previous = canonical[index - 1];
     const current = canonical[index];
     if (!previous || !current) continue;
-    if (parseLocalTime(current.from, field) < parseLocalTime(previous.to, field, true)) {
+    if (parseLocalTime(current.from, field) < rangeEndMinutes(previous, field)) {
       throw new Error(`ENERGYIQ_OPERATING_TIME_RANGE_OVERLAP:${field}`);
     }
   }
   return canonical;
+};
+
+/** Minutes after the start day's midnight at which a range ends: past 24:00 for a range that runs overnight. */
+const rangeEndMinutes = (range: EnergyIqOperatingTimeRange, field: string): number => {
+  const from = parseLocalTime(range.from, field);
+  const to = parseLocalTime(range.to, field, true);
+  return to <= from ? to + 24 * 60 : to;
 };
 
 const resolveTariffSegments = (input: {
@@ -1409,26 +1438,60 @@ const resolveOperatingWindows = (input: {
   const firstDate = localDateAtInstant(input.period.fromMs, input.revision.timezone);
   const lastDate = localDateAtInstant(input.period.toMs - 1, input.revision.timezone);
   const windows: EffectiveOperatingWindow[] = [];
-  for (const date of localDateRange(firstDate, lastDate)) {
+  // The day before the period only matters for hours that started then and run past midnight into it.
+  const dayBefore = addLocalDays(firstDate, -1);
+  for (const date of [dayBefore, ...localDateRange(firstDate, lastDate)]) {
     const selected = resolveOperatingCalendarEntryForDate({
       entries: input.revision.entries,
       scopeLineage: input.scopeLineage,
       date,
     });
-    if (!selected) return undefined;
-    const exception = selected.exceptions?.find((item) => item.date === date);
-    const ranges = exception?.operating ?? selected.weekly[dayAtLocalDate(date)];
+    if (!selected) {
+      if (date === dayBefore) continue;
+      return undefined;
+    }
+    const ranges = operatingRangesForDate(selected, date)
+      .filter((range) => date !== dayBefore || isOvernightRange(range));
     for (const range of ranges) {
       const fromMs = localDateTimeToInstant(date, range.from, input.revision.timezone);
+      // Hours belong to the day they start on; an end earlier than the start is the next morning.
       const toMs = range.to === "24:00"
         ? localDateTimeToInstant(addLocalDays(date, 1), "00:00", input.revision.timezone)
-        : localDateTimeToInstant(date, range.to, input.revision.timezone);
+        : isOvernightRange(range)
+          ? localDateTimeToInstant(addLocalDays(date, 1), range.to, input.revision.timezone)
+          : localDateTimeToInstant(date, range.to, input.revision.timezone);
       const clippedFrom = Math.max(fromMs, input.period.fromMs);
       const clippedTo = Math.min(toMs, input.period.toMs);
       if (clippedTo > clippedFrom) windows.push({ fromMs: clippedFrom, toMs: clippedTo });
     }
   }
-  return windows;
+  // A night that runs into the next day's own hours must not count the same minutes twice.
+  windows.sort((left, right) => left.fromMs - right.fromMs);
+  const merged: EffectiveOperatingWindow[] = [];
+  for (const window of windows) {
+    const last = merged[merged.length - 1];
+    if (last && window.fromMs <= last.toMs) last.toMs = Math.max(last.toMs, window.toMs);
+    else merged.push({ ...window });
+  }
+  return merged;
+};
+
+const isOvernightRange = (range: EnergyIqOperatingTimeRange): boolean =>
+  range.to !== "24:00" && range.to <= range.from;
+
+/**
+ * The hours that start on one local date. A dated exception replaces the weekly hours, except that for lights-on hours
+ * a day off (a holiday or closure with no hours of its own) keeps the usual hours: lighting still runs on holidays.
+ */
+const operatingRangesForDate = (
+  entry: EnergyIqOperatingCalendarEntry,
+  date: string,
+): EnergyIqOperatingTimeRange[] => {
+  const exception = entry.exceptions?.find((item) => item.date === date);
+  const weekly = entry.weekly[dayAtLocalDate(date)];
+  if (!exception) return weekly;
+  if (entry.hours_meaning === "lights_on" && exception.operating.length === 0) return weekly;
+  return exception.operating;
 };
 
 const resolveOperatingCalendarExceptions = (input: {

@@ -2,7 +2,7 @@
  * The shape of the readings the Analysis page loads, shared by the browser (which fetches them) and the server (which
  * only has to read them). Loading lives in apps/web's analysis-data.ts, which re-exports these types unchanged.
  */
-import type { AnalysisCategory, HoursByDay } from "./analysis-model.js";
+import type { AnalysisCategory, HoursByDay, HoursMeaning } from "./analysis-model.js";
 
 export type TrendCell = [string, number, number | null, number, number];
 export type TrendSeries = { id: string; expectedMinutesPerHour: number; cells: TrendCell[] };
@@ -23,4 +23,6 @@ export type AnalysisData = {
   projectId: string; projectName: string; timezone: string; snapshotId: string | null;
   current: LoadedPeriod; previous: LoadedPeriod | null; history: ScopeData | null; circuits: ScopeCircuit[];
   holidays: Map<string, string>; openingHours: HoursByDay | null; actions: ProjectAction[];
+  /** What the published hours mean; absent means opening hours. "lights_on": lighting that should run in them, usually at night. */
+  hoursMeaning?: HoursMeaning | undefined;
 };

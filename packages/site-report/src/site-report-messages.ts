@@ -66,6 +66,10 @@ export const siteReportMessages = defineMessages({
   "doc.col.closedBase": "Usual use while closed (kWh per hour)",
   "doc.col.result": "What we noticed",
   "doc.readingScreen": "What this means:",
+  "lights.doc.section.pattern": "An average day, hour by hour",
+  "lights.doc.noPattern": "Not enough complete days in this period to draw the hour-by-hour pattern.",
+  "lights.doc.col.openBase": "Usual use in lights-on hours (kWh per hour)",
+  "lights.doc.col.closedBase": "Usual use in the daytime (kWh per hour)",
 
   "plan.aria": "Simplified floor plan of {name}",
   "plan.estimate": "about {kwh} kWh per 30 days",
@@ -116,6 +120,7 @@ export const siteReportMessages = defineMessages({
 
   "profile.aria": "Average weekday use by hour, highest at {kw} kW",
   "profile.band": "opening hours {range}",
+  "lights.profile.band": "lights-on hours {range}",
   "profile.axis": "average power (kW)",
   "profile.average": "{kw} kW average",
 }, {
@@ -181,6 +186,10 @@ export const siteReportMessages = defineMessages({
     "doc.col.closedBase": "关门后的平常用电（每小时 kWh）",
     "doc.col.result": "我们的发现",
     "doc.readingScreen": "这意味着什么：",
+    "lights.doc.section.pattern": "平均一天的逐小时用电",
+    "lights.doc.noPattern": "这段时间内读数完整的日子不够，无法绘制逐小时规律。",
+    "lights.doc.col.openBase": "亮灯时间的平常用电（每小时 kWh）",
+    "lights.doc.col.closedBase": "白天的平常用电（每小时 kWh）",
 
     "plan.aria": "{name} 的简化楼层图",
     "plan.estimate": "约 {kwh} kWh / 30 天",
@@ -231,6 +240,7 @@ export const siteReportMessages = defineMessages({
 
     "profile.aria": "工作日各小时平均用电，最高 {kw} kW",
     "profile.band": "营业时间 {range}",
+    "lights.profile.band": "亮灯时间 {range}",
     "profile.axis": "平均功率（kW）",
     "profile.average": "平均 {kw} kW",
   },
@@ -296,6 +306,10 @@ export const siteReportMessages = defineMessages({
     "doc.col.closedBase": "Penggunaan biasa semasa tutup (kWh sejam)",
     "doc.col.result": "Apa yang kami perhatikan",
     "doc.readingScreen": "Maksudnya:",
+    "lights.doc.section.pattern": "Hari biasa, jam demi jam",
+    "lights.doc.noPattern": "Tidak cukup hari yang lengkap dalam tempoh ini untuk melukis corak mengikut jam.",
+    "lights.doc.col.openBase": "Penggunaan biasa dalam waktu lampu menyala (kWh sejam)",
+    "lights.doc.col.closedBase": "Penggunaan biasa pada waktu siang (kWh sejam)",
 
     "plan.aria": "Pelan lantai ringkas {name}",
     "plan.estimate": "kira-kira {kwh} kWh setiap 30 hari",
@@ -346,6 +360,7 @@ export const siteReportMessages = defineMessages({
 
     "profile.aria": "Purata penggunaan hari bekerja mengikut jam, paling tinggi {kw} kW",
     "profile.band": "waktu buka {range}",
+    "lights.profile.band": "waktu lampu menyala {range}",
     "profile.axis": "purata kuasa (kW)",
     "profile.average": "purata {kw} kW",
   },

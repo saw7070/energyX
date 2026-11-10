@@ -3,7 +3,7 @@
  * The page's own sections keep their wording in analysis-story-messages.ts and analysis-view-messages.ts.
  */
 import { defineMessages, translatorFor, type EnergyIqLocale } from "./locale.js";
-import type { AnalysisCategory, AnalysisDayType, TimeBucket } from "./analysis-model.js";
+import type { AnalysisCategory, AnalysisDayType, HoursMeaning, TimeBucket } from "./analysis-model.js";
 
 export const analysisMessages = defineMessages({
   "page.loading": "Loading analysis…",
@@ -34,6 +34,9 @@ export const analysisMessages = defineMessages({
   "bucket.after_hours": "Weekday evenings & nights",
   "bucket.weekend": "Weekends",
   "bucket.holiday": "Public holidays",
+  "lights.bucket.open": "Lights-on hours",
+  "lights.bucket.after_hours": "Daytime",
+  "hours.overnight": "{from} → {to} next day",
 
   "status.good": "Good",
   "status.watch": "Watch",
@@ -72,6 +75,19 @@ export const analysisMessages = defineMessages({
   "plan.unusual.other": "Find out what happened on {count} unusual days",
   "plan.unusualDay": "{date} (+{pct}%)",
   "plan.unusualDetail": "{days} used more than {pct}% above a normal day of the same type.",
+  "lights.plan.cutType": "Cut {name} left on in the daytime",
+  "lights.plan.switchOff": "Keep {name} off in the daytime",
+  "lights.plan.draws": "Draws {kw} on average in the daytime — {pct}% of its energy. Lights on by day, switched on too early or off too late all add to this.",
+  "lights.plan.quietest": " On its best days it already drops to {kw} in the daytime.",
+  "lights.plan.math": "{kw} × {hours} daytime hours a year{rate}",
+  "lights.plan.others": "Put {count} more circuits on a timer or daylight sensor",
+  "lights.plan.othersDetail": "Together they draw {kw} in the daytime.",
+  "lights.plan.benchmark": "Keep daytime use down to your own best level",
+  "lights.plan.benchmarkDetail": "The site has already held {kw} in the daytime. Daytime hours above that level used {kwh} kWh in these dates.",
+  "lights.plan.check": "Check whether {name} must run in the daytime",
+  "lights.plan.checkDetail": "Usually needs to stay on, but draws {kw} in the daytime. Confirm its settings before changing anything.",
+  "lights.plan.find": "Find what else stays on in {space} in the daytime",
+  "lights.plan.findDetail": "{kw} is used in the daytime by equipment that has no meter of its own. Check the area by day to find what is still running.",
 
   "picker.weekdays": "Mon,Tue,Wed,Thu,Fri,Sat,Sun",
   "picker.dayToShow": "Day to show: {day}",
@@ -130,6 +146,9 @@ export const analysisMessages = defineMessages({
     "bucket.after_hours": "工作日晚上和夜间",
     "bucket.weekend": "周末",
     "bucket.holiday": "公共假期",
+    "lights.bucket.open": "亮灯时间",
+    "lights.bucket.after_hours": "白天",
+    "hours.overnight": "{from} → 次日 {to}",
 
     "status.good": "良好",
     "status.watch": "留意",
@@ -168,6 +187,19 @@ export const analysisMessages = defineMessages({
     "plan.unusual.other": "查明 {count} 个异常日发生了什么",
     "plan.unusualDay": "{date}（+{pct}%）",
     "plan.unusualDetail": "{days}的用电比同类型的正常日子高出 {pct}% 以上。",
+    "lights.plan.cutType": "减少白天仍开着的{name}",
+    "lights.plan.switchOff": "白天关闭 {name}",
+    "lights.plan.draws": "白天平均功率为 {kw}，占它用电的 {pct}%。白天亮灯、开灯太早或关灯太晚，都会增加这部分用电。",
+    "lights.plan.quietest": "在表现最好的日子里，它白天已经能降到 {kw}。",
+    "lights.plan.math": "{kw} × 每年 {hours} 个白天小时{rate}",
+    "lights.plan.others": "为另外 {count} 个回路加装定时器或光控开关",
+    "lights.plan.othersDetail": "它们白天合计功率为 {kw}。",
+    "lights.plan.benchmark": "白天用电不超过本场地自己做到过的最低水平",
+    "lights.plan.benchmarkDetail": "本场地白天曾经保持在 {kw}。所选日期内，白天高于这个水平的用电为 {kwh} kWh。",
+    "lights.plan.check": "确认 {name} 是否必须在白天运行",
+    "lights.plan.checkDetail": "这类设备通常需要一直开着，但它白天的功率为 {kw}。改动前请先确认它的设置。",
+    "lights.plan.find": "找出{space}白天还有哪些设备开着",
+    "lights.plan.findDetail": "白天有 {kw} 的用电来自没有独立电表的设备。请在白天巡查这个区域，找出仍在运行的设备。",
 
     "picker.weekdays": "一,二,三,四,五,六,日",
     "picker.dayToShow": "显示的日期：{day}",
@@ -226,6 +258,9 @@ export const analysisMessages = defineMessages({
     "bucket.after_hours": "Petang & malam hari bekerja",
     "bucket.weekend": "Hujung minggu",
     "bucket.holiday": "Cuti umum",
+    "lights.bucket.open": "Waktu lampu menyala",
+    "lights.bucket.after_hours": "Waktu siang",
+    "hours.overnight": "{from} → {to} hari berikutnya",
 
     "status.good": "Baik",
     "status.watch": "Pantau",
@@ -264,6 +299,19 @@ export const analysisMessages = defineMessages({
     "plan.unusual.other": "Ketahui apa yang berlaku pada {count} hari luar biasa",
     "plan.unusualDay": "{date} (+{pct}%)",
     "plan.unusualDetail": "{days} menggunakan lebih daripada {pct}% di atas hari biasa yang sama jenis.",
+    "lights.plan.cutType": "Kurangkan {name} yang dibiarkan hidup pada waktu siang",
+    "lights.plan.switchOff": "Pastikan {name} dimatikan pada waktu siang",
+    "lights.plan.draws": "Menggunakan purata {kw} pada waktu siang — {pct}% daripada tenaganya. Lampu yang menyala pada waktu siang, dihidupkan terlalu awal atau dimatikan terlalu lewat semuanya menambah jumlah ini.",
+    "lights.plan.quietest": " Pada hari terbaiknya, ia sudah turun ke {kw} pada waktu siang.",
+    "lights.plan.math": "{kw} × {hours} jam waktu siang setahun{rate}",
+    "lights.plan.others": "Pasang pemasa atau penderia cahaya pada {count} litar lagi",
+    "lights.plan.othersDetail": "Bersama-sama, litar ini menggunakan {kw} pada waktu siang.",
+    "lights.plan.benchmark": "Kekalkan penggunaan waktu siang pada tahap terbaik anda sendiri",
+    "lights.plan.benchmarkDetail": "Premis ini pernah kekal pada {kw} pada waktu siang. Waktu siang yang melebihi tahap itu menggunakan {kwh} kWh dalam tarikh ini.",
+    "lights.plan.check": "Semak sama ada {name} perlu berjalan pada waktu siang",
+    "lights.plan.checkDetail": "Biasanya perlu kekal hidup, tetapi menggunakan {kw} pada waktu siang. Sahkan tetapannya sebelum mengubah apa-apa.",
+    "lights.plan.find": "Cari apa lagi yang masih hidup di {space} pada waktu siang",
+    "lights.plan.findDetail": "{kw} digunakan pada waktu siang oleh peralatan yang tiada meter sendiri. Periksa kawasan ini pada waktu siang untuk mencari apa yang masih berjalan.",
 
     "picker.weekdays": "Isn,Sel,Rab,Kha,Jum,Sab,Ahd",
     "picker.dayToShow": "Hari yang dipaparkan: {day}",
@@ -303,7 +351,9 @@ export const categoryDescription = (category: AnalysisCategory, locale: EnergyIq
 export const dayTypeLabel = (dayType: AnalysisDayType, locale: EnergyIqLocale = "en") => analysisText(locale)(`dayType.${dayType}`);
 /** The same inside a sentence: "weekday", "weekend", "holiday". */
 export const dayTypeWord = (dayType: AnalysisDayType, locale: EnergyIqLocale = "en") => analysisText(locale)(`dayTypeLower.${dayType}`);
-export const timeBucketLabel = (bucket: TimeBucket, locale: EnergyIqLocale = "en") => analysisText(locale)(`bucket.${bucket}`);
+/** Lights-on sites have only two parts: inside the lights-on hours and daytime (weekends and holidays are not closed). */
+export const timeBucketLabel = (bucket: TimeBucket, locale: EnergyIqLocale = "en", meaning: HoursMeaning = "opening") =>
+  analysisText(locale)(meaning === "lights_on" && (bucket === "open" || bucket === "after_hours") ? `lights.bucket.${bucket}` : `bucket.${bucket}`);
 const CONFIDENCE_KEYS = { High: "confidence.high", Medium: "confidence.medium", "Check first": "confidence.check" } as const;
 const EFFORT_KEYS = { Low: "effort.low", Medium: "effort.medium" } as const;
 /** Savings-plan confidence and effort stay English in the data (they drive styling); these are for display. */
