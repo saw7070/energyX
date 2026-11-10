@@ -179,7 +179,9 @@ export async function prepareReportInputs(run: ReportRun, directory: string, met
     // Meters filed by what they serve, with each group's energy and share, and which groups one meter measures alone.
     meterGroups: advisorMeterGroups(nameDocument, analysisUsage),
     tariff: readPolicy("tariff", tariffVersion), calendar: readPolicy("calendar", calendarVersion),
-    instructions: "Only published rules are included. Missing tariffs do not imply zero cost. Academic term breaks do not automatically mean closure. Project notes are separate reference information and must not silently override these published rules. Ask for clarification if they conflict.",
+    instructions: "Only published rules are included. Missing tariffs do not imply zero cost. Academic term breaks do not automatically mean closure. Project notes are separate reference information and must not silently override these published rules. Ask for clarification if they conflict. "
+      + "Calendar hours are local times. A range whose to is earlier than its from runs past midnight (19:00-07:00 means 7 pm to 7 am the next morning) and belongs to the day it starts on, which decides weekday, weekend and holiday. "
+      + "A calendar entry with hours_meaning \"lights_on\" lists the hours when lighting should be on (usually at night), not opening hours: night-time use is expected, use outside those hours is daytime use (lights left on by day, switched on too early or off too late), and weekends, public holidays and closures do not switch the lights off. Do not call that night-time use after-hours waste. Without hours_meaning the hours are opening hours.",
   };
   const currentProject = metadata.energyIq.getProject(run.projectId);
   const currentRelease = metadata.energyIq.templates.getLatestProjectRevision(run.projectId);

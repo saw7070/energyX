@@ -1603,6 +1603,10 @@ export type EnergyTariffScheduleRevisionDto = {
   published_at: string;
 };
 
+/** What a site's hours mean: when the building is in use (the default), or when lighting should be on (usually at night). */
+export type EnergyHoursMeaningDto = "opening" | "lights_on";
+
+/** A range whose `to` is earlier than its `from` runs past midnight (19:00–07:00) and belongs to the day it starts on. */
 export type EnergyOperatingCalendarEntryDto = {
   id: string;
   owner: EnergyOperationalPolicyOwnerDto;
@@ -1615,6 +1619,8 @@ export type EnergyOperatingCalendarEntryDto = {
     label?: string;
     classification?: EnergyCalendarExceptionClassificationDto;
   }>;
+  /** Present only for lights-on hours; absent means opening hours. */
+  hours_meaning?: EnergyHoursMeaningDto;
 };
 
 export type EnergyOperatingCalendarRevisionDto = {
@@ -1662,6 +1668,8 @@ export type EnergyOperatingCalendarEntryInputDto = {
   owner: EnergyOperationalPolicyOwnerInputDto;
   effectiveFrom: string;
   effectiveTo?: string;
+  /** Leave out for opening hours. */
+  hoursMeaning?: EnergyHoursMeaningDto;
   weekly: Record<EnergyOperatingDayDto, EnergyOperatingTimeRangeDto[]>;
   exceptions?: Array<{
     date: string;

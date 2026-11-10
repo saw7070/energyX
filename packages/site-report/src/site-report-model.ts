@@ -8,15 +8,19 @@
  */
 import type { ProjectSpatialReference } from "@datafoundry/contracts";
 import type { AnalysisData, ScopeData, ScopeMeter, TrendSeries } from "./analysis-types.js";
-import { alwaysOnKw, effectiveHours, isOpenHour, scopeDays, shortDate, timeBuckets, weekdayShort, type AnalysisCategory, type AnalysisDay } from "./analysis-model.js";
+import { alwaysOnKw, effectiveHours, hoursRangeLabel, isOvernight, localDayType, openWindowStart, quietHours, scopeDays, shortDate, timeBuckets, weekdayShort, type AnalysisCategory, type AnalysisDay, type HoursMeaning } from "./analysis-model.js";
 import { listText } from "./analysis-messages.js";
-import { translatorFor, type EnergyIqLocale, type Translate } from "./locale.js";
+import { forHoursMeaning, translatorFor, type EnergyIqLocale, type Translate } from "./locale.js";
 import { formatPeriod } from "./report-period.js";
 import { analysisGroupTree, biggestMeterGroup, flattenMeterGroups, type MeterGroupNode, type MeterGroupTree } from "./meter-groups.js";
 import { DAY_PARTS, siteReportModelMessages, type SiteReportModelKey } from "./site-report-model-messages.js";
 
 type T = Translate<SiteReportModelKey>;
 const modelText = (locale: EnergyIqLocale) => translatorFor(siteReportModelMessages, locale);
+/** The same wording, using the "lights." variant of a sentence when the hours are lights-on hours. */
+const hoursText = (locale: EnergyIqLocale, meaning: HoursMeaning) => forHoursMeaning(modelText(locale), siteReportModelMessages, meaning);
+/** For lights-on hours, a daytime share at or above this is worth a warning headline; below it the lights ran as planned. */
+export const DAYTIME_NOTABLE_SHARE = 0.1;
 
 // ---------- formatting ----------
 // Numbers keep one format (1,234.5) in every language, so figures match the rest of EnergyIQ.
@@ -101,7 +105,9 @@ export type ReportCircuit = {
   weekdayPerDay: number | null; weekendPerDay: number | null; periodKwh: number; monthKwh: number; monthCost: number | null; share: number;
   /** Average kWh per hour in weekday operating hours and in all other hours. */
   openBase: number | null; closedBase: number | null; ratio: number | null; hours: number;
-  gapDays: number; finding: string; eveningKwh: number | null; flat: boolean; colour: string;
+  gapDays: number; finding: string;
+  /** Extra kWh a day still used after closing (after lights-off time, for lights-on hours), and for lights-on hours before lights-on time. */
+  eveningKwh: number | null; earlyKwh: number | null; flat: boolean; colour: string;
 };
 export type ProfileNote = { hour: number; kw: number; text: string; place: "left" | "below" | "above-left" | "above-right" };
 /** One group in reading order, with its total for the dates and its share of the group above it. */
@@ -118,11 +124,16 @@ export type ReportGroups = {
   /** What the main meter recorded that no sub-meter explains. */
   unmeteredKwh: number;
 };
-/** What the Overview headline is about, the same in every language (the headline itself is translated). */
-export type HeadlineTopic = "always-on" | "after-hours" | "working-hours";
+/**
+ * What the Overview headline is about, the same in every language (the headline itself is translated). Lights-on
+ * sites use "daytime" (notable use while the lights should be off) or "night" (the lights ran as planned).
+ */
+export type HeadlineTopic = "always-on" | "after-hours" | "working-hours" | "daytime" | "night";
 export type SiteReport = {
   /** The language every sentence of this report is written in. */
   locale: EnergyIqLocale;
+  /** What the site's hours mean: opening hours, or lights-on hours for lighting that should run at night. */
+  hoursMeaning: HoursMeaning;
   /** "office", "campus" or "site": fixed English values used by code; the prose uses the reader's word. */
   projectName: string; siteWord: string; timezone: string; tzLabel: string; from: string; to: string; dayCount: number; generatedAt: string;
   currency: string; rate: number | null; rateLabel: string | null;
@@ -243,11 +254,17 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const dates = project.dates;
   const dateSet = new Set(dates);
   const days = scopeDays(project, data.holidays);
-  const hours = effectiveHours(data.openingHours);
+  // Lights-on hours: lighting that should run at night, so use outside the hours is daytime use, on every day.
+  const meaning: HoursMeaning = data.hoursMeaning ?? "opening";
+  const lighting = meaning === "lights_on";
+  const lt = hoursText(locale, meaning);
+  const hours = effectiveHours(data.openingHours, meaning);
   const hoursPublished = hours === data.openingHours;
   const dayOf = new Map(days.map(day => [day.date, day]));
-  const isOpen = (date: string, hour: number) => dayOf.get(date)?.dayType === "weekday" && isOpenHour(hours, date, hour);
-  const openRange = openingWindow(hours);
+  const dayTypeOf = (date: string) => dayOf.get(date)?.dayType ?? localDayType(date, data.holidays).dayType;
+  // Hours belong to the day they start on: weekday opening hours, or the lights-on hours of every day.
+  const isOpen = (date: string, hour: number) => { const start = openWindowStart(hours, date, hour); return start !== null && (lighting || dayTypeOf(start) === "weekday"); };
+  const openRange = openingWindow(hours, lighting);
   const currency = project.cost?.currency ?? "SGD";
   const rate = project.cost && project.usageKwh ? project.cost.amount / project.usageKwh : null;
   const rateLabel = rate == null ? null : t(project.cost?.note.includes("before tax") ? "rate.beforeGst" : project.cost?.note.includes("incl. tax") ? "rate.inclGst" : "rate.plain", { rate: moneyText(rate, currency, 4) });
@@ -263,12 +280,14 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const reportDays: ReportDay[] = days.map(day => ({ date: day.date, dow: weekdayOf(day.date, locale), kwh: day.totalKwh, dayType: day.dayType, holidayName: day.holidayName, complete: day.complete }));
   const weekdayAvg = mean(days.filter(day => day.complete && day.dayType === "weekday").map(day => day.totalKwh));
   const weekendAvg = mean(days.filter(day => day.complete && day.dayType !== "weekday").map(day => day.totalKwh));
-  const baseKw = alwaysOnKw(project);
+  // The always-on level comes from the quiet hours: 00:00–06:00, or the daytime for lights-on hours.
+  const baseKw = alwaysOnKw(project, quietHours(data.openingHours, meaning));
   const baseDayKwh = baseKw == null ? null : baseKw * 24;
   const readingHours = (project.total?.cells ?? []).filter(cell => dateSet.has(cell[0]) && cell[2] != null).length;
   const baseShare = baseKw != null && totalKwh > 0 ? Math.min(1, baseKw * readingHours / totalKwh) : null;
-  const buckets = timeBuckets(project, days, data.openingHours);
+  const buckets = timeBuckets(project, days, data.openingHours, meaning);
   const closedShare = buckets.total > 0 ? buckets.closedKwh / buckets.total : null;
+  const daytimeNotable = lighting && closedShare != null && closedShare >= DAYTIME_NOTABLE_SHARE;
 
   // Circuits, largest first
   const weekdayDates = days.filter(day => day.dayType === "weekday").map(day => day.date);
@@ -303,14 +322,15 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const monthKwh = raw.reduce((sum, circuit) => sum + circuit.monthKwh, 0);
   const monthCost = cost(monthKwh);
   const circuits: ReportCircuit[] = raw.map((circuit, index) => {
-    const screen = screenCircuit(circuit, { dates, weekdayDates, isOpen, openRange, locale });
+    // Lights run every night, so every day counts for switching on and off on time.
+    const screen = screenCircuit(circuit, { dates, weekdayDates: lighting ? dates : weekdayDates, isOpen, openRange, locale, meaning });
     return {
       key: circuit.key, name: circuit.name, code: circuit.code, codes: circuit.meters.map(meter => meter.name), label: circuit.zone ? t("circuit.inZone", { name: circuit.name, zone: zoneName(circuit.zone) }) : circuit.name, board: circuit.board, zone: circuit.zone, category: circuit.category, meterIds: circuit.meters.map(meter => meter.id),
       weekdayPerDay: circuit.weekdayPerDay, weekendPerDay: circuit.weekendPerDay, periodKwh: circuit.periodKwh, monthKwh: circuit.monthKwh, monthCost: cost(circuit.monthKwh),
       share: monthKwh > 0 ? circuit.monthKwh / monthKwh : 0, openBase: circuit.openBase, closedBase: circuit.closedBase,
       ratio: circuit.openBase && circuit.closedBase != null ? circuit.closedBase / circuit.openBase : null, hours: circuit.cells.size, gapDays: circuit.gapDays,
       // Brand orange for the largest load, then a fixed order, as in the reference report; every slice is also labelled.
-      finding: screen.finding, eveningKwh: screen.eveningKwh, flat: screen.flat, colour: LOAD_PALETTE[index % LOAD_PALETTE.length]!,
+      finding: screen.finding, eveningKwh: screen.eveningKwh, earlyKwh: screen.earlyKwh, flat: screen.flat, colour: LOAD_PALETTE[index % LOAD_PALETTE.length]!,
     };
   });
   const circuitName = (key: string) => circuits.find(circuit => circuit.key === key)!.name;
@@ -340,7 +360,9 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const circuitCount = circuits.reduce((sum, circuit) => sum + circuit.meterIds.length, 0);
   const lede = paragraph([
     t(circuitCount === 1 ? "lede.drew.one" : "lede.drew.other", { days: dates.length, site, kwh: kwhText(totalKwh), count: circuitCount }),
-    baseKw != null && baseShare != null && baseShare >= 0.5 ? t("lede.idles", { kw: kwText(baseKw) })
+    // Lights-on hours: night use is the point, so only notable daytime use is a finding.
+    lighting ? daytimeNotable ? t("lights.lede.daytime", { pct: pctText(closedShare!) }) : t("lights.lede.night")
+      : baseKw != null && baseShare != null && baseShare >= 0.5 ? t("lede.idles", { kw: kwText(baseKw) })
       : closedShare != null && closedShare >= 0.4 ? t("lede.closed", { pct: pctText(closedShare), site })
       : t("lede.working"),
   ]);
@@ -348,7 +370,7 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
     { value: kwhText(totalKwh), label: t("kf.total", { days: dates.length }) },
     { value: weekdayAvg != null && weekendAvg != null ? `${grouped(weekdayAvg)} / ${grouped(weekendAvg)}` : "—", label: t("kf.weekdayWeekend") },
     { value: baseKw != null ? kwText(baseKw) : "—", label: baseShare != null ? t("kf.baseShare", { pct: pctText(baseShare) }) : t("kf.base") },
-    { value: closedShare != null ? pctText(closedShare, 1) : "—", label: t("kf.closed", { kwh: kwhText(buckets.closedKwh) }) },
+    { value: closedShare != null ? pctText(closedShare, 1) : "—", label: lt("kf.closed", { kwh: kwhText(buckets.closedKwh) }) },
   ];
 
   // ---------- 1. property profile ----------
@@ -442,44 +464,57 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
         : t("outro.low", { kwh: kwhText(baseMonthKwh), pct: pctText(baseBillShare) }),
   };
 
-  // ---------- 4. weekday pattern ----------
-  const pattern = weekdayPattern({ project, days, openRange, baseKw, circuits: raw.map((circuit, index) => ({ name: circuits[index]!.name, plural: isPlural(circuits[index]!), category: circuit.category, cells: circuit.cells })), hoursPublished, site, locale });
+  // ---------- 4. weekday pattern (an average day, for lights-on hours) ----------
+  const pattern = lighting
+    ? lightsPattern({ project, days, openRange, published: hoursPublished ? openingLabelText(hours, locale) : null, locale })
+    : weekdayPattern({ project, days, openRange, baseKw, circuits: raw.map((circuit, index) => ({ name: circuits[index]!.name, plural: isPlural(circuits[index]!), category: circuit.category, cells: circuit.cells })), hoursPublished, site, locale });
 
   // ---------- 5. screening ----------
   const tail = circuits.filter(circuit => circuit.eveningKwh != null && circuit.eveningKwh >= 0.3);
+  // Lights-on hours: lights switched on before their time in the evening.
+  const early = circuits.filter(circuit => circuit.earlyKwh != null && circuit.earlyKwh >= 0.3);
+  const habits = tail.length + early.length;
   const flat = circuits.filter(circuit => circuit.flat);
   const target = flat.find(circuit => !isEquipment(circuit.category)) ?? flat[0];
-  const closedHoursPerMonth = 30 * 24 - 30 * 5 / 7 * (openRange.to - openRange.from);
+  // Lights run every day; opening hours count five working days a week.
+  const closedHoursPerMonth = lighting ? 30 * (24 - openLength(openRange)) : 30 * 24 - 30 * 5 / 7 * openLength(openRange);
   const targetSaving = target?.closedBase != null && rate != null ? target.closedBase * closedHoursPerMonth * rate : null;
-  const tailSaving = rate != null && tail.length ? tail.reduce((sum, circuit) => sum + circuit.eveningKwh! * 30 * 5 / 7, 0) * rate : null;
-  const tailNames = list(tail.map(circuit => t("call.tailItem", { name: inl(circuit.name), time: clock(openRange.to, locale), kwh: grouped(circuit.eveningKwh!, 1) })));
+  const perMonth = (kwh: number) => lighting ? kwh * 30 : kwh * 30 * 5 / 7;
+  const tailSaving = rate != null && habits ? [...tail.map(circuit => circuit.eveningKwh!), ...early.map(circuit => circuit.earlyKwh!)].reduce((sum, kwh) => sum + perMonth(kwh), 0) * rate : null;
+  const tailNames = list([
+    ...tail.map(circuit => lt("call.tailItem", { name: inl(circuit.name), time: clock(openRange.to, locale), kwh: grouped(circuit.eveningKwh!, 1) })),
+    ...early.map(circuit => t("lights.call.earlyItem", { name: inl(circuit.name), time: clock(openRange.from, locale), kwh: grouped(circuit.earlyKwh!, 1) })),
+  ]);
   const flatNames = list(flat.map(circuit => inl(circuit.name)));
   const callout = paragraph([
-    tail.length || flat.length ? t(tail.length ? "call.habits" : "call.alwaysOn") : t("call.none"),
-    tail.length ? t(tail.length === 1 ? "call.timer.one" : "call.timer.other", { items: capitalise(tailNames), worth: tailSaving != null ? t("call.worth", { cost: money(tailSaving) }) : "", end: t(flat.length ? "call.semicolon" : "call.period") }) : "",
+    habits || flat.length ? lt(habits ? "call.habits" : "call.alwaysOn") : t("call.none"),
+    habits ? lt(habits === 1 ? "call.timer.one" : "call.timer.other", { items: capitalise(tailNames), worth: tailSaving != null ? lt("call.worth", { cost: money(tailSaving) }) : "", end: t(flat.length ? "call.semicolon" : "call.period") }) : "",
     // A new sentence when nothing came before it; after "…timer;" it carries on the same sentence.
-    flat.length ? t(flat.length === 1 ? "call.flat.one" : "call.flat.other", { names: tail.length ? flatNames : en ? `The ${flatNames}` : capitalise(flatNames), site }) : "",
-    target && targetSaving != null && target.monthCost != null ? t(plural(target) ? "call.target.other" : "call.target.one", { name: theName(target.name), saving: money(targetSaving), cost: money(target.monthCost), year: money(targetSaving * 12) }) : "",
+    flat.length ? lt(flat.length === 1 ? "call.flat.one" : "call.flat.other", { names: habits ? flatNames : en ? `The ${flatNames}` : capitalise(flatNames), site }) : "",
+    target && targetSaving != null && target.monthCost != null ? lt(plural(target) ? "call.target.other" : "call.target.one", { name: theName(target.name), saving: money(targetSaving), cost: money(target.monthCost), year: money(targetSaving * 12) }) : "",
   ]);
   const screening = {
-    intro: t("scr.intro", { days: dates.length, range: hourRange(openRange.from, openRange.to, locale), pct: pctText(SCREEN_PCT), kwh: SCREEN_KWH }),
+    intro: lt("scr.intro", { days: dates.length, range: hourRange(openRange.from, openRange.to, locale), pct: pctText(SCREEN_PCT), kwh: SCREEN_KWH }),
     rows: circuits.map(circuit => {
       const per = (value: number | null) => { if (value == null) return "—"; const each = (value / circuit.meterIds.length).toFixed(2); return plural(circuit) ? t("scr.each", { value: each }) : each; };
       return { label: circuit.label, code: circuit.code, open: per(circuit.openBase), closed: per(circuit.closedBase), finding: circuit.finding };
     }),
     callout,
-    note: t("scr.note", { days: dates.length, schedule: t(hoursPublished ? "scr.published" : "scr.assumed"), pct: pctText(SCREEN_PCT), kwh: SCREEN_KWH }),
+    note: lt("scr.note", { days: dates.length, schedule: lt(hoursPublished ? "scr.published" : "scr.assumed"), pct: pctText(SCREEN_PCT), kwh: SCREEN_KWH }),
   };
 
-  const headlineTopic: HeadlineTopic = baseBillShare != null && baseBillShare >= 0.5 && baseMonthCost != null && monthCost != null ? "always-on"
+  const headlineTopic: HeadlineTopic = lighting ? daytimeNotable ? "daytime" : "night"
+    : baseBillShare != null && baseBillShare >= 0.5 && baseMonthCost != null && monthCost != null ? "always-on"
     : closedShare != null && closedShare >= 0.4 ? "after-hours" : "working-hours";
   const generatedDay = generatedAt.slice(0, 10);
   return {
-    locale, projectName: data.projectName, siteWord, timezone: data.timezone, tzLabel, from: dates[0] ?? "", to: dates.at(-1) ?? "", dayCount: dates.length, generatedAt,
+    locale, hoursMeaning: meaning, projectName: data.projectName, siteWord, timezone: data.timezone, tzLabel, from: dates[0] ?? "", to: dates.at(-1) ?? "", dayCount: dates.length, generatedAt,
     currency, rate, rateLabel,
     masthead: { site: data.projectName, detail: [place, t(`mast.report.${siteWord}`)].filter(Boolean).join(" · "), period: periodText, periodNote: t("mast.periodNote", { days: dates.length, tz: tzLabel }) },
-    title: headline(site, baseShare, closedShare, t), lede, keyFigures,
-    headline: headlineTopic === "always-on" ? t("head.alwaysOn", { base: money(baseMonthCost), month: money(monthCost) })
+    title: lighting ? lightsHeadline(closedShare, daytimeNotable, lt) : headline(site, baseShare, closedShare, t), lede, keyFigures,
+    headline: headlineTopic === "daytime" ? t(rate != null ? "lights.head.daytimeCost" : "lights.head.daytime", { pct: pctText(closedShare!), cost: rate != null ? money(buckets.closedKwh * rate * 30 / Math.max(dates.length, 1)) : "" })
+      : headlineTopic === "night" ? t("lights.head.night")
+      : headlineTopic === "always-on" ? t("head.alwaysOn", { base: money(baseMonthCost), month: money(monthCost) })
       : headlineTopic === "after-hours" ? t(rate != null ? "head.closedCost" : "head.closed", { pct: pctText(closedShare!), cost: rate != null ? money(buckets.closedKwh * rate * 30 / Math.max(dates.length, 1)) : "" })
       : t("head.working"),
     headlineTopic,
@@ -493,12 +528,36 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
 
 const ordinal = (n: number) => ["", "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth"][n] ?? `#${n}`;
 
-/** The weekday opening window as whole hours, for labels and the shaded band. */
-function openingWindow(hours: Record<string, Array<{ from: string; to: string }>>) {
-  const ranges = ["monday", "tuesday", "wednesday", "thursday", "friday"].flatMap(day => hours[day] ?? []);
+/**
+ * The weekday opening window as whole hours, for labels and the shaded band. For lights-on hours it is the night
+ * window of every day, and `to` is earlier than `from` when it runs past midnight (19 → 7).
+ */
+function openingWindow(hours: Record<string, Array<{ from: string; to: string }>>, lighting = false) {
+  const days = lighting ? ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] : ["monday", "tuesday", "wednesday", "thursday", "friday"];
+  const ranges = days.flatMap(day => hours[day] ?? []);
   const toHour = (time: string) => { const [h = "0", m = "0"] = time.split(":"); return Number(h) + Number(m) / 60; };
-  if (!ranges.length) return { from: 8, to: 18 };
+  if (!ranges.length) return lighting ? { from: 19, to: 7 } : { from: 8, to: 18 };
+  const overnight = ranges.filter(isOvernight);
+  if (overnight.length) {
+    // The earliest evening start and the latest morning end of the nights.
+    return { from: Math.round(Math.min(...overnight.map(range => toHour(range.from)))) % 24, to: Math.round(Math.max(...overnight.map(range => toHour(range.to)))) };
+  }
   return { from: Math.round(Math.min(...ranges.map(range => toHour(range.from)))), to: Math.round(Math.max(...ranges.map(range => toHour(range.to)))) };
+}
+/** Whole hours inside an opening window; 19 → 7 is 12 hours. */
+const openLength = (range: { from: number; to: number }) => range.to >= range.from ? range.to - range.from : range.to + 24 - range.from;
+const inWindow = (range: { from: number; to: number }, hour: number) => range.to >= range.from ? hour >= range.from && hour < range.to : hour >= range.from || hour < range.to;
+/** The published hours of the first day that has some, as written: "19:00 → 07:00 next day". */
+function openingLabelText(hours: Record<string, Array<{ from: string; to: string }>>, locale: EnergyIqLocale) {
+  const range = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].map(day => hours[day]?.[0]).find(Boolean);
+  return range ? hoursRangeLabel(range, locale) : "";
+}
+
+/** Lights-on hours: a warning about daytime use when it is notable, else that the lights ran at night as planned. */
+function lightsHeadline(closedShare: number | null, daytimeNotable: boolean, lt: T): SiteReport["title"] {
+  return daytimeNotable && closedShare != null
+    ? { before: lt("lights.title.daytime", { pct: pctText(closedShare) }), emphasis: lt("lights.title.daytimeEmphasis") }
+    : { before: lt("lights.title.night"), emphasis: lt("lights.title.nightEmphasis") };
 }
 
 /** "Three-quarters of the office load never switches off", or the outside-hours story, or the steady story. `site` is the reader's word for it. */
@@ -649,7 +708,7 @@ function weekdayPattern(input: { project: ScopeData; days: AnalysisDay[]; openRa
     ], locale);
   }
   const weekdayTotal = profile.reduce((sum, value) => sum + value, 0);
-  const openKwh = profile.reduce((sum, value, hour) => hour >= input.openRange.from && hour < input.openRange.to ? sum + value : sum, 0);
+  const openKwh = profile.reduce((sum, value, hour) => inWindow(input.openRange, hour) ? sum + value : sum, 0);
   const openShare = openKwh / Math.max(weekdayTotal, 0.001);
   return {
     hours: profile, openFrom: input.openRange.from, openTo: input.openRange.to, notes, intro, cause, weekdayCount: weekdays.length,
@@ -657,11 +716,45 @@ function weekdayPattern(input: { project: ScopeData; days: AnalysisDay[]; openRa
   };
 }
 
+/**
+ * Lights-on hours: an average day hour by hour (lights run every day), when the lights seem to come on and go off, and
+ * how much of the day's use falls inside the lights-on hours. `weekdayCount` holds the number of days averaged.
+ */
+function lightsPattern(input: { project: ScopeData; days: AnalysisDay[]; openRange: { from: number; to: number }; published: string | null; locale: EnergyIqLocale }): SiteReport["pattern"] {
+  const { locale, openRange } = input, t = modelText(locale);
+  const complete = input.days.filter(day => day.complete).map(day => day.date);
+  if (complete.length < 3 || !input.project.total) return null;
+  const cells = completeCells(input.project.total, new Set(complete));
+  const profile = Array.from({ length: 24 }, (_, hour) => mean(complete.map(date => cells.get(cellKey(date, hour))).filter((value): value is number => value !== undefined)) ?? 0);
+  const low = Math.min(...profile), high = Math.max(...profile);
+  const on = (hour: number) => high - low > 0.001 && profile[hour]! - low >= 0.5 * (high - low);
+  // Lights come on in the afternoon or evening and go off by the next midday: look from noon round the clock.
+  const order = Array.from({ length: 24 }, (_, index) => (12 + index) % 24);
+  const onAt = order.find(hour => on(hour));
+  const offAt = onAt === undefined ? undefined : order.slice(order.indexOf(onAt)).find(hour => !on(hour));
+  const nightKw = mean(profile.filter((_, hour) => inWindow(openRange, hour))) ?? 0;
+  const dayKw = mean(profile.filter((_, hour) => !inWindow(openRange, hour))) ?? 0;
+  const total = profile.reduce((sum, value) => sum + value, 0);
+  const openKwh = profile.reduce((sum, value, hour) => inWindow(openRange, hour) ? sum + value : sum, 0);
+  const share = openKwh / Math.max(total, 0.001);
+  const range = hourRange(openRange.from, openRange.to, locale);
+  return {
+    hours: profile, openFrom: openRange.from, openTo: openRange.to, notes: [], cause: null, weekdayCount: complete.length,
+    intro: sentences([
+      onAt !== undefined && offAt !== undefined ? t(input.published ? "lights.pat.timingPublished" : "lights.pat.timing", { on: clock(onAt, locale), off: clock(offAt, locale), published: input.published ?? "" }) : "",
+      t("lights.pat.level", { night: kwText(nightKw), day: kwText(dayKw) }),
+    ], locale),
+    caption: t("lights.pat.caption", { count: complete.length, range, openKwh: kwhText(openKwh), pct: pctText(share), total: kwhText(total), rest: pctText(1 - share) }),
+  };
+}
+
 // ---------- 5. circuit screening ----------
 type ScreenInput = { name: string; category: AnalysisCategory | "overall"; cells: Cells; perMeter: Cells[]; openBase: number | null; closedBase: number | null; meters: ScopeMeter[] };
-function screenCircuit(circuit: ScreenInput, context: { dates: string[]; weekdayDates: string[]; isOpen: (date: string, hour: number) => boolean; openRange: { from: number; to: number }; locale: EnergyIqLocale }) {
+function screenCircuit(circuit: ScreenInput, context: { dates: string[]; weekdayDates: string[]; isOpen: (date: string, hour: number) => boolean; openRange: { from: number; to: number }; locale: EnergyIqLocale; meaning: HoursMeaning }) {
   const { openBase, closedBase } = circuit;
-  const { locale } = context, t = modelText(locale), at = (hour: number) => clock(hour, locale);
+  const { locale } = context, t = modelText(locale), lt = hoursText(locale, context.meaning), at = (hour: number) => clock(hour, locale);
+  // Lights-on hours: "open" is the lights-on hours and "closed" the daytime; the morning tail is lights left on too late.
+  const lighting = context.meaning === "lights_on";
   const flagged = (value: number, base: number) => value > base * (1 + SCREEN_PCT) && value - base >= SCREEN_KWH;
   const openCells: Array<{ date: string; hour: number; value: number }> = [];
   let flags = 0, maxOver = 0;
@@ -677,12 +770,12 @@ function screenCircuit(circuit: ScreenInput, context: { dates: string[]; weekday
   const quiet = flags <= Math.max(1, circuit.cells.size * 0.005);
   const several = circuit.meters.length > 1;
   const found: string[] = [];
-  let eveningKwh: number | null = null;
+  let eveningKwh: number | null = null, earlyKwh: number | null = null;
 
   if (flat && neverOff && quiet && !isEquipment(circuit.category)) {
     found.push(t(several ? "find.zero.other" : "find.zero.one", { hours: grouped(circuit.cells.size), count: numberWord(circuit.meters.length, locale), days: context.dates.length }));
   } else if (flat) {
-    found.push(t(quiet ? "find.flatQuiet" : "find.flat", { pct: pctText(ratio!) }));
+    found.push(lt(quiet ? "find.flatQuiet" : "find.flat", { pct: pctText(ratio!) }));
   } else {
     // Evening tail: still on in the first hour after closing — on how many weekdays, and until when.
     const close = context.openRange.to;
@@ -699,11 +792,28 @@ function screenCircuit(circuit: ScreenInput, context: { dates: string[]; weekday
     }
     if (tails.length >= Math.max(2, seen * 0.3)) {
       const usual = Math.round(median(tails.map(item => item.offAt))!);
-      const late = tails.map(item => item.offAt).filter(offAt => offAt >= Math.max(21, usual + 1));
+      const late = lighting ? [] : tails.map(item => item.offAt).filter(offAt => offAt >= Math.max(21, usual + 1));
       eveningKwh = mean(tails.map(item => item.extra));
       const lateText = !late.length ? "" : Math.min(...late) === Math.max(...late) ? t(late.length === 1 ? "find.late.one" : "find.late.other", { count: numberWord(late.length, locale), time: at(late[0]!) })
         : t("find.lateRange", { count: numberWord(late.length, locale), from: at(Math.min(...late)), to: at(Math.max(...late)) });
-      found.push(t(`find.${circuit.category === "light" ? "lit" : "on"}${tails.length === seen ? "All" : "Some"}`, { close: at(close), count: tails.length, seen, kwh: mean(tails.map(item => item.first))!.toFixed(1), usual: at(usual), late: lateText }));
+      found.push(lt(`find.${circuit.category === "light" ? "lit" : "on"}${tails.length === seen ? "All" : "Some"}`, { close: at(close), count: tails.length, seen, kwh: mean(tails.map(item => item.first))!.toFixed(1), usual: at(usual), late: lateText }));
+    }
+    // Lights-on hours: switched on before the lights-on time, counted back from the hour before it.
+    const lightsOn = context.openRange.from;
+    if (lighting && closedBase != null && lightsOn > 0) {
+      const earlies: Array<{ onAt: number; extra: number }> = [];
+      let evenings = 0;
+      for (const date of context.weekdayDates) {
+        if (circuit.cells.get(cellKey(date, lightsOn - 1)) === undefined) continue;
+        evenings += 1;
+        let hour = lightsOn - 1, extra = 0;
+        for (let value = circuit.cells.get(cellKey(date, hour)); hour >= 0 && value !== undefined && flagged(value, closedBase); hour -= 1, value = circuit.cells.get(cellKey(date, hour))) extra += value - closedBase;
+        if (hour < lightsOn - 1) earlies.push({ onAt: hour + 1, extra });
+      }
+      if (earlies.length >= Math.max(2, evenings * 0.3)) {
+        earlyKwh = mean(earlies.map(item => item.extra));
+        found.push(t(earlies.length === evenings ? "lights.find.earlyAll" : "lights.find.earlySome", { open: at(lightsOn), count: earlies.length, seen: evenings, usual: at(Math.round(median(earlies.map(item => item.onAt))!)) }));
+      }
     }
     if (openBase != null) {
       // Days when daytime use ran well above its own daytime average.
@@ -716,14 +826,15 @@ function screenCircuit(circuit: ScreenInput, context: { dates: string[]; weekday
       const spread = Math.sqrt(mean(openCells.map(cell => (cell.value - openBase) ** 2)) ?? 0) / openBase;
       const top = openCells.reduce<(typeof openCells)[number] | null>((best, cell) => !best || cell.value > best.value ? cell : best, null);
       const busiest = [...high].sort((a, b) => b.pct - a.pct).slice(0, 3).map(item => item.date);
-      if (spread >= 0.35 && top && top.value >= openBase * 2.5 && flagged(top.value, openBase)) found.push(t("find.bursty", {
+      // Bursts mean demos and meetings in a building; lights-on hours only look for whole nights above normal.
+      if (!lighting && spread >= 0.35 && top && top.value >= openBase * 2.5 && flagged(top.value, openBase)) found.push(t("find.bursty", {
         date: shortDate(top.date, locale), time: at(top.hour), kwh: top.value.toFixed(1), times: (top.value / openBase).toFixed(1),
         busiest: busiest.length ? t("find.busiest", { days: listText(dateRuns(busiest, locale), locale) }) : "",
       }));
-      else if (high.length && high.length <= 6) found.push(t("find.high", { dates: listText(dateRuns(high.map(item => item.date), locale), locale), pct: pctText(Math.max(...high.map(item => item.pct))) }));
+      else if (high.length && high.length <= 6) found.push(lt("find.high", { dates: listText(dateRuns(high.map(item => item.date), locale), locale), pct: pctText(Math.max(...high.map(item => item.pct))) }));
     }
-    if (!found.length) found.push(flags === 0 ? t(ratio != null && ratio >= 0.6 ? "find.steadyRatio" : "find.steady", { pct: ratio != null ? pctText(ratio) : "" })
+    if (!found.length) found.push(flags === 0 ? lt(ratio != null && ratio >= 0.6 ? "find.steadyRatio" : "find.steady", { pct: ratio != null ? pctText(ratio) : "" })
       : t(flags === 1 ? "find.minor.one" : "find.minor.other", { count: flags, kwh: maxOver.toFixed(2) }));
   }
-  return { finding: sentences(found, locale), eveningKwh, flat };
+  return { finding: sentences(found, locale), eveningKwh, earlyKwh, flat };
 }

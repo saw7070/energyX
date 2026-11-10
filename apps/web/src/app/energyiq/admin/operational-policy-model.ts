@@ -1,4 +1,5 @@
 import type {
+  EnergyHoursMeaningDto,
   EnergyOperatingCalendarEntryInputDto,
   EnergyOperatingCalendarRevisionDto,
   EnergyOperatingDayDto,
@@ -34,7 +35,12 @@ export type TariffEntryDraft = {
   taxRatePct: string;
 };
 
+/** A range whose end is earlier than its start runs past midnight into the next morning (19:00 → 07:00 next day). */
 export type OperatingTimeRangeDraft = { key: string; from: string; to: string };
+
+/** Whether a range runs past midnight: its end is earlier than its start. 00:00 as an end means midnight, not the next day. */
+export const isOvernightRange = (range: { from: string; to: string }): boolean =>
+  !!range.from && !!range.to && range.to !== "00:00" && range.to !== "24:00" && range.to < range.from;
 
 export type OperatingExceptionDraft = {
   key: string;
@@ -49,6 +55,8 @@ export type OperatingCalendarEntryDraft = {
   owner: PolicyOwnerDraft;
   effectiveFrom: string;
   effectiveTo: string;
+  /** Opening hours (the building is in use) or lights-on hours (lighting that should run at night). */
+  hoursMeaning: EnergyHoursMeaningDto;
   weekly: Record<EnergyOperatingDayDto, OperatingTimeRangeDraft[]>;
   exceptions: OperatingExceptionDraft[];
 };
@@ -70,6 +78,7 @@ export const createEmptyCalendarEntry = (key: string): OperatingCalendarEntryDra
   owner: { kind: "project", scopeId: "" },
   effectiveFrom: "",
   effectiveTo: "",
+  hoursMeaning: "opening",
   weekly: {
     monday: [],
     tuesday: [],
@@ -118,6 +127,7 @@ export const calendarDraftFromRevision = (
   owner: ownerToDraft(entry.owner),
   effectiveFrom: entry.effective_from,
   effectiveTo: entry.effective_to ?? "",
+  hoursMeaning: entry.hours_meaning ?? "opening",
   weekly: Object.fromEntries(OPERATING_DAYS.map((day) => [
     day,
     entry.weekly[day].map((range, index) => ({
@@ -177,11 +187,17 @@ export const calendarPublishEntries = (
     owner: ownerToInput(entry.owner, () => t("error.calendarScope", { number })),
     effectiveFrom: entry.effectiveFrom,
     ...(entry.effectiveTo ? { effectiveTo: entry.effectiveTo } : {}),
+    // Opening hours are the default and are not sent, so a saved calendar keeps its earlier shape.
+    ...(entry.hoursMeaning === "lights_on" ? { hoursMeaning: "lights_on" as const } : {}),
     weekly: Object.fromEntries(OPERATING_DAYS.map((day) => [
       day,
       entry.weekly[day].map((range, rangeIndex) => {
         if (!range.from || !range.to) {
           throw new Error(t("error.rangeIncomplete", { number, day: dayName(day), range: rangeIndex + 1 }));
+        }
+        // An end earlier than the start is fine (it runs into the next morning); the same time twice is no hours at all.
+        if (range.from === range.to) {
+          throw new Error(t("error.rangeEmpty", { number, day: dayName(day), range: rangeIndex + 1 }));
         }
         return { from: range.from, to: range.to };
       }),
@@ -196,6 +212,9 @@ export const calendarPublishEntries = (
           operating: exception.operating.map((range, rangeIndex) => {
             if (!range.from || !range.to) {
               throw new Error(t("error.exceptionRange", { number, exception: exceptionIndex + 1, range: rangeIndex + 1 }));
+            }
+            if (range.from === range.to) {
+              throw new Error(t("error.exceptionRangeEmpty", { number, exception: exceptionIndex + 1, range: rangeIndex + 1 }));
             }
             return { from: range.from, to: range.to };
           }),

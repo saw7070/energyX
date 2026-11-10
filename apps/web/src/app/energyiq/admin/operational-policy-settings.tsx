@@ -19,6 +19,7 @@ import {
   createEmptyCalendarEntry,
   createEmptyTariffEntry,
   hasPendingPolicyRelease,
+  isOvernightRange,
   tariffDraftFromConfiguration,
   tariffPublishEntries,
   type OperatingCalendarEntryDraft,
@@ -363,11 +364,26 @@ export function CalendarEntryEditor({
         />
       </div>
 
+      <label className="mt-4 block max-w-xl">
+        <span className={fieldLabel}>{t("meaning.label")}</span>
+        <select
+          aria-label={t("meaning.label")}
+          className={compactInputClass}
+          value={entry.hoursMeaning}
+          onChange={(event) => onChange({ ...entry, hoursMeaning: event.target.value === "lights_on" ? "lights_on" : "opening" })}
+        >
+          <option value="opening">{t("meaning.opening")}</option>
+          <option value="lights_on">{t("meaning.lights_on")}</option>
+        </select>
+        <span className="mt-1.5 block text-[11px] leading-4 text-muted">{t(`meaning.hint.${entry.hoursMeaning}`)}</span>
+      </label>
+
       <div className="mt-5 overflow-hidden rounded-xl border border-border bg-surface">
         {OPERATING_DAYS.map((day) => (
           <OperatingDayEditor
             key={day}
             day={day}
+            lights={entry.hoursMeaning === "lights_on"}
             ranges={entry.weekly[day]}
             onChange={(ranges) => onChange({
               ...entry,
@@ -376,6 +392,7 @@ export function CalendarEntryEditor({
           />
         ))}
       </div>
+      <p className="mt-2 text-[11px] text-muted">{t("overnightHint")}</p>
 
       <div className="mt-5">
         <div className="flex items-center justify-between gap-3">
@@ -429,10 +446,13 @@ export function CalendarEntryEditor({
 
 function OperatingDayEditor({
   day,
+  lights,
   ranges,
   onChange,
 }: {
   day: EnergyOperatingDayDto;
+  /** Lights-on hours: a day without hours has the lights off, and new hours start as a night, 19:00 to 07:00. */
+  lights: boolean;
   ranges: OperatingTimeRangeDraft[];
   onChange: (ranges: OperatingTimeRangeDraft[]) => void;
 }) {
@@ -450,12 +470,12 @@ function OperatingDayEditor({
             onRemove={() => onChange(ranges.filter((candidate) => candidate.key !== range.key))}
           />
         ))}
-        {ranges.length === 0 ? <span className="block py-2 text-xs text-muted">{t("closed")}</span> : null}
+        {ranges.length === 0 ? <span className="block py-2 text-xs text-muted">{lights ? t("lightsOff") : t("closed")}</span> : null}
       </div>
       <button
         type="button"
         className={secondaryButton}
-        onClick={() => onChange([...ranges, { key: newKey(day), from: "08:00", to: "18:00" }])}
+        onClick={() => onChange([...ranges, lights ? { key: newKey(day), from: "19:00", to: "07:00" } : { key: newKey(day), from: "08:00", to: "18:00" }])}
       >
         {t("addHours")}
       </button>
@@ -554,6 +574,8 @@ function TimeRangeEditor({
         onChange={(event) => onChange({ ...range, to: event.target.value })}
         className={compactInputClass}
       />
+      {/* An end earlier than the start runs into the next morning: 19:00 → 07:00 next day. */}
+      {isOvernightRange(range) ? <span className="rounded-full bg-surface-subtle px-2 py-0.5 text-[11px] font-medium text-muted">{t("nextDay")}</span> : null}
       <button type="button" className={linkButton} onClick={onRemove}>{t("remove")}</button>
     </div>
   );

@@ -4,6 +4,11 @@ import type { EnergyMeterIntervalCoverage } from "@datafoundry/data-gateway";
  * Data availability, as government IoT contracts measure it: how much of a period each meter's readings were actually
  * received. HDB's term is 95%. Energy a meter counted while offline (an estimate) and time with nothing at all both
  * count as not received; a meter someone confirmed is not in use is shown but left out of the site figure.
+ *
+ * Time between two readings whose running total did not move is received: nothing was used, however long it lasted
+ * (a lighting circuit by day). The fact writer keeps it as real readings of 0 kWh. Time after a meter's last reading is
+ * missing. A new site's period starts at its first reading (see startAtFirstReading): days before it was connected are
+ * not missing readings.
  */
 export const DATA_AVAILABILITY_TARGET_PCT = 95;
 /** A meter whose newest reading is this much older than the period's end has stopped sending (as in the bell). */
@@ -118,8 +123,12 @@ const checksFor = (segments: Segment[]): DataAvailabilityCheck[] => {
   return checks;
 };
 
-/** Each day's share of real readings: all of it (allowing a rounding sliver), none, or something in between. */
-const daysFor = (segments: Segment[], dayStartsMs: number[], toMs: number): DataAvailabilityDay[] => dayStartsMs.map((start, index) => {
+/**
+ * Each day's share of real readings: all of it (allowing a rounding sliver), none, or something in between. A day that
+ * starts before the period (a new site's first day) counts from the period's start.
+ */
+const daysFor = (segments: Segment[], dayStartsMs: number[], fromMs: number, toMs: number): DataAvailabilityDay[] => dayStartsMs.map((dayStart, index) => {
+  const start = Math.max(dayStart, fromMs);
   const end = Math.min(dayStartsMs[index + 1] ?? toMs, toMs);
   const length = Math.max(1, end - start);
   const real = segments.filter(segment => segment.kind === "real").reduce((sum, segment) => sum + Math.max(0, Math.min(segment.end, end) - Math.max(segment.start, start)), 0);
@@ -185,7 +194,7 @@ export function summariseDataAvailability(input: {
       longestOutageHours: round(longest / HOUR_MS),
       ...(lastReadingAt ? { lastReadingAt } : {}),
       checks: meter.notInUse ? [] : checksFor(segments),
-      ...(input.dayStartsMs?.length ? { days: daysFor(segments, input.dayStartsMs, input.toMs) } : {}),
+      ...(input.dayStartsMs?.length ? { days: daysFor(segments, input.dayStartsMs, input.fromMs, input.toMs) } : {}),
     };
   });
   const counted = meters.filter(meter => meter.status !== "not_in_use");
@@ -243,3 +252,17 @@ export const resolveDataAvailabilityPeriod = (input: { from?: string | null; to?
   if ((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS + 1 > MAX_PERIOD_DAYS) throw new Error("ENERGYIQ_DATA_AVAILABILITY_PERIOD_INVALID");
   return { from, to, fromMs: localDayStartMs(from, input.timezone), toMs: localDayStartMs(shiftDate(to, 1), input.timezone) };
 };
+
+/**
+ * A site connected part-way through the period is counted from its first reading: the days before it had no meters
+ * to read, which is not the same as readings that went missing. `firstReadingMs` is the earliest reading of any of the
+ * site's meters, so a meter that started later than the others still shows its missing start. A period that ends
+ * before the first reading, or a site with no readings yet, is left as asked.
+ */
+export const startAtFirstReading = <Period extends { from: string; to: string; fromMs: number; toMs: number }>(
+  period: Period,
+  firstReadingMs: number | undefined,
+  timezone: string,
+): Period => firstReadingMs === undefined || !Number.isFinite(firstReadingMs) || firstReadingMs <= period.fromMs || firstReadingMs >= period.toMs
+  ? period
+  : { ...period, from: siteLocalDate(firstReadingMs, timezone), fromMs: firstReadingMs };

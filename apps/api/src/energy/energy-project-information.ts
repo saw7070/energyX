@@ -38,6 +38,7 @@ export function readEnergyProjectInformation(metadata: MetadataStore, userId: st
       locationId: locationId(meter.navigation_scope_id ?? meter.scope_id), location: names.get(locationId(meter.navigation_scope_id ?? meter.scope_id)) ?? "Project", officialAggregation: meter.aggregation_usage === "official" })),
     calendar: calendar ? { version: calendar.version_id, entries: calendar.entries.map(entry => ({
       location: ownerName(entry.owner), from: entry.effective_from, toExclusive: entry.effective_to ?? null,
+      ...(entry.hours_meaning === "lights_on" ? { hoursMeaning: "lights_on" as const } : {}),
       weekly: Object.fromEntries(Object.entries(entry.weekly).map(([day, ranges]) => [day, ranges.map(range => ({ from: range.from, to: range.to }))])),
       exceptions: (entry.exceptions ?? []).map(item => ({ date: item.date, label: item.label ?? item.classification ?? "Exception", ...(item.classification ? { classification: item.classification } : {}), operating: item.operating.map(range => ({ from: range.from, to: range.to })) })),
     })) } : null,

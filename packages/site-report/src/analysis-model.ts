@@ -1,14 +1,17 @@
 /** Pure calculations for the Analysis page, kept separate so every number on the page is testable. */
 import type { ScopeData, TrendCell, TrendSeries } from "./analysis-types.js";
 import { analysisMessages, analysisText, categoryLabel, joinText } from "./analysis-messages.js";
-import { intlLocale, type EnergyIqLocale } from "./locale.js";
+import { forHoursMeaning, intlLocale, type EnergyIqLocale } from "./locale.js";
 
 // English labels come from the page's wording so every language shares one list (see analysis-messages).
 const EN = analysisMessages.en;
 
 export type AnalysisCategory = "load" | "light" | "aircon" | "it" | "kitchen" | "plug" | "other";
 export type AnalysisDayType = "weekday" | "weekend" | "public_holiday";
+/** Each weekday's hours. A range whose `to` is earlier than its `from` runs past midnight and belongs to the day it starts on. */
 export type HoursByDay = Record<string, Array<{ from: string; to: string }>>;
+/** What the hours mean: when the building is in use (the default), or when lighting should be on (usually at night). */
+export type HoursMeaning = "opening" | "lights_on";
 export type AnalysisDay = { date: string; dayType: AnalysisDayType; holidayName?: string; complete: boolean; totalKwh: number; byCategory: Partial<Record<AnalysisCategory, number>> };
 export type AnalysisBaseline = { dayType: AnalysisDayType; expectedKwh: number | null; samples: number };
 export type AnalysisAnomaly = { date: string; dayType: AnalysisDayType; totalKwh: number; expectedKwh: number; deltaPct: number };
@@ -35,6 +38,8 @@ export const ANOMALY_THRESHOLD_PCT = 15;
 export const MIN_BASELINE_SAMPLES = 3;
 const WEEK = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 const NIGHT_HOURS = (hour: number) => hour >= 22 || hour < 6;
+/** The quiet hours of an opening-hours site, for its always-on level: 00:00–06:00. */
+export const NIGHT_WINDOW: readonly number[] = [0, 1, 2, 3, 4, 5];
 
 export const localDayType = (date: string, publicHolidays: Map<string, string>): { dayType: AnalysisDayType; holidayName?: string } => {
   const holidayName = publicHolidays.get(date);
@@ -114,22 +119,40 @@ export function topHours(scope: ScopeData, count = 5): PeakHour[] {
 }
 
 const minutesOf = (time: string) => { const [hours = "0", minutes = "0"] = time.split(":"); return Number(hours) * 60 + Number(minutes); };
-/** Whether a clock hour falls inside the published operating hours of that weekday (half-open, by hour start). */
-export const isOpenHour = (hours: HoursByDay | null, date: string, hour: number) => {
-  const ranges = hours?.[WEEK[new Date(`${date}T00:00:00Z`).getUTCDay()]!] ?? [];
-  return ranges.some(range => hour * 60 >= minutesOf(range.from) && hour * 60 < minutesOf(range.to));
+/** A range that runs past midnight into the next morning, such as 19:00–07:00. */
+export const isOvernight = (range: { from: string; to: string }) => minutesOf(range.to) <= minutesOf(range.from);
+const previousDate = (date: string) => new Date(Date.parse(`${date}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+const rangesOn = (hours: HoursByDay | null, date: string) => hours?.[WEEK[new Date(`${date}T00:00:00Z`).getUTCDay()]!] ?? [];
+/**
+ * The date on which the published hours covering a clock hour started (half-open, by hour start): the same date, or the
+ * day before for the early-morning part of a range that runs overnight (19:00–07:00). Null when the hour is outside them.
+ */
+export function openWindowStart(hours: HoursByDay | null, date: string, hour: number): string | null {
+  const at = hour * 60;
+  if (rangesOn(hours, date).some(range => at >= minutesOf(range.from) && (isOvernight(range) || at < minutesOf(range.to)))) return date;
+  const before = previousDate(date);
+  return rangesOn(hours, before).some(range => isOvernight(range) && at < minutesOf(range.to)) ? before : null;
+}
+/** Whether a clock hour falls inside the published hours, including the morning part of last night's hours. */
+export const isOpenHour = (hours: HoursByDay | null, date: string, hour: number) => openWindowStart(hours, date, hour) !== null;
+/** "08:00–18:00", or "19:00 → 07:00 next day" for a range that runs overnight. */
+export const hoursRangeLabel = (range: { from: string; to: string }, locale: EnergyIqLocale = "en") =>
+  isOvernight(range) ? analysisText(locale)("hours.overnight", { from: range.from, to: range.to }) : `${range.from}–${range.to}`;
+export const openingLabel = (hours: HoursByDay | null, locale: EnergyIqLocale = "en", meaning: HoursMeaning = "opening") => {
+  // A lights-on site may have no Monday hours, so it falls back to the first day that has some.
+  const range = hours?.monday?.[0] ?? (meaning === "lights_on" ? WEEK.map(day => hours?.[day]?.[0]).find(Boolean) : undefined);
+  return range ? hoursRangeLabel(range, locale) : meaning === "lights_on" ? hoursRangeLabel(DEFAULT_LIGHTS_ON_RANGE, locale) : "08:00–18:00";
 };
-export const openingLabel = (hours: HoursByDay | null) => { const range = hours?.monday?.[0]; return range ? `${range.from}–${range.to}` : "08:00–18:00"; };
 
 export function windowSum(scope: ScopeData, dates: string[], include: (date: string, hour: number) => boolean) {
   const set = new Set(dates);
   return (scope.total?.cells ?? []).filter(cell => set.has(cell[0]) && cell[2] != null && include(cell[0], cell[1])).reduce((sum, cell) => sum + cell[2]!, 0);
 }
 
-export function weekdayWindows(scope: ScopeData, days: AnalysisDay[], hours: HoursByDay | null) {
+export function weekdayWindows(scope: ScopeData, days: AnalysisDay[], hours: HoursByDay | null, meaning: HoursMeaning = "opening") {
   const weekdays = days.filter(day => day.dayType === "weekday").map(day => day.date);
   const total = windowSum(scope, weekdays, () => true);
-  const open = windowSum(scope, weekdays, (date, hour) => hours ? isOpenHour(hours, date, hour) : hour >= 8 && hour < 18);
+  const open = windowSum(scope, weekdays, (date, hour) => hours ? isOpenHour(hours, date, hour) : meaning === "lights_on" ? isOpenHour(DEFAULT_LIGHTS_ON_HOURS, date, hour) : hour >= 8 && hour < 18);
   const night = windowSum(scope, weekdays, (_date, hour) => NIGHT_HOURS(hour));
   return { total, open, openShare: total > 0 ? open / total : null, night, nightShare: total > 0 ? night / total : null };
 }
@@ -149,14 +172,19 @@ export function meterHeatmap(space: ScopeData, dates: string[]) {
   })).sort((a, b) => b.hours.reduce((sum, value) => sum + value, 0) - a.hours.reduce((sum, value) => sum + value, 0));
 }
 
-/** Lowest overnight (00:00–06:00) load the site sustained for seven complete nights, against the latest seven. */
-export function overnightFloor(scope: ScopeData) {
+/**
+ * Lowest quiet-hours load the site sustained for seven complete days, against the latest seven. The quiet hours are
+ * 00:00–06:00 for opening hours, or the daytime for lights-on hours (see quietHours).
+ */
+export function overnightFloor(scope: ScopeData, quiet: readonly number[] = NIGHT_WINDOW) {
   const series = scope.total;
   if (!series) return null;
+  const quietSet = new Set(quiet);
+  if (!quietSet.size) return null;
   const nights = scope.dates.flatMap(date => {
-    const cells = series.cells.filter(cell => cell[0] === date && cell[1] < 6);
-    const complete = cells.length === 6 && cells.every(cell => cell[2] != null && cell[3] >= series.expectedMinutesPerHour && cell[4] === 0);
-    return complete ? [{ date, kw: cells.reduce((sum, cell) => sum + cell[2]!, 0) / 6 }] : [];
+    const cells = series.cells.filter(cell => cell[0] === date && quietSet.has(cell[1]));
+    const complete = cells.length === quietSet.size && cells.every(cell => cell[2] != null && cell[3] >= series.expectedMinutesPerHour && cell[4] === 0);
+    return complete ? [{ date, kw: cells.reduce((sum, cell) => sum + cell[2]!, 0) / quietSet.size }] : [];
   });
   if (nights.length < 14) return null;
   const median = (values: number[]) => { const sorted = [...values].sort((a, b) => a - b); const mid = Math.floor(sorted.length / 2); return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2; };
@@ -196,50 +224,87 @@ export const TIME_BUCKET_COLORS: Record<TimeBucket, string> = { open: "#2a78d6",
 const WORKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday"];
 /** Operating hours used when the site has none published: Monday to Friday, 08:00–18:00. */
 export const DEFAULT_OPENING_HOURS: HoursByDay = Object.fromEntries(WORKDAYS.map(day => [day, [{ from: "08:00", to: "18:00" }]]));
-export const effectiveHours = (hours: HoursByDay | null) => hours && Object.values(hours).some(ranges => ranges.length) ? hours : DEFAULT_OPENING_HOURS;
+const DEFAULT_LIGHTS_ON_RANGE = { from: "19:00", to: "07:00" };
+/** Lights-on hours used when a lighting site has none published: every night, 19:00 to 07:00 the next morning. */
+export const DEFAULT_LIGHTS_ON_HOURS: HoursByDay = Object.fromEntries(WEEK.map(day => [day, [DEFAULT_LIGHTS_ON_RANGE]]));
+export const effectiveHours = (hours: HoursByDay | null, meaning: HoursMeaning = "opening") =>
+  hours && Object.values(hours).some(ranges => ranges.length) ? hours : meaning === "lights_on" ? DEFAULT_LIGHTS_ON_HOURS : DEFAULT_OPENING_HOURS;
 
-/** Which part of the week an hour belongs to. Public holidays count as closed all day. */
-export function bucketOf(hours: HoursByDay, date: string, dayType: AnalysisDayType, hour: number): TimeBucket {
+/** How to read the hours: what they mean, and the day type of a date outside the chosen days (for nights that began the day before). */
+export type BucketOptions = { meaning?: HoursMeaning | undefined; dayTypeOf?: ((date: string) => AnalysisDayType | undefined) | undefined };
+/**
+ * Which part of the week an hour belongs to. Hours belong to the day they start on: the small hours of a night that
+ * began on a weekday are open even on a Saturday morning, and a public holiday closes the hours that start on it.
+ * Lights-on hours have only two parts, inside them ("open") or daytime ("after_hours"), on every day of the year.
+ */
+export function bucketOf(hours: HoursByDay, date: string, dayType: AnalysisDayType, hour: number, options: BucketOptions = {}): TimeBucket {
+  const start = openWindowStart(hours, date, hour);
+  if (options.meaning === "lights_on") return start ? "open" : "after_hours";
+  if (start !== null) {
+    const startType = start === date ? dayType : options.dayTypeOf?.(start) ?? localDayType(start, new Map()).dayType;
+    return startType === "public_holiday" ? "holiday" : "open";
+  }
   if (dayType === "public_holiday") return "holiday";
-  if (isOpenHour(hours, date, hour)) return "open";
   return dayType === "weekend" ? "weekend" : "after_hours";
 }
 
 /** kWh in each part of the week, plus the share of calendar hours the site is closed (for yearly estimates). */
-export function timeBuckets(scope: ScopeData, days: AnalysisDay[], hours: HoursByDay | null) {
-  const open = effectiveHours(hours);
+export function timeBuckets(scope: ScopeData, days: AnalysisDay[], hours: HoursByDay | null, meaning: HoursMeaning = "opening") {
+  const open = effectiveHours(hours, meaning);
   const typeOf = new Map(days.map(day => [day.date, day.dayType]));
+  const options: BucketOptions = { meaning, dayTypeOf: date => typeOf.get(date) };
   const kwh: Record<TimeBucket, number> = { open: 0, after_hours: 0, weekend: 0, holiday: 0 };
   for (const cell of scope.total?.cells ?? []) {
     const dayType = typeOf.get(cell[0]);
-    if (dayType && cell[2] != null) kwh[bucketOf(open, cell[0], dayType, cell[1])] += cell[2];
+    if (dayType && cell[2] != null) kwh[bucketOf(open, cell[0], dayType, cell[1], options)] += cell[2];
   }
   let closed = 0;
-  for (const day of days) for (let hour = 0; hour < 24; hour += 1) if (bucketOf(open, day.date, day.dayType, hour) !== "open") closed += 1;
+  for (const day of days) for (let hour = 0; hour < 24; hour += 1) if (bucketOf(open, day.date, day.dayType, hour, options) !== "open") closed += 1;
   const total = TIME_BUCKETS.reduce((sum, bucket) => sum + kwh[bucket], 0);
   return { kwh, total, closedKwh: total - kwh.open, closedShareOfHours: days.length ? closed / (days.length * 24) : 0 };
 }
 
-/** The load that never switches off: median of each complete night's average 00:00–06:00 use, in kW. */
-export function alwaysOnKw(scope: ScopeData) {
+/**
+ * The clock hours whose level counts as "quiet", for the always-on load and the savings benchmarks. Opening hours:
+ * 00:00–06:00. Lights-on hours: the daytime, when the lights are off on every day of the week, less the hour either
+ * side of the lights-on hours (lights switching a little early or late at dusk and dawn) when that still leaves three
+ * hours. With no daytime at all (lights on around the clock) it falls back to 00:00–06:00.
+ */
+export function quietHours(hours: HoursByDay | null, meaning: HoursMeaning = "opening"): readonly number[] {
+  if (meaning !== "lights_on") return NIGHT_WINDOW;
+  const schedule = effectiveHours(hours, meaning);
+  // One full week (Monday 5 to Sunday 11 January 2026) covers every weekday and every night that runs into the next day.
+  const week = Array.from({ length: 7 }, (_, index) => `2026-01-${String(5 + index).padStart(2, "0")}`);
+  const closed = Array.from({ length: 24 }, (_, hour) => hour).filter(hour => week.every(date => !isOpenHour(schedule, date, hour)));
+  const core = closed.filter(hour => closed.includes((hour + 23) % 24) && closed.includes((hour + 1) % 24));
+  return core.length >= 3 ? core : closed.length ? closed : NIGHT_WINDOW;
+}
+
+/**
+ * The load that never switches off: median of each complete day's average use in the quiet hours, in kW. The quiet
+ * hours are 00:00–06:00 unless given (a lighting site passes its daytime, see quietHours).
+ */
+export function alwaysOnKw(scope: ScopeData, quiet: readonly number[] = NIGHT_WINDOW) {
   const series = scope.total;
-  if (!series) return null;
+  const quietSet = new Set(quiet);
+  if (!series || !quietSet.size) return null;
   const nights = scope.dates.flatMap(date => {
-    const cells = series.cells.filter(cell => cell[0] === date && cell[1] < 6);
-    return cells.length === 6 && cells.every(cell => cell[2] != null && cell[3] >= series.expectedMinutesPerHour && cell[4] === 0) ? [cells.reduce((sum, cell) => sum + cell[2]!, 0) / 6] : [];
+    const cells = series.cells.filter(cell => cell[0] === date && quietSet.has(cell[1]));
+    return cells.length === quietSet.size && cells.every(cell => cell[2] != null && cell[3] >= series.expectedMinutesPerHour && cell[4] === 0) ? [cells.reduce((sum, cell) => sum + cell[2]!, 0) / quietSet.size] : [];
   }).sort((a, b) => a - b);
   if (nights.length < 3) return null;
   const mid = Math.floor(nights.length / 2);
   return nights.length % 2 ? nights[mid]! : (nights[mid - 1]! + nights[mid]!) / 2;
 }
 
-/** Closed-hours energy above a benchmark load (kW): what would be saved by running no higher than the benchmark after working hours. */
-export function aboveBenchmarkWhenClosed(scope: ScopeData, days: AnalysisDay[], hours: HoursByDay | null, benchmarkKw: number) {
-  const open = effectiveHours(hours);
+/** Closed-hours energy above a benchmark load (kW): what would be saved by running no higher than the benchmark after working hours (in the daytime, for lights-on hours). */
+export function aboveBenchmarkWhenClosed(scope: ScopeData, days: AnalysisDay[], hours: HoursByDay | null, benchmarkKw: number, meaning: HoursMeaning = "opening") {
+  const open = effectiveHours(hours, meaning);
   const typeOf = new Map(days.map(day => [day.date, day.dayType]));
+  const options: BucketOptions = { meaning, dayTypeOf: date => typeOf.get(date) };
   return (scope.total?.cells ?? []).reduce((sum, cell) => {
     const dayType = typeOf.get(cell[0]);
-    return dayType && cell[2] != null && bucketOf(open, cell[0], dayType, cell[1]) !== "open" ? sum + Math.max(0, cell[2] - benchmarkKw) : sum;
+    return dayType && cell[2] != null && bucketOf(open, cell[0], dayType, cell[1], options) !== "open" ? sum + Math.max(0, cell[2] - benchmarkKw) : sum;
   }, 0);
 }
 
@@ -248,10 +313,11 @@ export type StoryHour = { hour: number; closed: boolean; base: number; working: 
  * An average day split into the always-on minimum, use above it while open, and use above it while closed.
  * An hour counts as closed when the site is closed on most of the chosen days.
  */
-export function storyProfile(scope: ScopeData, days: AnalysisDay[], hours: HoursByDay | null, minimumKw: number): StoryHour[] {
-  const open = effectiveHours(hours);
+export function storyProfile(scope: ScopeData, days: AnalysisDay[], hours: HoursByDay | null, minimumKw: number, meaning: HoursMeaning = "opening"): StoryHour[] {
+  const open = effectiveHours(hours, meaning);
+  const options: BucketOptions = { meaning };
   return hourlyProfile(scope, days.map(day => day.date)).map(row => {
-    const closedDays = days.filter(day => bucketOf(open, day.date, day.dayType, row.hour) !== "open").length;
+    const closedDays = days.filter(day => bucketOf(open, day.date, day.dayType, row.hour, options) !== "open").length;
     const closed = days.length > 0 && closedDays * 2 >= days.length;
     const base = Math.min(row.total, minimumKw);
     const above = Math.max(0, row.total - base);
@@ -263,31 +329,37 @@ export function storyProfile(scope: ScopeData, days: AnalysisDay[], hours: Hours
 const ESSENTIAL = /fridge|refrig|freez|server|network|router|\brack\b|\bups\b|security|cctv|alarm|access|door|lift|elevator|pump|emergency|exit|comms|data room|it room/i;
 export type ClosedUse = {
   id: string; name: string; space: string; category: AnalysisCategory | "overall"; kind: "circuit" | "remainder" | "type"; totalKwh: number; closedKwh: number; closedHours: number; closedKw: number; essential: boolean;
-  /** Its own low overnight level already reached (10th percentile of complete nights, 00:00–06:00), and closed-hours energy above that level. */
+  /** Its own low quiet-hours level already reached (10th percentile of complete days; 00:00–06:00, or the daytime for lights-on hours), and closed-hours energy above that level. */
   lowestKw: number | null; aboveLowestKwh: number;
 };
 
-/** A low overnight level the meter has already reached: 10th percentile of complete nights' average 00:00–06:00 use (needs five nights). */
-export function lowestNightKw(series: TrendSeries | null | undefined) {
-  if (!series) return null;
+/** A low quiet-hours level the meter has already reached: 10th percentile of complete days' average use in the quiet hours, 00:00–06:00 unless given (needs five days). */
+export function lowestNightKw(series: TrendSeries | null | undefined, quiet: readonly number[] = NIGHT_WINDOW) {
+  const quietSet = new Set(quiet);
+  if (!series || !quietSet.size) return null;
   const byDate = new Map<string, TrendCell[]>();
-  for (const cell of series.cells) if (cell[1] < 6) byDate.set(cell[0], [...(byDate.get(cell[0]) ?? []), cell]);
-  const nights = [...byDate.values()].filter(cells => cells.length === 6 && cells.every(cell => cell[2] != null && cell[3] >= series.expectedMinutesPerHour && cell[4] === 0))
-    .map(cells => cells.reduce((sum, cell) => sum + cell[2]!, 0) / 6).sort((a, b) => a - b);
+  for (const cell of series.cells) if (quietSet.has(cell[1])) byDate.set(cell[0], [...(byDate.get(cell[0]) ?? []), cell]);
+  const nights = [...byDate.values()].filter(cells => cells.length === quietSet.size && cells.every(cell => cell[2] != null && cell[3] >= series.expectedMinutesPerHour && cell[4] === 0))
+    .map(cells => cells.reduce((sum, cell) => sum + cell[2]!, 0) / quietSet.size).sort((a, b) => a - b);
   return nights.length >= 5 ? nights[Math.floor(0.1 * (nights.length - 1))]! : null;
 }
 
-/** What keeps using energy while the site is closed: each circuit inside each space, or each meter type when there is no circuit detail. */
-export function closedUseBreakdown(project: ScopeData, spaces: ScopeData[], holidays: Map<string, string>, hours: HoursByDay | null, locale: EnergyIqLocale = "en"): ClosedUse[] {
-  const open = effectiveHours(hours);
+/**
+ * What keeps using energy while the site is closed (in the daytime, for lights-on hours): each circuit inside each
+ * space, or each meter type when there is no circuit detail.
+ */
+export function closedUseBreakdown(project: ScopeData, spaces: ScopeData[], holidays: Map<string, string>, hours: HoursByDay | null, locale: EnergyIqLocale = "en", meaning: HoursMeaning = "opening"): ClosedUse[] {
+  const open = effectiveHours(hours, meaning);
   const t = analysisText(locale);
+  const quiet = quietHours(hours, meaning);
+  const options: BucketOptions = { meaning, dayTypeOf: date => localDayType(date, holidays).dayType };
   const measure = (series: TrendSeries | null | undefined) => {
-    const lowestKw = lowestNightKw(series);
+    const lowestKw = lowestNightKw(series, quiet);
     let totalKwh = 0, closedKwh = 0, closedHours = 0, aboveLowestKwh = 0;
     for (const cell of series?.cells ?? []) {
       if (cell[2] == null) continue;
       totalKwh += cell[2];
-      if (bucketOf(open, cell[0], localDayType(cell[0], holidays).dayType, cell[1]) !== "open") {
+      if (bucketOf(open, cell[0], localDayType(cell[0], holidays).dayType, cell[1], options) !== "open") {
         closedKwh += cell[2]; closedHours += 1;
         if (lowestKw != null) aboveLowestKwh += Math.max(0, cell[2] - lowestKw);
       }
@@ -330,8 +402,10 @@ export function savingsPlan(input: {
   projectName: string; closedUse: ClosedUse[]; closedHoursPerYear: number; rate: number | null; currency: string | null;
   aboveBenchmarkKwh: number | null; benchmarkKw: number | null; periodDays: number; anomalies: AnalysisAnomaly[];
   actions: Array<{ id: string; title: string; recommendation: string; state: string; priority: { level: string; reason: string } }>;
+  /** Lights-on hours: the ideas are about lights on by day, switched on too early or off too late. */
+  meaning?: HoursMeaning | undefined;
 }, locale: EnergyIqLocale = "en"): Opportunity[] {
-  const t = analysisText(locale);
+  const t = forHoursMeaning(analysisText(locale), analysisMessages, input.meaning);
   const money = (kwh: number | null) => kwh != null && input.rate != null ? kwh * input.rate : null;
   const rateText = input.rate != null && input.currency ? ` × ${input.currency} ${input.rate.toFixed(4)}/kWh` : "";
   const kw = (value: number) => `${value.toFixed(2)} kW`;

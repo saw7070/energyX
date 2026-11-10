@@ -239,6 +239,16 @@ describe("site report by group", () => {
     expect(buildSiteReport(DATA, REFERENCE, "2026-09-22T10:00:00Z").groups).toBeNull();
   });
 
+  it("keeps the lights-on story for a night-time site and adds the groups beside it", () => {
+    const nights = Object.fromEntries(["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].map(day => [day, [{ from: "19:00", to: "07:00" }]]));
+    const lit = buildSiteReport({ ...data, openingHours: nights, hoursMeaning: "lights_on" }, null, "2026-09-22T10:00:00Z");
+    expect(lit.hoursMeaning).toBe("lights_on");
+    expect(["daytime", "night", "always-on"]).toContain(lit.headlineTopic);
+    expect(lit.headline).not.toBe("");
+    expect(lit.groups!.summary).toBe("Block 264F 92% · Common area 8% — biggest single group: Ground floor");
+    expect(lit.profile.zones.find(zone => zone.heading.startsWith("Common area"))!.text).toContain("**Entrance** is the biggest share of common area and has no sub-meter below it.");
+  });
+
   it("prints the group table and a by-group donut, and the floor plan as a drawing without figures", () => {
     const html = renderSiteReportMarkup(report);
     expect(html).toContain("By group — share of an estimated 30-day month");

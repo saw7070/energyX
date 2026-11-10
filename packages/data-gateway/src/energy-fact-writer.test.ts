@@ -775,6 +775,38 @@ describe("writeEnergyFactProjectMaterialization", () => {
     }
   });
 
+  it("keeps a Tuya span whose total did not move as real readings of no use, however long", async () => {
+    const databasePath = ":memory:";
+    const projectId = "project-tuya-unchanged-total";
+    const batch = eventBatch({
+      databasePath,
+      projectId,
+      importBatchId: "tuya-unchanged-total",
+      sourceSha256: "tuya-unchanged-total-sha",
+      readings: [
+        ["2026-11-06T21:00:00.000Z", 13.23],
+        ["2026-11-06T22:00:00.000Z", 13.54],
+        // Nobody switches it on for 30 hours; the meter sends the same total again.
+        ["2026-11-08T04:00:00.000Z", 13.54],
+        ["2026-11-08T05:00:00.000Z", 13.86],
+      ],
+    });
+
+    await writeProjectSnapshot(batch, [batch], "snapshot-tuya-unchanged-total", [batch.sourceSha256], "unavailable");
+
+    const facts = await readCanonicalIntervals(databasePath, projectId);
+    const unchanged = facts.filter((fact) => {
+      const start = (fact.interval_start as Date).toISOString();
+      return start >= "2026-11-06T22:00:00.000Z" && start < "2026-11-08T04:00:00.000Z";
+    });
+    expect(unchanged).toHaveLength(30 * 4);
+    expect(unchanged.every((fact) => fact.quality_status === "ok" && Number(fact.usage_kwh) === 0)).toBe(true);
+    expect(facts.some((fact) => fact.quality_status !== "ok")).toBe(false);
+    expect(facts.reduce((sum, fact) => sum + Number(fact.usage_kwh), 0)).toBeCloseTo(13.86 - 13.23, 6);
+    const gaps = await readRows(databasePath, `SELECT 1 FROM energy_quality_events WHERE project_id = '${projectId}' AND code = 'gap'`);
+    expect(gaps).toHaveLength(0);
+  });
+
   it("keeps project-wide cumulative gaps aggregate-eligible without making them cadence-eligible", async () => {
     const databasePath = ":memory:";
     const projectId = "project-cross-batch-quality";

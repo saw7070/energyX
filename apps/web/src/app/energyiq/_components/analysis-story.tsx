@@ -4,9 +4,10 @@ import React, { useEffect, useId, useMemo, useState, type ReactNode } from "reac
 import { Bar, BarChart, CartesianGrid, Cell, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   CATEGORY_COLORS, CATEGORY_ORDER, TIME_BUCKETS, dateWithDayYear, TIME_BUCKET_COLORS, aboveBenchmarkWhenClosed, alwaysOnKw, closedUseBreakdown,
-  effectiveHours, openingLabel, percentChange, savingsPlan, shortDate, statusFor, storyProfile, timeBuckets,
-  type AnalysisAnomaly, type AnalysisDay, type HealthStatus, type overnightFloor,
+  effectiveHours, openingLabel, percentChange, quietHours, savingsPlan, shortDate, statusFor, storyProfile, timeBuckets,
+  type AnalysisAnomaly, type AnalysisDay, type HealthStatus, type HoursMeaning, type overnightFloor,
 } from "./analysis-model";
+import { forHoursMeaning } from "@datafoundry/site-report";
 import type { AnalysisData } from "./analysis-data";
 import { analysisMessages, categoryLabel, confidenceLabel, effortLabel, holidayName, joinText, rich, timeBucketLabel } from "./analysis-messages";
 import { storyMessages } from "./analysis-story-messages";
@@ -39,6 +40,13 @@ const STATUS: Record<HealthStatus, { icon: EnergyIconName; chip: string; ring: s
   act: { icon: "alert", chip: "bg-rose-50 text-rose-700 ring-rose-200", ring: "border-rose-200" },
 };
 type StoryText = Translate<keyof typeof storyMessages.en>;
+/** The summary's wording; lights-on hours use the "lights." sentences (daytime use rather than after working hours). */
+function useStoryText(meaning: HoursMeaning): StoryText {
+  const t = useMessages(storyMessages);
+  return useMemo(() => forHoursMeaning(t, storyMessages, meaning), [t, meaning]);
+}
+/** Lights-on hours: daytime use is worth watching from 10% and acting on from 25%; after working hours from 35% and 50%. */
+const closedThresholds = (meaning: HoursMeaning) => meaning === "lights_on" ? { watch: 10, act: 25 } : { watch: 35, act: 50 };
 
 type StoryInput = { data: AnalysisData; days: AnalysisDay[]; anomalies: AnalysisAnomaly[]; floor: ReturnType<typeof overnightFloor>; rate: number | null };
 type Story = ReturnType<typeof buildStory>;
@@ -48,18 +56,20 @@ function buildStory({ data, days, anomalies, floor, rate }: StoryInput, locale: 
   const project = data.current.project;
   const currency = project.cost?.currency ?? null;
   const hours = data.openingHours;
-  const split = timeBuckets(project, days, hours);
+  // Lights-on hours: lighting that should run at night, so "closed" is the daytime and quiet hours come from it too.
+  const meaning: HoursMeaning = data.hoursMeaning ?? "opening";
+  const split = timeBuckets(project, days, hours, meaning);
   const closedHoursPerYear = split.closedShareOfHours * 8760;
-  const alwaysOn = alwaysOnKw(project);
+  const alwaysOn = alwaysOnKw(project, quietHours(hours, meaning));
   const benchmark = floor?.bestKw ?? alwaysOn;
-  const aboveBenchmark = benchmark != null ? aboveBenchmarkWhenClosed(project, days, hours, benchmark) : null;
-  const closedUse = closedUseBreakdown(project, data.current.spaces, data.holidays, hours, locale);
-  const plan = savingsPlan({ projectName: data.projectName, closedUse, closedHoursPerYear, rate, currency, aboveBenchmarkKwh: aboveBenchmark, benchmarkKw: benchmark, periodDays: days.length, anomalies, actions: data.actions }, locale);
+  const aboveBenchmark = benchmark != null ? aboveBenchmarkWhenClosed(project, days, hours, benchmark, meaning) : null;
+  const closedUse = closedUseBreakdown(project, data.current.spaces, data.holidays, hours, locale, meaning);
+  const plan = savingsPlan({ projectName: data.projectName, closedUse, closedHoursPerYear, rate, currency, aboveBenchmarkKwh: aboveBenchmark, benchmarkKw: benchmark, periodDays: days.length, anomalies, actions: data.actions, meaning }, locale);
   const counted = plan.filter(item => item.counted);
   const periodCost = project.cost?.amount ?? null;
   const share = (kwh: number) => split.total > 0 ? kwh / split.total : 0;
   return {
-    project, currency, rate, hours, split, closedHoursPerYear, alwaysOn, benchmark, closedUse, plan, days,
+    project, currency, rate, hours, meaning, split, closedHoursPerYear, alwaysOn, benchmark, closedUse, plan, days,
     periodCost, closedShare: share(split.closedKwh), closedCost: periodCost != null ? periodCost * share(split.closedKwh) : null,
     yearlyCost: periodCost != null && days.length ? periodCost * 365 / days.length : null,
     alwaysOnYearlyCost: alwaysOn != null && rate != null ? alwaysOn * 8760 * rate : null,
@@ -67,15 +77,17 @@ function buildStory({ data, days, anomalies, floor, rate }: StoryInput, locale: 
     provenKwh: counted.some(item => item.provenKwh != null) ? counted.reduce((sum, item) => sum + (item.provenKwh ?? 0), 0) : null,
     provenCost: rate != null && counted.some(item => item.provenCost != null) ? counted.reduce((sum, item) => sum + (item.provenCost ?? 0), 0) : null,
     change: percentChange(project.usageKwh, data.previous?.project.usageKwh),
-    usingDefaultHours: effectiveHours(hours) !== hours,
+    usingDefaultHours: effectiveHours(hours, meaning) !== hours,
   };
 }
 
 export function DecisionSummary(props: StoryInput) {
   const { data: storyData, days, anomalies, floor, rate } = props;
   const { locale } = useEnergyIqLocale();
-  const t = useMessages(storyMessages);
   const story = useMemo(() => buildStory({ data: storyData, days, anomalies, floor, rate }, locale), [storyData, days, anomalies, floor, rate, locale]);
+  const t = useStoryText(story.meaning);
+  // Lights-on hours: a calm headline unless daytime use is worth a look.
+  const lightsOk = story.meaning === "lights_on" && story.closedShare * 100 < closedThresholds(story.meaning).watch;
   const { data } = props;
   const money = (amount: number | null) => amount == null || !story.currency ? "—" : withCurrency(story.currency, Math.round(amount).toLocaleString("en-SG"));
   const first = story.plan.find(item => item.counted);
@@ -95,8 +107,8 @@ export function DecisionSummary(props: StoryInput) {
         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">{t("summary.eyebrow")}</p>
         <h2 id="story-title" className="mt-1 max-w-4xl text-xl font-semibold leading-snug text-slate-900 sm:text-2xl">
           {story.periodCost != null
-            ? rich(t("summary.headlineCost", { days: dates.length }), { name: data.projectName, cost: <Strong>{money(story.periodCost)}</Strong>, closed: <Strong tone="amber">{money(story.closedCost)} ({num(story.closedShare * 100, 0)}%)</Strong> })
-            : rich(t("summary.headlineKwh", { days: dates.length }), { name: data.projectName, kwh: <Strong>{num(story.split.total, 0)} kWh</Strong>, share: <Strong tone="amber">{num(story.closedShare * 100, 0)}%</Strong> })}
+            ? rich(t(lightsOk ? "lights.summary.headlineCostOk" : "summary.headlineCost", { days: dates.length }), { name: data.projectName, cost: <Strong>{money(story.periodCost)}</Strong>, closed: <Strong tone="amber">{money(story.closedCost)} ({num(story.closedShare * 100, 0)}%)</Strong> })
+            : rich(t(lightsOk ? "lights.summary.headlineKwhOk" : "summary.headlineKwh", { days: dates.length }), { name: data.projectName, kwh: <Strong>{num(story.split.total, 0)} kWh</Strong>, share: <Strong tone="amber">{num(story.closedShare * 100, 0)}%</Strong> })}
         </h2>
         {story.periodCost != null && story.project.cost?.peak && story.project.cost.amount > 0 && story.project.usageKwh
           ? <p className="mt-2 max-w-3xl text-sm text-slate-600">{t("summary.peak", {
@@ -200,7 +212,7 @@ function ShareBars({ title, rows, format }: { title: string; rows: Array<{ key: 
 }
 
 function MoneySection({ story, data, money }: { story: Story; data: AnalysisData; money: (amount: number | null) => string }) {
-  const t = useMessages(storyMessages);
+  const t = useStoryText(story.meaning);
   const { locale } = useEnergyIqLocale();
   const rate = story.rate;
   // Money when a rate is published, otherwise kWh.
@@ -244,7 +256,7 @@ function MoneySection({ story, data, money }: { story: Story; data: AnalysisData
 }
 
 function WhenSection({ story, money, inspect }: { story: Story; money: (amount: number | null) => string; inspect?: { date: string; at: number } | null }) {
-  const t = useMessages(storyMessages);
+  const t = useStoryText(story.meaning);
   const { locale } = useEnergyIqLocale();
   const [dayType, setDayType] = useState<"weekday" | "weekend" | "day">("weekday");
   // Single-day view: any date in the period, defaulting to the latest day with complete readings.
@@ -256,8 +268,8 @@ function WhenSection({ story, money, inspect }: { story: Story; money: (amount: 
   const cost = (kwh: number) => story.periodCost != null && story.split.total > 0 ? story.periodCost * kwh / story.split.total : null;
   const chosen = dayType === "day" ? (pickedDay ? [pickedDay] : []) : story.days.filter(day => day.complete && day.dayType === dayType);
   const minimum = story.alwaysOn ?? 0;
-  const profileFor = (type: "weekday" | "weekend") => storyProfile(story.project, story.days.filter(day => day.complete && day.dayType === type), story.hours, minimum);
-  const rows = dayType === "day" ? storyProfile(story.project, chosen, story.hours, minimum) : profileFor(dayType);
+  const profileFor = (type: "weekday" | "weekend") => storyProfile(story.project, story.days.filter(day => day.complete && day.dayType === type), story.hours, minimum, story.meaning);
+  const rows = dayType === "day" ? storyProfile(story.project, chosen, story.hours, minimum, story.meaning) : profileFor(dayType);
   // One scale for weekday, weekend and the chosen day, so switching shows how much lower (or higher) each really is.
   const peak = Math.max(0.1, ...(["weekday", "weekend"] as const).flatMap(type => profileFor(type).map(row => row.total)), ...(dayType === "day" ? rows.map(row => row.total) : []));
   // About four round steps (1, 2, 2.5 or 5 × a power of ten) so the axis reads 0, 2, 4, 6, 8 rather than ending on an odd value.
@@ -271,8 +283,10 @@ function WhenSection({ story, money, inspect }: { story: Story; money: (amount: 
   const closedRanges: Array<{ from: number; to: number }> = [];
   for (const row of rows) { const last = closedRanges.at(-1); if (!row.closed) continue; if (last && last.to === row.hour - 1) last.to = row.hour; else closedRanges.push({ from: row.hour, to: row.hour }); }
   const dayAvoidable = rows.reduce((sum, row) => sum + row.avoidable, 0), dayBase = rows.reduce((sum, row) => sum + row.base, 0), dayTotal = rows.reduce((sum, row) => sum + row.total, 0);
-  const biggestClosed = TIME_BUCKETS.filter(bucket => bucket !== "open").sort((a, b) => story.split.kwh[b] - story.split.kwh[a])[0]!;
-  const segments = TIME_BUCKETS.filter(bucket => story.split.kwh[bucket] > 0);
+  const buckets = story.meaning === "lights_on" ? TIME_BUCKETS.filter(bucket => bucket === "open" || bucket === "after_hours") : TIME_BUCKETS;
+  const bucketLabel = (bucket: (typeof TIME_BUCKETS)[number]) => timeBucketLabel(bucket, locale, story.meaning);
+  const biggestClosed = buckets.filter(bucket => bucket !== "open").sort((a, b) => story.split.kwh[b] - story.split.kwh[a])[0]!;
+  const segments = buckets.filter(bucket => story.split.kwh[bucket] > 0);
   const series = [
     { key: "base", label: t("when.alwaysOn"), color: ALWAYS_ON_COLOR },
     { key: "working", label: t("when.working"), color: TIME_BUCKET_COLORS.open },
@@ -280,15 +294,15 @@ function WhenSection({ story, money, inspect }: { story: Story; money: (amount: 
   ] as const;
   const noCompleteDays = t(dayType === "weekend" ? "when.noComplete.weekend" : "when.noComplete.weekday");
   const takeaway = rich(t(story.usingDefaultHours ? "when.takeawayAssumed" : "when.takeaway", { pct: num(story.closedShare * 100, 0) }), {
-    hours: <span className="font-medium text-slate-900">{openingLabel(story.hours)}</span>,
-    bucket: <span className="font-medium text-slate-900">{timeBucketLabel(biggestClosed, locale).toLowerCase()}</span>,
+    hours: <span className="font-medium text-slate-900">{openingLabel(story.hours, locale, story.meaning)}</span>,
+    bucket: <span className="font-medium text-slate-900">{bucketLabel(biggestClosed).toLowerCase()}</span>,
   });
   return <StoryCard id="story-when" step={2} title={t("when.title")} takeaway={takeaway}>
-    <div className="mb-2 flex h-9 w-full overflow-hidden rounded-lg" role="img" aria-label={joinText(segments.map(bucket => `${timeBucketLabel(bucket, locale)} ${num(story.split.kwh[bucket] / story.split.total * 100, 0)}%`), locale)}>
+    <div className="mb-2 flex h-9 w-full overflow-hidden rounded-lg" role="img" aria-label={joinText(segments.map(bucket => `${bucketLabel(bucket)} ${num(story.split.kwh[bucket] / story.split.total * 100, 0)}%`), locale)}>
       {segments.map(bucket => { const pct = story.split.kwh[bucket] / story.split.total * 100; return <div key={bucket} className="flex items-center justify-center border-r-2 border-white text-xs font-semibold text-white last:border-r-0" style={{ width: `${pct}%`, background: TIME_BUCKET_COLORS[bucket] }}>{pct >= 8 ? `${num(pct, 0)}%` : ""}</div>; })}
     </div>
-    <ul className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{TIME_BUCKETS.map(bucket => <li key={bucket} className="rounded-lg border border-slate-200 px-3 py-2.5">
-      <p className="flex items-center gap-2 text-sm text-slate-600"><span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: TIME_BUCKET_COLORS[bucket] }} />{timeBucketLabel(bucket, locale)}</p>
+    <ul className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{buckets.map(bucket => <li key={bucket} className="rounded-lg border border-slate-200 px-3 py-2.5">
+      <p className="flex items-center gap-2 text-sm text-slate-600"><span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: TIME_BUCKET_COLORS[bucket] }} />{bucketLabel(bucket)}</p>
       <p className="mt-1 text-base font-semibold tabular-nums text-slate-900">{story.periodCost != null ? money(cost(story.split.kwh[bucket])) : `${num(story.split.kwh[bucket], 0)} kWh`}</p>
       <p className="text-sm tabular-nums text-slate-600">{story.periodCost != null ? `${num(story.split.kwh[bucket], 0)} kWh · ` : null}{story.split.total > 0 ? num(story.split.kwh[bucket] / story.split.total * 100, 0) : 0}%</p>
     </li>)}</ul>
@@ -337,7 +351,7 @@ function WhenSection({ story, money, inspect }: { story: Story; money: (amount: 
 }
 
 function StaysOnSection({ story, money }: { story: Story; money: (amount: number | null) => string }) {
-  const t = useMessages(storyMessages);
+  const t = useStoryText(story.meaning);
   const [all, setAll] = useState(false);
   const rows = all ? story.closedUse : story.closedUse.slice(0, 8);
   const yearly = (kw: number) => kw * story.closedHoursPerYear;
@@ -369,7 +383,7 @@ function StaysOnSection({ story, money }: { story: Story; money: (amount: number
 }
 
 function HealthSection({ story, data, anomalies, floor, onJump, onInspectDay }: { story: Story; data: AnalysisData; anomalies: AnalysisAnomaly[]; floor: ReturnType<typeof overnightFloor>; onJump: (id: string) => void; onInspectDay: (date: string) => void }) {
-  const t = useMessages(storyMessages);
+  const t = useStoryText(story.meaning);
   const shared = useMessages(analysisMessages);
   const { locale } = useEnergyIqLocale();
   const coverage = story.project.coverage;
@@ -379,8 +393,8 @@ function HealthSection({ story, data, anomalies, floor, onJump, onInspectDay }: 
     { title: t("health.unusual"), status: anomalies.length >= 3 ? "act" : anomalies.length ? "watch" : "good", value: `${anomalies.length}`,
       text: anomalies.length ? t("health.unusualSome", { days: joinText(anomalies.slice(0, 3).map(item => shortDate(item.date, locale)), locale) + (anomalies.length > 3 ? "…" : "") }) : t("health.unusualNone"),
       ...(anomalies.length ? { days: anomalies.slice(0, 4).map(item => item.date) } : {}) },
-    { title: t("health.closedShare"), status: statusFor(story.closedShare * 100, 35, 50), value: `${num(story.closedShare * 100, 0)}%`,
-      text: story.closedShare >= 0.35 ? t(story.rate != null ? "health.closedHigh" : "health.closedHighEnergy") : t("health.closedOk"), actions: [{ label: t("health.seeStaysOn"), onClick: () => onJump("story-on") }] },
+    { title: t("health.closedShare"), status: statusFor(story.closedShare * 100, closedThresholds(story.meaning).watch, closedThresholds(story.meaning).act), value: `${num(story.closedShare * 100, 0)}%`,
+      text: story.closedShare * 100 >= closedThresholds(story.meaning).watch ? t(story.rate != null ? "health.closedHigh" : "health.closedHighEnergy") : t("health.closedOk"), actions: [{ label: t("health.seeStaysOn"), onClick: () => onJump("story-on") }] },
     ...(gap != null ? [{ title: t("health.alwaysOn"), status: statusFor(gap, 10, 25), value: t("health.alwaysOnValue", { now: num(story.alwaysOn!, 2), best: num(floor!.bestKw, 2) }),
       text: gap >= 10 ? t("health.floorHigher", { kw: num(floor!.bestKw, 2), date: shortDate(floor!.bestTo, locale), pct: num(gap, 0) }) : gap < 1 ? t("health.floorAt") : t("health.floorWithin", { pct: num(gap, 0) }), actions: [{ label: t("health.seeStaysOn"), onClick: () => onJump("story-on") }] }] : []),
     ...(story.change != null ? [{ title: t("health.change", { days: story.days.length }), status: statusFor(story.change, 5, 15), value: `${story.change > 0 ? "+" : ""}${num(story.change)}%`,
@@ -580,7 +594,7 @@ function AheadSection({ story, data }: { story: Story; data: AnalysisData }) {
 }
 
 function PlanSection({ story, data, money }: { story: Story; data: AnalysisData; money: (amount: number | null) => string }) {
-  const t = useMessages(storyMessages);
+  const t = useStoryText(story.meaning);
   const { locale } = useEnergyIqLocale();
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [fixCost, setFixCost] = useState<Record<string, string>>({});
