@@ -57,7 +57,7 @@ export function monotonePath(points: Array<[number, number]>) {
  * minimum width and scrolls sideways instead of squeezing its labels together.
  */
 const CHART_MIN = 480;
-function useWidth(fallback: number) {
+export function useWidth(fallback: number) {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(fallback);
   useEffect(() => {
@@ -313,7 +313,8 @@ function StandoutBlock({ standout }: { standout: SiteReport["standout"] }) {
 }
 
 // ---------- 4. weekday hour by hour ----------
-function ProfileChart({ pattern, report, standalone }: { pattern: NonNullable<SiteReport["pattern"]>; report: SiteReport; standalone?: boolean | undefined }) {
+/** An average day hour by hour with the opening (or lights-on) hours shaded; the management review draws it too. */
+export function ProfileChart({ pattern, report, standalone }: { pattern: Pick<NonNullable<SiteReport["pattern"]>, "hours" | "openFrom" | "openTo" | "notes" | "caption">; report: Pick<SiteReport, "locale" | "hoursMeaning">; standalone?: boolean | undefined }) {
   const { locale } = report;
   const t = reportHoursText(report);
   const [ref, width] = useWidth(780);

@@ -14,6 +14,7 @@ import { forHoursMeaning, translatorFor, type EnergyIqLocale, type Translate } f
 import { formatPeriod } from "./report-period.js";
 import { analysisGroupTree, biggestMeterGroup, flattenMeterGroups, type MeterGroupNode, type MeterGroupTree } from "./meter-groups.js";
 import { DAY_PARTS, siteReportModelMessages, type SiteReportModelKey } from "./site-report-model-messages.js";
+import { notInUseIds, withMetersInUse } from "./meters-in-use.js";
 import { standoutReport, type StandoutReport } from "./standout-report.js";
 
 type T = Translate<SiteReportModelKey>;
@@ -188,6 +189,13 @@ function sumCells(parts: Cells[]): Cells {
 }
 const periodSum = (series: TrendSeries | null | undefined, dates: Set<string>) => (series?.cells ?? []).reduce((sum, cell) => dates.has(cell[0]) && cell[2] != null ? sum + cell[2] : sum, 0);
 
+/** "LED Display 3" → "LED Display": the name without the number at its end. */
+function withoutTrailingNumber(name: string) {
+  let end = name.length;
+  while (end > 0 && name.charCodeAt(end - 1) >= 48 && name.charCodeAt(end - 1) <= 57) end -= 1;
+  return name.slice(0, end).trim();
+}
+
 /** Official circuits across the spaces; channels with the same board, type and name apart from a number become one row ("LED Display ×3"). */
 function officialCircuits(data: AnalysisData, locale: EnergyIqLocale): Array<{ key: string; name: string; code: string; board: string; space: string; category: AnalysisCategory | "overall"; meters: ScopeMeter[] }> {
   const t = modelText(locale);
@@ -199,7 +207,7 @@ function officialCircuits(data: AnalysisData, locale: EnergyIqLocale): Array<{ k
     seen.add(meter.id);
     // Someone gave this meter a short name: it is a line of its own under that name, its full label the detail.
     if (meter.fullName) { groups.set(`short|${meter.id}`, { key: meter.id, name: meter.name, board: meter.location, space: space.name, category: meter.category, meters: [meter], short: true }); continue; }
-    const stem = meter.name.replace(/\s*\d+$/, "").trim();
+    const stem = withoutTrailingNumber(meter.name);
     const key = `${meter.location}|${meter.category}|${stem}`;
     const group = groups.get(key) ?? { key: meter.id, name: stem, board: meter.location, space: space.name, category: meter.category, meters: [] };
     group.meters.push(meter);
@@ -241,7 +249,13 @@ function occupancyText(property: NonNullable<SpatialExtras["property"]>, t: T) {
   if (extent && level) return /^half/i.test(extent) ? t("occupancy.half", { level }) : t("occupancy.extent", { extent, level });
   return extent || level || "";
 }
-const street = (address: string) => address.replace(/,?\s*Singapore$/i, "");
+/** "6 Battery Road, Singapore" → "6 Battery Road". Done by hand rather than with a regular expression that could crawl on long input. */
+function street(address: string) {
+  const word = "singapore";
+  if (address.slice(-word.length).toLowerCase() !== word) return address;
+  const rest = address.slice(0, -word.length).trimEnd();
+  return rest.endsWith(",") ? rest.slice(0, -1) : rest;
+}
 
 // ---------- the report ----------
 export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpatialReference | null, generatedAt = new Date().toISOString(), locale: EnergyIqLocale = "en"): SiteReport {
@@ -253,7 +267,8 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const inl = (name: string) => en ? inline(name) : name;
   const theName = (name: string) => en ? `${/^\d/.test(name) ? "the " : ""}${inline(name)}` : name;
   const reference = referenceInput as SpatialExtras | null;
-  const project = data.current.project;
+  // A meter marked "not in use" is expected to be silent: the days and hours it misses still count as complete.
+  const project = withMetersInUse(data.current.project, notInUseIds(data), data.current.spaces);
   const dates = project.dates;
   const dateSet = new Set(dates);
   const days = scopeDays(project, data.holidays);
@@ -524,7 +539,7 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
     profile: { intro: profileIntro, zones: profileZones, caption: profileCaption, hasMap },
     groups,
     reference: hasMap ? reference : null,
-    zones, circuits, estimate, benchmark, pattern, screening, standout: standoutReport(data, locale),
+    zones, circuits, estimate, benchmark, pattern, screening, standout: standoutReport(project === data.current.project ? data : { ...data, current: { ...data.current, project } }, locale),
     footer: { left: t("foot.left", { count: circuitCount, tz: tzLabel }), right: t("foot.right", { date: en ? `${shortDate(generatedDay)} ${generatedAt.slice(0, 4)}` : formatPeriod(generatedDay, generatedDay, locale) }) },
   };
 }
@@ -535,7 +550,7 @@ const ordinal = (n: number) => ["", "first", "second", "third", "fourth", "fifth
  * The weekday opening window as whole hours, for labels and the shaded band. For lights-on hours it is the night
  * window of every day, and `to` is earlier than `from` when it runs past midnight (19 → 7).
  */
-function openingWindow(hours: Record<string, Array<{ from: string; to: string }>>, lighting = false) {
+export function openingWindow(hours: Record<string, Array<{ from: string; to: string }>>, lighting = false) {
   const days = lighting ? ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] : ["monday", "tuesday", "wednesday", "thursday", "friday"];
   const ranges = days.flatMap(day => hours[day] ?? []);
   const toHour = (time: string) => { const [h = "0", m = "0"] = time.split(":"); return Number(h) + Number(m) / 60; };
@@ -548,8 +563,8 @@ function openingWindow(hours: Record<string, Array<{ from: string; to: string }>
   return { from: Math.round(Math.min(...ranges.map(range => toHour(range.from)))), to: Math.round(Math.max(...ranges.map(range => toHour(range.to)))) };
 }
 /** Whole hours inside an opening window; 19 → 7 is 12 hours. */
-const openLength = (range: { from: number; to: number }) => range.to >= range.from ? range.to - range.from : range.to + 24 - range.from;
-const inWindow = (range: { from: number; to: number }, hour: number) => range.to >= range.from ? hour >= range.from && hour < range.to : hour >= range.from || hour < range.to;
+export const openLength = (range: { from: number; to: number }) => range.to >= range.from ? range.to - range.from : range.to + 24 - range.from;
+export const inWindow = (range: { from: number; to: number }, hour: number) => range.to >= range.from ? hour >= range.from && hour < range.to : hour >= range.from || hour < range.to;
 /** The published hours of the first day that has some, as written: "19:00 → 07:00 next day". */
 function openingLabelText(hours: Record<string, Array<{ from: string; to: string }>>, locale: EnergyIqLocale) {
   const range = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].map(day => hours[day]?.[0]).find(Boolean);

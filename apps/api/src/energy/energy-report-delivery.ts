@@ -7,6 +7,8 @@ import { logger } from "../observability/logger.js";
 import { renderPortfolioPdf, portfolioPdfFileName } from "./energy-portfolio-pdf.js";
 import { buildPortfolio, localDate, portfolioProjectIds, shiftDate, type Portfolio, type PortfolioPeriod } from "./energy-portfolio.js";
 import { currencyMark } from "./energy-targets-monitor.js";
+import { findReportService } from "../report-agent/report-service.js";
+import { siteReportScheduleKey } from "../report-agent/site-report-generation.js";
 
 /**
  * Scheduled report emails: a PDF of the company's sites for last week (sent Monday) or last month (sent on the 1st),
@@ -83,7 +85,7 @@ export const deliverScheduledReport = async (input: {
       await input.delivery.send({
         to: group.emails,
         subject: `${input.schedule.name}: ${portfolio.workspaceName}, ${periodLabel(input.period, input.schedule.frequency)}`,
-        text: reportEmailText(portfolio, input.schedule, input.period, input.publicBaseUrl),
+        text: reportEmailText(portfolio, input.schedule, input.period, input.publicBaseUrl, siteReportLinks(input.metadataStore, portfolio, input.schedule.frequency, input.period, input.publicBaseUrl)),
         attachments: [{ filename: portfolioPdfFileName(portfolio), content: pdf, contentType: "application/pdf" }],
       });
     }
@@ -124,7 +126,28 @@ const recipientGroups = (metadataStore: MetadataStore, schedule: EnergyIqReportS
   return [...groups.values()];
 };
 
-export const reportEmailText = (portfolio: Portfolio, schedule: EnergyIqReportScheduleRecord, period: ReportPeriod, publicBaseUrl: string): string => {
+/** One site's own report for the same week or month, in the style that site chose for its automatic reports. */
+export type SiteReportLink = { name: string; style: "full" | "management"; url: string };
+
+/**
+ * Each site's own report for the period, where it has already been written: the full report or the management review,
+ * whichever the site chose under Automatic reports. Linked rather than attached, so the email stays small however many
+ * sites it covers; the link opens the saved report in Reports. Only sites in this email (ones the recipients may read).
+ */
+export const siteReportLinks = (metadataStore: MetadataStore, portfolio: Portfolio, frequency: EnergyIqReportScheduleRecord["frequency"], period: ReportPeriod, publicBaseUrl: string): SiteReportLink[] => {
+  const store = findReportService(metadataStore)?.store;
+  if (!store) return [];
+  const toExclusive = shiftDate(period.to, 1);
+  const base = publicBaseUrl.replace(/\/$/u, "");
+  return portfolio.sites.flatMap((site) => {
+    const run = store.findByScheduleKey(siteReportScheduleKey(site.projectId, frequency, { from: period.from, toExclusive }));
+    if (!run || run.status !== "succeeded" || !run.siteReport) return [];
+    const url = base ? `${base}/energyiq/library?${new URLSearchParams({ projectId: site.projectId, reportId: run.id })}` : "";
+    return [{ name: site.name, style: run.siteReport.style === "management" ? "management" as const : "full" as const, url }];
+  });
+};
+
+export const reportEmailText = (portfolio: Portfolio, schedule: EnergyIqReportScheduleRecord, period: ReportPeriod, publicBaseUrl: string, siteReports: SiteReportLink[] = []): string => {
   const totals = portfolio.totals;
   const cost = Object.entries(totals.costByCurrency).map(([currency, amount]) => `${currencyMark(currency)}${number(amount, 2)}`).join(" + ");
   const change = totals.previousUsageKwh > 0 ? ((totals.usageKwh - totals.previousUsageKwh) / totals.previousUsageKwh) * 100 : undefined;
@@ -139,6 +162,10 @@ export const reportEmailText = (portfolio: Portfolio, schedule: EnergyIqReportSc
       : []),
     "",
     "The attached PDF compares every site.",
+    ...(siteReports.length
+      ? ["", `Each site's own report for this ${schedule.frequency === "weekly" ? "week" : "month"}:`,
+        ...siteReports.map((site) => `- ${site.name} (${site.style === "management" ? "management review" : "full report"})${site.url ? `: ${site.url}` : ""}`)]
+      : []),
     ...(publicBaseUrl ? ["", `Open in EnergyX: ${publicBaseUrl.replace(/\/$/u, "")}/energyiq/portfolio`] : []),
     "",
     "You receive this because a team administrator added you to this scheduled report.",

@@ -9,18 +9,23 @@
  */
 import type { ProjectSpatialReference } from "@datafoundry/contracts";
 import type { AnalysisData } from "./analysis-types.js";
+import type { SiteReportStyle } from "./report-style.js";
 
 export const SITE_REPORT_SNAPSHOT_VERSION = 1;
 /** The file the server writes next to the rendered page, and the name the web app asks for. */
 export const SITE_REPORT_SNAPSHOT_FILE = "site-report-input.json";
 
 export type SiteReportCadence = "weekly" | "monthly";
+/** How often a saved report is issued, or "custom" for one somebody asked for on their own dates. */
+export type SiteReportSnapshotCadence = SiteReportCadence | "custom";
 
 export type SiteReportSnapshot = {
   schemaVersion: typeof SITE_REPORT_SNAPSHOT_VERSION;
   projectId: string;
-  /** How often this report is issued, so the Overview can show the right one. */
-  cadence: SiteReportCadence;
+  /** How often this report is issued, so the Overview can show the right one. "custom": asked for on chosen dates. */
+  cadence: SiteReportSnapshotCadence;
+  /** Which kind of report the saved page is. Absent on reports saved before the choice existed: the full report. */
+  style?: SiteReportStyle | undefined;
   /** The dates the report covers. `toExclusive` is the day after the last day included. */
   period: { from: string; toExclusive: string };
   /** When the page was written, which is separate from the dates it covers. */
@@ -49,7 +54,7 @@ export function serializeSiteReportSnapshot(snapshot: SiteReportSnapshot): Store
 export function parseSiteReportSnapshot(value: unknown): SiteReportSnapshot {
   const stored = value as StoredSiteReportSnapshot | null;
   if (!stored || typeof stored !== "object" || stored.schemaVersion !== SITE_REPORT_SNAPSHOT_VERSION || !stored.data) throw new Error("SITE_REPORT_SNAPSHOT_INVALID");
-  if (stored.cadence !== "weekly" && stored.cadence !== "monthly") throw new Error("SITE_REPORT_SNAPSHOT_INVALID");
+  if (stored.cadence !== "weekly" && stored.cadence !== "monthly" && stored.cadence !== "custom") throw new Error("SITE_REPORT_SNAPSHOT_INVALID");
   const holidays = Array.isArray(stored.data.holidays) ? stored.data.holidays : [];
   return { ...stored, data: { ...stored.data, holidays: new Map(holidays) } };
 }

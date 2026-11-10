@@ -33,7 +33,7 @@ export type AnalysisSource = {
 /** The calendar and meter facts the readings are labelled with, however the caller happens to have loaded them. */
 export type ProjectInformationSource = {
   name?: string | undefined;
-  meters?: Array<{ id: string; location: string; locationId?: string | undefined; panel?: string | undefined }> | undefined;
+  meters?: Array<{ id: string; name?: string | undefined; location: string; locationId?: string | undefined; panel?: string | undefined; notInUse?: string | undefined }> | undefined;
   /** The project's Locations tree; the project itself has no parent. Older servers leave it out. */
   locations?: Array<{ id: string; name: string; parentId?: string | null | undefined }> | undefined;
   calendar: null | { entries: Array<{ location: string; from: string; toExclusive: string | null; weekly: unknown; hoursMeaning?: string | undefined; exceptions: Array<{ date: string; label: string; classification?: string | undefined }> }> };
@@ -194,6 +194,10 @@ export function assembleAnalysisData(input: {
   const projectEntry = entries.find(entry => entry.location === information?.name && entry.from <= lastDate && (!entry.toExclusive || entry.toExclusive > lastDate)) ?? entries.find(entry => entry.location === information?.name) ?? entries[0];
   const hasPrevious = !!input.previousProject && input.previousProject.summary.validIntervalCount > 0;
   const groups = analysisGroups(project, information);
+  // Meters someone said are not in use: named as readers know them, with the reason they gave.
+  const meterNames = new Map((project.explorerMeters ?? []).map(meter => [meter.id, meter.name]));
+  const notInUse = (information?.meters ?? []).filter(meter => meter.notInUse?.trim())
+    .map(meter => ({ id: meter.id, name: meterNames.get(meter.id) ?? meter.name ?? meter.id, reason: meter.notInUse!.trim() }));
   const loadedSpaces = input.spaceCurrent.filter((item): item is AnalysisSource => !!item);
   const period = (project: AnalysisSource, loaded: Array<AnalysisSource | null>): LoadedPeriod => ({
     project: toScope(project, locations),
@@ -210,6 +214,7 @@ export function assembleAnalysisData(input: {
     // Only lights-on hours are marked, so opening-hours sites keep exactly the readings they had before.
     ...(projectEntry?.hoursMeaning === "lights_on" ? { hoursMeaning: "lights_on" as const } : {}),
     ...(groups ? { groups } : {}),
+    ...(notInUse.length ? { notInUse } : {}),
   };
 }
 
