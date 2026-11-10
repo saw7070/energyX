@@ -1367,6 +1367,8 @@ const rebuildProjectCumulativeQualityEvents = async (
  * for hours. A quiet spell that ends with energy used is different: the meter was offline and its first reading back
  * carries everything it counted meanwhile. That energy is real, but when it was used is not known, so the 15-minute
  * intervals it is spread across are kept as an estimate ('gap'): they count in totals, never as real readings.
+ * Two readings with the same total are the opposite case: nothing was used between them, however long apart they are,
+ * so that span is real readings of 0 kWh ('ok'), never an outage. Only time after a meter's last reading is unknown.
  */
 export const TUYA_OUTAGE_MIN_HOURS = 3;
 export const TUYA_OUTAGE_MIN_KWH = 0.05;

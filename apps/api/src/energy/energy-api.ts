@@ -24,7 +24,7 @@ import {
   readEnergyMeterDataHealth,
   readEnergyMeterIntervalCoverage,
 } from "@datafoundry/data-gateway";
-import { localDayStarts, resolveDataAvailabilityPeriod, summariseDataAvailability } from "./energy-data-availability.js";
+import { localDayStarts, resolveDataAvailabilityPeriod, startAtFirstReading, summariseDataAvailability } from "./energy-data-availability.js";
 import { readOfflineMeters } from "./energy-live-status.js";
 import { normalizeProjectRegion, type EnergyIqProjectRegion, type MetadataStore } from "@datafoundry/metadata";
 import type {
@@ -1824,10 +1824,16 @@ export const handleEnergyApiRequest = async (
             toMs: period.toMs,
           }),
         ]) : [[], []];
+        // A site connected part-way through the period is counted from its first reading, not from before it existed.
+        const firstReadingMs = Math.min(...health.flatMap((meterPoint) => {
+          const first = meterPoint.coverageFrom ?? meterPoint.readingFrom;
+          return first ? [Date.parse(first)] : [];
+        }));
+        const counted = startAtFirstReading(period, Number.isFinite(firstReadingMs) ? firstReadingMs : undefined, project.timezone);
         const summary = summariseDataAvailability({
-          fromMs: period.fromMs,
-          toMs: period.toMs,
-          dayStartsMs: localDayStarts(period.from, period.to, project.timezone),
+          fromMs: counted.fromMs,
+          toMs: counted.toMs,
+          dayStartsMs: localDayStarts(counted.from, counted.to, project.timezone),
           meters: meterPoints.map((meterPoint) => {
             const detail = details.get(meterPoint.meterPointId);
             return {
@@ -1852,7 +1858,7 @@ export const handleEnergyApiRequest = async (
         return {
           status: 200,
           headers: { "Cache-Control": "private, no-store" },
-          body: createSuccessResult({ from: period.from, to: period.to, timezone: project.timezone, ...summary, meters }),
+          body: createSuccessResult({ from: counted.from, to: counted.to, timezone: project.timezone, ...summary, meters }),
         };
       });
     }
