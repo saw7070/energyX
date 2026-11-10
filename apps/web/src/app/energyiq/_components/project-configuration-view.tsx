@@ -29,6 +29,8 @@ import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { SiteSavings } from "./site-savings";
 import { SiteTargets } from "./site-targets";
 import { projectConfigurationMessages } from "./project-configuration-messages";
+import { SpreadsheetArrange } from "./spreadsheet-arrange";
+import { spreadsheetArrangeMessages } from "./spreadsheet-arrange-messages";
 const label = (value: string) => value.replace(/_/g, " ").replace(/^./, char => char.toUpperCase());
 /** A stored instant as the site-local calendar date, e.g. "1 May 2026". */
 const siteDate = (value: string, timezone?: string) => {
@@ -39,6 +41,7 @@ const siteDate = (value: string, timezone?: string) => {
 export function ProjectConfigurationView({ setup, notes, policies, projectId, onPolicyChange, canEditPolicies = false, canEditSetup = false, canEditNotes = canEditPolicies, advisorEdit, readOnly = false, initialTab, onTabChange }: { readOnly?: boolean; canEditNotes?: boolean; advisorEdit?: boolean; initialTab?: string; onTabChange?: (tab: string, extra?: Record<string, string>) => void; onPolicyChange?: () => void; projectId?: string; setup: EnergyProjectSetupDto; notes: string; policies: EnergyOperationalPolicyConfigurationDto | null; canEditPolicies?: boolean; canEditSetup?: boolean }) {
   const t = useMessages(projectConfigurationMessages);
   const typeText = useMessages(meterTypeReviewMessages);
+  const arrangeText = useMessages(spreadsheetArrangeMessages);
   // Anyone who may change something may also see their saved change go live.
   const canEditAny = canEditSetup || canEditPolicies || canEditNotes;
   const { locale } = useEnergyIqLocale();
@@ -47,6 +50,8 @@ export function ProjectConfigurationView({ setup, notes, policies, projectId, on
   const [setupError, setSetupError] = useState("");
   const [editingCalendar, setEditingCalendar] = useState(false);
   const [editingPlan, setEditingPlan] = useState(false);
+  // "Arrange from a spreadsheet" takes the place of the Groups list while it is open.
+  const [arranging, setArranging] = useState(false);
   const [liveBusy, setLiveBusy] = useState(false);
   // Saved changes go live on their own, including ones left behind by an earlier failure or by another tool.
   const liveAttempt = useRef("");
@@ -111,15 +116,16 @@ export function ProjectConfigurationView({ setup, notes, policies, projectId, on
     catch (reason) { say(t("notLive", { reason: applyReason(reason) })); }
     finally { setLiveBusy(false); onPolicyChange?.(); }
   };
-  // Each in-page edit saves the shared draft and then makes it live.
-  const saveDraft = async (next: EnergyProjectSetupDocumentDto, message: string, select?: string | null) => {
-    if (!projectId || setupBusy) return;
+  // Each in-page edit saves the shared draft and then makes it live. True once saved.
+  const saveDraft = async (next: EnergyProjectSetupDocumentDto, message: string, select?: string | null): Promise<boolean> => {
+    if (!projectId || setupBusy) return false;
     setSetupBusy(true); setSetupError("");
     try {
       // A change that leaves every area counted once needs no separate confirmation; a real conflict still stops below.
       await configApi.saveEnergyProjectSetupDraft(projectId, { expectedRevision: setup.draft.revision, document: withConfirmedTotals(next) });
       setSetupEdit(null); if (select !== undefined) setSelectedId(select); void makeLive(message);
-    } catch (reason) { setSetupError(reason instanceof Error && /REVISION/.test(reason.message) ? t("changedSinceLoad") : t("saveFailed")); }
+      return true;
+    } catch (reason) { setSetupError(reason instanceof Error && /REVISION/.test(reason.message) ? t("changedSinceLoad") : t("saveFailed")); return false; }
     finally { setSetupBusy(false); }
   };
   const saveLocation = (target: Parameters<typeof applyLocationEdit>[2], draft: Parameters<typeof applyLocationEdit>[3]) => {
@@ -209,8 +215,11 @@ export function ProjectConfigurationView({ setup, notes, policies, projectId, on
       ? <MeterTypeReview document={doc} busy={setupBusy} error={setupError} onCancel={() => setSetupEdit(null)} onSave={choices => { const next = applyMeterTypes(doc, choices, locale); if ("error" in next) setSetupError(next.error); else void saveDraft(next, typeText("saved")); }} />
       : <MeterTypeBanner document={doc} onOpen={() => startSetupEdit({ kind: "types" })} />)}
     {tab === "structure" && editingPlan && projectId && <FloorPlanEditor projectId={projectId} notes={notes} block={spatial?.block ?? null} previous={(spatial?.reference as StoredSpatialReference | undefined) ?? null} meters={planMeters} boards={planBoards} onCancel={() => setEditingPlan(false)} onSaved={message => { setEditingPlan(false); setPolicyMessage(message); onPolicyChange?.(); }} />}
-    {tab === "structure" && !editingPlan && <div className={styles.workspace}>
-      <section className={styles.locations}><header><h3>{t("locations")}</h3>{!editable && edit("structure",t("editStructure"))}</header>{nodes.length > 0 && <p className={styles.groupsHint}>{editable ? t("groupsHint") : t("totalsFromGroups")}</p>}<ul className={styles.tree}>{tree}</ul>{editable && <button type="button" className={styles.addLocation} onClick={() => startSetupEdit({ kind: "new" })}>{t("newGroup")}</button>}{nodes.filter(node=>!seen.has(node.id)).map(node=><button className={styles.unassigned} key={node.id} onClick={()=>setSelectedId(node.id)}>{t("unresolved", { name: node.name })}</button>)}{meters.some(meter=>!names.has(meter.scope_id)) && <button className={styles.unassigned} onClick={()=>setSelectedId("unassigned")}>{t("unassignedMeters")}</button>}{!nodes.length && <div className={styles.empty}><h3>{t("firstLocation")}</h3>{edit("structure",t("organiseAdvisor"))}</div>}</section>
+    {tab === "structure" && arranging && editable && !editingPlan && <SpreadsheetArrange doc={doc} projectId={pid} notes={notes} block={spatial?.block ?? null} previous={(spatial?.reference as StoredSpatialReference | undefined) ?? null} canEditPlan={canEditNotes} busy={setupBusy} error={setupError}
+      onCancel={() => { setArranging(false); setSetupError(""); }} onPlanSaved={() => onPolicyChange?.()}
+      onApply={async (next, message) => { const saved = await saveDraft(next, message, null); if (saved) setArranging(false); return saved; }} />}
+    {tab === "structure" && !editingPlan && !(arranging && editable) && <div className={styles.workspace}>
+      <section className={styles.locations}><header><h3>{t("locations")}</h3>{!editable && edit("structure",t("editStructure"))}</header>{nodes.length > 0 && <p className={styles.groupsHint}>{editable ? t("groupsHint") : t("totalsFromGroups")}</p>}<ul className={styles.tree}>{tree}</ul>{editable && <button type="button" className={styles.addLocation} onClick={() => startSetupEdit({ kind: "new" })}>{t("newGroup")}</button>}{editable && <button type="button" className={styles.addLocation} onClick={() => { setSetupError(""); setPolicyMessage(""); setArranging(true); }}>{arrangeText("open")}</button>}{nodes.filter(node=>!seen.has(node.id)).map(node=><button className={styles.unassigned} key={node.id} onClick={()=>setSelectedId(node.id)}>{t("unresolved", { name: node.name })}</button>)}{meters.some(meter=>!names.has(meter.scope_id)) && <button className={styles.unassigned} onClick={()=>setSelectedId("unassigned")}>{t("unassignedMeters")}</button>}{!nodes.length && <div className={styles.empty}><h3>{t("firstLocation")}</h3>{edit("structure",t("organiseAdvisor"))}</div>}</section>
       <section className={styles.inspector}><FloorPlanView reference={(spatial?.reference as StoredSpatialReference | undefined) ?? null} meters={planMeters} highlight={highlight} focusDevice={focusMeter} canEdit={canEditNotes && !!projectId} onEdit={() => setEditingPlan(true)} onSelectBoard={selectBoard} onSelectDevice={selectDevice} />
       <div data-location-detail>
       {setupEdit?.kind === "new" ? <LocationForm key={`new-${setupEdit.parentId ?? ""}`} title={setupEdit.parentId ? t("newGroupIn", { parent: names.get(setupEdit.parentId) ?? t("thisLocation") }) : t("newGroupTitle")} initial={{ name: "", area: "", occupants: "" }} busy={setupBusy} error={setupError} onCancel={() => setSetupEdit(null)} onSave={draft => saveNewGroup(setupEdit.parentId, draft)} />
