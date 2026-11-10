@@ -2,7 +2,7 @@
 import { useState } from "react";
 import type { EnergyMeterCategoryDto, EnergyMeterMappingRowDto, EnergyProjectSetupDocumentDto, EnergyProjectSetupNodeDto } from "../../../lib/config-api";
 import { addNode, applyMeterMappingRowEdit, buildAggregationReview, hasSiblingNameConflict, nodePathLabel, removeNodeAndDescendants } from "../admin/project-setup-model";
-import { projectMeterName } from "./project-meter-name";
+import { projectMeterFullName, projectMeterName } from "./project-meter-name";
 import styles from "./project-configuration-view.module.css";
 import { EnergyIcon } from "./icons";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
@@ -69,7 +69,7 @@ export function applyMeterMoves(document: EnergyProjectSetupDocumentDto, meterId
   for (const id of meterIds) {
     const meter = next.meter_mapping?.rows.find(row => row.id === id);
     if (!meter) return { error: t("move.errorGone") };
-    const moved = applyMeterEdit(next, meter, { name: projectMeterName(meter), scopeId, category: meter.category, counted: meter.aggregation_usage === "official" }, locale);
+    const moved = applyMeterEdit(next, meter, { name: projectMeterFullName(meter), scopeId, category: meter.category, counted: meter.aggregation_usage === "official" }, locale);
     if ("error" in moved) return moved;
     next = moved;
   }

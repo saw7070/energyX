@@ -75,6 +75,7 @@ export function ExplorerMeterDetail({
           {published?.name ?? meter.name}
         </h1>
         <p className="mt-2 text-sm text-muted">
+          {(published?.fullName ?? meter.fullName) && `${published?.fullName ?? meter.fullName} · `}
           {(published?.circuitName ?? meter.circuitName) && `${published?.circuitName ?? meter.circuitName} · `}
           {meter.kind === "virtual" ? "Virtual circuit" : "Circuit"} ·{" "}
           {meter.role === "total"

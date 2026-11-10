@@ -889,7 +889,7 @@ export function ProjectTree({
                 name={typeIcon[node.type]}
                 className={["h-3.5 w-3.5 shrink-0", selected ? "text-white" : "text-muted-light"].join(" ")}
               />
-              <span className="min-w-0 flex-1 truncate font-medium">{node.name}{node.meter?.circuitName && node.meter.circuitName !== node.name ? <span className="ml-1 text-[10px] opacity-70"> · {node.meter.circuitName}</span> : null}</span>
+              <span className="min-w-0 flex-1 truncate font-medium" title={node.meter?.fullName ? `${node.name} — ${node.meter.fullName}` : undefined}>{node.name}{node.meter?.circuitName && node.meter.circuitName !== node.name ? <span className="ml-1 text-[10px] opacity-70"> · {node.meter.circuitName}</span> : null}</span>
               <span
                 aria-label={snapshotHealth?.label ?? "Recent data status unavailable or not monitored"}
                 title={snapshotHealth?.label ?? "Recent data status unavailable or not monitored"}
