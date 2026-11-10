@@ -4,6 +4,7 @@
  */
 import type { AnalysisCategory, HoursByDay, HoursMeaning } from "./analysis-model.js";
 import type { GroupedMeter, MeterGroup } from "./meter-groups.js";
+import type { NotInUseMeter } from "./meters-in-use.js";
 
 export type TrendCell = [string, number, number | null, number, number];
 export type TrendSeries = { id: string; expectedMinutesPerHour: number; cells: TrendCell[] };
@@ -31,4 +32,9 @@ export type AnalysisData = {
   hoursMeaning?: HoursMeaning | undefined;
   /** Missing on readings saved before groups existed; everything then falls back to the old per-space view. */
   groups?: AnalysisGroups | undefined;
+  /**
+   * Meters someone marked "not in use" on Data availability. Their silence is expected, so they never stop a day from
+   * counting as complete in the site report. Absent on readings saved before this was kept, and when there are none.
+   */
+  notInUse?: NotInUseMeter[] | undefined;
 };

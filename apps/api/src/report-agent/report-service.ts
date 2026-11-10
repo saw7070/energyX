@@ -35,8 +35,8 @@ import { ActionEstimates } from "./action-estimates.js";
 import { canUseActions } from "./action-access.js";
 import { dueReportPeriods } from "./report-calendar.js";
 import type { LocalDataGateway } from "@datafoundry/data-gateway";
-import { SITE_REPORT_SNAPSHOT_FILE } from "@datafoundry/site-report";
-import { publishSiteReport, siteReportScheduleKey } from "./site-report-generation.js";
+import { SITE_REPORT_SNAPSHOT_FILE, type SiteReportStyle } from "@datafoundry/site-report";
+import { publishCustomSiteReport, publishSiteReport, siteReportScheduleKey } from "./site-report-generation.js";
 import type { loadSiteReportData } from "./site-report-data.js";
 import { availableReportPeriod } from "./report-periods.js";
 import { scheduledAnalysisPrompt, withCadenceSkill } from "./report-schedule-policy.js";
@@ -294,6 +294,24 @@ export class ReportService {
   /** Wait for any site reports still being written. Used when shutting down, and by tests. */
   async settleSiteReports(): Promise<void> {
     while (this.siteReports.size) await Promise.all([...this.siteReports.values()]);
+  }
+
+  /**
+   * A site report on dates somebody chose, written straight from the readings in the style they chose (no advisor,
+   * no AI). One at a time per site: building one reads the whole site, so a second request waits for the first.
+   */
+  async createCustomSiteReport(input: { settings: ReportSettings; actorUserId: string; period: { from: string; toExclusive: string }; style: SiteReportStyle }): Promise<ReportRun> {
+    if (!this.options.dataGateway) throw new Error("SITE_REPORT_NOT_AVAILABLE");
+    const key = `custom:${input.settings.projectId}`;
+    if (this.siteReports.has(key)) throw new Error("SITE_REPORT_ALREADY_RUNNING");
+    const work = publishCustomSiteReport({
+      metadata: this.options.metadata, dataGateway: this.options.dataGateway, store: this.store, root: this.options.root,
+      settings: input.settings, actorUserId: input.actorUserId, period: input.period, style: input.style,
+      ...(this.options.loadSiteReportData ? { loadData: this.options.loadSiteReportData } : {}),
+    });
+    const settled = work.then(() => undefined, () => undefined).finally(() => { this.siteReports.delete(key); });
+    this.siteReports.set(key, settled);
+    return (await work).run;
   }
 
   private async execute(run: ReportRun, controller: AbortController): Promise<void> {

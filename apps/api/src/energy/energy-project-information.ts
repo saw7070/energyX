@@ -35,6 +35,8 @@ export function readEnergyProjectInformation(metadata: MetadataStore, userId: st
     meters: rows.map(meter => ({ id: meter.id, name: meter.presentation?.short_name?.trim() || meter.presentation?.device_name?.trim() || meter.presentation?.circuit_name?.trim() || meter.display_name || meter.source_label,
       ...(meter.presentation?.short_name?.trim() ? { fullName: meter.presentation?.device_name?.trim() || meter.presentation?.circuit_name?.trim() || meter.display_name || meter.source_label } : {}),
       ...(meter.presentation?.panel?.trim() ? { panel: meter.presentation.panel.trim() } : {}),
+      // Someone confirmed on Data availability that this meter is not in use; reports leave it out of complete-day checks.
+      ...(meter.presentation?.not_in_use?.trim() ? { notInUse: meter.presentation.not_in_use.trim() } : {}),
       locationId: locationId(meter.navigation_scope_id ?? meter.scope_id), location: names.get(locationId(meter.navigation_scope_id ?? meter.scope_id)) ?? "Project", officialAggregation: meter.aggregation_usage === "official" })),
     calendar: calendar ? { version: calendar.version_id, entries: calendar.entries.map(entry => ({
       location: ownerName(entry.owner), from: entry.effective_from, toExclusive: entry.effective_to ?? null,

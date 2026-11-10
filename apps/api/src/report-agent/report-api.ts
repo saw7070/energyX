@@ -11,6 +11,7 @@ import { availableReportPeriod, latestReportPeriod, presetReportPeriod, resolveR
 import { readReportProjectData } from "./report-project-data.js";
 import { findReportService } from "./report-service.js";
 import type { ReportSettings } from "./report-store.js";
+import { siteReportStyleOf } from "@datafoundry/site-report";
 
 const settingsSchema = z.object({
   contextNotes: z.string().max(100_000), fileRefIds: z.array(z.string().min(1)).max(20),
@@ -20,6 +21,13 @@ const settingsSchema = z.object({
   comparisonPeriod: z.object({ from: z.string(), toExclusive: z.string() }).optional(),
   skillRefs: z.array(z.object({ name: z.string().min(1).max(100), version: z.string().min(1).max(100), content: z.string().min(1).max(50000), scope: z.enum(["general", "project"]).optional(), category: z.enum(["analysis", "presentation", "other"]).optional(), sourceRunId: z.string().uuid().optional(), sourceSessionId: z.string().uuid().optional() })).max(5).optional(),
   skillSourceRunId: z.string().uuid().optional(),
+  // Which site report the schedule writes. Left out by older pages, which keeps whatever was saved before.
+  siteReportStyle: z.enum(["full", "management"]).optional(),
+});
+/** A site report on chosen dates, straight from the readings: the end date is the day after the last day included. */
+const siteReportSchema = z.object({
+  period: z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), toExclusive: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }),
+  style: z.enum(["full", "management"]).optional(),
 });
 const runSchema = z.object({
   skillSelection: skillSelectionSchema.optional(),
@@ -171,6 +179,13 @@ export async function handleReportApi(request: IncomingMessage, segments: string
         ...(body.sessionId ? { sessionId: body.sessionId } : {}), ...(body.kind ? { kind: body.kind } : {}), ...(body.parentRunId ? { parentRunId: body.parentRunId } : {}) });
       void service.tick();
       return { status: 202, body: createSuccessResult({ id: run.id }) };
+    }
+    // A site report written now from the readings, in the style asked for (the full report unless said otherwise).
+    // No advisor and no AI are involved, so the AI limits do not apply; anyone who may ask for reports may ask for one.
+    if (action === "site-reports" && segments.length === 2 && request.method === "POST") {
+      const body = siteReportSchema.parse(await readBody(request));
+      const run = await service.createCustomSiteReport({ settings: { ...storedSettings, timezone: project.timezone }, actorUserId: context.userId, period: body.period, style: siteReportStyleOf(body.style) });
+      return { status: 201, headers: { "Cache-Control": "private, no-store" }, body: createSuccessResult({ id: run.id }) };
     }
     if (action === "draft-skill" && segments.length === 3 && request.method === "GET") {
       const run = service.store.get(projectId, segments[2]!);

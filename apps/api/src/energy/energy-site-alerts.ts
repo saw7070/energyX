@@ -46,7 +46,7 @@ type ReportRunLike = {
   status: string;
   kind: string;
   scheduleKey?: string;
-  siteReport?: { cadence: string };
+  siteReport?: { cadence?: string | undefined };
   reportingPeriod?: { from: string; toExclusive: string };
   period: { from: string; toExclusive: string };
   finishedAt?: string;

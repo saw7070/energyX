@@ -3,6 +3,7 @@ import { validateReportSkillContent } from "./report-skills.js";
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { validateReportPeriod, type ReportFrequency, type ReportPeriod } from "./report-calendar.js";
+import type { SiteReportStyle } from "@datafoundry/site-report";
 
 export type ReportSettings = {
   /** Project-owned, pinned visual instructions; independent of analytical method selection. */
@@ -27,14 +28,19 @@ export type ReportSettings = {
   frequency: ReportFrequency;
   localHour: number;
   scheduledPrompt: string;
+  /** Which site report the schedule writes: the full report (absent, as before) or the management review. */
+  siteReportStyle?: SiteReportStyle | undefined;
 };
 export type ReportRun = {
   actionProgress?: { actionId: string; title: string; text: string; timezone: string; submittedAt: string };
   actionEstimate?: { actionId: string; title: string; recommendation: string; meterIds: string[]; clarifications?:string[] };
   actionExtraction?: { sourceReportId: string };
   actionFeedback?: ActionFeedbackInput;
-  /** Present when the server wrote this report itself from the site's own readings, instead of the advisor writing it. */
-  siteReport?: { cadence: "weekly" | "monthly" };
+  /**
+   * Present when the server wrote this report itself from the site's own readings, instead of the advisor writing it.
+   * `cadence` is absent for a custom report somebody asked for on chosen dates; `style` is absent for the full report.
+   */
+  siteReport?: { cadence?: "weekly" | "monthly"; style?: "management" };
   scheduleKey?: string;
   id: string;
   sessionId?: string;
@@ -201,31 +207,37 @@ export class ReportStore {
    * `enqueue` is for work the advisor still has to do: it forces the row to "queued" and enforces one conversation at
    * a time. A site report is finished the moment it is saved, so it takes this door instead. The schedule key still
    * decides uniqueness, so re-running the same period simply hands back the report already published for it.
+   *
+   * A custom site report (somebody asked for it on their own dates) passes `custom: true` and no schedule key: it is
+   * listed as a custom report, and asking twice saves two.
    */
   insertCompleted(input: {
     settings: ReportSettings; period: ReportPeriod; reportingPeriod?: ReportPeriod; prompt: string;
-    actorUserId: string; scheduleKey: string; siteReport: NonNullable<ReportRun["siteReport"]>; id?: string;
+    actorUserId: string; scheduleKey?: string; custom?: boolean; siteReport: NonNullable<ReportRun["siteReport"]>; id?: string;
   }): { run: ReportRun; created: boolean } {
     validateReportPeriod(input.period);
     if (input.reportingPeriod) validateReportPeriod(input.reportingPeriod);
     if (!input.prompt.trim() || input.prompt.length > 20_000) throw new Error("REPORT_PROMPT_REQUIRED_OR_TOO_LONG");
-    if (!input.scheduleKey.trim()) throw new Error("REPORT_SCHEDULE_KEY_REQUIRED");
-    const existing = this.db.prepare("SELECT document FROM energyiq_report_runs WHERE schedule_key = ?").get(input.scheduleKey);
-    if (existing) return { run: JSON.parse(String(existing.document)) as ReportRun, created: false };
+    const scheduleKey = input.custom ? null : input.scheduleKey?.trim() ?? "";
+    if (scheduleKey === "") throw new Error("REPORT_SCHEDULE_KEY_REQUIRED");
+    if (scheduleKey) {
+      const existing = this.db.prepare("SELECT document FROM energyiq_report_runs WHERE schedule_key = ?").get(scheduleKey);
+      if (existing) return { run: JSON.parse(String(existing.document)) as ReportRun, created: false };
+    }
     const id = input.id ?? randomUUID();
     if (!/^[a-f0-9-]{36}$/.test(id)) throw new Error("REPORT_INVALID_ID");
     const now = new Date().toISOString();
     const run: ReportRun = {
       id, projectId: input.settings.projectId, workspaceId: input.settings.workspaceId, actorUserId: input.actorUserId,
-      status: "succeeded", kind: "report", hasReport: true, siteReport: input.siteReport, scheduleKey: input.scheduleKey,
+      status: "succeeded", kind: "report", hasReport: true, siteReport: input.siteReport, ...(scheduleKey ? { scheduleKey } : {}),
       period: input.period, ...(input.reportingPeriod ? { reportingPeriod: input.reportingPeriod } : {}),
       prompt: input.prompt.trim(), settings: input.settings, createdAt: now, startedAt: now, finishedAt: now,
     };
     try {
-      this.db.prepare("INSERT INTO energyiq_report_runs VALUES (?, ?, ?, ?, ?)").run(run.id, run.projectId, run.status, input.scheduleKey, JSON.stringify(run));
+      this.db.prepare("INSERT INTO energyiq_report_runs VALUES (?, ?, ?, ?, ?)").run(run.id, run.projectId, run.status, scheduleKey, JSON.stringify(run));
     } catch (error) {
       // Two workers reaching the same period at once: the schedule key is unique, so the first one published wins.
-      const raced = this.db.prepare("SELECT document FROM energyiq_report_runs WHERE schedule_key = ?").get(input.scheduleKey);
+      const raced = scheduleKey ? this.db.prepare("SELECT document FROM energyiq_report_runs WHERE schedule_key = ?").get(scheduleKey) : undefined;
       if (!raced) throw error;
       return { run: JSON.parse(String(raced.document)) as ReportRun, created: false };
     }
