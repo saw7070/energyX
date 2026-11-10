@@ -1,4 +1,5 @@
-import type { EnergyOperatingCalendarEntryDto, EnergyOperatingDayDto } from "../../../lib/config-api";
+import { hoursRangeLabel } from "@datafoundry/site-report";
+import type { EnergyOperatingCalendarEntryDto, EnergyOperatingDayDto, EnergyOperatingTimeRangeDto } from "../../../lib/config-api";
 import { translatorFor, type EnergyIqLocale } from "./energyiq-messages";
 import { dayMessages } from "./site-devices-messages";
 
@@ -29,18 +30,35 @@ const minuteOfDay = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhm
 const COMPLETE_DAY_MINUTES = 0.9 * 1440;
 const average = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 
-/** Opening minutes inside one local hour, from the project-wide calendar entry in force on that date. */
-export function operatingMinutes(entries: EnergyOperatingCalendarEntryDto[], date: string, hour: number): number {
+/** A range whose end is earlier than its start runs past midnight into the next morning (19:00–07:00). */
+const isOvernight = (range: EnergyOperatingTimeRangeDto) => minuteOfDay(range.to) <= minuteOfDay(range.from);
+const previousDay = (date: string) => new Date(Date.parse(`${date}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+
+/**
+ * The hours that start on one date, from the project-wide calendar entry in force then. A dated exception replaces the
+ * weekly hours, except that lights-on hours keep their usual hours on a day off (lighting still runs on holidays).
+ */
+function rangesStarting(entries: EnergyOperatingCalendarEntryDto[], date: string): EnergyOperatingTimeRangeDto[] {
   const entry = entries.find(item => item.owner.kind === "project" && item.effective_from.slice(0, 10) <= date && (!item.effective_to || date < item.effective_to.slice(0, 10)));
-  if (!entry) return 0;
+  if (!entry) return [];
   const exception = entry.exceptions?.find(item => item.date === date);
-  const ranges = exception ? exception.operating : entry.weekly[DAYS[new Date(`${date}T00:00:00Z`).getUTCDay()]!] ?? [];
-  const start = hour * 60, end = start + 60;
-  return ranges.reduce((sum, range) => sum + Math.max(0, Math.min(end, minuteOfDay(range.to)) - Math.max(start, minuteOfDay(range.from))), 0);
+  const weekly = entry.weekly[DAYS[new Date(`${date}T00:00:00Z`).getUTCDay()]!] ?? [];
+  if (!exception || (entry.hours_meaning === "lights_on" && exception.operating.length === 0)) return weekly;
+  return exception.operating;
 }
 
+/** Opening minutes inside one local hour, including the morning part of hours that started the night before. */
+export function operatingMinutes(entries: EnergyOperatingCalendarEntryDto[], date: string, hour: number): number {
+  const start = hour * 60, end = start + 60;
+  const overlap = (from: number, to: number) => Math.max(0, Math.min(end, to) - Math.max(start, from));
+  const own = rangesStarting(entries, date).reduce((sum, range) => sum + overlap(minuteOfDay(range.from), isOvernight(range) ? 1440 : minuteOfDay(range.to)), 0);
+  const lastNight = rangesStarting(entries, previousDay(date)).filter(isOvernight).reduce((sum, range) => sum + overlap(0, minuteOfDay(range.to)), 0);
+  return Math.min(60, own + lastNight);
+}
+
+/** Whether any hours start on this date. A night belongs to the day it starts on, so its morning does not open the next day. */
 export function isOpenDay(entries: EnergyOperatingCalendarEntryDto[], date: string): boolean {
-  return Array.from({ length: 24 }, (_, hour) => operatingMinutes(entries, date, hour)).some(minutes => minutes > 0);
+  return rangesStarting(entries, date).some(range => range.from !== range.to);
 }
 
 /** Local calendar dates covered by an end-exclusive UTC window. */
@@ -121,7 +139,8 @@ export function openingHoursLabel(entries: EnergyOperatingCalendarEntryDto[] | n
   }
   const label = (group: (typeof groups)[number]) => t("hours.group", {
     days: group.days.length > 1 ? t("hours.dayRange", { from: short(group.days[0]!), to: short(group.days[group.days.length - 1]!) }) : short(group.days[0]!),
-    hours: group.hours.split(", ").join(t("hours.rangeSeparator")),
+    // Hours past midnight read "19:00 → 07:00 next day".
+    hours: group.hours.split(", ").map(text => { const [from = "", to = ""] = text.split("–"); return hoursRangeLabel({ from, to }, locale); }).join(t("hours.rangeSeparator")),
   });
   return groups.length ? groups.map(label).join(t("hours.groupSeparator")) : t("hours.closedEveryDay");
 }

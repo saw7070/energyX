@@ -174,6 +174,7 @@ export type {
   EnergyProjectSetupIssueDto,
   EnergyProjectSetupNodeDto,
   EnergyProjectSetupValidationDto,
+  EnergyHoursMeaningDto,
   EnergyOperatingCalendarEntryDto,
   EnergyOperatingCalendarEntryInputDto,
   EnergyOperatingCalendarRevisionDto,

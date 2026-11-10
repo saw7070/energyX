@@ -5112,6 +5112,9 @@ const parseOperatingCalendarEntries = (value: unknown): EnergyIqOperatingCalenda
     const exceptions = entry.exceptions === undefined
       ? undefined
       : parseOperatingExceptions(entry.exceptions, index);
+    if (entry.hoursMeaning !== undefined && entry.hoursMeaning !== "opening" && entry.hoursMeaning !== "lights_on") {
+      throw new Error(`ENERGYIQ_OPERATING_HOURS_MEANING_INVALID:${index}`);
+    }
     return {
       id: `calendar-entry-${randomUUID()}`,
       owner: parsePolicyOwner(entry.owner, `ENERGYIQ_OPERATING_OWNER_INVALID:${index}`),
@@ -5122,6 +5125,7 @@ const parseOperatingCalendarEntries = (value: unknown): EnergyIqOperatingCalenda
       ...(effectiveTo ? { effective_to: effectiveTo } : {}),
       weekly: parsedWeekly,
       ...(exceptions ? { exceptions } : {}),
+      ...(entry.hoursMeaning === "lights_on" ? { hours_meaning: "lights_on" as const } : {}),
     };
   });
 };

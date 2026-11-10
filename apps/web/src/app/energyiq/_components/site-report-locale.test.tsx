@@ -63,7 +63,7 @@ function prose(report: ReturnType<typeof buildSiteReport>): string[] {
   const { masthead, title, lede, headline, keyFigures, profile, estimate, benchmark, pattern, screening, footer, circuits } = report;
   return [masthead.detail, masthead.period, masthead.periodNote, title.before, title.emphasis, lede, headline, ...keyFigures.map(figure => figure.label), profile.intro, ...profile.zones.flatMap(zone => [zone.heading, zone.text]), profile.caption,
     estimate.intro, estimate.comparison, estimate.spaceCaption, estimate.loadCaption, estimate.note, benchmark.intro, benchmark.caption, benchmark.outro, ...benchmark.rows.flatMap(row => [row.label, row.rate, row.cost]),
-    pattern!.intro, pattern!.cause!, pattern!.caption, ...pattern!.notes.map(note => note.text), screening.intro, screening.callout, screening.note, ...screening.rows.flatMap(row => [row.open, row.finding]),
+    pattern!.intro, pattern!.cause ?? "", pattern!.caption, ...pattern!.notes.map(note => note.text), screening.intro, screening.callout, screening.note, ...screening.rows.flatMap(row => [row.open, row.finding]),
     footer.left, footer.right, ...circuits.flatMap(circuit => [circuit.name, circuit.label]), ...report.benchmark.days.map(day => day.dow)];
 }
 // Names from the project (areas, rooms, meters, address) and units stay as written; any other English word is a missed translation.
@@ -154,6 +154,22 @@ describe("site report in Chinese and Malay", () => {
     expect(malay.headline).toMatch(/^Kira-kira S\$\d+ daripada anggaran bil bulanan S\$\d+ dibayar untuk peralatan yang hidup sepanjang masa, walaupun tiada sesiapa di situ\.$/);
     const malayWords = new Set(["Ia", "ia"]);
     expect(englishLeft(prose(malay)).filter(word => /^(the|and|of|is|are|with|from|per|weekday|weekend|hours?|lights?|equipment|never|after|before|average|load|zone|Weekday|Weekend|Base|Zone|Lit|Still|Steady|Zero|Nothing|Switching|Method|Cost|Across)$/.test(word) && !malayWords.has(word))).toEqual([]);
+  });
+
+  it("words a lights-on site's report in whole Chinese and Malay sentences", () => {
+    // The same meters read as lighting that should run every night from 7 pm to 7 am.
+    const nights = Object.fromEntries(["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].map(day => [day, [{ from: "19:00", to: "07:00" }]]));
+    const lights = { ...DATA, openingHours: nights, hoursMeaning: "lights_on" as const };
+    const lightsChinese = buildSiteReport(lights, REFERENCE, GENERATED, "zh-Hans");
+    const lightsMalay = buildSiteReport(lights, REFERENCE, GENERATED, "ms");
+    expect([lightsChinese.headlineTopic, lightsMalay.headlineTopic]).toEqual(["daytime", "daytime"]);
+    expect(lightsChinese.title.emphasis).toBe("白天");
+    expect(lightsChinese.headline).toMatch(/^\d+% 的用电发生在白天，而那时灯本应关着，每月约 S\$\d+。$/);
+    expect(englishLeft(prose(lightsChinese))).toEqual([]);
+    expect(lightsMalay.title.emphasis).toBe("pada waktu siang");
+    expect(lightsMalay.screening.intro).toContain("**waktu lampu menyala**");
+    const malayWords = new Set(["Ia", "ia"]);
+    expect(englishLeft(prose(lightsMalay)).filter(word => /^(the|and|of|is|are|with|from|per|daytime|night|morning|evening|hours?|lights?|equipment|never|after|before|average|load|zone|Lit|Still|Steady|Switched|Switching|Nothing|Cost)$/.test(word) && !malayWords.has(word))).toEqual([]);
   });
 
   it("swaps panel codes for the translated everyday names, without lowering them", () => {

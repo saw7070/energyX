@@ -54,4 +54,26 @@ describe("DecisionSummary", () => {
     expect(markup).toContain('aria-label="What does Power Load mean?"');
     expect(markup).not.toContain("assumed — no operating hours");
   });
+
+  it("reads lights-on hours as lighting that should run at night", () => {
+    // Lights draw 3 kW from 19:00 to 07:00 every night and nothing by day, except one circuit left on until 08:00.
+    const night = (hour: number) => hour >= 19 || hour < 7;
+    const lights = (_date: string, hour: number) => night(hour) ? 3 : hour === 7 ? 1 : 0;
+    const total = series("__scope__", lights);
+    const kwh = total.cells.reduce((sum, cell) => sum + cell[2]!, 0);
+    const estate = scope("estate", "Estate", { total, types: { light: series("__category__:light", lights) }, usageKwh: kwh, typeTotals: { light: kwh }, cost: { amount: kwh * 0.3, currency: "SGD", note: "0.3 SGD/kWh" } });
+    const nights = Object.fromEntries(["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].map(day => [day, [{ from: "19:00", to: "07:00" }]]));
+    // A public holiday does not switch the lights off.
+    const lightsData: AnalysisData = { ...data, projectName: "Estate", current: { project: estate, spaces: [] }, holidays: new Map([["2026-08-10", "National Day observed"]]), openingHours: nights, hoursMeaning: "lights_on" };
+    const markup = renderToStaticMarkup(<DecisionSummary data={lightsData} days={scopeDays(estate, lightsData.holidays)} anomalies={[]} floor={null} rate={0.3} />).replace(/<!-- -->/g, "");
+    // 1 of 253 kWh a day is daytime use: a calm headline.
+    expect(markup).toContain("The lights ran at night as planned: only");
+    expect(markup).not.toContain("after working hours");
+    expect(markup).toContain("Lights-on hours are <span class=\"font-medium text-slate-900\">19:00 → 07:00 next day</span>");
+    expect(markup).toContain("In the daytime");
+    expect(markup).toContain("What stays on in the daytime");
+    expect(markup).toContain("Almost all the energy is used during the lights-on hours, as planned.");
+    expect(markup).not.toContain("Public holidays");
+    expect(markup).not.toContain("Weekends");
+  });
 });
