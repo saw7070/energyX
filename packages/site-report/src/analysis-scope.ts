@@ -33,7 +33,7 @@ export type AnalysisSource = {
 /** The calendar and meter facts the readings are labelled with, however the caller happens to have loaded them. */
 export type ProjectInformationSource = {
   name?: string | undefined;
-  meters?: Array<{ id: string; location: string; locationId?: string | undefined }> | undefined;
+  meters?: Array<{ id: string; location: string; locationId?: string | undefined; panel?: string | undefined }> | undefined;
   /** The project's Locations tree; the project itself has no parent. Older servers leave it out. */
   locations?: Array<{ id: string; name: string; parentId?: string | null | undefined }> | undefined;
   calendar: null | { entries: Array<{ location: string; from: string; toExclusive: string | null; weekly: unknown; exceptions: Array<{ date: string; label: string; classification?: string | undefined }> }> };
@@ -221,8 +221,10 @@ export function analysisGroups(project: AnalysisSource, information: ProjectInfo
   const list = groupsFromLocations(information.locations);
   if (!list.length) return undefined;
   const groupOf = new Map((information.meters ?? []).flatMap(meter => meter.locationId ? [[meter.id, meter.locationId] as const] : []));
+  const panelOf = new Map((information.meters ?? []).flatMap(meter => meter.panel ? [[meter.id, meter.panel] as const] : []));
   const meters = rankCircuits([project], null, new Map()).map(circuit => ({
     id: circuit.id, name: circuit.name, ...(circuit.fullName ? { fullName: circuit.fullName } : {}), groupId: groupOf.get(circuit.id) ?? null, kwh: circuit.kwh,
+    ...(panelOf.get(circuit.id) ? { panel: panelOf.get(circuit.id) } : {}),
   }));
   return { list, meters };
 }

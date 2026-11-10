@@ -23,6 +23,8 @@ export type GroupedMeter = {
   fullName?: string | undefined;
   groupId: string | null;
   kwh: number;
+  /** The electrical panel it is wired from, when recorded: a detail only, never what it counts under. */
+  panel?: string | undefined;
   /** The part of a total that no sub-meter explains, rather than a meter of its own. */
   unmetered?: boolean | undefined;
 };

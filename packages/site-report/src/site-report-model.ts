@@ -12,6 +12,7 @@ import { alwaysOnKw, effectiveHours, isOpenHour, scopeDays, shortDate, timeBucke
 import { listText } from "./analysis-messages.js";
 import { translatorFor, type EnergyIqLocale, type Translate } from "./locale.js";
 import { formatPeriod } from "./report-period.js";
+import { analysisGroupTree, biggestMeterGroup, flattenMeterGroups, type MeterGroupNode, type MeterGroupTree } from "./meter-groups.js";
 import { DAY_PARTS, siteReportModelMessages, type SiteReportModelKey } from "./site-report-model-messages.js";
 
 type T = Translate<SiteReportModelKey>;
@@ -103,6 +104,20 @@ export type ReportCircuit = {
   gapDays: number; finding: string; eveningKwh: number | null; flat: boolean; colour: string;
 };
 export type ProfileNote = { hour: number; kw: number; text: string; place: "left" | "below" | "above-left" | "above-right" };
+/** One group in reading order, with its total for the dates and its share of the group above it. */
+export type ReportGroupRow = { key: string; name: string; depth: number; kwh: number; share: number; parent: string; meters: string[]; singleMeter: boolean };
+/** The meters filed by what they serve. The electrical panel is only a detail; a floor layout is only a drawing. */
+export type ReportGroups = {
+  /** "Block 264F 40% · Block 264E 38% · Common area 22% — biggest single group: Entrance". */
+  summary: string;
+  /** The top-level groups, largest first; `monthKwh` is their part of the 30-day estimate, `colour` follows the name. */
+  top: Array<{ key: string; name: string; kwh: number; share: number; monthKwh: number; colour: string }>;
+  rows: ReportGroupRow[];
+  /** The most specific group that uses the most, and whether one meter measures all of it. */
+  biggest: { name: string; singleMeter: boolean } | null;
+  /** What the main meter recorded that no sub-meter explains. */
+  unmeteredKwh: number;
+};
 /** What the Overview headline is about, the same in every language (the headline itself is translated). */
 export type HeadlineTopic = "always-on" | "after-hours" | "working-hours";
 export type SiteReport = {
@@ -118,6 +133,8 @@ export type SiteReport = {
   headlineTopic: HeadlineTopic;
   keyFigures: Array<{ value: string; label: string }>;
   profile: { intro: string; zones: Array<{ heading: string; text: string }>; caption: string; hasMap: boolean };
+  /** Null for readings saved before groups existed: the report then reads by floor-layout zone, as it used to. */
+  groups: ReportGroups | null;
   reference: SpatialExtras | null;
   zones: ReportZone[]; circuits: ReportCircuit[];
   estimate: { monthKwh: number; monthCost: number | null; intro: string; comparison: string; spaceCaption: string; loadCaption: string; note: string };
@@ -162,17 +179,21 @@ function officialCircuits(data: AnalysisData, locale: EnergyIqLocale): Array<{ k
   const t = modelText(locale);
   const sources = data.current.spaces.length ? data.current.spaces : [data.current.project];
   const seen = new Set<string>();
-  const groups = new Map<string, { key: string; name: string; board: string; space: string; category: AnalysisCategory | "overall"; meters: ScopeMeter[] }>();
+  const groups = new Map<string, { key: string; name: string; board: string; space: string; category: AnalysisCategory | "overall"; meters: ScopeMeter[]; short?: boolean }>();
   for (const space of sources) for (const meter of space.meters) {
     if (!meter.official || meter.category === "overall" || !meter.series || seen.has(meter.id)) continue;
     seen.add(meter.id);
+    // Someone gave this meter a short name: it is a line of its own under that name, its full label the detail.
+    if (meter.fullName) { groups.set(`short|${meter.id}`, { key: meter.id, name: meter.name, board: meter.location, space: space.name, category: meter.category, meters: [meter], short: true }); continue; }
     const stem = meter.name.replace(/\s*\d+$/, "").trim();
     const key = `${meter.location}|${meter.category}|${stem}`;
     const group = groups.get(key) ?? { key: meter.id, name: stem, board: meter.location, space: space.name, category: meter.category, meters: [] };
     group.meters.push(meter);
     groups.set(key, group);
   }
-  const list = [...groups.values()].map(group => ({ ...group, code: group.meters.length === 1 ? group.meters[0]!.name : `${group.name} 1–${group.meters.length}`, name: plainName(group, sources.length > 1, locale) }));
+  const list = [...groups.values()].map(group => group.short
+    ? { ...group, code: group.meters[0]!.fullName ?? group.name }
+    : { ...group, code: group.meters.length === 1 ? group.meters[0]!.name : `${group.name} 1–${group.meters.length}`, name: plainName(group, sources.length > 1, locale) });
   // Two circuits with the same plain name (two lighting boards in one area) keep their panel names apart.
   return list.map(group => list.filter(other => other.name === group.name).length > 1 ? { ...group, name: t("circuit.withCode", { name: group.name, code: group.code }) } : group);
 }
@@ -257,7 +278,7 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   // an area is renamed, and every zone would hold no circuits while still
   // drawing on the plan — which reads as a site that used no electricity.
   const zoneForBoard = new Map(zonesRef.flatMap(zone =>
-    [zone.referenceBoard, ...(zone.meterLocations ?? [])].map(board => [board, zone.id] as const)));
+    [zone.referenceBoard, ...(zone.meterLocations ?? [])].filter(Boolean).map(board => [board, zone.id] as const)));
   // A colour chosen for one area in the floor plan editor wins over its board's colour.
   const validColour = (value: unknown) => typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value : undefined;
   const chosenColour = (board: string) => { const value = reference?.layout.boardColours?.[board]; return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value : undefined; };
@@ -307,6 +328,10 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   for (const zone of zoneList) zone.share = zoneTotal > 0 ? zone.monthKwh / zoneTotal : 0;
   const zones = zoneList.filter(zone => zone.monthKwh > 0 || zone.rect);
   const parentZone = (zone: ReportZone) => zones.find(item => !item.subgroup && zone.parentRoom && item.rooms.includes(zone.parentRoom));
+  // Groups: the meters filed by what they serve. When the readings carry them, the profile, the shares and the
+  // comparison follow the groups, wherever each meter is wired from; a floor layout is then only a drawing.
+  const groupTree = analysisGroupTree(data, t("group.unmetered"));
+  const groups = groupTree ? reportGroups(groupTree, raw.reduce((sum, circuit) => sum + circuit.monthKwh, 0), t) : null;
 
   // ---------- masthead, title, key figures ----------
   const property = reference?.property;
@@ -330,15 +355,16 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const boards = [...new Set(circuits.map(circuit => circuit.board).filter(Boolean))];
   const boardsText = t(boards.length === 1 ? "profile.boards.one" : "profile.boards.other", { count: count(boards.length) });
   const zonesText = t(zones.length === 1 ? "profile.zones.one" : "profile.zones.other", { count: count(zones.length) });
+  const groupsIntro = groupTree && groups ? t(groupTree.meterCount === 1 ? "profile.groups.one" : "profile.groups.other", { count: groupTree.meterCount, groups: list(groups.top.map(group => t("group.share", { name: group.name, pct: pctText(group.share) }))) }) : null;
   const profileIntro = property?.address
     ? paragraph([
       t("profile.occupies", { site: siteName, where: t(property.approximateAreaM2 ? "profile.whereArea" : "profile.where", { occupancy: occupancyText(property, t), street: street(property.address), m2: grouped(property.approximateAreaM2 ?? 0) }) }),
-      t(reference?.layout.entrance ? "profile.mappedEntrance" : "profile.mapped", { boards: boardsText, zones: zonesText }),
+      groupsIntro ?? t(reference?.layout.entrance ? "profile.mappedEntrance" : "profile.mapped", { boards: boardsText, zones: zonesText }),
     ])
-    : t("profile.grouped", { boards: boardsText, zones: zonesText });
+    : groupsIntro ?? t("profile.grouped", { boards: boardsText, zones: zonesText });
   const meteredAs = (zone: ReportZone) => zone.circuitKeys.length ? list(zone.circuitKeys.map(key => { const item = circuits.find(circuit => circuit.key === key)!; return t("metered.item", { name: inl(item.name), code: item.code }); })) : t("metered.none");
   const direction = (value: string) => value === "left" || value === "right" ? t(`direction.${value}`) : value;
-  const profileZones = zones.map(zone => zone.subgroup
+  const profileZones = groupTree ? groupProfile(groupTree, { t, list, paragraph, inl }) : zones.map(zone => zone.subgroup
     ? { heading: t("zone.subHeading", { zone: zone.label, board: zone.board }), text: t(zone.parentRoom ? "zone.subText" : "zone.subTextNoRoom", {
       equipment: zone.equipment ? en ? zone.equipment.charAt(0).toLowerCase() + zone.equipment.slice(1) : zone.equipment : t("zone.equipment"),
       room: zone.parentRoom ? en ? zone.parentRoom.toLowerCase() : zone.parentRoom : "", metered: meteredAs(zone), board: zone.board, zone: zone.label }) }
@@ -357,7 +383,8 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const cheaper = flatCircuit && circuits.find(circuit => circuit.monthKwh < flatCircuit.monthKwh && circuit.zone !== flatCircuit.zone && !circuit.flat);
   const plural = isPlural;
   const comparison = paragraph([
-    ranked.length > 1 ? t("cmp.hungriest", { zone: ranked[0]!.label, pct: pctText(ranked[0]!.share), others: list(ranked.slice(1).map(zone => t("cmp.otherZone", { zone: zone.label, pct: pctText(zone.share) }))) }) : "",
+    groups ? groups.top.length > 1 ? t("cmp.hungriestGroup", { zone: groups.top[0]!.name, pct: pctText(groups.top[0]!.share), others: list(groups.top.slice(1).map(group => t("cmp.otherZone", { zone: group.name, pct: pctText(group.share) }))) }) : ""
+    : ranked.length > 1 ? t("cmp.hungriest", { zone: ranked[0]!.label, pct: pctText(ranked[0]!.share), others: list(ranked.slice(1).map(zone => t("cmp.otherZone", { zone: zone.label, pct: pctText(zone.share) }))) }) : "",
     largest ? t(plural(largest) ? "cmp.largest.other" : "cmp.largest.one", { name: inl(largest.name), pct: pctText(largest.share), rest: flatCircuit?.monthCost != null
       ? t(plural(flatCircuit) ? "cmp.flat.other" : "cmp.flat.one", { name: theName(flatCircuit.label), cost: money(flatCircuit.monthCost), more: cheaper ? t("cmp.more", { name: inl(cheaper.label) }) : "" })
       : t("cmp.end") }) : "",
@@ -371,7 +398,7 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
     monthKwh, monthCost,
     intro: paragraph([t("est.intro", { kwh: kwhText(monthKwh) }), monthCost != null ? t("est.bill", { rate: rateLabel ?? "", cost: money(monthCost) }) : t("est.noRate")]),
     comparison,
-    spaceCaption: subgroupZones.length ? t("caption.split", {
+    spaceCaption: groups ? t("caption.groupShares") : subgroupZones.length ? t("caption.split", {
       zones: list(subgroupZones.map(zone => zoneBoard(zone, true))),
       parents: list([...new Set(subgroupZones.map(zone => { const parent = parentZone(zone); return parent ? zoneBoard(parent) : t("caption.parentUnknown"); }))]),
     }) : t("caption.shares"),
@@ -457,6 +484,7 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
       : t("head.working"),
     headlineTopic,
     profile: { intro: profileIntro, zones: profileZones, caption: profileCaption, hasMap },
+    groups,
     reference: hasMap ? reference : null,
     zones, circuits, estimate, benchmark, pattern, screening,
     footer: { left: t("foot.left", { count: circuitCount, tz: tzLabel }), right: t("foot.right", { date: en ? `${shortDate(generatedDay)} ${generatedAt.slice(0, 4)}` : formatPeriod(generatedDay, generatedDay, locale) }) },
@@ -484,6 +512,54 @@ function headline(site: string, baseShare: number | null, closedShare: number | 
   }
   if (closedShare != null && closedShare >= 0.4) return { before: t("title.closed", { pct: pctText(closedShare) }), emphasis: t("title.closedEmphasis") };
   return { before: t("title.steady", { site }), emphasis: t("title.steadyEmphasis") };
+}
+
+/** The groups for the report: top-level shares for the donut and comparison, and every group in reading order. */
+function reportGroups(tree: MeterGroupTree, monthKwh: number, t: T): ReportGroups {
+  const measured = tree.kwh - tree.unmeteredKwh;
+  // Colour follows the group (sorted by name), never its size, like the zones.
+  const byName = [...tree.children].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  const top = tree.children.map(group => ({ key: group.id, name: group.name, kwh: group.kwh, share: group.share, monthKwh: measured > 0 ? group.kwh / measured * monthKwh : 0, colour: ZONE_PALETTE[byName.indexOf(group) % ZONE_PALETTE.length]! }));
+  const parentOf = new Map<string, string>();
+  const visit = (node: MeterGroupNode) => { for (const child of node.children) { parentOf.set(child.id, node.name); visit(child); } };
+  visit(tree);
+  const rows = flattenMeterGroups(tree).map(group => ({ key: group.id, name: group.name, depth: group.depth - 1, kwh: group.kwh, share: group.share, parent: parentOf.get(group.id) ?? tree.name,
+    meters: group.meters.filter(meter => !meter.unmetered).map(meter => meter.name), singleMeter: group.singleMeter }));
+  const biggest = biggestMeterGroup(tree);
+  const summary = [top.map(group => t("summary.share", { name: group.name, pct: pctText(group.share) })).join(" · "), biggest ? t("summary.biggest", { name: biggest.name }) : ""].filter(Boolean).join(" — ");
+  return { summary, top, rows, biggest: biggest ? { name: biggest.name, singleMeter: biggest.singleMeter } : null, unmeteredKwh: tree.unmeteredKwh };
+}
+
+/**
+ * "About the site and its meters" by group: each top-level group with its total and share, what it splits into, the
+ * meters that measure it, and the panels it is wired from as a detail. The biggest part of a group that one meter
+ * measures on its own is named, because nothing below it can say more.
+ */
+function groupProfile(tree: MeterGroupTree, text: { t: T; list: (items: string[]) => string; paragraph: (parts: string[]) => string; inl: (name: string) => string }): Array<{ heading: string; text: string }> {
+  const { t, list, paragraph, inl } = text;
+  const part = (item: { name: string; kwh: number; share: number }) => t("group.part", { name: item.name, kwh: kwhText(item.kwh), pct: pctText(item.share) });
+  const panelsIn = (node: MeterGroupNode): string[] => [...new Set([...node.meters.flatMap(meter => meter.panel ? [meter.panel] : []), ...node.children.flatMap(panelsIn)])].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const entries = tree.children.map(group => {
+    const meters = group.meters.filter(meter => !meter.unmetered);
+    const lead = group.children[0];
+    const panels = panelsIn(group);
+    return {
+      heading: t("group.heading", { name: group.name, kwh: kwhText(group.kwh), pct: pctText(group.share) }),
+      text: paragraph([
+        group.children.length ? t("group.split", { parts: list(group.children.map(part)) }) : "",
+        !group.children.length && group.singleMeter && meters[0] ? t("group.oneMeter", { name: meters[0].name }) : meters.length ? t("group.meters", { meters: list(meters.map(part)) }) : "",
+        lead && lead.singleMeter && group.children.length > 1 ? t("group.biggestSingle", { name: lead.name, parent: inl(group.name) }) : "",
+        panels.length ? t(panels.length === 1 ? "group.panels.one" : "group.panels.other", { panels: list(panels) }) : "",
+      ]),
+    };
+  });
+  const unmetered = tree.meters.find(meter => meter.unmetered);
+  const loose = tree.meters.filter(meter => !meter.unmetered);
+  return [
+    ...entries,
+    ...loose.map(meter => ({ heading: t("group.heading", { name: meter.name, kwh: kwhText(meter.kwh), pct: pctText(meter.share) }), text: t("group.oneMeter", { name: meter.name }) })),
+    ...(unmetered ? [{ heading: unmetered.name, text: t("group.unmeteredLine", { kwh: kwhText(unmetered.kwh), pct: pctText(unmetered.share) }) }] : []),
+  ];
 }
 
 /** Without a floor layout, each space is a zone. */
