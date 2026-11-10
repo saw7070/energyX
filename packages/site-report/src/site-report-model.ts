@@ -450,7 +450,7 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const flat = circuits.filter(circuit => circuit.flat);
   const target = flat.find(circuit => !isEquipment(circuit.category)) ?? flat[0];
   // Lights run every day; opening hours count five working days a week.
-  const closedHoursPerMonth = lighting ? 30 * (24 - openLength(openRange)) : 30 * 24 - 30 * 5 / 7 * (openRange.to - openRange.from);
+  const closedHoursPerMonth = lighting ? 30 * (24 - openLength(openRange)) : 30 * 24 - 30 * 5 / 7 * openLength(openRange);
   const targetSaving = target?.closedBase != null && rate != null ? target.closedBase * closedHoursPerMonth * rate : null;
   const perMonth = (kwh: number) => lighting ? kwh * 30 : kwh * 30 * 5 / 7;
   const tailSaving = rate != null && habits ? [...tail.map(circuit => circuit.eveningKwh!), ...early.map(circuit => circuit.earlyKwh!)].reduce((sum, kwh) => sum + perMonth(kwh), 0) * rate : null;
@@ -517,8 +517,8 @@ function openingWindow(hours: Record<string, Array<{ from: string; to: string }>
   return { from: Math.round(Math.min(...ranges.map(range => toHour(range.from)))), to: Math.round(Math.max(...ranges.map(range => toHour(range.to)))) };
 }
 /** Whole hours inside an opening window; 19 → 7 is 12 hours. */
-const openLength = (range: { from: number; to: number }) => range.to > range.from ? range.to - range.from : range.to + 24 - range.from;
-const inWindow = (range: { from: number; to: number }, hour: number) => range.to > range.from ? hour >= range.from && hour < range.to : hour >= range.from || hour < range.to;
+const openLength = (range: { from: number; to: number }) => range.to >= range.from ? range.to - range.from : range.to + 24 - range.from;
+const inWindow = (range: { from: number; to: number }, hour: number) => range.to >= range.from ? hour >= range.from && hour < range.to : hour >= range.from || hour < range.to;
 /** The published hours of the first day that has some, as written: "19:00 → 07:00 next day". */
 function openingLabelText(hours: Record<string, Array<{ from: string; to: string }>>, locale: EnergyIqLocale) {
   const range = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].map(day => hours[day]?.[0]).find(Boolean);
@@ -632,7 +632,7 @@ function weekdayPattern(input: { project: ScopeData; days: AnalysisDay[]; openRa
     ], locale);
   }
   const weekdayTotal = profile.reduce((sum, value) => sum + value, 0);
-  const openKwh = profile.reduce((sum, value, hour) => hour >= input.openRange.from && hour < input.openRange.to ? sum + value : sum, 0);
+  const openKwh = profile.reduce((sum, value, hour) => inWindow(input.openRange, hour) ? sum + value : sum, 0);
   const openShare = openKwh / Math.max(weekdayTotal, 0.001);
   return {
     hours: profile, openFrom: input.openRange.from, openTo: input.openRange.to, notes, intro, cause, weekdayCount: weekdays.length,

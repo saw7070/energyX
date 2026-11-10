@@ -304,9 +304,9 @@ function ProfileChart({ pattern, report, standalone }: { pattern: NonNullable<Si
   const every = pw / 23 >= 26 ? 2 : pw / 23 >= 14 ? 3 : 4;
   const bandFrom = x(pattern.openFrom), bandTo = x(Math.min(23, pattern.openTo));
   // Hours that run past midnight (19 → 7) shade the evening and the early morning of the same average day.
-  const bands = pattern.openTo > pattern.openFrom ? [[bandFrom, bandTo]] : [[bandFrom, x(23)], [x(0), bandTo]];
+  const bands = pattern.openTo >= pattern.openFrom ? [[bandFrom, bandTo]] : [[bandFrom, x(23)], [x(0), bandTo]];
   // The label sits in the wider part; in the evening part it ends at the chart's right edge so it stays inside.
-  const bandLabel = pattern.openTo > pattern.openFrom ? { x: bandFrom + 8 }
+  const bandLabel = pattern.openTo >= pattern.openFrom ? { x: bandFrom + 8 }
     : pattern.openTo >= 23 - pattern.openFrom ? { x: x(0) + 8 } : { x: x(23) - 8, textAnchor: "end" as const };
   const place = (note: ProfileNote) => {
     const px = x(note.hour), py = y(note.kw), w = textWidth(note.text, 10.5);

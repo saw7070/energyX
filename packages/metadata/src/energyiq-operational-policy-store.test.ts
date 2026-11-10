@@ -970,6 +970,122 @@ describe("EnergyIqOperationalPolicyStore", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("accepts hours that run past midnight, keeps earlier calendars unchanged and still rejects empty hours", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-overnight-calendar-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      seedNightProject(metadata, "night-1");
+      const policy = metadata.energyIq.operationalPolicy;
+      const nights = everyNight("19:00", "07:00");
+      const saved = policy.publishOperatingCalendar({
+        version_id: "night-v1", project_id: "night-1", published_by: "dev-user",
+        entries: [{ id: "lights", owner: { kind: "project" }, effective_from: "2026-07-01", weekly: nights, hours_meaning: "lights_on" }],
+      });
+      expect(saved.entries[0]).toMatchObject({ weekly: { monday: [{ from: "19:00", to: "07:00" }] }, hours_meaning: "lights_on" });
+
+      // Opening hours are the default and are not stored, so an office calendar keeps exactly its earlier shape.
+      const office = policy.publishOperatingCalendar({
+        version_id: "office-v1", project_id: "night-1", published_by: "dev-user",
+        entries: [{ id: "office", owner: { kind: "project" }, effective_from: "2026-07-01", weekly: operatingWeek("08:00", "18:00"), hours_meaning: "opening" }],
+      });
+      expect(office.entries[0]).not.toHaveProperty("hours_meaning");
+      expect(office.entries[0]!.weekly.monday).toEqual([{ from: "08:00", to: "18:00" }]);
+
+      // Ending at midnight is the end of the start day.
+      const toMidnight = policy.publishOperatingCalendar({
+        version_id: "midnight-v1", project_id: "night-1", published_by: "dev-user",
+        entries: [{ id: "late", owner: { kind: "project" }, effective_from: "2026-07-01", weekly: { ...closedWeek(), friday: [{ from: "19:00", to: "00:00" }] } }],
+      });
+      expect(toMidnight.entries[0]!.weekly.friday).toEqual([{ from: "19:00", to: "24:00" }]);
+
+      const publish = (weekly: ReturnType<typeof closedWeek>, hoursMeaning?: string) => () => policy.publishOperatingCalendar({
+        version_id: `bad-${Math.random()}`, project_id: "night-1", published_by: "dev-user",
+        entries: [{ id: "bad", owner: { kind: "project" }, effective_from: "2026-07-01", weekly, ...(hoursMeaning ? { hours_meaning: hoursMeaning as "lights_on" } : {}) }],
+      });
+      expect(publish({ ...closedWeek(), monday: [{ from: "08:00", to: "08:00" }] })).toThrowError("ENERGYIQ_OPERATING_TIME_RANGE_INVALID");
+      expect(publish({ ...closedWeek(), monday: [{ from: "00:00", to: "00:00" }] })).toThrowError("ENERGYIQ_OPERATING_TIME_RANGE_INVALID");
+      // A night overlaps any later hours that start the same day.
+      expect(publish({ ...closedWeek(), monday: [{ from: "19:00", to: "07:00" }, { from: "20:00", to: "22:00" }] })).toThrowError("ENERGYIQ_OPERATING_TIME_RANGE_OVERLAP");
+      expect(publish(closedWeek(), "evening")).toThrowError("ENERGYIQ_OPERATING_HOURS_MEANING_INVALID");
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("counts a night's hours into the next morning, on the day the night starts", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-overnight-operating-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      seedNightProject(metadata, "night-2");
+      const policy = metadata.energyIq.operationalPolicy;
+      const evaluate = (version: string, from: string, to: string, intervals: Array<[string, string]>) => {
+        policy.activateProjectPolicies({ project_id: "night-2", business_calendar_version: version, updated_by: "dev-user" });
+        const result = policy.evaluateAnalysisPolicy({
+          project_id: "night-2", scope_id: "night-2-root", period: { from, to }, policy_source: { mode: "active" },
+          intervals: intervals.map(([start, end]) => ({ start, end_exclusive: end, usage_kwh: 1 })),
+        });
+        return result.operating.status === "available" ? [result.operating.operating_kwh, result.operating.standby_kwh] : result.operating.reason.code;
+      };
+      // 1 Jul 2026 is a Wednesday. 02:00 belongs to Tuesday night, 12:00 is daytime, 20:00 starts Wednesday night.
+      const day = (time: string) => `2026-07-01T${time}+08:00`;
+      const hours: Array<[string, string]> = [[day("02:00:00"), day("03:00:00")], [day("12:00:00"), day("13:00:00")], [day("20:00:00"), day("21:00:00")]];
+      policy.publishOperatingCalendar({
+        version_id: "nights", project_id: "night-2", published_by: "dev-user",
+        entries: [{ id: "nights", owner: { kind: "project" }, effective_from: "2026-06-01", weekly: everyNight("19:00", "07:00") }],
+      });
+      expect(evaluate("nights", day("00:00:00"), "2026-07-02T00:00:00+08:00", hours)).toEqual([2, 1]);
+
+      // With no hours before the period, the small hours of its first day are not open.
+      policy.publishOperatingCalendar({
+        version_id: "nights-from-july", project_id: "night-2", published_by: "dev-user",
+        entries: [{ id: "nights", owner: { kind: "project" }, effective_from: "2026-07-01", weekly: everyNight("19:00", "07:00") }],
+      });
+      expect(evaluate("nights-from-july", day("00:00:00"), "2026-07-02T00:00:00+08:00", hours)).toEqual([1, 2]);
+
+      // Opening hours: a public holiday closes the night that starts on it, including its small hours the next day.
+      const holiday = [{ date: "2026-06-30", operating: [], label: "Holiday", classification: "public_holiday" as const }];
+      policy.publishOperatingCalendar({
+        version_id: "night-shift", project_id: "night-2", published_by: "dev-user",
+        entries: [{ id: "shift", owner: { kind: "project" }, effective_from: "2026-06-01", weekly: everyNight("19:00", "07:00"), exceptions: holiday }],
+      });
+      expect(evaluate("night-shift", day("00:00:00"), "2026-07-02T00:00:00+08:00", hours)).toEqual([1, 2]);
+
+      // Lights-on hours: holidays keep the usual hours, because the lights still have to come on.
+      policy.publishOperatingCalendar({
+        version_id: "lights", project_id: "night-2", published_by: "dev-user",
+        entries: [{ id: "lights", owner: { kind: "project" }, effective_from: "2026-06-01", weekly: everyNight("19:00", "07:00"), exceptions: holiday, hours_meaning: "lights_on" }],
+      });
+      expect(evaluate("lights", day("00:00:00"), "2026-07-02T00:00:00+08:00", hours)).toEqual([2, 1]);
+
+      // Opening hours that never cross midnight are counted exactly as before.
+      policy.publishOperatingCalendar({
+        version_id: "office", project_id: "night-2", published_by: "dev-user",
+        entries: [{ id: "office", owner: { kind: "project" }, effective_from: "2026-07-01", weekly: operatingWeek("08:00", "18:00") }],
+      });
+      expect(evaluate("office", day("00:00:00"), "2026-07-02T00:00:00+08:00", hours)).toEqual([1, 2]);
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+const seedNightProject = (metadata: ReturnType<typeof createMetadataStore>, projectId: string) => {
+  metadata.workspaces.upsert({ id: `${projectId}-workspace`, owner_user_id: "dev-user", name: "Estate", kind: "customer" });
+  metadata.energyIq.upsertProject({ id: projectId, workspace_id: `${projectId}-workspace`, name: "Estate", status: "published", timezone: "Asia/Singapore", root_scope_id: `${projectId}-root` });
+  metadata.energyIq.upsertProjectNode({ id: `${projectId}-root`, project_id: projectId, name: "Estate", node_type: "project" });
+};
+
+const everyNight = (from: string, to: string) => ({
+  monday: [{ from, to }],
+  tuesday: [{ from, to }],
+  wednesday: [{ from, to }],
+  thursday: [{ from, to }],
+  friday: [{ from, to }],
+  saturday: [{ from, to }],
+  sunday: [{ from, to }],
 });
 
 const operatingWeek = (from: string, to: string) => ({
