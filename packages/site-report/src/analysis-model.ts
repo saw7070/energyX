@@ -139,7 +139,7 @@ export const isOpenHour = (hours: HoursByDay | null, date: string, hour: number)
 export const hoursRangeLabel = (range: { from: string; to: string }, locale: EnergyIqLocale = "en") =>
   isOvernight(range) ? analysisText(locale)("hours.overnight", { from: range.from, to: range.to }) : `${range.from}–${range.to}`;
 export const openingLabel = (hours: HoursByDay | null, locale: EnergyIqLocale = "en", meaning: HoursMeaning = "opening") => {
-  // Lights often run at weekends only too, so a lights-on site falls back to the first day that has hours.
+  // A lights-on site may have no Monday hours, so it falls back to the first day that has some.
   const range = hours?.monday?.[0] ?? (meaning === "lights_on" ? WEEK.map(day => hours?.[day]?.[0]).find(Boolean) : undefined);
   return range ? hoursRangeLabel(range, locale) : meaning === "lights_on" ? hoursRangeLabel(DEFAULT_LIGHTS_ON_RANGE, locale) : "08:00–18:00";
 };

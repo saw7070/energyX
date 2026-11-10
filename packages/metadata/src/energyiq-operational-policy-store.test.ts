@@ -999,7 +999,7 @@ describe("EnergyIqOperationalPolicyStore", () => {
       });
       expect(toMidnight.entries[0]!.weekly.friday).toEqual([{ from: "19:00", to: "24:00" }]);
 
-      const publish = (weekly: ReturnType<typeof closedWeek>, hoursMeaning?: string) => () => policy.publishOperatingCalendar({
+      const publish = (weekly: ReturnType<typeof everyNight>, hoursMeaning?: string) => () => policy.publishOperatingCalendar({
         version_id: `bad-${Math.random()}`, project_id: "night-1", published_by: "dev-user",
         entries: [{ id: "bad", owner: { kind: "project" }, effective_from: "2026-07-01", weekly, ...(hoursMeaning ? { hours_meaning: hoursMeaning as "lights_on" } : {}) }],
       });
