@@ -6,7 +6,7 @@ import {
   Area, AreaChart, Bar, CartesianGrid, Cell, ComposedChart, Legend, Line, Pie, PieChart, ReferenceArea, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import {
-  ANOMALY_THRESHOLD_PCT, CATEGORY_COLORS, CATEGORY_ORDER, average, dateWithDay, dayTypeBaselines,
+  ANOMALY_THRESHOLD_PCT, CATEGORY_COLORS, CATEGORY_ORDER, average, dateWithDay,
   findAnomalies, hourlyProfile, meterHeatmap, openingLabel, overnightFloor, percentChange, quietHours, scopeDays, shortDate, topHours, weekdayShort, weekdayWindows,
   type AnalysisCategory, type AnalysisDay, type AnalysisDayType, type PeakHour,
 } from "./analysis-model";
@@ -26,7 +26,8 @@ import { EnergyFlow } from "./energy-flow";
 import { analysisCsvFilename, analysisHourlyCsv } from "./analysis-export";
 import { downloadText } from "./explorer-export";
 import { breakdownSpaces } from "./site-total";
-import { analysisGroupTree } from "@datafoundry/site-report";
+import { DayTip, STANDOUT_STROKE, StandoutDayList, useDayExplanations } from "./analysis-standout";
+import { analysisGroupTree, STANDOUT_MIN_DAYS, usualDayBaselines } from "@datafoundry/site-report";
 import { MeterGroupTree } from "./meter-group-tree";
 import { currencyMark } from "./money";
 
@@ -75,14 +76,16 @@ type Derived = ReturnType<typeof derive>;
 function derive(data: AnalysisData) {
   const days = scopeDays(data.current.project, data.holidays);
   const previousDays = data.previous ? scopeDays(data.previous.project, data.holidays) : [];
-  const calibration = [...previousDays, ...days];
-  const baselines = dayTypeBaselines(calibration);
+  // One usual day for the whole page: the median of complete days of the same kind in these dates, the same figure the
+  // "why was this day different" explanations use. Every day is one kind at a lights-on site.
+  const lighting = data.hoursMeaning === "lights_on";
+  const calibration = days;
+  const baselines = usualDayBaselines(days, lighting);
   const spaces = data.current.spaces.map(space => {
     const previous = data.previous?.spaces.find(item => item.id === space.id) ?? null;
     const spaceDays = scopeDays(space, data.holidays);
-    const spaceCalibration = [...(previous ? scopeDays(previous, data.holidays) : []), ...spaceDays];
-    const spaceBaselines = dayTypeBaselines(spaceCalibration);
-    return { scope: space, previous, days: spaceDays, calibration: spaceCalibration, baselines: spaceBaselines, anomalies: findAnomalies(spaceDays, spaceBaselines) };
+    const spaceBaselines = usualDayBaselines(spaceDays, lighting);
+    return { scope: space, previous, days: spaceDays, calibration: spaceDays, baselines: spaceBaselines, anomalies: findAnomalies(spaceDays, spaceBaselines) };
   });
   const project = data.current.project;
   const rate = project.cost && project.usageKwh ? project.cost.amount / project.usageKwh : null;
@@ -328,28 +331,34 @@ function DailyTotalTrend({ data, derived }: { data: AnalysisData; derived: Deriv
   const { locale } = useEnergyIqLocale();
   const t = useMessages(viewMessages);
   const DayTick = useMemo(() => makeDayTick(data.holidays, locale, t("ph")), [data.holidays, locale, t]);
+  // A lights-on site's lights run every night, so every day is one kind: no weekday / weekend split.
+  const lighting = data.hoursMeaning === "lights_on";
+  const lt = forHoursMeaning(t, viewMessages, data.hoursMeaning);
   const spaceItem = derived.spaces.find(item => item.scope.id === space);
   const selected = spaceItem ? { ...spaceItem, name: spaceItem.scope.name } : { days: derived.days, baselines: derived.baselines, anomalies: derived.anomalies, calibration: derived.calibration, name: t("allSpaces") };
   const baseline = selected.baselines.find(item => item.dayType === dayType)!;
-  const shown = selected.days.filter(day => day.dayType === dayType);
+  const shown = lighting ? selected.days : selected.days.filter(day => day.dayType === dayType);
   const complete = shown.filter(day => day.complete);
   const incomplete = shown.filter(day => !day.complete && day.totalKwh > 0).length;
-  const anomalies = selected.anomalies.filter(item => item.dayType === dayType);
+  const anomalies = lighting ? selected.anomalies : selected.anomalies.filter(item => item.dayType === dayType);
   const threshold = baseline.expectedKwh == null ? null : baseline.expectedKwh * (1 + ANOMALY_THRESHOLD_PCT / 100);
-  const rows = shown.map(day => ({ date: day.date, total: day.totalKwh > 0 ? day.totalKwh : null, complete: day.complete, expected: baseline.expectedKwh, threshold }));
+  // Why each day was different: against a usual day of its kind, split by the meters inside the chosen location.
+  const explanations = useDayExplanations(selected.days, spaceItem?.scope ?? null, data.current, lighting, data.groups);
+  const rows = shown.map(day => ({ date: day.date, total: day.totalKwh > 0 ? day.totalKwh : null, complete: day.complete, expected: baseline.expectedKwh, threshold, standout: explanations.get(day.date)?.status === "standout" }));
   const calibrationDates = selected.calibration.map(day => day.date).sort();
   // The area that only holds the main meter is the site total, not a part of it; it is already the daily total column.
   const listedSpaces = breakdownSpaces(derived.spaces, item => item.scope);
   const showSpaces = !spaceItem && listedSpaces.length > 1;
   const label = dayTypeWord(dayType, locale);
   const dailyTotalName = t("trend.dailyTotal");
+  const totalLabel = (value: string, whole: boolean) => `${dailyTotalName}: ${value}${whole ? "" : t("trend.incomplete")}`;
   return <section className={`${PANEL} p-4`}>
     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
       <div>
-        <Title guide={{ summary: t("trend.summary"), dataAcquisition: [t("trend.data1"), t("trend.data2")], chartGeneration: [t("trend.chart1"), t("trend.chart2", { pct: ANOMALY_THRESHOLD_PCT })] }}>{t("trend.title")}</Title>
+        <Title guide={{ summary: lt("trend.summary"), dataAcquisition: [t("trend.data1"), t("trend.data2")], chartGeneration: [lt("trend.chart1", { count: STANDOUT_MIN_DAYS }), t("trend.chart2", { pct: ANOMALY_THRESHOLD_PCT })] }}>{t("trend.title")}</Title>
         <p className="text-sm text-slate-600">{t("trend.meta", {
-          samples: t(complete.length === 1 ? "trend.samples.one" : "trend.samples.other", { count: complete.length, type: label }),
-          baseline: baseline.expectedKwh == null ? t("trend.baselineNeeds") : t("unit.perDay", { value: num(baseline.expectedKwh) }),
+          samples: lt(complete.length === 1 ? "trend.samples.one" : "trend.samples.other", { count: complete.length, type: label }),
+          baseline: baseline.expectedKwh == null ? t("trend.baselineNeeds", { count: STANDOUT_MIN_DAYS }) : t("unit.perDay", { value: num(baseline.expectedKwh) }),
           calibrated: calibrationDates.length ? `${dateWithDay(calibrationDates[0]!, locale)} – ${dateWithDay(calibrationDates.at(-1)!, locale)}` : "—",
           pct: ANOMALY_THRESHOLD_PCT,
         })}</p>
@@ -357,26 +366,27 @@ function DailyTotalTrend({ data, derived }: { data: AnalysisData; derived: Deriv
     </div>
     <div className="mb-3 text-sm text-slate-700">{rich(t("trend.scope"), { name: <span className="font-semibold text-slate-900">{selected.name}</span> })}</div>
     <div className="mb-3 flex flex-wrap items-start gap-3">
-      <Toggle label={t("trend.dayType")} value={dayType} onChange={setDayType} options={dayTypeOptions(locale)} />
+      {!lighting && <Toggle label={t("trend.dayType")} value={dayType} onChange={setDayType} options={dayTypeOptions(locale)} />}
       {derived.spaces.length > 0 && <Toggle label={t("spaceFilter")} value={space} onChange={setSpace} options={[["all", t("allSpaces")], ...derived.spaces.map(item => [item.scope.id, item.scope.name] as [string, string])]} />}
     </div>
-    <div className="mb-1 text-[11px] text-slate-500">{incomplete ? t("trend.captionFaded", { type: dayTypeLabel(dayType, locale), count: incomplete }) : t("trend.caption", { type: dayTypeLabel(dayType, locale) })}</div>
+    <div className="mb-1 text-[11px] text-slate-500">{incomplete ? lt("trend.captionFaded", { type: dayTypeLabel(dayType, locale), count: incomplete }) : lt("trend.caption", { type: dayTypeLabel(dayType, locale) })}</div>
     <div className="mb-4 h-80">
       {rows.length ? <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={rows} margin={{ top: 8, right: 12, bottom: 8, left: 2 }}>
           <CartesianGrid {...GRID} />
           <XAxis dataKey="date" stroke="#64748b" interval={0} height={48} tick={DayTick} />
           <YAxis {...AXIS} width={40} />
-          <Tooltip {...TOOLTIP} labelFormatter={date => dateWithDay(String(date), locale)} formatter={(value, name, item) => [value == null ? "—" : `${Number(value).toFixed(1)} kWh${item.dataKey === "total" && !(item.payload as { complete: boolean }).complete ? t("trend.incomplete") : ""}`, String(name)]} />
+          <Tooltip cursor={{ fill: "rgba(15, 23, 42, 0.04)" }} content={({ active, label: date }) => active && date != null ? <DayTip date={String(date)} item={explanations.get(String(date))} siteName={data.projectName} totalLabel={totalLabel} /> : null} />
           <Legend itemSorter={null} wrapperStyle={{ fontSize: 11 }} />
-          <Bar dataKey="total" fill="#5B8BCF" name={dailyTotalName} radius={[4, 4, 0, 0]} isAnimationActive={false}>{rows.map(row => <Cell key={row.date} fillOpacity={row.complete ? 1 : 0.35} />)}</Bar>
+          <Bar dataKey="total" fill="#5B8BCF" name={dailyTotalName} radius={[4, 4, 0, 0]} isAnimationActive={false}>{rows.map(row => <Cell key={row.date} fillOpacity={row.complete ? 1 : 0.35} stroke={row.standout ? STANDOUT_STROKE : undefined} strokeWidth={row.standout ? 2 : 0} />)}</Bar>
           <Line type="monotone" dataKey="expected" stroke="#f59e0b" strokeWidth={2} dot={false} strokeLinejoin="round" strokeLinecap="round" name={t("trend.expected")} isAnimationActive={false} />
           <Line type="monotone" dataKey="threshold" stroke="#ef4444" strokeDasharray="4 4" strokeWidth={1.8} dot={false} strokeLinejoin="round" strokeLinecap="round" name={t("trend.threshold", { pct: 100 + ANOMALY_THRESHOLD_PCT })} isAnimationActive={false} />
           {anomalies.map(item => <ReferenceDot key={item.date} x={item.date} y={item.totalKwh} r={4} fill="#ef4444" stroke="#fff" strokeWidth={1.2} />)}
         </ComposedChart>
-      </ResponsiveContainer> : <div className="flex h-full items-center justify-center rounded-md border border-dashed border-slate-200 text-sm text-slate-600">{t("trend.noDays", { type: label })}</div>}
+      </ResponsiveContainer> : <div className="flex h-full items-center justify-center rounded-md border border-dashed border-slate-200 text-sm text-slate-600">{lt("trend.noDays", { type: label })}</div>}
     </div>
-    <div className="mb-2 text-sm text-slate-700">{rich(t(complete.length === 1 ? "trend.detected.one" : "trend.detected.other", { total: complete.length, type: label }), { count: <span className="font-semibold text-rose-700">{anomalies.length}</span> })}</div>
+    {rows.length > 0 && <StandoutDayList items={shown.flatMap(day => explanations.get(day.date) ?? [])} lighting={lighting} siteName={data.projectName} hint={t("standout.hint")} />}
+    <div className="mb-2 text-sm text-slate-700">{rich(lt(complete.length === 1 ? "trend.detected.one" : "trend.detected.other", { total: complete.length, type: label }), { count: <span className="font-semibold text-rose-700">{anomalies.length}</span> })}</div>
     <div className="rounded-md border border-slate-200">
       <div className="border-b border-slate-200 bg-white px-3 py-2"><Title className="text-xs font-medium text-slate-700" guide={{ summary: t("anomalies.summary"), dataAcquisition: [t("anomalies.data1")], chartGeneration: [t("anomalies.chart1")] }}>{t("anomalies.title")}</Title></div>
       <div className="max-h-72 overflow-auto">
@@ -388,7 +398,7 @@ function DailyTotalTrend({ data, derived }: { data: AnalysisData; derived: Deriv
             {showSpaces && <td className="px-3 py-2 text-right text-slate-500">{listedSpaces.map(entry => num(entry.days.find(day => day.date === item.date)?.totalKwh ?? 0)).join(" / ")}</td>}
             <td className="px-3 py-2 text-right text-rose-700">+{item.deltaPct.toFixed(1)}%</td><td className="px-3 py-2"><span className="rounded bg-rose-100 px-2 py-0.5 text-rose-700">{t("anomaly")}</span></td>
           </tr>)}</tbody>
-        </table> : <p className="px-3 py-4 text-sm text-slate-600">{baseline.expectedKwh == null ? t("trend.noBaseline", { type: label }) : t("trend.noneAbove", { type: label, pct: ANOMALY_THRESHOLD_PCT })}</p>}
+        </table> : <p className="px-3 py-4 text-sm text-slate-600">{baseline.expectedKwh == null ? lt("trend.noBaseline", { type: label }) : lt("trend.noneAbove", { type: label, pct: ANOMALY_THRESHOLD_PCT })}</p>}
       </div>
     </div>
   </section>;

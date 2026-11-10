@@ -103,6 +103,18 @@ describe("management review: sections", () => {
     expect(comparison.intro).toContain("Part for part, the biggest difference is Lift lobby lights: Block 12B uses 20% more than Block 12A.");
   });
 
+  it("shows the days that stood out under the daily totals, with the meters behind them", () => {
+    const lateMorning: Record<string, Def> = { ...LIGHTING, "a-corridor": { ...LIGHTING["a-corridor"]!, kwh: (d, h) => night(h) || (d === "2026-08-06" && h >= 7 && h < 9) ? 0.6 : 0 } };
+    const review = buildManagementReview(site(lateMorning, { meaning: "lights_on" }), null, GENERATED);
+    expect(review.total.standout?.title).toBe("Days that stood out");
+    expect(review.total.standout?.items.map(item => item.date)).toEqual(["2026-08-06"]);
+    expect(review.total.standout?.items[0]!.text).toContain("12A corridor lights");
+    expect(review.summary.findings).toContain("One day stood out from a usual day: 6 Aug (see Days that stood out).");
+    expect(renderManagementReviewHtml(review)).toContain("Days that stood out");
+    // With nothing unusual, the block says so in one line.
+    expect(buildManagementReview(site(LIGHTING, { meaning: "lights_on" }), null, GENERATED).total.standout?.note).toBe("No day stood out from a usual day.");
+  });
+
   it("explains a gap between two blocks by what only one of them has", () => {
     const entrance: Record<string, Def> = { ...LIGHTING, "b-lobby": { ...LIGHTING["b-lobby"]!, kwh: (_d, h) => night(h) ? 0.31 : 0 }, entrance: { name: "Main entrance lighting", group: "block-a", category: "light", kwh: (_d, h) => night(h) ? 0.34 : 0 } };
     const review = buildManagementReview(site(entrance, { meaning: "lights_on" }), null, GENERATED);
@@ -179,6 +191,9 @@ describe("meters marked not in use", () => {
     expect(after.benchmark.days.every(day => day.complete)).toBe(true);
     expect(after.benchmark.weekdayAvg).not.toBeNull();
     expect(after.benchmark.baseKw).toBeCloseTo(0.2, 6);
+    // Days that stood out use the same rule, so the week is compared instead of skipped as missing.
+    expect(before.standout.note).toMatch(/Readings were missing/);
+    expect(after.standout.note).not.toMatch(/Readings were missing/);
     // The energy is the same either way: only the complete-day check changes.
     expect(after.benchmark.days.map(day => day.kwh)).toEqual(before.benchmark.days.map(day => day.kwh));
   });

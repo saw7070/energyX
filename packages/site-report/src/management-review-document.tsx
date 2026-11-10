@@ -191,6 +191,12 @@ export function ManagementReviewDocument({ review, standalone }: { review: Manag
       <Section id="total" number={numberOf("total")} title={t("sec.total")}>
         {total.intro && <p><Rich text={total.intro} /></p>}
         {total.days.length > 0 && <DailyChart review={review} />}
+        {total.standout && <div className="standout">
+          <h3>{total.standout.title}</h3>
+          {total.standout.items.length > 0 && <ul>{total.standout.items.map(item => <li key={item.date}>{item.text}</li>)}</ul>}
+          {total.standout.note && <p>{total.standout.note}</p>}
+          <p className="rule">{total.standout.rule}</p>
+        </div>}
         {total.rows.length > 0 && <div className="table-wrap"><table>
           <thead><tr><th>{t("total.col.projection")}</th><th className="r">{t("total.col.energy")}</th>{review.rate != null && <th className="r">{t("total.col.cost")}</th>}</tr></thead>
           <tbody>{total.rows.map(row => <tr key={row.label}><td>{row.label}</td><td className="r">{kwhText(row.kwh)}</td>{review.rate != null && <td className="r">{row.cost == null ? "—" : moneyText(row.cost, review.currency, row.kwh < 100 ? 2 : 0)}</td>}</tr>)}</tbody>

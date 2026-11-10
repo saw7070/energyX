@@ -64,7 +64,8 @@ function prose(report: ReturnType<typeof buildSiteReport>): string[] {
   return [masthead.detail, masthead.period, masthead.periodNote, title.before, title.emphasis, lede, headline, ...keyFigures.map(figure => figure.label), profile.intro, ...profile.zones.flatMap(zone => [zone.heading, zone.text]), profile.caption,
     estimate.intro, estimate.comparison, estimate.spaceCaption, estimate.loadCaption, estimate.note, benchmark.intro, benchmark.caption, benchmark.outro, ...benchmark.rows.flatMap(row => [row.label, row.rate, row.cost]),
     pattern!.intro, pattern!.cause ?? "", pattern!.caption, ...pattern!.notes.map(note => note.text), screening.intro, screening.callout, screening.note, ...screening.rows.flatMap(row => [row.open, row.finding]),
-    footer.left, footer.right, ...circuits.flatMap(circuit => [circuit.name, circuit.label]), ...report.benchmark.days.map(day => day.dow)];
+    footer.left, footer.right, ...circuits.flatMap(circuit => [circuit.name, circuit.label]), ...report.benchmark.days.map(day => day.dow),
+    report.standout.title, report.standout.note, report.standout.rule, ...report.standout.items.map(item => item.text)];
 }
 // Names from the project (areas, rooms, meters, address) and units stay as written; any other English word is a missed translation.
 // Zone and board ids (A, DB1, L1), units (kWh, kW, m², h, S$) and the time zone are not translated either.
@@ -189,7 +190,7 @@ describe("site report page in other languages", () => {
     expect(page.host.querySelector('article[aria-label="Tuya Office 能源报告"]')).not.toBeNull();
     expect(page.host.querySelector('svg[aria-label="Tuya Office 的简化楼层图"]')).not.toBeNull();
     expect(page.host.querySelector('svg[aria-label="每日用电量，含工作日平均线和无人在场日的参考线"]')).not.toBeNull();
-    for (const text of ["时段：2026年8月3日–16日（14 天，SGT）", "午餐时用电下降的原因：", "这意味着什么：", "办公室合计", "估算，30 天", "工作日平均", "无人在场的一天", "电气面板（配电箱）", "右转 · 位置 A", "左转 · 位置 B + C", "营业时间 上午9点–下午6点", "平均功率（kW）"]) expect(page.text()).toContain(text);
+    for (const text of ["时段：2026年8月3日–16日（14 天，SGT）", "午餐时用电下降的原因：", "这意味着什么：", "办公室合计", "估算，30 天", "工作日平均", "无人在场的一天", "电气面板（配电箱）", "右转 · 位置 A", "左转 · 位置 B + C", "营业时间 上午9点–下午6点", "平均功率（kW）", "与平常不同的日子", "没有哪一天与同类正常日子明显不同。"]) expect(page.text()).toContain(text);
     // Everything a reader can see or hear: visible text, accessible names and hover titles.
     const labels = [...page.host.querySelectorAll("[aria-label]")].map(node => node.getAttribute("aria-label")!);
     const titles = [...page.host.querySelectorAll("title")].map(node => node.textContent ?? "");

@@ -22,6 +22,7 @@ import { managementReviewMessages, type ManagementReviewKey } from "./management
 import { analysisGroupTree, type MeterGroupNode, type MeterGroupTree } from "./meter-groups.js";
 import { notInUseIds, withMetersInUse, type NotInUseMeter } from "./meters-in-use.js";
 import { formatPeriod } from "./report-period.js";
+import type { StandoutReport } from "./standout-report.js";
 import { buildSiteReport, clock, DAYTIME_NOTABLE_SHARE, hourRange, inWindow, kwhText, kwText, moneyText, openingWindow, pctText, REPORT_COLOURS, weekdayOf } from "./site-report-model.js";
 
 type T = Translate<ManagementReviewKey>;
@@ -64,6 +65,8 @@ export type ManagementReview = {
   total: {
     intro: string; days: ReviewDay[]; typicalKwh: number | null; caption: string; meterCount: number;
     rows: Array<{ label: string; kwh: number; cost: number | null }>;
+    /** Days that used clearly more or less than a usual day, and the meters behind each: the full report's own block. */
+    standout: StandoutReport | null;
   };
   /** Top-level groups (or, with no groups, the biggest circuits as one list). */
   groups: { heading: string; intro: string; rows: ReviewGroup[]; byCircuit: boolean; note: string } | null;
@@ -181,7 +184,7 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
   const missing = readDays.filter(day => !day.complete).length;
   const typicalCost = typicalKwh == null ? null : cost(typicalKwh);
   const total = {
-    days: reviewDays, typicalKwh, meterCount,
+    days: reviewDays, typicalKwh, meterCount, standout: reviewDays.length ? base.standout : null,
     intro: !shownDays.length ? "" : paragraph([
       shownDays.length > 1 && kwhText(low) === kwhText(high) ? t("total.introSteady", { kwh: kwhText(low), cost: typicalCost != null ? t("total.introCost", { cost: money(typicalCost, 2)! }) : "" })
         : shownDays.length === 1 ? t("total.introOne", { kwh: kwhText(shownDays[0]!.totalKwh), cost: rate != null ? t("total.introCost", { cost: money(cost(shownDays[0]!.totalKwh), 2)! }) : "" })
@@ -262,6 +265,8 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
   const topGroup = groupRows[0];
   const topPart = topGroup?.parts[0];
   const firstStopped = stopped[0];
+  const standoutDates = base.standout.items.map(item => shortDate(item.date, locale));
+  const standoutFinding = standoutDates.length ? t(standoutDates.length === 1 ? "find.standout.one" : "find.standout.other", { count: standoutDates.length, dates: list(standoutDates) }) : "";
   const findings = [
     readDays.length ? t("find.total", { kwh: kwhText(totalKwh), days: readDays.length, perDay: kwhText(perDayOf(totalKwh)), cost: rate != null ? t("find.totalCost", { cost: money(cost(perDayOf(totalKwh)), 2)! }) : "" }) : "",
     closedShare == null ? ""
@@ -273,6 +278,7 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
     comparison?.finding ?? "",
     stopped.length === 1 && firstStopped ? t("find.stopped.one", { name: firstStopped.name, since: firstStopped.last ? at(firstStopped.last.date, firstStopped.last.hour) : periodText })
       : stopped.length > 1 ? t("find.stopped.other", { count: stopped.length, names: list(stopped.map(row => row.name)) }) : "",
+    standoutFinding,
     notInUseList.length === 1 ? t("find.notInUse.one", { name: notInUseList[0]!.name }) : notInUseList.length > 1 ? t("find.notInUse.other", { count: notInUseList.length }) : "",
   ].filter(Boolean).slice(0, MAX_FINDINGS);
   const worth = (row: { kwhYear: number; costYear: number | null }) => row.costYear != null ? money(row.costYear) : kwhText(row.kwhYear);

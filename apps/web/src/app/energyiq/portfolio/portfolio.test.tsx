@@ -28,13 +28,15 @@ const site = (overrides: Partial<EnergyPortfolioSiteDto>): EnergyPortfolioSiteDt
 const portfolio: EnergyPortfolioDto = {
   workspaceId: "w", workspaceName: "Acme", period: { from: "2026-09-01", to: "2026-09-30" }, generatedAt: "2026-10-01T00:00:00Z",
   sites: [
-    site({ projectId: "a", name: "Raffles HQ", usageKwh: 5000, cost: { amount: 1500, currency: "SGD" }, afterHoursSharePct: 31, carbonKg: 2010,
+    site({ projectId: "a", name: "Raffles HQ", usageKwh: 5000, averageDailyKwh: 166.67, readingDays: 30, dailyKwh: Array.from({ length: 30 }, (_, day) => 160 + day),
+      cost: { amount: 1500, currency: "SGD" }, afterHoursSharePct: 31, carbonKg: 2010,
       budget: { month: "2026-09", daysInMonth: 30, actualKwh: 5000, forecastKwh: 5000, actualCost: 1500, forecastCost: 1500, currency: "SGD", budgetAmount: 1200, status: "over" } }),
-    site({ projectId: "b", name: "KL Office", country: "MY", usageKwh: 8000, changePct: -5, cost: { amount: 2600, currency: "MYR" }, carbonKg: 5920, coveragePct: 88.5, dataStatus: "partial",
+    // Connected on 10 September: 21 days of readings in the 30-day period.
+    site({ projectId: "b", name: "KL Office", country: "MY", usageKwh: 8000, averageDailyKwh: 380.95, readingDays: 21, dailyKwh: [...Array(9).fill(null), ...Array(21).fill(380.95)], changePct: -5, cost: { amount: 2600, currency: "MYR" }, carbonKg: 5920, coveragePct: 88.5, dataStatus: "partial",
       carbonFactor: { basis: "grid", grid: "MY-PENINSULAR", kgCo2ePerKwh: 0.74, year: 2024, source: "Energy Commission Malaysia", provisional: true } }),
     site({ projectId: "c", name: "Tuas Depot", status: "unavailable", usageKwh: 0, previousUsageKwh: 0, changePct: null, carbonKg: 0, coveragePct: 0, dataStatus: "unavailable" }),
   ],
-  totals: { usageKwh: 13000, previousUsageKwh: 12000, carbonKg: 7930, costByCurrency: { SGD: 1500, MYR: 2600 }, sitesWithData: 2, sitesOverBudget: 1, sitesAtRisk: 0 },
+  totals: { usageKwh: 13000, previousUsageKwh: 12000, averageDailyKwh: 547.62, carbonKg: 7930, costByCurrency: { SGD: 1500, MYR: 2600 }, sitesWithData: 2, sitesOverBudget: 1, sitesAtRisk: 0 },
 };
 
 describe("Portfolio view", () => {
@@ -59,6 +61,39 @@ describe("Portfolio view", () => {
     expect(names()).toEqual(["KL Office", "Raffles HQ", "Tuas Depot"]);
     await act(async () => (host.querySelector('button[aria-label="Sort by Carbon (t)"]') as HTMLButtonElement).click());
     expect(names()).toEqual(["Raffles HQ", "KL Office", "Tuas Depot"]);
+    await act(async () => root.unmount());
+  });
+
+  it("shows each site's average day, a daily trend line with words for it, and the whole portfolio's average day", async () => {
+    const { host, root } = await render(<PortfolioView portfolio={portfolio} />);
+    const tile = Array.from(host.querySelectorAll("strong")).find(value => value.parentElement?.textContent?.includes("Average a day"))!;
+    expect(tile.textContent).toBe("548 kWh");
+    expect(host.textContent).toContain("All sites together on an average day");
+    const row = (name: string) => Array.from(host.querySelectorAll("tbody tr")).find(item => item.querySelector("th")?.textContent?.includes(name))!;
+    const headers = Array.from(host.querySelectorAll("thead th")).map(cell => cell.textContent);
+    expect(headers.slice(0, 4)).toEqual(["Site", "Energy (kWh) ↓", "Average a day (kWh)", "Daily trend"]);
+    // KL Office started part-way through, so its average is over its 21 days of readings and says so.
+    expect(row("KL Office").querySelectorAll("td")[1]!.textContent).toBe("381over 21 days of readings");
+    expect(row("Raffles HQ").querySelectorAll("td")[1]!.textContent).toBe("167");
+    const spark = row("Raffles HQ").querySelector('svg[role="img"]')!;
+    expect(spark.getAttribute("aria-label")).toBe("Daily use from 1 Sep to 30 Sep: lowest 160.0 kWh on 1 Sep, highest 189.0 kWh on 30 Sep.");
+    expect(spark.querySelector("title")?.textContent).toBe(spark.getAttribute("aria-label"));
+    expect(row("KL Office").querySelectorAll("polyline")).toHaveLength(1);
+    expect(row("Tuas Depot").textContent).toContain("No readings for this period");
+
+    await act(async () => (host.querySelector('button[aria-label="Sort by Average a day (kWh)"]') as HTMLButtonElement).click());
+    expect(Array.from(host.querySelectorAll("tbody th a")).map(cell => cell.textContent)).toEqual(["KL Office", "Raffles HQ", "Tuas Depot"]);
+    await act(async () => (host.querySelector('button[aria-label="Sort by Average a day (kWh)"]') as HTMLButtonElement).click());
+    expect(Array.from(host.querySelectorAll("tbody th a")).map(cell => cell.textContent)).toEqual(["Raffles HQ", "KL Office", "Tuas Depot"]);
+    await act(async () => root.unmount());
+  });
+
+  it("copes with an older server that sends no daily figures", async () => {
+    const older: EnergyPortfolioDto = { ...portfolio, sites: [site({ projectId: "a", name: "Raffles HQ", averageDailyKwh: 0 })], totals: Object.fromEntries(Object.entries(portfolio.totals).filter(([key]) => key !== "averageDailyKwh")) as EnergyPortfolioDto["totals"] };
+    const { host, root } = await render(<PortfolioView portfolio={older} />);
+    const cells = host.querySelectorAll("tbody td");
+    expect(cells[1]!.textContent).toBe("—");
+    expect(cells[2]!.textContent).toBe("—No daily readings");
     await act(async () => root.unmount());
   });
 

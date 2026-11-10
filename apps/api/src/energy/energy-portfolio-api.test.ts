@@ -101,6 +101,16 @@ describe("portfolio, budgets, overnight checks and scheduled reports", () => {
     expect(site).toMatchObject({ status: "ok", usageKwh: 2880, peakKw: 4, coveragePct: 100, dataStatus: "complete" });
     expect(site.carbonKg).toBeCloseTo(2880 * 0.402, 1);
     expect(site.carbonFactor).toMatchObject({ basis: "grid", grid: "SG", kgCo2ePerKwh: 0.402 });
+    // 96 kWh on each of the 30 days, and the whole portfolio's average day is that one site's.
+    expect(site).toMatchObject({ averageDailyKwh: 96, readingDays: 30 });
+    expect(site.dailyKwh).toEqual(Array(30).fill(96));
+    expect(portfolio.totals.averageDailyKwh).toBe(96);
+
+    // Readings start on 1 September: asked from 22 August, the site's average day still counts only days with readings.
+    const early = await call("GET", ["portfolio"], "?from=2026-08-22&to=2026-09-30");
+    const started = (early.body as { data: { sites: Array<Record<string, unknown>> } }).data.sites.find((candidate) => candidate.projectId === PROJECT)!;
+    expect(started).toMatchObject({ usageKwh: 2880, averageDailyKwh: 96, readingDays: 30 });
+    expect(started.dailyKwh).toEqual([...Array(10).fill(null), ...Array(30).fill(96)]);
 
     const pdf = await call("GET", ["portfolio", "pdf"], "?from=2026-09-01&to=2026-09-30");
     expect(pdf.headers).toMatchObject({ "Content-Type": "application/pdf" });

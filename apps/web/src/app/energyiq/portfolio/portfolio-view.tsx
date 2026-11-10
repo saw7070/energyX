@@ -11,7 +11,17 @@ import { EnergyIcon, type EnergyIconName } from "../_components/icons";
 import { portfolioMessages } from "./portfolio-messages";
 import styles from "./portfolio.module.css";
 
-type SortKey = "name" | "usageKwh" | "changePct" | "cost" | "peakKw" | "afterHoursSharePct" | "kwhPerSqm" | "carbonKg";
+type SortKey = "name" | "usageKwh" | "averageDailyKwh" | "changePct" | "cost" | "peakKw" | "afterHoursSharePct" | "kwhPerSqm" | "carbonKg";
+
+/** A site's kWh on an average day, or null when it has less than a day of readings (an older server sends no day count). */
+export const averageOf = (site: EnergyPortfolioSiteDto): number | null =>
+  site.status !== "ok" ? null : site.readingDays === undefined ? (site.averageDailyKwh > 0 ? site.averageDailyKwh : null) : site.readingDays >= 1 ? site.averageDailyKwh : null;
+/** Every local date from the period's first to its last day. */
+const periodDates = (period: { from: string; to: string }) => {
+  const dates: string[] = [];
+  for (let day = Date.parse(`${period.from}T00:00:00Z`); day <= Date.parse(`${period.to}T00:00:00Z`); day += 86_400_000) dates.push(new Date(day).toISOString().slice(0, 10));
+  return dates;
+};
 
 /** Every site's figures for one period, as summary tiles and a sortable comparison table. */
 export function PortfolioView({ portfolio }: { portfolio: EnergyPortfolioDto }) {
@@ -26,6 +36,14 @@ export function PortfolioView({ portfolio }: { portfolio: EnergyPortfolioDto }) 
   const largest = Math.max(1, ...portfolio.sites.map(site => site.usageKwh));
   const showIntensity = portfolio.sites.some(site => site.kwhPerSqm !== undefined);
   const factors = uniqueFactors(portfolio.sites);
+  const dates = useMemo(() => periodDates(portfolio.period), [portfolio.period]);
+  const dayLabel = (date: string) => new Date(`${date}T00:00:00Z`).toLocaleDateString(intlLocale(locale), { timeZone: "UTC", day: "numeric", month: "short" }).replace("Sept", "Sep");
+  const trendLabel = (values: Array<number | null>) => {
+    const days = values.flatMap((kwh, index) => kwh === null || !dates[index] ? [] : [{ kwh, date: dates[index]! }]);
+    if (!days.length) return t("trendNone");
+    const low = days.reduce((best, day) => day.kwh < best.kwh ? day : best), high = days.reduce((best, day) => day.kwh > best.kwh ? day : best);
+    return t("trendAlt", { from: dayLabel(dates[0]!), to: dayLabel(dates.at(-1)!), low: format.one(low.kwh), lowDate: dayLabel(low.date), high: format.one(high.kwh), highDate: dayLabel(high.date) });
+  };
   const header = (key: SortKey, label: string, align: "left" | "right" = "right") => (
     <th scope="col" className={align === "right" ? styles.numeric : undefined} aria-sort={sort.key === key ? (sort.descending ? "descending" : "ascending") : "none"}>
       <button type="button" onClick={() => setSort(current => ({ key, descending: current.key === key ? !current.descending : key !== "name" }))} aria-label={t("sortBy", { column: label })}>
@@ -39,6 +57,7 @@ export function PortfolioView({ portfolio }: { portfolio: EnergyPortfolioDto }) 
     <div className={styles.stack}>
       <section className={styles.tiles} aria-label={t("title")}>
         <Tile icon="bolt" iconTone="energy" chip={change === null ? undefined : format.signedPct(change)} chipTone={change !== null && change > 0 ? "up" : "down"} label={t("tile.energy")} value={`${format.kwh(totals.usageKwh)} kWh`} note={change === null ? t("tile.sites", { count: totals.sitesWithData }) : t("tile.change", { change: format.signedPct(change) })} />
+        <Tile icon="calendar" iconTone="energy" label={t("tile.average")} value={totals.averageDailyKwh ? `${format.kwh(totals.averageDailyKwh)} kWh` : "—"} note={t("tile.averageNote")} />
         <Tile icon="dollar" iconTone="cost" label={t("tile.cost")} value={Object.keys(totals.costByCurrency).length
           ? Object.entries(totals.costByCurrency).map(([currency, amount]) => withCurrency(currency, format.money(amount))).join(" + ")
           : "—"} note={Object.keys(totals.costByCurrency).length ? undefined : t("tile.noCost")} />
@@ -56,6 +75,8 @@ export function PortfolioView({ portfolio }: { portfolio: EnergyPortfolioDto }) 
             <tr>
               {header("name", t("col.site"), "left")}
               {header("usageKwh", t("col.energy"))}
+              {header("averageDailyKwh", t("col.average"))}
+              <th scope="col">{t("col.trend")}</th>
               {header("changePct", t("col.change"))}
               {header("cost", t("col.cost"))}
               {header("peakKw", t("col.peak"))}
@@ -80,10 +101,16 @@ export function PortfolioView({ portfolio }: { portfolio: EnergyPortfolioDto }) 
                   {site.status === "ok" && <span className={styles.bar} aria-hidden="true"><span style={{ width: `${(site.usageKwh / largest) * 100}%` }} /></span>}
                 </th>
                 {site.status === "unavailable" ? (
-                  <td colSpan={5 + (showIntensity ? 1 : 0) + (budgeted.length > 0 ? 1 : 0) + 1} className={styles.unavailable}>{t("unavailable")}</td>
+                  <td colSpan={7 + (showIntensity ? 1 : 0) + (budgeted.length > 0 ? 1 : 0) + 1} className={styles.unavailable}>{t("unavailable")}</td>
                 ) : (
                   <>
                     <td className={styles.numeric}>{format.kwh(site.usageKwh)}</td>
+                    <td className={styles.numeric}>
+                      {averageOf(site) === null ? "—" : format.kwh(averageOf(site)!)}
+                      {/* A site connected part-way through, or with days lost, says how many days the average is over. */}
+                      {site.readingDays !== undefined && site.readingDays >= 1 && site.readingDays <= dates.length - 1 && <small className={styles.cellNote}>{t("readingDays", { days: format.days(site.readingDays) })}</small>}
+                    </td>
+                    <td className={styles.trendCell}><Sparkline values={site.dailyKwh ?? []} label={trendLabel(site.dailyKwh ?? [])} /></td>
                     <td className={`${styles.numeric} ${site.changePct !== null && site.changePct > 0 ? styles.up : site.changePct !== null && site.changePct < 0 ? styles.down : ""}`}>{site.changePct === null ? "—" : format.signedPct(site.changePct)}</td>
                     <td className={styles.numeric}>{site.cost ? withCurrency(site.cost.currency, format.money(site.cost.amount)) : "—"}</td>
                     <td className={styles.numeric}>{format.one(site.peakKw)}</td>
@@ -118,6 +145,31 @@ export function PortfolioView({ portfolio }: { portfolio: EnergyPortfolioDto }) 
       </section>
     </div>
   );
+}
+
+/**
+ * Each day's use as a small line from zero, so a steady site reads as steady. Days without readings leave a gap.
+ * Screen readers, and a mouse hovering over it, get the same story in words: the period and its lowest and highest day.
+ */
+export function Sparkline({ values, label }: { values: Array<number | null>; label: string }) {
+  const width = 104, height = 28, pad = 2;
+  const present = values.filter((value): value is number => value !== null);
+  if (!present.length) return <span className={styles.coverage} title={label}>—<span className={styles.srOnly}>{label}</span></span>;
+  const max = Math.max(...present, 0.001);
+  const x = (index: number) => values.length === 1 ? width / 2 : pad + index * (width - 2 * pad) / (values.length - 1);
+  const y = (value: number) => pad + (1 - value / max) * (height - 2 * pad);
+  const runs: Array<Array<[number, number]>> = [];
+  values.forEach((value, index) => {
+    if (value === null) { if (runs.at(-1)?.length) runs.push([]); return; }
+    if (!runs.length) runs.push([]);
+    runs.at(-1)!.push([x(index), y(value)]);
+  });
+  return <svg className={styles.spark} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={label}>
+    <title>{label}</title>
+    {runs.filter(run => run.length).map((run, index) => run.length === 1
+      ? <circle key={index} cx={run[0]![0]} cy={run[0]![1]} r={1.6} />
+      : <polyline key={index} points={run.map(([px, py]) => `${px.toFixed(1)},${py.toFixed(1)}`).join(" ")} />)}
+  </svg>;
 }
 
 function Tile({ label, value, note, tone, icon, iconTone, chip, chipTone }: { label: string; value: string; note?: string | undefined; tone?: "warn" | "bad" | undefined; icon: EnergyIconName; iconTone: "energy" | "cost" | "carbon" | "budget"; chip?: string | undefined; chipTone?: "up" | "down" }) {
@@ -155,6 +207,7 @@ const sortSites = (sites: EnergyPortfolioSiteDto[], key: SortKey, descending: bo
   const value = (site: EnergyPortfolioSiteDto): number | string | undefined => key === "name" ? site.name
     : key === "cost" ? site.cost?.amount
     : key === "changePct" ? site.changePct ?? undefined
+    : key === "averageDailyKwh" ? averageOf(site) ?? undefined
     : site[key];
   return [...sites].sort((left, right) => {
     // Sites without the figure go last whichever way the column is sorted.
@@ -185,6 +238,7 @@ export const formatters = (locale: string) => {
     money: (value: number, digits = 2) => fixed(digits).format(value),
     one: (value: number) => fixed(1).format(value),
     whole: (value: number) => fixed(0).format(value),
+    days: (value: number) => new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value),
     tonnes: (value: number) => fixed(value >= 100 ? 0 : value >= 1 ? 1 : 2).format(value),
     signedPct: (value: number) => `${value > 0 ? "+" : value < 0 ? "−" : ""}${fixed(0).format(Math.abs(value))}%`,
   };

@@ -15,6 +15,7 @@ import { formatPeriod } from "./report-period.js";
 import { analysisGroupTree, biggestMeterGroup, flattenMeterGroups, type MeterGroupNode, type MeterGroupTree } from "./meter-groups.js";
 import { DAY_PARTS, siteReportModelMessages, type SiteReportModelKey } from "./site-report-model-messages.js";
 import { notInUseIds, withMetersInUse } from "./meters-in-use.js";
+import { standoutReport, type StandoutReport } from "./standout-report.js";
 
 type T = Translate<SiteReportModelKey>;
 const modelText = (locale: EnergyIqLocale) => translatorFor(siteReportModelMessages, locale);
@@ -153,6 +154,8 @@ export type SiteReport = {
   benchmark: { days: ReportDay[]; weekdayAvg: number | null; weekendAvg: number | null; baseKw: number | null; baseDayKwh: number | null; intro: string; caption: string; closeToWeekend: boolean; rows: Array<{ label: string; rate: string; perDay: string; perMonth: string; cost: string; hot: boolean }>; outro: string };
   pattern: { hours: number[]; openFrom: number; openTo: number; notes: ProfileNote[]; intro: string; cause: string | null; caption: string; weekdayCount: number } | null;
   screening: { intro: string; rows: Array<{ label: string; code: string; open: string; closed: string; finding: string }>; callout: string; note: string };
+  /** The days that used clearly more or less than a usual day of the same kind, and the meters behind each. */
+  standout: StandoutReport;
   footer: { left: string; right: string };
 };
 
@@ -523,7 +526,7 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
     profile: { intro: profileIntro, zones: profileZones, caption: profileCaption, hasMap },
     groups,
     reference: hasMap ? reference : null,
-    zones, circuits, estimate, benchmark, pattern, screening,
+    zones, circuits, estimate, benchmark, pattern, screening, standout: standoutReport(project === data.current.project ? data : { ...data, current: { ...data.current, project } }, locale),
     footer: { left: t("foot.left", { count: circuitCount, tz: tzLabel }), right: t("foot.right", { date: en ? `${shortDate(generatedDay)} ${generatedAt.slice(0, 4)}` : formatPeriod(generatedDay, generatedDay, locale) }) },
   };
 }

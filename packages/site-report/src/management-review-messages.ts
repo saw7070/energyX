@@ -57,6 +57,8 @@ export const managementReviewMessages = defineMessages({
   "find.spread": "Of the {count} groups compared, **{high}** uses the most ({highKwh} a day) and **{low}** the least ({lowKwh} a day).",
   "find.stopped.one": "**{name}** has sent no readings since {since}.",
   "find.stopped.other": "**{count} meters** have stopped sending readings: {names}.",
+  "find.standout.one": "One day stood out from a usual day: {dates} (see Days that stood out).",
+  "find.standout.other": "{count} days stood out from a usual day: {dates} (see Days that stood out).",
   "find.notInUse.one": "{name} is marked not in use, so it is left out of the daily checks.",
   "find.notInUse.other": "{count} meters are marked not in use, so they are left out of the daily checks.",
 
@@ -228,6 +230,8 @@ export const managementReviewMessages = defineMessages({
     "find.spread": "在参与对比的 {count} 个分组中，**{high}** 用电最多（每天 {highKwh}），**{low}** 最少（每天 {lowKwh}）。",
     "find.stopped.one": "**{name}** 自 {since} 起没有发送读数。",
     "find.stopped.other": "**{count} 个电表**已停止发送读数：{names}。",
+    "find.standout.one": "有 1 天与正常日子明显不同：{dates}（见“与平常不同的日子”）。",
+    "find.standout.other": "有 {count} 天与正常日子明显不同：{dates}（见“与平常不同的日子”）。",
     "find.notInUse.one": "{name} 已标记为不使用，因此不计入每日检查。",
     "find.notInUse.other": "{count} 个电表已标记为不使用，因此不计入每日检查。",
 
@@ -399,6 +403,8 @@ export const managementReviewMessages = defineMessages({
     "find.spread": "Daripada {count} kumpulan yang dibandingkan, **{high}** menggunakan paling banyak ({highKwh} sehari) dan **{low}** paling sedikit ({lowKwh} sehari).",
     "find.stopped.one": "**{name}** tidak menghantar bacaan sejak {since}.",
     "find.stopped.other": "**{count} meter** telah berhenti menghantar bacaan: {names}.",
+    "find.standout.one": "Satu hari menonjol berbanding hari biasa: {dates} (lihat Hari yang menonjol).",
+    "find.standout.other": "{count} hari menonjol berbanding hari biasa: {dates} (lihat Hari yang menonjol).",
     "find.notInUse.one": "{name} ditanda tidak digunakan, jadi ia tidak dikira dalam semakan harian.",
     "find.notInUse.other": "{count} meter ditanda tidak digunakan, jadi ia tidak dikira dalam semakan harian.",
 

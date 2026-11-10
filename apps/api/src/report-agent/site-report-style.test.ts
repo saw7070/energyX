@@ -77,14 +77,12 @@ it("keeps the full report for automatic reports unless the site chooses the mana
   const { service, settings, api } = setup();
   const saved = service.store.saveSettings(settings);
   expect(saved.siteReportStyle).toBeUndefined();
-  const { revision: _revision, ...rest } = saved;
-  const body = { ...rest, revision: saved.revision };
-  const chosen = await api("PUT", ["settings"], { ...body, siteReportStyle: "management" });
+  const chosen = await api("PUT", ["settings"], { ...saved, siteReportStyle: "management" });
   expect(chosen.status).toBe(200);
   expect(service.store.settings("project")?.siteReportStyle).toBe("management");
   // An older page that does not know the choice leaves it as it was.
-  const latest = service.store.settings("project")!;
-  const { siteReportStyle: _style, ...older } = latest;
+  const older: Partial<ReportSettings> = { ...service.store.settings("project")! };
+  delete older.siteReportStyle;
   expect((await api("PUT", ["settings"], { ...older, scheduledPrompt: "Watch the lift lobbies" })).status).toBe(200);
   expect(service.store.settings("project")).toMatchObject({ siteReportStyle: "management", scheduledPrompt: "Watch the lift lobbies" });
   expect((await api("PUT", ["settings"], { ...service.store.settings("project")!, siteReportStyle: "fancy" })).status).toBe(400);

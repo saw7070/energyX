@@ -11,6 +11,7 @@ import {
 } from "@datafoundry/metadata";
 
 import { executeEnergySiteFiguresProjection, type EnergySiteFiguresProjection } from "./energy-analysis.js";
+import { siteDailyFigures } from "./energy-portfolio-daily.js";
 import { withEnergyProjectPublicationReadLock } from "./energy-project-materialization.js";
 import { resolveEnergyAccessContext, resolveEnergyPublishedHierarchyNodes } from "./energy-query-context.js";
 import { resolvePublishedEnergyQueryContext } from "./project-analysis-resolver.js";
@@ -51,7 +52,15 @@ export type PortfolioSite = {
   status: "ok" | "unavailable";
   reason?: string;
   usageKwh: number;
+  /**
+   * kWh on an average day: the kWh read divided by the days of readings, so a site connected part-way through the
+   * period counts from its first reading. 0 with less than a day of readings (see energy-portfolio-daily).
+   */
   averageDailyKwh: number;
+  /** Days of readings behind averageDailyKwh, to one decimal. */
+  readingDays: number;
+  /** Each local date's kWh from period.from to period.to, for the trend line; null on a day with no readings. */
+  dailyKwh: Array<number | null>;
   peakKw: number;
   peakAt?: string;
   previousUsageKwh: number;
@@ -79,6 +88,8 @@ export type Portfolio = {
   totals: {
     usageKwh: number;
     previousUsageKwh: number;
+    /** All sites together on an average day: each site's own average a day, added up. */
+    averageDailyKwh: number;
     carbonKg: number;
     /** Money is never added across currencies. */
     costByCurrency: Record<string, number>;
@@ -147,6 +158,7 @@ export const buildPortfolio = async (input: {
     totals: {
       usageKwh: round(sum(sites.map((site) => site.usageKwh)), 2),
       previousUsageKwh: round(sum(sites.map((site) => site.previousUsageKwh)), 2),
+      averageDailyKwh: round(sum(sites.map((site) => site.averageDailyKwh)), 2),
       carbonKg: round(sum(sites.map((site) => site.carbonKg)), 1),
       costByCurrency,
       sitesWithData: sites.filter((site) => site.status === "ok" && site.usageKwh > 0).length,
@@ -178,14 +190,17 @@ const readPortfolioSite = async (input: {
   };
   let site: PortfolioSite;
   try {
-    const { figures, floorAreaSqm } = await readSiteFigures({ ...input, from: input.period.from, to: input.period.to });
+    const { figures, floorAreaSqm, timezone } = await readSiteFigures({ ...input, from: input.period.from, to: input.period.to });
     const { headline, offHours } = figures;
     const usageKwh = headline.summary.usageKwh;
+    const daily = siteDailyFigures({ intervals: figures.intervals, timezone, period: input.period });
     site = {
       ...base,
       status: "ok",
       usageKwh: round(usageKwh, 2),
-      averageDailyKwh: round(headline.summary.averageDailyUsageKwh, 2),
+      averageDailyKwh: daily.averageDailyKwh,
+      readingDays: daily.readingDays,
+      dailyKwh: daily.dailyKwh,
       peakKw: round(headline.summary.peakKw, 2),
       ...(headline.summary.peakAt ? { peakAt: headline.summary.peakAt } : {}),
       previousUsageKwh: round(headline.comparison.usageKwh, 2),
@@ -209,6 +224,8 @@ const readPortfolioSite = async (input: {
       reason: errorCode(error),
       usageKwh: 0,
       averageDailyKwh: 0,
+      readingDays: 0,
+      dailyKwh: [],
       peakKw: 0,
       previousUsageKwh: 0,
       changePct: null,

@@ -302,6 +302,16 @@ function BenchChart({ benchmark, locale, standalone }: { benchmark: SiteReport["
   </div>;
 }
 
+/** The days that used clearly more or less than a usual day of their kind, in one short block under the daily chart. */
+function StandoutBlock({ standout }: { standout: SiteReport["standout"] }) {
+  return <div className="standout">
+    <h3>{standout.title}</h3>
+    {standout.items.length > 0 && <ul>{standout.items.map(item => <li key={item.date}>{item.text}</li>)}</ul>}
+    {standout.note && <p>{standout.note}</p>}
+    <p className="rule">{standout.rule}</p>
+  </div>;
+}
+
 // ---------- 4. weekday hour by hour ----------
 /** An average day hour by hour with the opening (or lights-on) hours shaded; the management review draws it too. */
 export function ProfileChart({ pattern, report, standalone }: { pattern: Pick<NonNullable<SiteReport["pattern"]>, "hours" | "openFrom" | "openTo" | "notes" | "caption">; report: Pick<SiteReport, "locale" | "hoursMeaning">; standalone?: boolean | undefined }) {
@@ -420,6 +430,7 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
         <div className="sec-head"><span className="num">3</span><h2>{t("doc.section.benchmark")}</h2></div>
         <p><Rich text={benchmark.intro} /></p>
         {benchmark.days.length > 0 && <BenchChart benchmark={benchmark} locale={locale} standalone={standalone} />}
+        {report.standout && benchmark.days.length > 0 && <StandoutBlock standout={report.standout} />}
         {benchmark.rows.length > 0 && <div className="table-wrap"><table>
           <thead><tr><th>{t("doc.col.benchmark")}</th><th className="r">{t("doc.col.rate")}</th><th className="r">{t("doc.col.perDay")}</th><th className="r">{t("doc.col.perMonth")}</th><th className="r">{rate != null ? t("doc.col.benchCostAt", { rate: moneyText(rate, report.currency, 4) }) : t("doc.col.benchCost")}</th></tr></thead>
           <tbody>{benchmark.rows.map(row => <tr key={row.label}><td>{row.label}</td>{[row.rate, row.perDay, row.perMonth, row.cost].map((value, index) => <td key={index} className={`r${row.hot ? " hot" : ""}`}>{value}</td>)}</tr>)}</tbody>
