@@ -119,7 +119,7 @@ describe("Facility pages in other languages", () => {
     expect(container.querySelector("h3")?.textContent).toBe("设备");
     for (const phrase of ["值得注意的地方", "场地统计", "开放日与休息日对比", "用电去向", "所有设备：完整统计", "本期间的特殊日子", "公共假期", "这些数据是怎么算出来的", "周一至周五 09:00–18:00", "2026年8月14日–20日", "读数正常", "插座用电", "不含 GST"]) expect(text).toContain(phrase);
     for (const english of ["What stands out", "Energy used", "Where the energy goes", "Reporting", "Special days", "Closed day"]) expect(text).not.toContain(english);
-    expect(container.querySelector('[role="group"]')?.getAttribute("aria-label")).toBe("显示整个场地或单个配电箱");
+    expect(container.querySelector('[role="group"]')?.getAttribute("aria-label")).toBe("显示整个场地或单个分组");
   });
 
   it("shows one device in Malay", async () => {

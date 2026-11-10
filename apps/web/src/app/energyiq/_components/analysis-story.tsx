@@ -21,6 +21,8 @@ import { DayPicker } from "./day-picker";
 import { dayKindLabel, type DayKind as CalendarDayKind } from "./day-context";
 import { TypeHint } from "./type-hint";
 import { siteBreakdown, UNMETERED_KEY } from "./site-total";
+import { analysisGroupTree } from "@datafoundry/site-report";
+import { MeterGroupTree } from "./meter-group-tree";
 import { withCurrency } from "./money";
 
 // The forecast's three colours: what really happened (green), next month's working days (blue) and its closed
@@ -208,22 +210,33 @@ function MoneySection({ story, data, money }: { story: Story; data: AnalysisData
   const unmeteredColor = "#9aa5b1";
   // The main meter is the site total, not an area: list what is below it, and what no sub-meter explains as its own line.
   const breakdown = siteBreakdown({ projectKwh: data.current.project.usageKwh, spaces: data.current.spaces, circuits: data.circuits, unmeteredLabel: t("money.unmetered") });
+  // Where the site's meters are grouped by what they serve, the split follows the groups: each with its total and its
+  // share of the group above it. Readings saved before groups existed keep the split by area.
+  const tree = analysisGroupTree(data, t("money.unmetered"));
+  const unmeteredKwh = tree ? tree.unmeteredKwh : breakdown.unmeteredKwh;
   let colour = 0;
-  const spaces = breakdown.rows.map(row => ({ key: row.key, label: row.label, value: value(row.kwh), color: row.unmetered ? unmeteredColor : spaceColors[colour++ % spaceColors.length]! }));
+  const spaces = tree ? [] : breakdown.rows.map(row => ({ key: row.key, label: row.label, value: value(row.kwh), color: row.unmetered ? unmeteredColor : spaceColors[colour++ % spaceColors.length]! }));
+  const groups = tree ? [...tree.children.map(group => ({ key: group.id, label: group.name, value: value(group.kwh) })), ...tree.meters.map(meter => ({ key: meter.unmetered ? UNMETERED_KEY : meter.id, label: meter.name, value: value(meter.kwh) }))].sort((a, b) => b.value - a.value) : [];
   const types: Array<{ key: string; label: string; value: number; color: string; hint?: ReactNode }> = CATEGORY_ORDER.filter(category => (story.project.typeTotals[category] ?? 0) > 0)
     .map(category => ({ key: category, label: categoryLabel(category, locale), value: value(story.project.typeTotals[category]!), color: CATEGORY_COLORS[category], hint: <TypeHint category={category} examples={data.circuits.filter(circuit => circuit.category === category).slice(0, 3).map(circuit => circuit.name)} place={data.projectName} /> })).sort((a, b) => b.value - a.value);
-  if (types.length && breakdown.unmeteredKwh > 0) {
-    types.push({ key: UNMETERED_KEY, label: t("money.unmetered"), value: value(breakdown.unmeteredKwh), color: unmeteredColor, hint: <span title={t("money.unmeteredHint")}>{t("money.unmetered")}</span> });
+  if (types.length && unmeteredKwh > 0) {
+    types.push({ key: UNMETERED_KEY, label: t("money.unmetered"), value: value(unmeteredKwh), color: unmeteredColor, hint: <span title={t("money.unmeteredHint")}>{t("money.unmetered")}</span> });
     types.sort((a, b) => b.value - a.value);
   }
-  const lead = spaces.length ? spaces : types;
+  const split = groups.length ? groups : spaces;
+  const lead = split.length ? split : types;
   const firstType = types.find(type => type.key !== UNMETERED_KEY);
   const all = lead.reduce((sum, row) => sum + row.value, 0);
-  const takeaway = lead[0]?.key === UNMETERED_KEY ? t("money.takeawayUnmetered", { pct: num(lead[0].value / Math.max(all, 0.001) * 100, 0) }) : lead[0] ? rich(t(spaces.length && firstType ? "money.takeawayType" : "money.takeaway", { pct: num(lead[0].value / Math.max(all, 0.001) * 100, 0), what: t(rate != null ? "money.bill" : "money.energy") }), {
+  const takeaway = lead[0]?.key === UNMETERED_KEY ? t("money.takeawayUnmetered", { pct: num(lead[0].value / Math.max(all, 0.001) * 100, 0) }) : lead[0] ? rich(t(split.length && firstType ? "money.takeawayType" : "money.takeaway", { pct: num(lead[0].value / Math.max(all, 0.001) * 100, 0), what: t(rate != null ? "money.bill" : "money.energy") }), {
     lead: <span className="font-medium text-slate-900">{lead[0].label}</span>, type: firstType ? <span className="font-medium text-slate-900">{firstType.label.toLowerCase()}</span> : null,
   }) : t("money.none");
   return <StoryCard id="story-money" step={1} title={t(rate != null ? "money.title" : "money.titleEnergy")} takeaway={takeaway}>
-    <div className={`grid gap-8 ${spaces.length && types.length ? "lg:grid-cols-2" : ""}`}>
+    <div className={`grid gap-8 ${split.length && types.length ? "lg:grid-cols-2" : ""}`}>
+      {tree && <div>
+        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("money.byGroup")}</h3>
+        <p className="mb-3 text-xs text-slate-500">{t("money.byGroupNote")}</p>
+        <MeterGroupTree tree={tree} kwh={kwh => rate != null ? money(kwh * rate) : `${num(kwh, kwh < 20 ? 1 : 0)} kWh`} pct={share => `${num(share * 100, 0)}%`} />
+      </div>}
       {spaces.length > 0 && <ShareBars title={t(breakdown.byCircuit ? "money.byCircuit" : "money.byArea")} rows={spaces} format={format} />}
       {types.length > 0 && <ShareBars title={t("money.byType")} rows={types} format={format} />}
     </div>

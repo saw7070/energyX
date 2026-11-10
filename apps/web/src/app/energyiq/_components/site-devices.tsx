@@ -15,6 +15,8 @@ import { MeterHealthNotice, PendingDayNote } from "./meter-health-notice";
 import { siteReportMessages } from "./site-report-messages";
 import Link from "next/link";
 import { chartMessages, deviceMessages } from "./site-devices-messages";
+import { MeterGroupTree } from "./meter-group-tree";
+import { buildMeterGroupTree, flattenMeterGroups, type GroupedMeter, type MeterGroup, type MeterGroupNode } from "@datafoundry/site-report";
 import styles from "./site-devices.module.css";
 
 type DeviceKey = keyof (typeof deviceMessages)["en"];
@@ -22,7 +24,12 @@ type DeviceKey = keyof (typeof deviceMessages)["en"];
 export type DeviceStatus = "reporting" | "gaps" | "stopped" | "silent";
 export type DeviceRow = {
   id: string;
+  /** The short name when one is set, else the installer's label. */
   name: string;
+  /** The installer's full label, kept only when a short name is shown instead. */
+  fullName?: string;
+  /** The electrical panel the meter is wired from, when someone recorded it. */
+  panel?: string;
   circuit?: string;
   boardId: string;
   category: string;
@@ -73,7 +80,9 @@ export function summariseDevices(analysis: EnergyScopeAnalysisDto): DeviceSummar
       ...(lastReadingAt ? { stoppedAt: lastReadingAt } : {}),
       id: meter.id,
       name: meter.name,
-      ...(meter.circuitName && meter.circuitName !== meter.name ? { circuit: meter.circuitName } : {}),
+      ...(meter.fullName && meter.fullName !== meter.name ? { fullName: meter.fullName } : {}),
+      ...(meter.panel ? { panel: meter.panel } : {}),
+      ...(meter.circuitName && meter.circuitName !== meter.name && meter.circuitName !== meter.fullName ? { circuit: meter.circuitName } : {}),
       boardId: meter.scopeId,
       category: meter.category,
       type: MEASUREMENT_LABELS[meter.category as EnergyMeterCategoryDto] ?? "Other",
@@ -244,9 +253,12 @@ export function deviceFindings({ row, stat, rate, openingHours, locale = "en", t
 }
 
 export type DevicesView = { kind: "site" } | { kind: "board"; id: string } | { kind: "device"; id: string };
-/** Reads `?view=board:<id>` or `?view=device:<id>`; anything unknown falls back to the whole site. */
-export function parseDevicesView(value: string | null, rows: DeviceRow[]): DevicesView {
-  if (value?.startsWith("board:") && rows.some(row => row.boardId === value.slice(6))) return { kind: "board", id: value.slice(6) };
+/**
+ * Reads `?view=board:<id>` or `?view=device:<id>`; anything unknown falls back to the whole site. `groupIds` are the
+ * groups above the devices' own groups that can be opened too (a block above its floors).
+ */
+export function parseDevicesView(value: string | null, rows: DeviceRow[], groupIds: ReadonlySet<string> = new Set()): DevicesView {
+  if (value?.startsWith("board:") && (rows.some(row => row.boardId === value.slice(6)) || groupIds.has(value.slice(6)))) return { kind: "board", id: value.slice(6) };
   if (value?.startsWith("device:") && rows.some(row => row.id === value.slice(7))) return { kind: "device", id: value.slice(7) };
   return { kind: "site" };
 }
@@ -299,7 +311,7 @@ const cachedDevices = (projectId: string): Loaded | null => {
   return entry && Date.now() - entry.at < DEVICES_CACHE_MS ? entry.value : null;
 };
 
-async function loadDevices(projectId: string, likelyBoardIds: string[] = []): Promise<Loaded> {
+async function loadDevices(projectId: string, likelyBoardIds: string[] = [], boardParents: ReadonlyMap<string, string> = new Map()): Promise<Loaded> {
   // Start the per-location analyses alongside the site one rather than after it; the site result only
   // confirms which locations hold meters. Unused requests are ignored. Large sites skip the head start
   // so a portfolio with hundreds of locations does not flood the server.
@@ -325,7 +337,8 @@ async function loadDevices(projectId: string, likelyBoardIds: string[] = []): Pr
   const ids = new Set(summary.rows.map(row => row.id));
   const stats = new Map<string, DeviceStatistics>();
   const cells = new Map<string, HourCell[]>();
-  const boardIds = [...new Set(summary.rows.map(row => row.boardId))];
+  // Each group holding devices, and each top-level group above them: the tabs open those with their own figures.
+  const boardIds = [...new Set([...summary.rows.map(row => row.boardId), ...summary.rows.map(row => topGroupOf(row.boardId, boardParents))])];
   const results = await Promise.allSettled(boardIds.map(boardId => boardRequests.get(boardId) ?? configApi.executeEnergyScopeAnalysis(request(projectId, boardId))));
   const boards = new Map<string, ScopeData>();
   results.forEach((result, index) => {
@@ -341,22 +354,72 @@ async function loadDevices(projectId: string, likelyBoardIds: string[] = []): Pr
   return { summary, site, boards, stats, cells, dates, days: chartDates.map(date => dayContext(revision, date)), openHours, calendar, shortDays, partial: results.some(result => result.status === "rejected") };
 }
 
-/** Searchable list of every device, grouped by board, for opening one device on its own. */
+/** The top-level group a group sits in ("Block 264F" for "Block 264F › Ground floor"), or the group itself at the top. */
+export function topGroupOf(groupId: string, boardParents: ReadonlyMap<string, string>): string {
+  const seen = new Set<string>();
+  let current = groupId;
+  while (boardParents.has(current) && !seen.has(current)) { seen.add(current); current = boardParents.get(current)!; }
+  return current;
+}
+
+/** Whether a group is `ancestorId` or anywhere inside it. */
+export function isWithinGroup(groupId: string, ancestorId: string, boardParents: ReadonlyMap<string, string>): boolean {
+  const seen = new Set<string>();
+  for (let current: string | undefined = groupId; current && !seen.has(current); current = boardParents.get(current)) {
+    if (current === ancestorId) return true;
+    seen.add(current);
+  }
+  return false;
+}
+
 /**
- * The blocks or areas a site's devices sit in, like the rooms of a home app: the location above a device's own
- * location when there is one (a block above its circuits), else the device's own location. Natural name order.
+ * The tabs of the Devices page, like the rooms of a home app: the top-level groups the devices sit in ("Block 264F",
+ * "Common area"), however deep each device's own group is. Natural name order.
  */
 export function deviceBlocks(rows: Array<Pick<DeviceRow, "id" | "boardId">>, boardParents: ReadonlyMap<string, string>, boardName: (id: string) => string): Array<{ id: string; name: string; deviceIds: string[] }> {
   const blocks = new Map<string, string[]>();
   for (const row of rows) {
-    const id = boardParents.get(row.boardId) ?? row.boardId;
+    const id = topGroupOf(row.boardId, boardParents);
     blocks.set(id, [...(blocks.get(id) ?? []), row.id]);
   }
   return [...blocks].map(([id, deviceIds]) => ({ id, name: boardName(id), deviceIds }))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 }
 
+/**
+ * Where the energy goes, group by group: each group's total is the sum of the pieces inside it, with its share of the
+ * group above it. The pieces are the non-overlapping ones from `energyBreakdown`, so a device counts once, in the
+ * group it is filed in. What the site's main meter measured that no sub-meter explains sits at the top on its own.
+ * With `scopeId`, only that group and what is inside it, as a whole of its own.
+ */
+export function groupBreakdown(input: { rows: DeviceRow[]; shares: EnergyShare[]; boardNames: ReadonlyMap<string, string>; boardParents: ReadonlyMap<string, string>; name: string; unmeteredLabel: string; scopeId?: string | null }): MeterGroupNode {
+  const { rows, boardParents } = input;
+  const topTotals = rows.filter(row => row.isBoardTotal && row.category === "overall" && row.usageKwh !== null && !boardParents.has(row.boardId));
+  const siteRest = topTotals.length === 1 ? `${topTotals[0]!.id}:rest` : null;
+  const byId = new Map(rows.map(row => [row.id, row]));
+  const ids = new Set([...input.boardNames.keys(), ...rows.map(row => row.boardId)]);
+  const groups: MeterGroup[] = [...ids].map(id => ({ id, name: input.boardNames.get(id) ?? id, parentId: boardParents.get(id) ?? null }));
+  const meters: GroupedMeter[] = input.shares.map(share => {
+    const row = byId.get(share.id);
+    return {
+      id: share.id, name: share.name, ...(row?.fullName ? { fullName: row.fullName } : {}),
+      // Inside one group the remainder stays in the group the main meter is filed in, so the group still adds up.
+      groupId: share.id === siteRest && !input.scopeId ? null : share.boardId, kwh: share.kwh, ...(share.unmetered ? { unmetered: true } : {}),
+    };
+  });
+  const tree = buildMeterGroupTree({ groups, meters, name: input.name, unmeteredLabel: input.unmeteredLabel });
+  if (!input.scopeId) return tree;
+  const group = flattenMeterGroups(tree).find(item => item.id === input.scopeId);
+  // The group stands on its own here: it is the whole, not a share of the site.
+  return group ? { ...group, share: 1 } : tree;
+}
+
 /** A card names the meter only; "264E GF Lobby Lighting · Groundfloor lift lobby" keeps what it powers for the device view. */
+/** A short name with the installer's full label after it, for a tooltip: "Pavilion 1 — 264E Pavilion Light 1". */
+export const fullTitle = (row: { name: string; fullName?: string | undefined }): string => row.fullName ? `${row.name} — ${row.fullName}` : row.name;
+/** What sits under a device's name: its full label when a short name is shown, then its panel. */
+const nameDetails = (row: Pick<DeviceRow, "fullName" | "panel">, t: Translate<DeviceKey>): string[] => [row.fullName ?? "", row.panel ? t("panel", { panel: row.panel }) : ""].filter(Boolean);
+
 /** The colour key under the device cards. Stopped and never-sent share red, so they share one entry. */
 const LEGEND_STATUSES = ["reporting", "gaps", "stopped"] as const;
 export const legendStatus = (status: DeviceStatus): typeof LEGEND_STATUSES[number] => status === "silent" ? "stopped" : status;
@@ -383,7 +446,7 @@ function DevicePicker({ rows, boardName, value, onPick }: { rows: DeviceRow[]; b
   }, [open]);
   const words = query.trim().toLowerCase();
   // The English type is kept alongside the reader's language, so either finds a device.
-  const matches = rows.filter(row => !words || `${row.name} ${row.circuit ?? ""} ${row.type} ${measurementLabel(row.category, locale)} ${boardName(row.boardId)}`.toLowerCase().includes(words));
+  const matches = rows.filter(row => !words || `${row.name} ${row.fullName ?? ""} ${row.panel ?? ""} ${row.circuit ?? ""} ${row.type} ${measurementLabel(row.category, locale)} ${boardName(row.boardId)}`.toLowerCase().includes(words));
   const pick = (id: string) => { onPick(id); setOpen(false); setQuery(""); };
   const selected = rows.find(row => row.id === value);
   return <div ref={root} className={styles.picker}>
@@ -394,7 +457,7 @@ function DevicePicker({ rows, boardName, value, onPick }: { rows: DeviceRow[]; b
         <p className={styles.pickerGroup}>{boardName(boardId)}</p>
         {matches.filter(row => row.boardId === boardId).map(row => <button key={row.id} type="button" className={styles.pickerItem} aria-current={row.id === value ? "true" : undefined} onClick={() => pick(row.id)}>
           <span className={`${styles.dot} ${styles[row.status]}`} aria-label={statusText(row.status, t)} />
-          <span><strong>{row.name}</strong><small>{[measurementLabel(row.category, locale), row.isBoardTotal ? t("boardTotalShort") : "", row.circuit ? t("circuit", { circuit: row.circuit }) : ""].filter(Boolean).join(" · ")}</small></span>
+          <span><strong>{row.name}</strong><small>{[...nameDetails(row, t), measurementLabel(row.category, locale), row.isBoardTotal ? t("boardTotalShort") : "", row.circuit ? t("circuit", { circuit: row.circuit }) : ""].filter(Boolean).join(" · ")}</small></span>
           <span>{row.usageKwh === null ? "—" : kwh(row.usageKwh)}</span>
         </button>)}
       </div>)}
@@ -414,6 +477,8 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
   // Read when loading starts; the map is rebuilt on every render, so it must not restart the load.
   const likelyBoards = useRef<string[]>([]);
   likelyBoards.current = [...boardNames.keys()];
+  const groupParents = useRef<ReadonlyMap<string, string>>(new Map());
+  groupParents.current = boardParents ?? new Map();
   const [error, setError] = useState<ReportProblem | null>(null);
   // The block tab someone chose; until then it follows the device or board on show.
   const [pickedBlock, setPickedBlock] = useState<string | null | undefined>(undefined);
@@ -447,7 +512,7 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
     // Show the last figures straight away when we have them; fresh ones replace them when ready.
     const cached = cachedDevices(projectId);
     if (cached) setLoaded(cached);
-    loadDevices(projectId, likelyBoards.current).then(result => {
+    loadDevices(projectId, likelyBoards.current, groupParents.current).then(result => {
       devicesCache.set(projectId, { at: Date.now(), value: result });
       if (!cancelled) setLoaded(result);
     })
@@ -466,7 +531,10 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
   if (!summary.rows.length) return <section className={styles.panel}><h3>{t("title")}</h3><p className={styles.muted}>{t("empty")}</p></section>;
   const openingHours = openingHoursLabel(loaded.calendar, locale);
 
-  const view = parseDevicesView(searchParams.get("view"), summary.rows);
+  const parentsOf: ReadonlyMap<string, string> = boardParents ?? new Map();
+  // Top-level groups with figures of their own can be opened like a group that holds devices.
+  const topGroups = new Set(summary.rows.map(row => topGroupOf(row.boardId, parentsOf)).filter(id => loaded.boards.has(id)));
+  const view = parseDevicesView(searchParams.get("view"), summary.rows, topGroups);
   const showView = (next: DevicesView) => {
     const params = new URLSearchParams(searchParams.toString());
     if (next.kind === "site") params.delete("view"); else params.set("view", `${next.kind}:${next.id}`);
@@ -480,8 +548,10 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
   const boardIds = [...new Set(summary.rows.map(row => row.boardId))];
   const boardName = (boardId: string) => boardNames.get(boardId) ?? boardId;
   const byBoard = (boardId: string) => summary.rows.filter(row => row.boardId === boardId).sort((a, b) => Number(b.isBoardTotal) - Number(a.isBoardTotal) || (b.usageKwh ?? -1) - (a.usageKwh ?? -1));
+  /** The devices in a group or anywhere inside it, in list order. */
+  const rowsIn = (groupId: string) => boardIds.filter(id => isWithinGroup(id, groupId, parentsOf)).flatMap(byBoard);
   const ordered = boardIds.flatMap(byBoard);
-  const blocks = deviceBlocks(ordered, boardParents ?? new Map(), boardName);
+  const blocks = deviceBlocks(ordered, parentsOf, boardName);
   const blockOf = new Map(blocks.flatMap(block => block.deviceIds.map(id => [id, block.id] as const)));
   const money = (value: number | null | undefined) => rate && value != null ? sgd(value * rate) : "—";
   const dayMap = new Map(loaded.days.map(day => [day.date, day]));
@@ -535,14 +605,10 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
     const offHours = analysis.offHours.status === "available" ? analysis.offHours : null;
     const peakAt = peakText(analysis.summary.peakAt);
     const largest = shares[0]?.kwh ?? 1;
-    const boards = isSite ? boardIds : [boardId];
-    // What no sub-meter explains is its own line, not part of the board the main meter happens to sit on.
-    const unmeteredKwh = shares.filter(share => share.unmetered).reduce((sum, share) => sum + share.kwh, 0);
-    const boardTotals: Array<{ id?: string; label: string; kwh: number }> = boards
-      .map(id => ({ id, label: boardName(id), kwh: shares.filter(share => share.boardId === id && !share.unmetered).reduce((sum, share) => sum + share.kwh, 0) }))
-      .filter(item => item.kwh > 0);
-    if (unmeteredKwh > 0) boardTotals.push({ label: t("unmetered.site"), kwh: unmeteredKwh });
-    boardTotals.sort((a, b) => b.kwh - a.kwh);
+    const boards = isSite ? boardIds : boardIds.filter(id => isWithinGroup(id, boardId, parentsOf));
+    // Group by group, each with its share of the group above; what no sub-meter explains is its own line at the top.
+    const tree = groupBreakdown({ rows, shares, boardNames, boardParents: parentsOf, name: isSite ? t("wholeSite") : label, unmeteredLabel: t("unmetered.site"), scopeId: boardId });
+    const nested = tree.children.length > 0;
     // Where the scope's total is a main meter, its "type" is only "Total"; the types come from the meters below it instead.
     const typeTotals = data.typeTotals.some(item => item.category === "overall")
       ? [...shares.reduce((sum, share) => {
@@ -588,7 +654,6 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
           </div>
           <DailyProfileChart profileKw={stat.openProfileKw} openHours={loaded.openHours} name={t("profile.openName", { label })} title={t("profile.openTitle", { label, count: stat.openDays })} max={profileMax} period={span} />
           <DailyProfileChart profileKw={stat.closedProfileKw} openHours={new Set()} name={t("profile.closedName", { label })} title={t("profile.closedTitle", { label, count: stat.closedDays })} max={profileMax} period={span} />
-          {isSite && shareBars(boardTotals, t("byBoard"), id => showView({ kind: "board", id }))}
           {typeTotals.length > 0 && shareBars(typeTotals, t("byType"))}
         </div>
         {specialDaysSection(stat)}
@@ -597,15 +662,20 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
 
       <section className={styles.breakdown} aria-label={t("breakdown.title")}>
         <h4>{t("breakdown.title")}</h4>
+        {nested ? <>
+          <p className={styles.muted}>{t("breakdown.groupNote", { scope: scopeName, kwh: kwh(tree.kwh) })}</p>
+          <MeterGroupTree tree={tree} kwh={kwh} pct={share => pct(share * 100)} onOpenMeter={id => { if (rows.some(row => row.id === id)) openDevice(id); }} openDepth={tree.depth + 1} />
+        </> : <>
         <p className={styles.muted}>{t("breakdown.note", { scope: scopeName, kwh: kwh(scopeKwh) })}</p>
         <div className={styles.rankHead} aria-hidden="true"><span>{t("column.device")}</span><span /><span>{t("column.used")}</span>{rate && <span>{t("column.cost")}</span>}<span>{t("column.share")}</span></div>
         <ol className={styles.ranking}>{shares.map(share => <li key={share.id} className={share.unmetered ? styles.unmetered : undefined} aria-label={rate ? t("rank.ariaCost", { name: share.name, kwh: kwh(share.kwh), cost: sgd(share.kwh * rate), pct: pct(share.kwh / scopeKwh * 100), scope: label }) : t("rank.aria", { name: share.name, kwh: kwh(share.kwh), pct: pct(share.kwh / scopeKwh * 100), scope: label })}>
-          <span className={styles.rankName} title={share.unmetered ? t("noSeparateMeterTitle", { name: share.name }) : share.name}>{share.unmetered ? <>{share.name}<small> · {t("noSeparateMeter")}</small></> : <button type="button" className={styles.nameLink} onClick={() => openDevice(share.id)}>{share.name}</button>}</span>
+          <span className={styles.rankName} title={share.unmetered ? t("noSeparateMeterTitle", { name: share.name }) : fullTitle(rows.find(row => row.id === share.id) ?? share)}>{share.unmetered ? <>{share.name}<small> · {t("noSeparateMeter")}</small></> : <button type="button" className={styles.nameLink} onClick={() => openDevice(share.id)}>{share.name}</button>}</span>
           <span className={styles.bar}><span style={{ width: `${Math.max(1, share.kwh / largest * 100)}%` }} /></span>
           <span className={styles.number}>{kwh(share.kwh)}</span>
           {rate && <span className={styles.number}>{sgd(share.kwh * rate)}</span>}
           <span className={styles.number}>{pct(share.kwh / scopeKwh * 100)}</span>
         </li>)}</ol>
+        </>}
       </section>
 
       <section className={styles.allDevices} aria-label={t("all.aria")}>
@@ -624,7 +694,7 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
               {boardRows.map(row => {
                 const stat = stats.get(row.id);
                 return <tr key={row.id}>
-                  <th scope="row" className={styles.sticky}><button type="button" className={styles.deviceLink} onClick={() => openDevice(row.id)}><strong>{row.name}</strong></button><small>{[typeName(row), row.isBoardTotal ? boardTotalNote(row.type, locale) : "", row.circuit ? t("circuit", { circuit: row.circuit }) : ""].filter(Boolean).join(" · ")}</small></th>
+                  <th scope="row" className={styles.sticky}><button type="button" className={styles.deviceLink} title={fullTitle(row)} onClick={() => openDevice(row.id)}><strong>{row.name}</strong></button><small>{[...nameDetails(row, t), typeName(row), row.isBoardTotal ? boardTotalNote(row.type, locale) : "", row.circuit ? t("circuit", { circuit: row.circuit }) : ""].filter(Boolean).join(" · ")}</small></th>
                   <td className={styles.number}>{row.usageKwh === null ? "—" : kwh(row.usageKwh)}</td>
                   {rate && <td className={styles.number}>{row.usageKwh === null ? "—" : sgd(row.usageKwh * rate)}</td>}
                   <td className={styles.number}>{row.usageKwh === null || !scopeKwh ? "—" : pct(row.usageKwh / scopeKwh * 100)}</td>
@@ -702,12 +772,12 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
   const boardData = view.kind === "board" ? loaded.boards.get(view.id) : null;
   const currentBoard = view.kind === "board" ? view.id : device?.boardId ?? null;
   const title = device ? device.name : view.kind === "board" ? boardName(view.id) : t("title");
-  const viewBlock = device ? blockOf.get(device.id) ?? null : view.kind === "board" ? (boardParents?.get(view.id) ?? view.id) : null;
+  const viewBlock = device ? blockOf.get(device.id) ?? null : view.kind === "board" ? topGroupOf(view.id, parentsOf) : null;
   const activeBlock = pickedBlock !== undefined && (pickedBlock === null ? view.kind === "site" : true) ? pickedBlock : viewBlock;
   const cardRows = activeBlock ? ordered.filter(row => blockOf.get(row.id) === activeBlock) : ordered;
   const shownCards = activeBlock || allCards ? cardRows : cardRows.slice(0, CARD_PREVIEW);
-  const description = device ? t("description.device", { details: [typeName(device), device.isBoardTotal ? boardTotalNote(device.type, locale) : "", boardName(device.boardId), device.circuit ? t("circuit", { circuit: device.circuit }) : ""].filter(Boolean).join(" · "), period, days })
-    : view.kind === "board" ? t("description.board", { count: byBoard(view.id).length, period, days })
+  const description = device ? t("description.device", { details: [...nameDetails(device, t), typeName(device), device.isBoardTotal ? boardTotalNote(device.type, locale) : "", boardName(device.boardId), device.circuit ? t("circuit", { circuit: device.circuit }) : ""].filter(Boolean).join(" · "), period, days })
+    : view.kind === "board" ? t("description.board", { count: rowsIn(view.id).length, period, days })
     : t("description.site", { period, days });
 
   return <><MeterHealthNotice projectId={projectId} />
@@ -735,7 +805,7 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
         {blocks.length > 1 && blocks.map(block => <button key={block.id} type="button" aria-pressed={activeBlock === block.id} onClick={() => {
           setPickedBlock(block.id);
           // A block that is itself a board has its own figures; a block above several circuits just narrows the cards.
-          if (boardIds.includes(block.id)) showView({ kind: "board", id: block.id });
+          if (boardIds.includes(block.id) || topGroups.has(block.id)) showView({ kind: "board", id: block.id });
         }}>{block.name}</button>)}
       </div>
       <DevicePicker rows={ordered} boardName={boardName} value={device?.id ?? null} onPick={id => { setPickedBlock(undefined); openDevice(id); }} />
@@ -743,8 +813,8 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
     <div className={styles.cardGrid} role="list" aria-label={activeBlock ? t("cards.inBlock", { block: boardName(activeBlock) }) : t("cards.all")}>
       {shownCards.map(row => <button key={row.id} type="button" role="listitem" className={styles.deviceCard} aria-current={device?.id === row.id ? "true" : undefined} onClick={() => openDevice(row.id)}>
         <span className={styles.cardIcon} aria-hidden="true"><EnergyIcon name="meter" /></span>
-        <strong title={row.name}>{cardTitle(row.name)}</strong>
-        <span className={styles.cardMeta}><span className={`${styles.dot} ${styles[row.status]}`} aria-label={statusText(row.status, t)} title={statusText(row.status, t)} />{boardName(blockOf.get(row.id) ?? row.boardId)}{row.usageKwh === null ? "" : ` · ${kwh(row.usageKwh)}`}</span>
+        <strong title={fullTitle(row)}>{cardTitle(row.name)}</strong>
+        <span className={styles.cardMeta}><span className={`${styles.dot} ${styles[row.status]}`} aria-label={statusText(row.status, t)} title={statusText(row.status, t)} />{boardName(activeBlock ? row.boardId : blockOf.get(row.id) ?? row.boardId)}{row.usageKwh === null ? "" : ` · ${kwh(row.usageKwh)}`}</span>
       </button>)}
     </div>
     <ul className={styles.cardLegend} aria-label={t("cards.legend")}>
@@ -753,7 +823,7 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
     {cardRows.length > CARD_PREVIEW && <button type="button" className={`${styles.secondary} ${styles.showAllCards}`} onClick={() => setAllCards(current => !current)}>{allCards ? t("cards.fewer") : t("cards.showAll", { count: cardRows.length })}</button>}
 
     {device ? deviceView(device)
-      : view.kind === "board" ? boardData ? scopeView(boardData, byBoard(view.id), view.id) : <p role="alert" className={styles.emptyDevice}>{t("boardFailed", { board: boardName(view.id) })} <button type="button" className={styles.link} onClick={() => { setLoaded(null); setRefresh(n => n + 1); }}>{t("tryAgain")}</button></p>
+      : view.kind === "board" ? boardData ? scopeView(boardData, rowsIn(view.id), view.id) : <p role="alert" className={styles.emptyDevice}>{t("boardFailed", { board: boardName(view.id) })} <button type="button" className={styles.link} onClick={() => { setLoaded(null); setRefresh(n => n + 1); }}>{t("tryAgain")}</button></p>
       : scopeView(loaded.site, summary.rows, null)}
 
     <details className={styles.method}>

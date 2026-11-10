@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { EnergyScopeAnalysisDto } from "../../../lib/config-api";
 import type { DeviceStatistics } from "./device-statistics";
-import { boardTotalNote, cardTitle, dayCountText, legendStatus, deviceBlocks, deviceFindings, energyBreakdown, formatPeriod, parseDevicesView, periodDayCount, siteFindings, summariseDevices, tariffRate, withShortDays, type DeviceRow } from "./site-devices";
+import { boardTotalNote, cardTitle, dayCountText, legendStatus, deviceBlocks, deviceFindings, energyBreakdown, formatPeriod, fullTitle, groupBreakdown, parseDevicesView, periodDayCount, siteFindings, summariseDevices, tariffRate, topGroupOf, withShortDays, type DeviceRow } from "./site-devices";
+import { flattenMeterGroups } from "@datafoundry/site-report";
 
 const health = (coveragePct: number, validIntervalCount = 100) => ({ coveragePct, expectedMeterIntervalCount: 100, validIntervalCount, qualityEventCount: 0 });
 const circuit = (meterNodeId: string, usageKwh: number, coveragePct: number) => ({ meterNodeId, name: meterNodeId, appliance: "load", category: "load", meterRole: "component", usageKwh, sharePct: 0, peakKw: 0.5, qualityEventCount: 0, dataHealth: health(coveragePct) });
@@ -243,6 +244,69 @@ describe("window length wording", () => {
     const rows = summariseDevices(analysis).rows;
     const findings = siteFindings({ rows, stats: new Map(), shares: energyBreakdown(rows, new Map()), siteKwh: 2309.07, rate: null, openingHours: null, periodDays: 6 });
     expect(findings[0]!.detail).toContain("in these 6 days.");
+  });
+});
+
+describe("groups on the Devices tab", () => {
+  // SKTC by what each meter serves: blocks with floors inside, and the outdoor common area.
+  const names = new Map([["blk-f", "Block 264F"], ["f-gf", "Ground floor"], ["f-common", "Building common area"], ["blk-e", "Block 264E"], ["common", "Common area"], ["pavilion", "Pavilion"], ["entrance", "Entrance"]]);
+  const parents = new Map([["f-gf", "blk-f"], ["f-common", "blk-f"], ["pavilion", "common"], ["entrance", "common"]]);
+  const device = (id: string, boardId: string, usageKwh: number, extra: Partial<DeviceRow> = {}): DeviceRow => ({ id, name: id, boardId, category: "light", type: "Lighting", isBoardTotal: false, usageKwh, peakKw: 1, coveragePct: 100, status: "reporting", ...extra });
+  const rows = [
+    device("lobby", "f-gf", 3), device("deco", "f-gf", 1), device("l1-l6a", "f-common", 4), device("e-lobby", "blk-e", 6),
+    device("pav-1", "pavilion", 0.25), device("pav-2", "pavilion", 0.15),
+    // Wired from 264F's panel; it lights the entrance signboard, so it is filed under Entrance.
+    device("sign", "entrance", 0.6, { name: "Entrance", fullName: "264F Compassvale Bow signboard", panel: "264F" }),
+  ];
+  const tree = groupBreakdown({ rows, shares: energyBreakdown(rows, names, "en", parents), boardNames: names, boardParents: parents, name: "Whole site", unmeteredLabel: "Not measured by a sub-meter" });
+  const group = (name: string) => flattenMeterGroups(tree).find(item => item.name === name)!;
+
+  it("makes the top-level groups the tabs, however deep each meter's own group is", () => {
+    expect(deviceBlocks(rows, parents, id => names.get(id) ?? id).map(block => [block.name, block.deviceIds])).toEqual([
+      ["Block 264E", ["e-lobby"]], ["Block 264F", ["lobby", "deco", "l1-l6a"]], ["Common area", ["pav-1", "pav-2", "sign"]],
+    ]);
+    expect(topGroupOf("f-gf", parents)).toBe("blk-f");
+    expect(topGroupOf("blk-e", parents)).toBe("blk-e");
+  });
+
+  it("nests the breakdown, each group with its total and its share of the group above", () => {
+    expect(tree.kwh).toBeCloseTo(15);
+    expect(tree.children.map(item => [item.name, item.kwh])).toEqual([["Block 264F", 8], ["Block 264E", 6], ["Common area", 1]]);
+    expect(group("Block 264F").share).toBeCloseTo(8 / 15);
+    expect(group("Ground floor").share).toBeCloseTo(0.5);
+    expect(group("Common area").children.map(item => [item.name, Math.round(item.share * 100)])).toEqual([["Entrance", 60], ["Pavilion", 40]]);
+    expect(group("Entrance").singleMeter).toBe(true);
+    // The short name leads; the installer's label stays with it.
+    expect(group("Entrance").meters[0]).toEqual(expect.objectContaining({ name: "Entrance", fullName: "264F Compassvale Bow signboard" }));
+  });
+
+  it("counts a meter only in the group it is filed in", () => {
+    const wired = rows.map(row => row.id === "sign" ? { ...row, boardId: "f-gf" } : row);
+    const before = groupBreakdown({ rows: wired, shares: energyBreakdown(wired, names, "en", parents), boardNames: names, boardParents: parents, name: "Whole site", unmeteredLabel: "-" });
+    expect(flattenMeterGroups(before).find(item => item.name === "Block 264F")!.kwh).toBeCloseTo(8.6);
+    expect(group("Block 264F").kwh).toBeCloseTo(8);
+    expect(group("Entrance").kwh).toBeCloseTo(0.6);
+    expect(before.kwh).toBeCloseTo(tree.kwh);
+  });
+
+  it("shows one group on its own as the whole, and keeps the main meter's remainder at the top of the site", () => {
+    const blockF = groupBreakdown({ rows: rows.filter(row => ["f-gf", "f-common"].includes(row.boardId)), shares: energyBreakdown(rows.filter(row => ["f-gf", "f-common"].includes(row.boardId)), names, "en", parents), boardNames: names, boardParents: parents, name: "Block 264F", unmeteredLabel: "-", scopeId: "blk-f" });
+    expect([blockF.name, blockF.kwh, blockF.share]).toEqual(["Block 264F", 8, 1]);
+    const withMain = [...rows, device("main", "site", 20, { isBoardTotal: true, category: "overall", type: "Total" })];
+    const site = groupBreakdown({ rows: withMain, shares: energyBreakdown(withMain, new Map([...names, ["site", "Main board"]]), "en", parents), boardNames: new Map([...names, ["site", "Main board"]]), boardParents: parents, name: "Whole site", unmeteredLabel: "Not measured by a sub-meter" });
+    expect(site.kwh).toBeCloseTo(20);
+    expect(site.meters.find(item => item.unmetered)).toEqual(expect.objectContaining({ kwh: expect.closeTo(5), groupId: null }));
+    expect(site.children.find(item => item.name === "Block 264F")!.share).toBeCloseTo(0.4);
+  });
+
+  it("opens a top-level group that has figures of its own, and names devices short name first", () => {
+    expect(parseDevicesView("board:blk-f", rows)).toEqual({ kind: "site" });
+    expect(parseDevicesView("board:blk-f", rows, new Set(["blk-f"]))).toEqual({ kind: "board", id: "blk-f" });
+    expect(fullTitle(rows.at(-1)!)).toBe("Entrance — 264F Compassvale Bow signboard");
+    expect(fullTitle(rows[0]!)).toBe("lobby");
+    const named = summariseDevices({ ...analysis, explorerMeters: [meter("conow", "Pantry", { fullName: "Showroom Conow", circuitName: "Showroom Conow", panel: "DB2" })] } as unknown as EnergyScopeAnalysisDto).rows[0]!;
+    expect(named).toEqual(expect.objectContaining({ name: "Pantry", fullName: "Showroom Conow", panel: "DB2" }));
+    expect(named).not.toHaveProperty("circuit");
   });
 });
 
