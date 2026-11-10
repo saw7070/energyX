@@ -59,6 +59,11 @@ export const REPORT_CSS = `
 .eiq-report .callout{border-left:4px solid var(--ember);background:#FFF4EF;padding:14px 18px;margin-top:18px;max-width:70ch;font-size:15px}
 .eiq-report .note{font-size:13px;color:var(--muted);margin-top:14px;max-width:70ch}
 .eiq-report .zones p{margin-top:6px}
+.eiq-report .standout{margin-top:18px;max-width:70ch;font-size:15px}
+.eiq-report .standout h3{font-size:16px;font-weight:700}
+.eiq-report .standout ul{margin-top:6px;padding-left:20px;display:grid;gap:6px}
+.eiq-report .standout p{margin-top:6px}
+.eiq-report .standout .rule{font-size:13px;color:var(--muted)}
 .eiq-report footer{margin-top:64px;border-top:1px solid var(--line);padding-top:16px;font-size:12.5px;color:var(--muted);display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px}
 .eiq-report .svgt{font-family:inherit}
 .eiq-report .tick{font-size:11px;fill:var(--muted)}
