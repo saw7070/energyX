@@ -176,24 +176,24 @@ describe("report wording helpers", () => {
 });
 
 describe("site report by group", () => {
-  // SKTC: meters filed by what they serve. The signboard meter is wired from 264F's panel but serves the entrance.
+  // An estate: meters filed by what they serve. The signboard meter is wired from 1B's panel but serves the entrance.
   const LIGHTS: Record<string, { name: string; fullName?: string; group: string; panel: string; kwh: number }> = {
-    "f-lobby": { name: "Lift lobby 1", fullName: "264F GF Lobby Lighting · Groundfloor lift lobby", group: "f-gf", panel: "264F", kwh: 0.2 },
-    "f-common": { name: "L1–L6A", fullName: "264F L1-L6A Blk common Area Lighting · Block Common Area Lighting 1", group: "f-common", panel: "264F", kwh: 0.1 },
-    "pav-1": { name: "Pavilion 1", group: "pavilion", panel: "264E", kwh: 0.01 },
-    "play": { name: "Playground", group: "playground", panel: "264E", kwh: 0.005 },
-    "sign": { name: "Compassvale Bow signboard", fullName: "264F Signboard lighting", group: "entrance", panel: "264F", kwh: 0.0125 },
+    "f-lobby": { name: "Lift lobby 1", fullName: "1B GF Lobby Lighting · Groundfloor lift lobby", group: "f-gf", panel: "1B", kwh: 0.2 },
+    "f-common": { name: "L1–L6A", fullName: "1B L1-L6A Blk common Area Lighting · Block Common Area Lighting 1", group: "f-common", panel: "1B", kwh: 0.1 },
+    "pav-1": { name: "Pavilion 1", group: "pavilion", panel: "1A", kwh: 0.01 },
+    "play": { name: "Playground", group: "playground", panel: "1A", kwh: 0.005 },
+    "sign": { name: "Estate signboard", fullName: "1B Signboard lighting", group: "entrance", panel: "1B", kwh: 0.0125 },
   };
   const ids = Object.keys(LIGHTS);
   const lightMeter = (id: string): ScopeMeter => ({ id, name: LIGHTS[id]!.name, ...(LIGHTS[id]!.fullName ? { fullName: LIGHTS[id]!.fullName } : {}), location: LIGHTS[id]!.group, category: "light", official: true, series: series(id, () => LIGHTS[id]!.kwh) });
   const periodKwh = (id: string) => LIGHTS[id]!.kwh * 24 * DATES.length;
   const scopeOf = (name: string, members: string[]): ScopeData => ({ ...scope(name, []), meters: members.map(lightMeter), usageKwh: members.reduce((sum, id) => sum + periodKwh(id), 0), total: series("__scope__", () => members.reduce((sum, id) => sum + LIGHTS[id]!.kwh, 0)) });
   const data: AnalysisData = {
-    ...DATA, projectId: "sktc", projectName: "SKTC Estate",
-    current: { project: scopeOf("SKTC Estate", ids), spaces: [scopeOf("Block 264F", ["f-lobby", "f-common"]), scopeOf("Common area", ["pav-1", "play", "sign"])] },
+    ...DATA, projectId: "estate", projectName: "Estate",
+    current: { project: scopeOf("Estate", ids), spaces: [scopeOf("Block 1B", ["f-lobby", "f-common"]), scopeOf("Common area", ["pav-1", "play", "sign"])] },
     groups: {
       list: [
-        { id: "blk-f", name: "Block 264F", parentId: null }, { id: "f-gf", name: "Ground floor", parentId: "blk-f" }, { id: "f-common", name: "Building common area", parentId: "blk-f" },
+        { id: "blk-f", name: "Block 1B", parentId: null }, { id: "f-gf", name: "Ground floor", parentId: "blk-f" }, { id: "f-common", name: "Building common area", parentId: "blk-f" },
         { id: "common", name: "Common area", parentId: null }, { id: "pavilion", name: "Pavilion", parentId: "common" }, { id: "playground", name: "Playground", parentId: "common" }, { id: "entrance", name: "Entrance", parentId: "common" },
       ],
       meters: ids.map(id => ({ id, name: LIGHTS[id]!.name, ...(LIGHTS[id]!.fullName ? { fullName: LIGHTS[id]!.fullName } : {}), groupId: LIGHTS[id]!.group, kwh: periodKwh(id), panel: LIGHTS[id]!.panel })),
@@ -202,39 +202,39 @@ describe("site report by group", () => {
   const report = buildSiteReport(data, REFERENCE, "2026-09-22T10:00:00Z");
 
   it("describes the site by group, with each group's kWh and share, and the panel only as a detail", () => {
-    expect(report.profile.intro).toContain("The site's 5 meters are grouped by what they serve: Block 264F **92%** and Common area **8%**.");
+    expect(report.profile.intro).toContain("The site's 5 meters are grouped by what they serve: Block 1B **92%** and Common area **8%**.");
     const common = report.profile.zones.find(zone => zone.heading.startsWith("Common area"))!;
     expect(common.heading).toBe("Common area · 9.2 kWh (8%)");
     // Groups read in the order they were saved (here, the order listed), whatever their size; the biggest is still named.
-    expect(common.text).toBe("Split into Pavilion 3.4 kWh (36%), Playground 1.7 kWh (18%) and Entrance 4.2 kWh (45%). **Entrance** is the biggest share of common area and has no sub-meter below it. Wired from panels 264E and 264F.");
-    expect(report.profile.zones.find(zone => zone.heading.startsWith("Block 264F"))!.text).toContain("Split into Ground floor 67 kWh (67%) and Building common area 34 kWh (33%).");
-    expect(report.groups!.summary).toBe("Block 264F 92% · Common area 8% — biggest single group: Ground floor");
+    expect(common.text).toBe("Split into Pavilion 3.4 kWh (36%), Playground 1.7 kWh (18%) and Entrance 4.2 kWh (45%). **Entrance** is the biggest share of common area and has no sub-meter below it. Wired from panels 1A and 1B.");
+    expect(report.profile.zones.find(zone => zone.heading.startsWith("Block 1B"))!.text).toContain("Split into Ground floor 67 kWh (67%) and Building common area 34 kWh (33%).");
+    expect(report.groups!.summary).toBe("Block 1B 92% · Common area 8% — biggest single group: Ground floor");
     expect(report.groups!.rows.map(row => [row.name, row.depth, row.parent])).toEqual([
-      ["Block 264F", 0, "SKTC Estate"], ["Ground floor", 1, "Block 264F"], ["Building common area", 1, "Block 264F"],
-      ["Common area", 0, "SKTC Estate"], ["Pavilion", 1, "Common area"], ["Playground", 1, "Common area"], ["Entrance", 1, "Common area"],
+      ["Block 1B", 0, "Estate"], ["Ground floor", 1, "Block 1B"], ["Building common area", 1, "Block 1B"],
+      ["Common area", 0, "Estate"], ["Pavilion", 1, "Common area"], ["Playground", 1, "Common area"], ["Entrance", 1, "Common area"],
     ]);
     expect(report.estimate.spaceCaption).toBe("Each group's share of the estimated month.");
-    expect(report.estimate.comparison).toContain("Block 264F uses the most, at **92%** of the energy, compared with Common area's 8%.");
+    expect(report.estimate.comparison).toContain("Block 1B uses the most, at **92%** of the energy, compared with Common area's 8%.");
   });
 
-  it("counts the entrance signboard only under Entrance, though it is wired from 264F's panel", () => {
-    const block = report.groups!.rows.find(row => row.name === "Block 264F")!;
+  it("counts the entrance signboard only under Entrance, though it is wired from 1B's panel", () => {
+    const block = report.groups!.rows.find(row => row.name === "Block 1B")!;
     expect(block.kwh).toBeCloseTo(periodKwh("f-lobby") + periodKwh("f-common"));
-    expect(report.groups!.rows.find(row => row.name === "Entrance")).toEqual(expect.objectContaining({ meters: ["Compassvale Bow signboard"], singleMeter: true }));
+    expect(report.groups!.rows.find(row => row.name === "Entrance")).toEqual(expect.objectContaining({ meters: ["Estate signboard"], singleMeter: true }));
     // The donut is by group, its slices adding up to the month estimate.
     expect(report.groups!.top.reduce((sum, group) => sum + group.monthKwh, 0)).toBeCloseTo(report.estimate.monthKwh);
   });
 
   it("names meters by their short names, keeping the installer's full label as the detail", () => {
     const sign = report.circuits.find(circuit => circuit.meterIds.includes("sign"))!;
-    expect(sign.name).toBe("Compassvale Bow signboard");
-    expect(sign.code).toBe("264F Signboard lighting");
-    expect(report.screening.rows.some(row => row.code === "264F Signboard lighting")).toBe(true);
+    expect(sign.name).toBe("Estate signboard");
+    expect(sign.code).toBe("1B Signboard lighting");
+    expect(report.screening.rows.some(row => row.code === "1B Signboard lighting")).toBe(true);
   });
 
   it("reads the same groups in Chinese and Malay", () => {
-    expect(buildSiteReport(data, null, "2026-09-22T10:00:00Z", "zh-Hans").profile.intro).toBe("场地的 5 个电表按用途分组：Block 264F **92%**和Common area **8%**。");
-    expect(buildSiteReport(data, null, "2026-09-22T10:00:00Z", "ms").groups!.summary).toBe("Block 264F 92% · Common area 8% — kumpulan tunggal terbesar: Ground floor");
+    expect(buildSiteReport(data, null, "2026-09-22T10:00:00Z", "zh-Hans").profile.intro).toBe("场地的 5 个电表按用途分组：Block 1B **92%**和Common area **8%**。");
+    expect(buildSiteReport(data, null, "2026-09-22T10:00:00Z", "ms").groups!.summary).toBe("Block 1B 92% · Common area 8% — kumpulan tunggal terbesar: Ground floor");
   });
 
   it("keeps the old zone wording for readings saved before groups existed", () => {
@@ -247,7 +247,7 @@ describe("site report by group", () => {
     expect(lit.hoursMeaning).toBe("lights_on");
     expect(["daytime", "night", "always-on"]).toContain(lit.headlineTopic);
     expect(lit.headline).not.toBe("");
-    expect(lit.groups!.summary).toBe("Block 264F 92% · Common area 8% — biggest single group: Ground floor");
+    expect(lit.groups!.summary).toBe("Block 1B 92% · Common area 8% — biggest single group: Ground floor");
     expect(lit.profile.zones.find(zone => zone.heading.startsWith("Common area"))!.text).toContain("**Entrance** is the biggest share of common area and has no sub-meter below it.");
   });
 
@@ -256,7 +256,7 @@ describe("site report by group", () => {
     expect(html).toContain("By group — share of an estimated 30-day month");
     expect(html).not.toContain("By location — share of an estimated 30-day month");
     expect(html).toContain("<th>Group</th>");
-    expect(html).toMatch(/└ Entrance<\/td><td class="r">4\.2 kWh<\/td><td class="r">45%<\/td><td>Compassvale Bow signboard<\/td>/);
+    expect(html).toMatch(/└ Entrance<\/td><td class="r">4\.2 kWh<\/td><td class="r">45%<\/td><td>Estate signboard<\/td>/);
     expect(html).not.toContain("kWh per 30 days</text>");
   });
 });

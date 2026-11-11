@@ -67,7 +67,7 @@ describe("the 20-minute allowance either side of the lights-on hours", () => {
     expect([17, 18, 19, 6, 7, 8].map(hour => minutesInHours(NIGHTS, "2026-08-04", hour))).toEqual([0, 0, 60, 60, 0, 0]);
     expect([17, 18, 19, 6, 7, 8].map(hour => minutesInHours(NIGHTS, "2026-08-04", hour, 20))).toEqual([0, 20, 60, 60, 20, 0]);
     expect(allowedShare(NIGHTS, "2026-08-04", 18)).toBeCloseTo(1 / 3, 9);
-    // SKTC's coming hours, 18:30–07:15: half of 18:00–19:00 is inside, and 20 more minutes are allowed before it.
+    // Hours of 18:30–07:15: half of 18:00–19:00 is inside, and 20 more minutes are allowed before it.
     const late = every("18:30", "07:15");
     expect([17, 18, 19, 6, 7, 8].map(hour => minutesInHours(late, "2026-08-04", hour))).toEqual([0, 30, 60, 60, 15, 0]);
     expect([17, 18, 19, 6, 7, 8].map(hour => minutesInHours(late, "2026-08-04", hour, 20))).toEqual([0, 50, 60, 60, 35, 0]);
@@ -199,47 +199,47 @@ describe("which lights were on in the daytime, and when", () => {
 });
 
 describe("a meter that sent readings for only part of a day", () => {
-  // Real use is about 0.19 kWh a day: 12 lit hours at 0.016 kWh. Linkway light 1 sent two evening hours on Monday
+  // Real use is about 0.19 kWh a day: 12 lit hours at 0.016 kWh. Walkway light 1 sent two evening hours on Monday
   // 3 Aug, each holding what the light had counted since it was last read (0.08 kWh), then nothing. A usual day worked
   // out from the hours it did send would be 0.08 kWh × 24 ≈ 1.9 kWh: ten times its real use. That must never happen.
-  const LINKWAY: Record<string, Meter> = {
-    "linkway-1": { name: "Linkway light 1", fullName: "Pavilion walk path light 1", group: "Pavilion", kwh: (date, hour) => date === "2026-08-03" && (hour === 19 || hour === 20) ? 0.08 : null },
+  const WALKWAY: Record<string, Meter> = {
+    "walkway-1": { name: "Walkway light 1", fullName: "Garden path light 1", group: "Pavilion", kwh: (date, hour) => date === "2026-08-03" && (hour === 19 || hour === 20) ? 0.08 : null },
     // Every hour arrives, except after its last reading on the last evening, which carried a 0.08 kWh catch-up.
-    "linkway-2": { name: "Linkway light 2", fullName: "Pavilion walk path light 2", group: "Pavilion", kwh: (date, hour) => date === DATES.at(-1) && hour > 19 ? null : date === DATES.at(-1) && hour === 19 ? 0.08 : night(hour) ? 0.016 : 0 },
+    "walkway-2": { name: "Walkway light 2", fullName: "Garden path light 2", group: "Pavilion", kwh: (date, hour) => date === DATES.at(-1) && hour > 19 ? null : date === DATES.at(-1) && hour === 19 ? 0.08 : night(hour) ? 0.016 : 0 },
     pavilion: ESTATE.pavilion!,
   };
-  const data = estate(LINKWAY);
+  const data = estate(WALKWAY);
 
   it("gets no usual day and no 30-day estimate, and the report says there are not enough readings", () => {
     const report = buildSiteReport(data, null, "2026-09-22T10:00:00Z");
-    const linkway = report.circuits.find(circuit => circuit.name === "Linkway light 1")!;
-    expect(linkway).toMatchObject({ fullDays: 0, weekdayPerDay: null, weekendPerDay: null, monthKwh: 0 });
-    expect(linkway.periodKwh).toBeCloseTo(0.16, 9);
-    expect(report.estimate.note).toContain("Not enough readings for linkway light 1: it has no full day of readings in these dates, so it is not counted in the 30-day estimate.");
-    expect(report.estimate.note).not.toContain("fills in the missing days for linkway light 1");
+    const walkway = report.circuits.find(circuit => circuit.name === "Walkway light 1")!;
+    expect(walkway).toMatchObject({ fullDays: 0, weekdayPerDay: null, weekendPerDay: null, monthKwh: 0 });
+    expect(walkway.periodKwh).toBeCloseTo(0.16, 9);
+    expect(report.estimate.note).toContain("Not enough readings for walkway light 1: it has no full day of readings in these dates, so it is not counted in the 30-day estimate.");
+    expect(report.estimate.note).not.toContain("fills in the missing days for walkway light 1");
     const html = renderSiteReportMarkup(report);
-    expect(html).toMatch(/Linkway light 1<small class="code">Pavilion walk path light 1<\/small><\/td><td class="r" colSpan="2">Not enough readings<\/td><td class="r">0<\/td><td class="r">—<\/td>/i);
+    expect(html).toMatch(/Walkway light 1<small class="code">Garden path light 1<\/small><\/td><td class="r" colSpan="2">Not enough readings<\/td><td class="r">0<\/td><td class="r">—<\/td>/i);
   });
 
   it("takes a meter's usual day only from its full days, never from the hours of a part day", () => {
     const report = buildSiteReport(data, null, "2026-09-22T10:00:00Z");
-    const linkway = report.circuits.find(circuit => circuit.name === "Linkway light 2")!;
-    expect(linkway.fullDays).toBe(13);
-    expect(linkway.weekdayPerDay).toBeCloseTo(0.192, 9);
-    expect(linkway.weekendPerDay).toBeCloseTo(0.192, 9);
-    expect(linkway.monthKwh).toBeCloseTo(0.192 * 30, 9);
-    // No figure for either linkway light comes anywhere near the 1.9 kWh a day a per-hour reading would give.
-    for (const circuit of report.circuits.filter(item => item.name.startsWith("Linkway"))) expect(Math.max(circuit.weekdayPerDay ?? 0, circuit.weekendPerDay ?? 0, circuit.monthKwh / 30)).toBeLessThan(0.2);
+    const walkway = report.circuits.find(circuit => circuit.name === "Walkway light 2")!;
+    expect(walkway.fullDays).toBe(13);
+    expect(walkway.weekdayPerDay).toBeCloseTo(0.192, 9);
+    expect(walkway.weekendPerDay).toBeCloseTo(0.192, 9);
+    expect(walkway.monthKwh).toBeCloseTo(0.192 * 30, 9);
+    // No figure for either walkway light comes anywhere near the 1.9 kWh a day a per-hour reading would give.
+    for (const circuit of report.circuits.filter(item => item.name.startsWith("Walkway"))) expect(Math.max(circuit.weekdayPerDay ?? 0, circuit.weekendPerDay ?? 0, circuit.monthKwh / 30)).toBeLessThan(0.2);
   });
 
   it("shows not enough readings in the management review rather than a per-day figure", () => {
     const review = buildManagementReview(data, null, "2026-09-22T10:00:00Z");
     const meter = (name: string) => review.method.meters.find(item => item.name === name)!;
-    // Linkway light 1 stopped long ago, so the note says when; it still has no usual day.
-    expect(meter("Linkway light 1")).toMatchObject({ perDay: null, note: "Last reading 3 Aug, 8 pm" });
-    expect(meter("Linkway light 2").perDay).toBeCloseTo(0.192, 9);
+    // Walkway light 1 stopped long ago, so the note says when; it still has no usual day.
+    expect(meter("Walkway light 1")).toMatchObject({ perDay: null, note: "Last reading 3 Aug, 8 pm" });
+    expect(meter("Walkway light 2").perDay).toBeCloseTo(0.192, 9);
     // A meter that is still sending but has no full day says so.
-    const fresh = estate({ ...LINKWAY, "linkway-1": { ...LINKWAY["linkway-1"]!, kwh: (date, hour) => date === DATES.at(-1) && hour >= 19 ? 0.016 : null } });
-    expect(buildManagementReview(fresh, null, "2026-09-22T10:00:00Z").method.meters.find(item => item.name === "Linkway light 1")).toMatchObject({ perDay: null, note: "Not enough readings for a usual day" });
+    const fresh = estate({ ...WALKWAY, "walkway-1": { ...WALKWAY["walkway-1"]!, kwh: (date, hour) => date === DATES.at(-1) && hour >= 19 ? 0.016 : null } });
+    expect(buildManagementReview(fresh, null, "2026-09-22T10:00:00Z").method.meters.find(item => item.name === "Walkway light 1")).toMatchObject({ perDay: null, note: "Not enough readings for a usual day" });
   });
 });

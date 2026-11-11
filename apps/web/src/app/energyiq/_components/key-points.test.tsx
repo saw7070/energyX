@@ -48,12 +48,12 @@ it("leads with the report headline and links to the explanation in Analysis inst
 it("adds one short line by top-level group under the headline, worded as each group's share of all use", async () => {
  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);vi.stubGlobal("React",React);
  const report = site.report as typeof site.report & { groups?: { summary: string } };
- report.groups = { summary: "Block 264F 40% · Block 264E 38% · Common area 22% — biggest single group: Entrance" };
- const request=vi.spyOn(configApi,"reportActionRequest").mockResolvedValue({ publication:{reportId:"r",selection:{active:[],featuredActionIds:[]}}, metrics:{projectName:"SKTC",period:{from:"2026-09-01",toExclusive:"2026-09-02"},energyKwh:0,peakKw:0,coverage:1,cost:null,outsideHoursPercent:null} });
+ report.groups = { summary: "Block 1B 40% · Block 1A 38% · Common area 22% — biggest single group: Entrance" };
+ const request=vi.spyOn(configApi,"reportActionRequest").mockResolvedValue({ publication:{reportId:"r",selection:{active:[],featuredActionIds:[]}}, metrics:{projectName:"Estate",period:{from:"2026-09-01",toExclusive:"2026-09-02"},energyKwh:0,peakKw:0,coverage:1,cost:null,outsideHoursPercent:null} });
  const host=document.createElement("div");document.body.append(host);const root=createRoot(host);
  try {await act(async()=>root.render(<KeyPoints projectId="p"/>));
  // Not a split of the daytime share in the headline above it: each group's share of all the site's use.
- expect(host.textContent).toContain("Share of all use: Block 264F 40% · Block 264E 38% · Common area 22% — biggest single group: Entrance");
+ expect(host.textContent).toContain("Share of all use: Block 1B 40% · Block 1A 38% · Common area 22% — biggest single group: Entrance");
  expect(host.textContent).not.toContain("By group:");
  } finally {delete report.groups;await act(async()=>root.unmount());host.remove();request.mockRestore();vi.unstubAllGlobals();}
 });

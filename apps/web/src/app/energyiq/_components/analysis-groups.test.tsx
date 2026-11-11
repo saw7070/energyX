@@ -30,7 +30,7 @@ const withoutGroups: AnalysisData = {
   current: { project, spaces: [scope("blk-a", "Block A", { usageKwh: 300 }), scope("common", "Common area", { usageKwh: 216 })] }, previous: null, history: null,
   circuits: [
     { id: "gf", name: "Lift lobby", location: "Ground floor", category: "light", kwh: 300, previousKwh: null },
-    { id: "sign", name: "Entrance sign", fullName: "264F Compassvale Bow signboard", location: "Entrance", category: "light", kwh: 150, previousKwh: null },
+    { id: "sign", name: "Entrance sign", fullName: "1B Estate signboard", location: "Entrance", category: "light", kwh: 150, previousKwh: null },
     { id: "p1", name: "Pavilion 1", location: "Pavilion", category: "light", kwh: 40, previousKwh: null },
     { id: "p2", name: "Pavilion 2", location: "Pavilion", category: "light", kwh: 26, previousKwh: null },
   ],
@@ -46,7 +46,7 @@ const data: AnalysisData = {
     ],
     meters: [
       { id: "gf", name: "Lift lobby", groupId: "gf-group", kwh: 300 },
-      { id: "sign", name: "Entrance sign", fullName: "264F Compassvale Bow signboard", groupId: "entrance", kwh: 150 },
+      { id: "sign", name: "Entrance sign", fullName: "1B Estate signboard", groupId: "entrance", kwh: 150 },
       { id: "p1", name: "Pavilion 1", groupId: "pavilion", kwh: 40 },
       { id: "p2", name: "Pavilion 2", groupId: "pavilion", kwh: 26 },
     ],
@@ -108,7 +108,7 @@ describe("where the energy goes, by group", () => {
     expect(page.host.querySelector('[aria-label="Pavilion 1: 40 kWh, 61% of Pavilion"]')).not.toBeNull();
     // The biggest circuits list names the short name first and keeps the full label underneath.
     const row = Array.from(page.host.querySelectorAll("td")).find(cell => cell.textContent?.startsWith("Entrance sign"))!;
-    expect(row.querySelector("small")?.textContent).toBe("264F Compassvale Bow signboard");
+    expect(row.querySelector("small")?.textContent).toBe("1B Estate signboard");
     await page.unmount();
 
     mock.load.mockResolvedValue(withoutGroups);
