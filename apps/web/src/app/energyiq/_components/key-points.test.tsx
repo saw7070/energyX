@@ -45,15 +45,38 @@ it("leads with the report headline and links to the explanation in Analysis inst
  } finally {await act(async()=>root.unmount());host.remove();request.mockRestore();vi.unstubAllGlobals();}
 });
 
-it("adds one short line by top-level group under the headline when the report has groups", async () => {
+it("adds one short line by top-level group under the headline, worded as each group's share of all use", async () => {
  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);vi.stubGlobal("React",React);
  const report = site.report as typeof site.report & { groups?: { summary: string } };
  report.groups = { summary: "Block 264F 40% · Block 264E 38% · Common area 22% — biggest single group: Entrance" };
  const request=vi.spyOn(configApi,"reportActionRequest").mockResolvedValue({ publication:{reportId:"r",selection:{active:[],featuredActionIds:[]}}, metrics:{projectName:"SKTC",period:{from:"2026-09-01",toExclusive:"2026-09-02"},energyKwh:0,peakKw:0,coverage:1,cost:null,outsideHoursPercent:null} });
  const host=document.createElement("div");document.body.append(host);const root=createRoot(host);
  try {await act(async()=>root.render(<KeyPoints projectId="p"/>));
- expect(host.textContent).toContain("By group: Block 264F 40% · Block 264E 38% · Common area 22% — biggest single group: Entrance");
+ // Not a split of the daytime share in the headline above it: each group's share of all the site's use.
+ expect(host.textContent).toContain("Share of all use: Block 264F 40% · Block 264E 38% · Common area 22% — biggest single group: Entrance");
+ expect(host.textContent).not.toContain("By group:");
  } finally {delete report.groups;await act(async()=>root.unmount());host.remove();request.mockRestore();vi.unstubAllGlobals();}
+});
+
+it("lists the lights that were on in the daytime under a daytime warning, and nothing extra when the lights ran as planned", async () => {
+ vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);vi.stubGlobal("React",React);
+ const report = site.report as typeof site.report & { headlineTopic?: string; daytime?: { heading: string; items: string[]; more: string | null; none: string | null; alwaysOn: string | null; rule: string } };
+ report.daytime = { heading: "On in the daytime", items: ["Corridor lights: on 6–7 pm on 14 days, 8.4 kWh", "Driveway lamp: on 7–9 am on 3 days, 3.0 kWh"], more: "and 2 more", none: null, alwaysOn: "Always on by design, so left out of daytime use: Emergency lights.", rule: "" };
+ const request=vi.spyOn(configApi,"reportActionRequest").mockResolvedValue({ publication:{reportId:"r",selection:{active:[],featuredActionIds:[]}}, metrics:{projectName:"Estate",period:{from:"2026-09-01",toExclusive:"2026-09-02"},energyKwh:0,peakKw:0,coverage:1,cost:null,outsideHoursPercent:null} });
+ const host=document.createElement("div");document.body.append(host);const root=createRoot(host);
+ try {
+  report.headlineTopic = "daytime";
+  await act(async()=>root.render(<KeyPoints projectId="p"/>));
+  const items=[...host.querySelectorAll("li")].map(item=>item.textContent);
+  expect(items).toEqual(["Corridor lights: on 6–7 pm on 14 days, 8.4 kWh", "Driveway lamp: on 7–9 am on 3 days, 3.0 kWh", "and 2 more"]);
+  expect(host.textContent).toContain("Always on by design, so left out of daytime use: Emergency lights.");
+  await act(async()=>root.unmount());
+  report.headlineTopic = "night";
+  const again=createRoot(host);
+  await act(async()=>again.render(<KeyPoints projectId="p"/>));
+  expect(host.textContent).not.toContain("On in the daytime");
+  await act(async()=>again.unmount());
+ } finally {delete report.daytime;delete report.headlineTopic;host.remove();request.mockRestore();vi.unstubAllGlobals();}
 });
 
 // The heading and the document below it are one saved report, so the page names that report and nothing else.

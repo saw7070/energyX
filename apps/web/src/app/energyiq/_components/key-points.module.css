@@ -17,6 +17,7 @@
 .hero .heroLinks{display:flex;flex-wrap:wrap;gap:8px 24px;margin-top:20px}
 .hero .heroForecast{margin-top:12px;font-size:14px;color:#c6ddd0}
 .hero .heroGroups{margin-top:12px;font-size:14px;font-weight:600;color:var(--hero-quiet)}
+.hero .heroDaytime{margin-top:12px;font-size:14px;color:var(--hero-quiet)}.hero .heroDaytime p{font-size:14px;color:var(--hero-quiet)}.hero .heroDaytime>p:first-child{font-weight:600}.hero .heroDaytime ul{margin:4px 0 0;padding-left:20px;display:grid;gap:2px}
 .hero .heroForecast a{font-weight:600}
 
 /* Which report the Overview comes from, and a note when newer readings exist. */
@@ -168,6 +169,8 @@
 :global(:where(html[data-energyiq-theme="dark"])) .heroEyebrow { color:#a9cdb9; }
 :global(:where(html[data-energyiq-theme="dark"])) .hero .heroForecast { color:#c6ddd0; }
 :global(:where(html[data-energyiq-theme="dark"])) .hero .heroGroups { color:var(--hero-quiet); }
+:global(:where(html[data-energyiq-theme="dark"])) .hero .heroDaytime { color:var(--hero-quiet); }
+:global(:where(html[data-energyiq-theme="dark"])) .hero .heroDaytime p { color:var(--hero-quiet); }
 :global(:where(html[data-energyiq-theme="dark"])) .source { border:1px solid #303733; border-radius:12px; background:#1a1d1b; color:#a8bcb0; }
 :global(:where(html[data-energyiq-theme="dark"])) .source svg { color:#72bb99; }
 :global(:where(html[data-energyiq-theme="dark"])) .source>svg { border-radius:50%; background:#1a221d; }

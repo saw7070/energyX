@@ -57,8 +57,9 @@ describe("site report", () => {
     expect(report.masthead).toEqual({ site: "Tuya Office", detail: "6 Battery Road, Level 27 · Office energy report", period: "3–16 Aug 2026", periodNote: "14 days, SGT" });
     expect(report.title.emphasis).toBe("never switches off");
     expect(report.title.before).toMatch(/four-fifths of the office's electricity use $/);
-    expect(report.lede).toContain("It never drops below about **2.82 kW**, day and night");
-    expect(report.keyFigures.map(figure => figure.label)).toEqual(["total use, 14 days", "average kWh a day, weekday vs weekend", expect.stringMatching(/^always on, day and night \(~\d+% of all use\)$/), expect.stringMatching(/^used outside opening hours/)]);
+    // A steady draw in kW also reads as kWh a day, as the Tuya app shows it: 2.82 kW all day is about 68 kWh.
+    expect(report.lede).toContain("It never drops below about **2.82 kW** (about 68 kWh a day), day and night");
+    expect(report.keyFigures.map(figure => figure.label)).toEqual(["total use, 14 days", "average kWh a day, weekday vs weekend", expect.stringMatching(/^always on, day and night: about 68 kWh a day \(~\d+% of all use\)$/), expect.stringMatching(/^used outside opening hours/)]);
   });
 
   it("groups numbered channels into one circuit and scales weekday and weekend averages to 30 days", () => {

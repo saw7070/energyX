@@ -5,6 +5,7 @@
 import type { AnalysisCategory, HoursByDay, HoursMeaning } from "./analysis-model.js";
 import type { GroupedMeter, MeterGroup } from "./meter-groups.js";
 import type { NotInUseMeter } from "./meters-in-use.js";
+import type { AlwaysOnMeter } from "./always-on-by-design.js";
 
 export type TrendCell = [string, number, number | null, number, number];
 export type TrendSeries = { id: string; expectedMinutesPerHour: number; cells: TrendCell[] };
@@ -37,4 +38,10 @@ export type AnalysisData = {
    * counting as complete in the site report. Absent on readings saved before this was kept, and when there are none.
    */
   notInUse?: NotInUseMeter[] | undefined;
+  /**
+   * Meters meant to run day and night (emergency lighting): someone ticked "always on" on the meter. They count in
+   * every total, but their use in the daytime is expected, so it is never called daytime use or a saving. Absent on
+   * readings saved before this was kept, and when there are none.
+   */
+  alwaysOnByDesign?: AlwaysOnMeter[] | undefined;
 };

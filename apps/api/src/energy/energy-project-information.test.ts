@@ -43,3 +43,18 @@ it("rejects foreign project scopes and revoked memberships", () => {
   metadata.workspaceMemberships.remove({ workspace_id: "default", user_id: "reader" });
   expect(read).toThrow("FORBIDDEN");
 });
+it("says which meters are meant to run day and night, and nothing for the rest", () => {
+  const initial = read();
+  expect(initial.meters.some(meter => "alwaysOn" in meter)).toBe(false);
+  // Tick "always on" on one published meter, as the meter form saves it.
+  const project = metadata.energyIq.getProject("ngee-ann-polytechnic");
+  const revision = metadata.energyIq.projectSetup.listHierarchyRevisions("ngee-ann-polytechnic").find(item => item.id === (metadata.energyIq.templates.getLatestProjectRevision("ngee-ann-polytechnic")?.hierarchy_revision_id ?? project.hierarchy_revision_id))!;
+  const document = JSON.parse(revision.snapshot_json) as { meter_mapping: { rows: Array<{ id: string; presentation?: Record<string, string> }> } };
+  const [first, second] = document.meter_mapping.rows;
+  first!.presentation = { ...first!.presentation, always_on: "true" };
+  second!.presentation = { ...second!.presentation, always_on: "false" };
+  metadata.db.prepare("UPDATE energyiq_hierarchy_revisions SET snapshot_json = ? WHERE id = ?").run(JSON.stringify(document), revision.id);
+  const marked = read().meters;
+  expect(marked.find(meter => meter.id === first!.id)).toMatchObject({ alwaysOn: true });
+  expect(marked.filter(meter => "alwaysOn" in meter).map(meter => meter.id)).toEqual([first!.id]);
+});

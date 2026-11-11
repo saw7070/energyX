@@ -7,7 +7,7 @@ import {
   effectiveHours, openingLabel, percentChange, quietHours, savingsPlan, shortDate, statusFor, storyProfile, timeBuckets,
   type AnalysisAnomaly, type AnalysisDay, type HealthStatus, type HoursMeaning, type overnightFloor,
 } from "./analysis-model";
-import { forHoursMeaning } from "@datafoundry/site-report";
+import { alwaysOnByDesignIds, alwaysOnByDesignKw, daytimeUse, forHoursMeaning, hourRange, kwhText } from "@datafoundry/site-report";
 import type { AnalysisData } from "./analysis-data";
 import { analysisMessages, categoryLabel, confidenceLabel, effortLabel, holidayName, joinText, rich, timeBucketLabel } from "./analysis-messages";
 import { storyMessages } from "./analysis-story-messages";
@@ -59,20 +59,28 @@ function buildStory({ data, days, anomalies, floor, rate }: StoryInput, locale: 
   // Lights-on hours: lighting that should run at night, so "closed" is the daytime and quiet hours come from it too.
   const meaning: HoursMeaning = data.hoursMeaning ?? "opening";
   const split = timeBuckets(project, days, hours, meaning);
+  // Lights-on hours: daytime use leaves out meters always on by design and allows 20 minutes either side of the hours,
+  // exactly as the site report counts it; its share is of all use, so the money matches the kWh.
+  const daytime = meaning === "lights_on" ? daytimeUse(data) : null;
+  const closedKwh = daytime ? daytime.kwh : split.closedKwh;
   const closedHoursPerYear = split.closedShareOfHours * 8760;
   const alwaysOn = alwaysOnKw(project, quietHours(hours, meaning));
+  const byDesignKw = alwaysOnByDesignKw(data, quietHours(hours, meaning));
   const benchmark = floor?.bestKw ?? alwaysOn;
   const aboveBenchmark = benchmark != null ? aboveBenchmarkWhenClosed(project, days, hours, benchmark, meaning) : null;
-  const closedUse = closedUseBreakdown(project, data.current.spaces, data.holidays, hours, locale, meaning);
+  const closedUse = closedUseBreakdown(project, data.current.spaces, data.holidays, hours, locale, meaning, alwaysOnByDesignIds(data));
   const plan = savingsPlan({ projectName: data.projectName, closedUse, closedHoursPerYear, rate, currency, aboveBenchmarkKwh: aboveBenchmark, benchmarkKw: benchmark, periodDays: days.length, anomalies, actions: data.actions, meaning }, locale);
   const counted = plan.filter(item => item.counted);
   const periodCost = project.cost?.amount ?? null;
   const share = (kwh: number) => split.total > 0 ? kwh / split.total : 0;
   return {
-    project, currency, rate, hours, meaning, split, closedHoursPerYear, alwaysOn, benchmark, closedUse, plan, days,
-    periodCost, closedShare: share(split.closedKwh), closedCost: periodCost != null ? periodCost * share(split.closedKwh) : null,
+    project, currency, rate, hours, meaning, split, closedHoursPerYear, alwaysOn, benchmark, closedUse, plan, days, daytime, closedKwh,
+    periodCost, closedShare: share(closedKwh), closedCost: periodCost != null ? periodCost * share(closedKwh) : null,
+    // Step 2's bar splits all use by the hour, always-on meters included; its sentence describes that bar.
+    timeSplitShare: share(split.closedKwh),
     yearlyCost: periodCost != null && days.length ? periodCost * 365 / days.length : null,
-    alwaysOnYearlyCost: alwaysOn != null && rate != null ? alwaysOn * 8760 * rate : null,
+    // What never switching off costs, without the meters always on by design: those are meant to run all year.
+    alwaysOnYearlyCost: alwaysOn != null && rate != null && alwaysOn - byDesignKw > 0.005 ? (alwaysOn - byDesignKw) * 8760 * rate : null,
     savingKwh: counted.reduce((sum, item) => sum + (item.annualKwh ?? 0), 0), savingCost: rate != null ? counted.reduce((sum, item) => sum + (item.annualCost ?? 0), 0) : null,
     provenKwh: counted.some(item => item.provenKwh != null) ? counted.reduce((sum, item) => sum + (item.provenKwh ?? 0), 0) : null,
     provenCost: rate != null && counted.some(item => item.provenCost != null) ? counted.reduce((sum, item) => sum + (item.provenCost ?? 0), 0) : null,
@@ -110,6 +118,7 @@ export function DecisionSummary(props: StoryInput) {
             ? rich(t(lightsOk ? "lights.summary.headlineCostOk" : "summary.headlineCost", { days: dates.length }), { name: data.projectName, cost: <Strong>{money(story.periodCost)}</Strong>, closed: <Strong tone="amber">{money(story.closedCost)} ({num(story.closedShare * 100, 0)}%)</Strong> })
             : rich(t(lightsOk ? "lights.summary.headlineKwhOk" : "summary.headlineKwh", { days: dates.length }), { name: data.projectName, kwh: <Strong>{num(story.split.total, 0)} kWh</Strong>, share: <Strong tone="amber">{num(story.closedShare * 100, 0)}%</Strong> })}
         </h2>
+        {story.daytime && !lightsOk && <DaytimeList daytime={story.daytime} />}
         {story.periodCost != null && story.project.cost?.peak && story.project.cost.amount > 0 && story.project.usageKwh
           ? <p className="mt-2 max-w-3xl text-sm text-slate-600">{t("summary.peak", {
               cost: money(story.project.cost.peak.cost),
@@ -121,8 +130,8 @@ export function DecisionSummary(props: StoryInput) {
       <div className="mt-5 grid gap-px border-y border-slate-200 bg-slate-200/70 md:grid-cols-3">
         <Step index={1} label={t(story.periodCost != null ? "step.spent" : "step.used", { days: dates.length })} value={story.periodCost != null ? money(story.periodCost) : `${num(story.split.total, 0)} kWh`}
           note={<>{story.periodCost != null ? `${num(story.project.usageKwh ?? story.split.total, 0)} kWh · ` : null}{shortDate(dates[0]!, locale)} – {shortDate(dates.at(-1)!, locale)}{story.change != null && <> · <span className={story.change > 0 ? "text-amber-700" : "text-emerald-700"}>{t("step.change", { change: `${story.change > 0 ? "+" : ""}${num(story.change)}`, days: dates.length })}</span></>}</>} />
-        <Step index={2} label={t("step.after")} tone="amber" value={story.periodCost != null ? money(story.closedCost) : `${num(story.split.closedKwh, 0)} kWh`}
-          note={<>{t(story.periodCost != null ? "step.afterNote" : "step.afterNoteEnergy", { pct: num(story.closedShare * 100, 0) })}{story.alwaysOn != null ? t("step.neverBelow", { kw: num(story.alwaysOn, 1) }) : null}</>} />
+        <Step index={2} label={t("step.after")} tone="amber" value={story.periodCost != null ? money(story.closedCost) : `${num(story.closedKwh, 0)} kWh`}
+          note={<>{t(story.periodCost != null ? "step.afterNote" : "step.afterNoteEnergy", { pct: num(story.closedShare * 100, 0) })}{story.alwaysOn != null ? t("step.neverBelow", { kw: num(story.alwaysOn, 1), day: num(story.alwaysOn * 24, 1) }) : null}</>} />
         <Step index={3} label={t("step.save")} tone="emerald" value={savingRange(story, money, t)}
           note={story.savingKwh ? <>{story.provenKwh != null && meaningfulLow(story.provenKwh, story.savingKwh)
             ? t("step.saveRange", { low: story.provenCost != null ? money(story.provenCost) : `${num(story.provenKwh, 0)} kWh`, high: story.savingCost != null ? money(story.savingCost) : `${num(story.savingKwh, 0)} kWh` })
@@ -166,6 +175,26 @@ function savingRange(story: Story, money: (amount: number | null) => string, t: 
 function itemRange(item: Story["plan"][number], money: (amount: number | null) => string, t: StoryText, upTo = true) {
   if (item.annualCost == null) return "—";
   return item.provenCost != null && meaningfulLow(item.provenCost, item.annualCost) ? `${money(item.provenCost)} – ${Math.round(item.annualCost).toLocaleString("en-SG")}` : upTo ? t("range.upToLower", { amount: money(item.annualCost) }) : money(item.annualCost);
+}
+
+/**
+ * Lights-on hours: the lights that were on in the daytime, and when, largest first — a few named, the rest counted —
+ * and the meters left out because they are always on by design. The same list the site report prints.
+ */
+function DaytimeList({ daytime }: { daytime: NonNullable<Story["daytime"]> }) {
+  const t = useMessages(storyMessages);
+  const { locale } = useEnergyIqLocale();
+  const shown = daytime.meters.slice(0, daytime.meters.length === 4 ? 4 : 3);
+  const rest = daytime.meters.length - shown.length;
+  if (!shown.length && !daytime.alwaysOn.length) return null;
+  return <div className="mt-2 max-w-3xl text-sm text-slate-600">
+    {shown.length > 0 && <><p className="font-medium text-slate-800">{t("daytime.heading")}</p>
+      <ul className="mt-1 list-disc space-y-0.5 pl-5">
+        {shown.map(meter => <li key={meter.id}>{t(meter.days === 1 ? "daytime.item.one" : "daytime.item.other", { name: meter.name, hours: joinText(meter.hours.map(run => hourRange(run.from, run.to, locale)), locale), days: meter.days, kwh: kwhText(meter.kwh) })}</li>)}
+        {rest > 0 && <li>{t("daytime.more", { count: rest })}</li>}
+      </ul></>}
+    {daytime.alwaysOn.length > 0 && <p className="mt-1">{t("daytime.alwaysOn", { names: joinText(daytime.alwaysOn.map(meter => meter.name), locale) })}</p>}
+  </div>;
 }
 
 function Strong({ children, tone = "slate" }: { children: ReactNode; tone?: "slate" | "amber" }) {
@@ -293,7 +322,7 @@ function WhenSection({ story, money, inspect }: { story: Story; money: (amount: 
     { key: "avoidable", label: t("when.leftOn"), color: "#eb6834" },
   ] as const;
   const noCompleteDays = t(dayType === "weekend" ? "when.noComplete.weekend" : "when.noComplete.weekday");
-  const takeaway = rich(t(story.usingDefaultHours ? "when.takeawayAssumed" : "when.takeaway", { pct: num(story.closedShare * 100, 0) }), {
+  const takeaway = rich(t(story.usingDefaultHours ? "when.takeawayAssumed" : "when.takeaway", { pct: num(story.timeSplitShare * 100, 0) }), {
     hours: <span className="font-medium text-slate-900">{openingLabel(story.hours, locale, story.meaning)}</span>,
     bucket: <span className="font-medium text-slate-900">{bucketLabel(biggestClosed).toLowerCase()}</span>,
   });
@@ -357,12 +386,16 @@ function StaysOnSection({ story, money }: { story: Story; money: (amount: number
   const yearly = (kw: number) => kw * story.closedHoursPerYear;
   const max = Math.max(0.001, ...story.closedUse.map(row => row.closedKw));
   const covered = story.closedUse.slice(0, 3).reduce((sum, row) => sum + row.closedKwh, 0);
-  const lead = story.closedUse.find(row => row.kind !== "remainder");
+  // The lead is something that could change: never what is always on by design.
+  const lead = story.closedUse.find(row => row.kind !== "remainder" && !row.byDesign);
+  // A draw in kW also as kWh a day, as the Tuya app shows it: what that draw adds up to over a day's closed hours.
+  const perDay = (kw: number) => num(kw * story.closedHoursPerYear / 365, 1);
   const closedTotal = story.closedUse.reduce((sum, row) => sum + row.closedKwh, 0);
   const note = (row: Story["closedUse"][number]) => row.kind === "remainder" ? { text: t("on.tagRest"), tone: "bg-slate-100 text-slate-600" }
+    : row.byDesign ? { text: t("on.tagByDesign"), tone: "bg-slate-100 text-slate-700" }
     : row.essential ? { text: t("on.tagEssential"), tone: "bg-slate-100 text-slate-700" }
       : { text: t("on.tagSwitchable"), tone: "bg-amber-50 text-amber-800" };
-  const takeaway = story.closedUse.length ? <>{t("on.takeaway", { pct: num(covered / Math.max(closedTotal, 0.001) * 100, 0) })}{lead ? rich(t("on.takeawayLead", { kw: num(lead.closedKw, 2) }), { name: <span className="font-medium text-slate-900">{lead.name}</span> }) : null}</> : t("on.noCircuits");
+  const takeaway = story.closedUse.length ? <>{t("on.takeaway", { pct: num(covered / Math.max(closedTotal, 0.001) * 100, 0) })}{lead ? rich(t("on.takeawayLead", { kw: num(lead.closedKw, 2), day: perDay(lead.closedKw) }), { name: <span className="font-medium text-slate-900">{lead.name}</span> }) : null}</> : t("on.noCircuits");
   return <StoryCard id="story-on" step={3} title={t("on.title")} takeaway={takeaway}>
     {story.closedUse.length ? <>
       <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-sm">
@@ -370,7 +403,7 @@ function StaysOnSection({ story, money }: { story: Story; money: (amount: number
         <tbody>{rows.map(row => { const tag = note(row); return <tr key={row.id} className="border-b border-slate-100 last:border-0">
           <td className="py-2.5 pr-3 font-medium text-slate-900">{row.name}</td>
           <td className="px-3 py-2.5 text-slate-600">{row.kind === "type" ? t("on.wholeSite") : row.space}</td>
-          <td className="px-3 py-2.5"><div className="flex items-center gap-2"><div className="h-2 w-20 shrink-0 rounded-full bg-slate-100"><div className="h-full rounded-full bg-[#eb6834]" style={{ width: `${row.closedKw / max * 100}%` }} /></div><span className="whitespace-nowrap tabular-nums text-slate-700">{num(row.closedKw, 2)} kW</span></div></td>
+          <td className="px-3 py-2.5"><div className="flex items-center gap-2"><div className="h-2 w-20 shrink-0 rounded-full bg-slate-100"><div className="h-full rounded-full bg-[#eb6834]" style={{ width: `${row.closedKw / max * 100}%` }} /></div><span className="whitespace-nowrap tabular-nums text-slate-700">{num(row.closedKw, 2)} kW <span className="text-slate-500">{t("on.perDay", { kwh: perDay(row.closedKw) })}</span></span></div></td>
           <td className="px-3 py-2.5 text-right font-semibold tabular-nums text-slate-900">{story.rate != null ? money(yearly(row.closedKw) * story.rate) : `${num(yearly(row.closedKw), 0)} kWh`}</td>
           <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">{row.totalKwh > 0 ? num(Math.min(100, row.closedKwh / row.totalKwh * 100), 0) : "—"}%</td>
           <td className="py-2.5 pl-3"><span className={`inline-flex rounded-full px-2 py-0.5 text-xs ${tag.tone}`}>{tag.text}</span></td>

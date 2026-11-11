@@ -312,6 +312,17 @@ function StandoutBlock({ standout }: { standout: SiteReport["standout"] }) {
   </div>;
 }
 
+/** Lights-on hours: which lights were on in the daytime, and when; the always-on meters left out; the 20-minute rule. */
+export function DaytimeBlock({ daytime }: { daytime: NonNullable<SiteReport["daytime"]> }) {
+  return <div className="standout daytime">
+    <h3>{daytime.heading}</h3>
+    {daytime.items.length > 0 && <ul>{daytime.items.map(item => <li key={item}>{item}</li>)}{daytime.more && <li>{daytime.more}</li>}</ul>}
+    {daytime.none && <p>{daytime.none}</p>}
+    {daytime.alwaysOn && <p>{daytime.alwaysOn}</p>}
+    <p className="rule">{daytime.rule}</p>
+  </div>;
+}
+
 // ---------- 4. weekday hour by hour ----------
 /** An average day hour by hour with the opening (or lights-on) hours shaded; the management review draws it too. */
 export function ProfileChart({ pattern, report, standalone }: { pattern: Pick<NonNullable<SiteReport["pattern"]>, "hours" | "openFrom" | "openTo" | "notes" | "caption">; report: Pick<SiteReport, "locale" | "hoursMeaning">; standalone?: boolean | undefined }) {
@@ -409,8 +420,11 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
           <thead><tr><th>{t("doc.col.feeds")}</th><th className="r">{t("doc.col.weekday")}</th><th className="r">{t("doc.col.weekend")}</th><th className="r">{t("doc.col.recorded", { days: report.dayCount })}</th><th className="r">{t("doc.col.month")}</th>{rate != null && <th className="r">{t("doc.col.cost")}</th>}</tr></thead>
           <tbody>
             {report.circuits.map((circuit, index) => <tr key={circuit.key}>
-              <td>{circuit.label}<small className="code">{circuit.code}</small></td><td className="r">{num(circuit.weekdayPerDay)}</td><td className="r">{num(circuit.weekendPerDay)}</td><td className="r">{whole(circuit.periodKwh)}</td>
-              <td className={`r${index === 0 ? " hot" : ""}`}>{whole(circuit.monthKwh)}</td>{rate != null && <td className={`r${index === 0 ? " hot" : ""}`}>{circuit.monthCost == null ? "—" : moneyText(circuit.monthCost, report.currency)}</td>}
+              <td>{circuit.label}<small className="code">{circuit.code}</small></td>
+              {/* Not one full day of readings: no usual day, so nothing is estimated rather than a guess from part of a day. */}
+              {circuit.fullDays === 0 ? <td className="r" colSpan={2}>{t("doc.notEnough")}</td> : <><td className="r">{num(circuit.weekdayPerDay)}</td><td className="r">{num(circuit.weekendPerDay)}</td></>}
+              <td className="r">{whole(circuit.periodKwh)}</td>
+              <td className={`r${index === 0 ? " hot" : ""}`}>{circuit.fullDays === 0 ? "—" : whole(circuit.monthKwh)}</td>{rate != null && <td className={`r${index === 0 ? " hot" : ""}`}>{circuit.monthCost == null || circuit.fullDays === 0 ? "—" : moneyText(circuit.monthCost, report.currency)}</td>}
             </tr>)}
             <tr className="total"><td>{t(report.siteWord === "office" ? "doc.total.office" : "doc.total.site")}</td><td className="r">{num(report.circuits.reduce((sum, circuit) => sum + (circuit.weekdayPerDay ?? 0), 0))}</td><td className="r">{num(report.circuits.reduce((sum, circuit) => sum + (circuit.weekendPerDay ?? 0), 0))}</td>
               <td className="r">{whole(report.circuits.reduce((sum, circuit) => sum + circuit.periodKwh, 0))}</td><td className="r">{whole(estimate.monthKwh)}</td>{rate != null && <td className="r">{estimate.monthCost == null ? "—" : moneyText(estimate.monthCost, report.currency)}</td>}</tr>
@@ -445,6 +459,7 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
           {pattern.cause && <p><strong>{t("doc.lunchCause")}</strong> <Rich text={pattern.cause} /></p>}
           <ProfileChart pattern={pattern} report={report} standalone={standalone} />
         </> : <p>{t("doc.noPattern")}</p>}
+        {report.daytime && <DaytimeBlock daytime={report.daytime} />}
       </section>
 
       <section id="screening">

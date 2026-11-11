@@ -135,6 +135,28 @@ export function openWindowStart(hours: HoursByDay | null, date: string, hour: nu
 }
 /** Whether a clock hour falls inside the published hours, including the morning part of last night's hours. */
 export const isOpenHour = (hours: HoursByDay | null, date: string, hour: number) => openWindowStart(hours, date, hour) !== null;
+const nextDate = (date: string) => new Date(Date.parse(`${date}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+/**
+ * Minutes of one clock hour that fall inside the published hours, each range widened by `margin` minutes at both ends:
+ * 0 to 60. Ranges that started the day before (the morning of last night's hours) and the next day count too. With
+ * hours 18:30–07:15, 18:00–19:00 has 30 minutes inside, or 50 with a 20-minute margin.
+ */
+export function minutesInHours(hours: HoursByDay | null, date: string, hour: number, margin = 0): number {
+  const start = hour * 60, end = start + 60;
+  const spans: Array<[number, number]> = [];
+  for (const [day, offset] of [[previousDate(date), -1440], [date, 0], [nextDate(date), 1440]] as const) {
+    for (const range of rangesOn(hours, day)) {
+      const from = offset + minutesOf(range.from) - margin;
+      const to = offset + minutesOf(range.to) + (isOvernight(range) ? 1440 : 0) + margin;
+      const clipped: [number, number] = [Math.max(start, from), Math.min(end, to)];
+      if (clipped[1] > clipped[0]) spans.push(clipped);
+    }
+  }
+  spans.sort((a, b) => a[0] - b[0]);
+  let covered = 0, reach = start;
+  for (const [from, to] of spans) { if (to > reach) { covered += to - Math.max(from, reach); reach = to; } }
+  return covered;
+}
 /** "08:00–18:00", or "19:00 → 07:00 next day" for a range that runs overnight. */
 export const hoursRangeLabel = (range: { from: string; to: string }, locale: EnergyIqLocale = "en") =>
   isOvernight(range) ? analysisText(locale)("hours.overnight", { from: range.from, to: range.to }) : `${range.from}–${range.to}`;
@@ -331,6 +353,8 @@ export type ClosedUse = {
   id: string; name: string; space: string; category: AnalysisCategory | "overall"; kind: "circuit" | "remainder" | "type"; totalKwh: number; closedKwh: number; closedHours: number; closedKw: number; essential: boolean;
   /** Its own low quiet-hours level already reached (10th percentile of complete days; 00:00–06:00, or the daytime for lights-on hours), and closed-hours energy above that level. */
   lowestKw: number | null; aboveLowestKwh: number;
+  /** Meant to run day and night (emergency lighting): shown as always on by design, never offered as a saving. */
+  byDesign?: boolean;
 };
 
 /** A low quiet-hours level the meter has already reached: 10th percentile of complete days' average use in the quiet hours, 00:00–06:00 unless given (needs five days). */
@@ -346,9 +370,9 @@ export function lowestNightKw(series: TrendSeries | null | undefined, quiet: rea
 
 /**
  * What keeps using energy while the site is closed (in the daytime, for lights-on hours): each circuit inside each
- * space, or each meter type when there is no circuit detail.
+ * space, or each meter type when there is no circuit detail. Meters in `alwaysOnByDesign` are marked `byDesign`.
  */
-export function closedUseBreakdown(project: ScopeData, spaces: ScopeData[], holidays: Map<string, string>, hours: HoursByDay | null, locale: EnergyIqLocale = "en", meaning: HoursMeaning = "opening"): ClosedUse[] {
+export function closedUseBreakdown(project: ScopeData, spaces: ScopeData[], holidays: Map<string, string>, hours: HoursByDay | null, locale: EnergyIqLocale = "en", meaning: HoursMeaning = "opening", alwaysOnByDesign: ReadonlySet<string> = new Set()): ClosedUse[] {
   const open = effectiveHours(hours, meaning);
   const t = analysisText(locale);
   const quiet = quietHours(hours, meaning);
@@ -371,7 +395,7 @@ export function closedUseBreakdown(project: ScopeData, spaces: ScopeData[], holi
     const withSeries = space.meters.filter(meter => meter.series && meter.category !== "overall");
     const subMeters = withSeries.filter(meter => !meter.official);
     const chosen = subMeters.length ? subMeters : withSeries;
-    for (const meter of chosen) rows.push({ id: meter.id, name: meter.name, space: space.name, category: meter.category, kind: "circuit", essential: ESSENTIAL.test(meter.name), ...measure(meter.series) });
+    for (const meter of chosen) rows.push({ id: meter.id, name: meter.name, space: space.name, category: meter.category, kind: "circuit", essential: ESSENTIAL.test(meter.name), ...measure(meter.series), ...(alwaysOnByDesign.has(meter.id) ? { byDesign: true } : {}) });
     if (subMeters.length) {
       // Energy in the space that no sub-meter explains, so the list still adds up to the space total.
       const whole = measure(space.total);
@@ -414,7 +438,8 @@ export function savingsPlan(input: {
   const yearly = (periodKwh: number) => input.periodDays > 0 ? periodKwh * 365 / input.periodDays : 0;
   const upTo = (load: number) => load * input.closedHoursPerYear;
   const items: Opportunity[] = [];
-  const switchable = input.closedUse.filter(row => !row.essential && row.kind !== "remainder" && row.closedKw >= 0.05);
+  // Meters meant to run day and night are never a saving or a check: running all the time is their job.
+  const switchable = input.closedUse.filter(row => !row.essential && !row.byDesign && row.kind !== "remainder" && row.closedKw >= 0.05);
   const describe = (row: ClosedUse) => row.kind === "type" ? t("plan.areaType", { name: row.name, project: input.projectName }) : row.space ? t("plan.areaCircuit", { name: row.name, space: row.space }) : row.name;
   const proven = (rows: ClosedUse[]) => rows.some(row => row.lowestKw != null) ? yearly(rows.reduce((sum, row) => sum + row.aboveLowestKwh, 0)) : null;
   // Name up to three items; a lone fourth is named too rather than grouped as "1 more item".
@@ -440,7 +465,7 @@ export function savingsPlan(input: {
       annualKwh, annualCost: money(annualKwh), provenKwh: annualKwh, provenCost: money(annualKwh),
       math: t("plan.benchmarkMath", { kwh: fmt(input.aboveBenchmarkKwh, 0), days: input.periodDays, rate: rateText }), confidence: "High", effort: "Medium", counted: true, source: "readings" });
   }
-  for (const row of input.closedUse.filter(item => item.essential && item.closedKw >= 0.05).slice(0, 2)) {
+  for (const row of input.closedUse.filter(item => item.essential && !item.byDesign && item.closedKw >= 0.05).slice(0, 2)) {
     const annualKwh = upTo(row.closedKw);
     items.push({ id: `check-${row.id}`, title: t("plan.check", { name: row.name }), area: describe(row),
       detail: t("plan.checkDetail", { kw: kw(row.closedKw) }),

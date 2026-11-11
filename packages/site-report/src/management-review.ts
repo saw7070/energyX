@@ -16,13 +16,15 @@ import {
   aboveBenchmarkWhenClosed, alwaysOnKw, closedUseBreakdown, dayTypeBaselines, effectiveHours, findAnomalies, hoursRangeLabel, quietHours,
   savingsPlan, scopeDays, shortDate, timeBuckets, type AnalysisDay, type HoursMeaning,
 } from "./analysis-model.js";
-import type { AnalysisData, ScopeData, ScopeMeter } from "./analysis-types.js";
+import type { AnalysisData, ScopeData, ScopeMeter, TrendSeries } from "./analysis-types.js";
 import { forHoursMeaning, translatorFor, type EnergyIqLocale, type Translate } from "./locale.js";
 import { managementReviewMessages, type ManagementReviewKey } from "./management-review-messages.js";
 import { analysisGroupTree, type MeterGroupNode, type MeterGroupTree } from "./meter-groups.js";
 import { notInUseIds, withMetersInUse, type NotInUseMeter } from "./meters-in-use.js";
 import { formatPeriod } from "./report-period.js";
 import type { StandoutReport } from "./standout-report.js";
+import { alwaysOnByDesignIds } from "./always-on-by-design.js";
+import { daytimeUse } from "./daytime-use.js";
 import { buildSiteReport, clock, DAYTIME_NOTABLE_SHARE, hourRange, inWindow, kwhText, kwText, moneyText, openingWindow, pctText, REPORT_COLOURS, weekdayOf } from "./site-report-model.js";
 
 type T = Translate<ManagementReviewKey>;
@@ -47,6 +49,7 @@ export type ReviewBarPart = { name: string; kwh: number; share: number };
 export type ReviewGroup = { key: string; name: string; kwh: number; perDay: number; share: number; colour: string; parts: ReviewBarPart[]; more: number; biggest: string | null };
 /** `area` is where it applies (empty for the whole site); `why` is the one line the decisions table shows. */
 export type ReviewSaving = { title: string; area: string; why: string; basis: string; kwhYear: number; costYear: number | null };
+/** `perDay` is the meter's usual day, from days with every hour's readings only; null when it has none (not enough readings). */
 export type ReviewMeter = { id: string; name: string; group: string; perDay: number | null; note: string };
 
 export type ManagementReview = {
@@ -161,7 +164,6 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
     const cells = meter.series?.cells ?? [];
     const received = cells.filter(cell => cell[3] > 0);
     const last = received.reduce<{ date: string; hour: number } | null>((best, cell) => !best || hourIndex(cell[0], cell[1]) > hourIndex(best.date, best.hour) ? { date: cell[0], hour: cell[1] } : best, null);
-    const kwh = cells.reduce((sum, cell) => sum + (cell[2] ?? 0), 0);
     const off = notInUseList.find(item => item.id === meter.id);
     const stopped = !off && meter.series && Number.isFinite(siteLast) && (!last || siteLast - hourIndex(last.date, last.hour) > REVIEW_STOPPED_HOURS);
     // Days the site was reading but this meter was not, fully: the same rule as a complete day.
@@ -169,10 +171,14 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
     const minutesOn = new Map<string, number>();
     for (const cell of cells) minutesOn.set(cell[0], (minutesOn.get(cell[0]) ?? 0) + (cell[4] ? 0 : cell[3]));
     const gapDays = meter.series ? dates.filter(date => readDates.has(date) && (minutesOn.get(date) ?? 0) < expected).length : 0;
+    // A meter's usual day comes only from days with every hour's readings, as in the full report. One that read for
+    // part of a day and went quiet has none: nothing is worked out from the hours it did send.
+    const perDay = meter.series ? usualDay(meter.series, dates) : null;
     const note = off ? off.reason ? t("met.note.notInUse", { reason: reasonText(off.reason) }) : t("met.note.notInUsePlain")
       : stopped ? last ? t("met.note.stopped", { since: at(last.date, last.hour) }) : t("met.note.none")
+      : meter.series && received.length && perDay == null ? t("met.note.notEnough")
       : gapDays ? t(gapDays === 1 ? "met.note.gaps.one" : "met.note.gaps.other", { count: gapDays }) : "";
-    return { id: meter.id, name: meter.name, group: topGroupOf.get(meter.id) ?? place, perDay: meter.series ? perDayOf(kwh) : null, note, stopped: !!stopped, last };
+    return { id: meter.id, name: meter.name, group: topGroupOf.get(meter.id) ?? place, perDay, note, stopped: !!stopped, last };
   });
   const stopped = meterRows.filter(row => row.stopped);
   const meterCount = meters.length || base.circuits.reduce((sum, circuit) => sum + circuit.meterIds.length, 0);
@@ -235,10 +241,11 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
 
   // ---------- saving energy ----------
   const split = timeBuckets(project, days, data.openingHours, meaning);
-  const closedShare = split.total > 0 ? split.closedKwh / split.total : null;
+  // Lights-on hours: daytime use as the full report counts it (always-on meters left out, 20 minutes allowed).
+  const closedShare = lighting ? daytimeUse(data, project).share : split.total > 0 ? split.closedKwh / split.total : null;
   const alwaysOn = alwaysOnKw(project, quietHours(data.openingHours, meaning));
   const above = alwaysOn != null ? aboveBenchmarkWhenClosed(project, days, data.openingHours, alwaysOn, meaning) : null;
-  const closedUse = closedUseBreakdown(project, data.current.spaces, data.holidays, data.openingHours, locale, meaning);
+  const closedUse = closedUseBreakdown(project, data.current.spaces, data.holidays, data.openingHours, locale, meaning, alwaysOnByDesignIds(data));
   const plan = savingsPlan({
     projectName: data.projectName, closedUse, closedHoursPerYear: split.closedShareOfHours * 8760, rate, currency,
     aboveBenchmarkKwh: above, benchmarkKw: alwaysOn, periodDays: days.length, anomalies: findAnomalies(days, dayTypeBaselines(days)), actions: [], meaning,
@@ -261,7 +268,9 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
   };
 
   // ---------- summary ----------
-  const baseShare = base.benchmark.baseKw != null && totalKwh > 0 ? Math.min(1, base.benchmark.baseKw * totalCells.filter(cell => cell[2] != null).length / totalKwh) : null;
+  // What never switches off and could: the always-on level less the meters always on by design (as in the full report).
+  const cutKw = base.benchmark.baseKw == null ? null : Math.max(0, base.benchmark.baseKw - base.benchmark.byDesignKw);
+  const baseShare = cutKw != null && totalKwh > 0 ? Math.min(1, cutKw * totalCells.filter(cell => cell[2] != null).length / totalKwh) : null;
   const topGroup = groupRows[0];
   const topPart = topGroup?.parts[0];
   const firstStopped = stopped[0];
@@ -271,7 +280,7 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
     readDays.length ? t("find.total", { kwh: kwhText(totalKwh), days: readDays.length, perDay: kwhText(perDayOf(totalKwh)), cost: rate != null ? t("find.totalCost", { cost: money(cost(perDayOf(totalKwh)), 2)! }) : "" }) : "",
     closedShare == null ? ""
       : lighting ? t(closedShare >= DAYTIME_NOTABLE_SHARE ? "find.closed" : "lights.find.night", { pct: pctText(closedShare) })
-      : baseShare != null && baseShare >= 0.5 && base.benchmark.baseKw != null ? t("find.alwaysOn", { kw: kwText(base.benchmark.baseKw), pct: pctText(baseShare) })
+      : baseShare != null && baseShare >= 0.5 && cutKw != null ? t("find.alwaysOn", { kw: kwText(cutKw), day: kwhText(cutKw * 24), pct: pctText(baseShare) })
       : closedShare >= 0.4 ? t("find.closed", { pct: pctText(closedShare) }) : t("find.working", { pct: pctText(1 - closedShare) }),
     topGroup && groupRows.length > 1 ? topPart && topGroup.parts.length > 1 ? t("find.groupPart", { name: topGroup.name, pct: pctText(topGroup.share), part: topPart.name, partPct: pctText(topPart.share) }) : t("find.group", { name: topGroup.name, pct: pctText(topGroup.share) })
       : circuitRows[0] ? t("find.circuit", { name: circuitRows[0].name, pct: pctText(circuitRows[0].share) }) : "",
@@ -339,6 +348,19 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
     savings, method,
     footer: { left: t("foot.left", { count: meterCount, tz: base.tzLabel }), right: t("foot.right", { date: formatPeriod(generatedDay, generatedDay, locale) }) },
   };
+}
+
+/** A meter's usual day: the average of the days on which every hour's readings arrived with no problem; null with none. */
+function usualDay(series: TrendSeries, dates: string[]): number | null {
+  const set = new Set(dates);
+  const days = new Map<string, { kwh: number; hours: number }>();
+  for (const cell of series.cells) {
+    if (!set.has(cell[0]) || cell[2] == null || cell[3] < series.expectedMinutesPerHour || cell[4] !== 0) continue;
+    const day = days.get(cell[0]) ?? { kwh: 0, hours: 0 };
+    day.kwh += cell[2]; day.hours += 1;
+    days.set(cell[0], day);
+  }
+  return mean([...days.values()].filter(day => day.hours >= 24).map(day => day.kwh));
 }
 
 /** The first published range, for the method table ("19:00 → 07:00 next day"). */

@@ -2,6 +2,9 @@ import type { MetadataStore, EnergyIqProjectSetupDocument } from "@datafoundry/m
 import { resolveEnergyProjectCapabilities } from "./energy-project-capabilities.js";
 import { resolveEnergyPublishedHierarchyNodes } from "./energy-query-context.js";
 
+/** presentation.always_on === "true": the meter is meant to run day and night. Read loosely until the setup document types the field. */
+const alwaysOn = (presentation: object | undefined) => (presentation as { always_on?: unknown } | undefined)?.always_on === "true";
+
 /** Published customer information only; do not return setup documents or policy catalogs. */
 export function readEnergyProjectInformation(metadata: MetadataStore, userId: string, workspaceId: string, projectId: string) {
   if (!resolveEnergyProjectCapabilities({ metadataStore: metadata, userId, workspaceId, projectId }).readProjectInformation) throw Error("ENERGYIQ_PROJECT_FORBIDDEN");
@@ -37,6 +40,8 @@ export function readEnergyProjectInformation(metadata: MetadataStore, userId: st
       ...(meter.presentation?.panel?.trim() ? { panel: meter.presentation.panel.trim() } : {}),
       // Someone confirmed on Data availability that this meter is not in use; reports leave it out of complete-day checks.
       ...(meter.presentation?.not_in_use?.trim() ? { notInUse: meter.presentation.not_in_use.trim() } : {}),
+      // Meant to run day and night (emergency lighting): reports keep it in totals but never call its daytime use a finding.
+      ...(alwaysOn(meter.presentation) ? { alwaysOn: true as const } : {}),
       locationId: locationId(meter.navigation_scope_id ?? meter.scope_id), location: names.get(locationId(meter.navigation_scope_id ?? meter.scope_id)) ?? "Project", officialAggregation: meter.aggregation_usage === "official" })),
     calendar: calendar ? { version: calendar.version_id, entries: calendar.entries.map(entry => ({
       location: ownerName(entry.owner), from: entry.effective_from, toExclusive: entry.effective_to ?? null,

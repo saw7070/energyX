@@ -117,7 +117,13 @@ export function KeyPoints({projectId}:{projectId:string}) {
         <h2>{report ? <>{report.title.before}<span>{report.title.emphasis}</span></> : site.state && publication?.selection.summary ? plain(publication.selection.summary) : t("fallbackHeadline")}</h2>
         {/* The sentence under the headline only when it adds something: often it is the headline again. */}
         {report?.headline && sameText(report.headline, `${report.title.before}${report.title.emphasis}`) === false ? <p>{report.headline}</p> : null}
-        {/* Where the energy goes, one short line by top-level group, from the same report as the headline. */}
+        {/* Lights-on sites warned about daytime use: which lights were on in the daytime, and when, largest first. */}
+        {report?.daytime && report.headlineTopic === "daytime" && report.daytime.items.length > 0 && <div className={styles.heroDaytime}>
+          <p>{report.daytime.heading}</p>
+          <ul>{report.daytime.items.map(item => <li key={item}>{item}</li>)}{report.daytime.more && <li>{report.daytime.more}</li>}</ul>
+          {report.daytime.alwaysOn && <p>{report.daytime.alwaysOn}</p>}
+        </div>}
+        {/* Where the energy goes, one short line by top-level group: each group's share of all use, not of the line above. */}
         {report?.groups && <p className={styles.heroGroups}>{t("byGroup", { summary: report.groups.summary })}</p>}
         <ForecastLine projectId={projectId} className={styles.heroForecast} />
         <p className={styles.heroLinks}><Link href={analysisHref(projectId, shownPeriod, report?.headline ?? "", report?.headlineTopic)}>{t("seeWhy")}</Link></p></section>
