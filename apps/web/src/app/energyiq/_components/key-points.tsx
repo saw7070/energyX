@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { configApi } from "../../../lib/config-api";
 import styles from "./key-points.module.css";
@@ -15,7 +15,7 @@ import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { intlLocale, type EnergyIqLocale } from "./energyiq-messages";
 import { keyPointsMessages } from "./key-points-messages";
 import { useEnergyIqAccess } from "./energyiq-access";
-import { kwhText, type BreakdownRow } from "@datafoundry/site-report";
+import { GroupSplit } from "./group-split";
 
 /** Two sentences that say nearly the same thing ("used after working hours" / "used outside working hours"). */
 const sameText = (left: string, right: string): boolean => {
@@ -29,7 +29,7 @@ const sameText = (left: string, right: string): boolean => {
 };
 
 /**
- * Analysis for the same dates as the headline's report. A headline about equipment left on opens step 3,
+ * Analysis for the same dates as the headline's report. A headline about equipment left on opens step 2,
  * "What stays on after working hours"; anything else opens the short version at the top. Pass the report's topic
  * when known: the headline may be in Chinese or Malay, so the English wording test is only a fallback.
  */
@@ -82,42 +82,6 @@ function SiteQuestion({projectId,point,notes}:{projectId:string;point:Point;note
 function withBold(sentence: string, placeholder: string, value: string) {
   const [before, after = ""] = sentence.split(placeholder);
   return <>{before}<strong>{value}</strong>{after}</>;
-}
-/**
- * Where the energy goes, in the Overview's first view: the top-level groups in their saved order, each with its kWh on
- * an average day and its share of the whole site. A group opens onto the groups inside it, each with its own kWh and
- * share of the whole site, so they add up to the group's share. Each group is a button that says whether it is open.
- */
-function GroupSplit({ rows }: { rows: BreakdownRow[] }) {
-  const t = useMessages(keyPointsMessages);
-  const id = useId();
-  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
-  const toggle = (key: string) => setOpen(current => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; });
-  // One scale for every bar, so the groups inside a group visibly add up to it.
-  const scale = Math.max(0.001, ...rows.map(row => row.share));
-  // Whole percentages that add up: the top-level groups to 100%, the groups inside one to its own share.
-  const value = (row: BreakdownRow) => row.perDay == null ? `${row.pct}%` : t("splitValue", { kwh: kwhText(row.perDay), pct: `${row.pct}%` });
-  const parts = (row: BreakdownRow) => <>
-    <span className={styles.splitName}>{row.name}</span>
-    <span className={styles.splitBar} aria-hidden="true"><i style={{ width: `${Math.min(1, row.share / scale) * 100}%` }} /></span>
-    <span className={styles.splitValue}>{value(row)}</span>
-  </>;
-  return <section className={styles.split} aria-labelledby={`${id}-title`}>
-    <h3 id={`${id}-title`}>{t("splitTitle")}</h3>
-    <ul>{rows.map((row, index) => {
-      const listId = `${id}-group-${index}`;
-      const expanded = open.has(row.key);
-      return <li key={row.key}>
-        {row.rows.length ? <button type="button" className={styles.splitRow} aria-expanded={expanded} aria-controls={listId} onClick={() => toggle(row.key)}>
-          {parts(row)}<span className={styles.splitChevron} aria-hidden="true" />
-        </button> : <div className={styles.splitRow}>{parts(row)}<span aria-hidden="true" /></div>}
-        {row.rows.length > 0 && <ul id={listId} className={styles.splitInner} hidden={!expanded} aria-label={t("splitInside", { name: row.name })}>
-          {row.rows.map(child => <li key={child.key}><div className={styles.splitRow}>{parts(child)}<span aria-hidden="true" /></div></li>)}
-        </ul>}
-      </li>;
-    })}</ul>
-    {rows.some(row => row.rows.length > 0) && <p className={styles.splitHint}>{t("splitHint")}</p>}
-  </section>;
 }
 const reportDate = (value: string, locale: EnergyIqLocale = "en") => new Date(value).toLocaleDateString(locale === "en" ? "en-GB" : intlLocale(locale),{timeZone:"Asia/Singapore",day:"numeric",month:"short",year:"numeric"}).replace("Sept","Sep");
 export function KeyPoints({projectId}:{projectId:string}) {
