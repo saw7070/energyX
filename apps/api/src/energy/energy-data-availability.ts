@@ -225,7 +225,8 @@ export function summariseDataAvailability(input: {
       metersBelowTarget: counted.filter(meter => meter.availabilityPct < DATA_AVAILABILITY_TARGET_PCT).length,
       outageCount: listed.length,
       estimatedKwh: round(counted.reduce((sum, meter) => sum + meter.estimatedKwh, 0), 2),
-      checkCount: counted.reduce((sum, meter) => sum + meter.checks.length, 0),
+      // Readings that need a look: days of no use from a meter that is only using nothing (idle) are not among them.
+      checkCount: counted.reduce((sum, meter) => sum + meter.checks.filter(check => meter.status !== "idle" || check.kind !== "flat_zero").length, 0),
     },
     meters,
     outages: listed,

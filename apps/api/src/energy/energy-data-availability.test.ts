@@ -108,6 +108,21 @@ describe("data availability", () => {
     expect(summariseDataAvailability(input).meters.map(meter => meter.status)).toEqual(["stopped", "stopped"]);
   });
 
+  it("keeps days of no use on an idle meter, but counts them among the readings that need a look only for others", () => {
+    // Two made-up fans: used on the first day, then nothing for 80 hours, then used again. One is quiet since and idle.
+    const to = from + days(6);
+    const pattern = (hour: number) => hour < 24 ? 0.5 + (hour % 4) * 0.01 : hour < 24 + 80 ? 0 : 0.6 + (hour % 3) * 0.02;
+    const summary = summariseDataAvailability({
+      fromMs: from, toMs: to,
+      meters: [{ meterPointId: "fan", name: "Pavilion fan" }, { meterPointId: "hall", name: "Hall fan" }],
+      intervals: [...quarterHours("fan", from, 108, "ok", pattern), ...quarterHours("hall", from, 24 * 6, "ok", pattern)],
+      lastReadingAt: new Map([["fan", new Date(from + 108 * HOUR).toISOString()], ["hall", new Date(to).toISOString()]]),
+      idleWhenQuiet: new Set(["fan", "hall"]),
+    });
+    expect(summary.meters.map(meter => [meter.status, meter.checks.map(check => check.kind)])).toEqual([["idle", ["flat_zero"]], ["ok", ["flat_zero"]]]);
+    expect(summary.site.checkCount).toBe(1);
+  });
+
   it("calls an online meter with nothing at all in the period idle, but one that has never sent a reading no readings", () => {
     const summary = summariseDataAvailability({
       fromMs: from, toMs: from + days(1),

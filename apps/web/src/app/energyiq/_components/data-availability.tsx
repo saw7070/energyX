@@ -85,9 +85,10 @@ export function DataAvailability({ projectId, siteName, document, canEdit, busy,
     setEditing(null);
   };
 
-  // Only a stuck reading needs a look. Days of no use are normal for something rarely used, so they stay a quiet note
-  // beside the meter and never suggest marking it not in use.
-  const checks = (data?.meters ?? []).flatMap(meter => meter.checks.filter(check => check.kind !== "flat_zero").map(check => ({ meter, check })));
+  // Days of no use from a meter that is only using nothing now (idle: online, and able to) stay a quiet note beside it.
+  // Anywhere else they still need a look: a lighting circuit sending 0 kWh for days may have lights that do not come on.
+  const quietNote = (meter: Meter, check: Meter["checks"][number]) => check.kind === "flat_zero" && meter.status === "idle";
+  const checks = (data?.meters ?? []).flatMap(meter => meter.checks.filter(check => !quietNote(meter, check)).map(check => ({ meter, check })));
   // Meters that need attention first; within each, the least received first.
   const severity: Record<Meter["status"], number> = { no_readings: 0, stopped: 1, below_target: 2, ok: 3, idle: 4, not_in_use: 5 };
   // A meter offline right now leads: every hour it stays offline costs availability.
@@ -155,7 +156,7 @@ export function DataAvailability({ projectId, siteName, document, canEdit, busy,
             <tbody>{meters.flatMap(meter => {
               const low = meter.status !== "not_in_use" && meter.availabilityPct < target;
               const row = <tr key={meter.meterPointId}>
-                <td><span className={styles.name}><b>{meter.name}</b>{meter.location && <small>{meter.location}</small>}{meter.checks.map(check => <small key={check.from} className={check.kind === "flat_zero" ? undefined : styles.flag}>{checkText(meter, check, true)}</small>)}</span></td>
+                <td><span className={styles.name}><b>{meter.name}</b>{meter.location && <small>{meter.location}</small>}{meter.checks.map(check => <small key={check.from} className={quietNote(meter, check) ? undefined : styles.flag}>{checkText(meter, check, true)}</small>)}</span></td>
                 <td><span className={styles.received}>
                   <span className={`${styles.bar} ${low ? styles.barLow : ""}`} aria-hidden="true"><span style={{ width: `${Math.min(100, meter.availabilityPct)}%` }} /><i className={styles.target} style={{ left: `${target}%` }} /></span>
                   <b>{number(meter.availabilityPct)}%</b>
@@ -169,11 +170,13 @@ export function DataAvailability({ projectId, siteName, document, canEdit, busy,
                 <td>{meter.offlineSince
                   ? <><span className={`${styles.badge} ${styles.badgeBad}`}><i aria-hidden="true" />{t("status.offline_now")}</span><small className={styles.note}>{t("offlineSince", { when: when(meter.offlineSince) })}</small></>
                   : <span className={`${styles.badge} ${badgeClass(meter.status)}`}><i aria-hidden="true" />{statusText(meter.status, meter)}</span>}{meter.notInUse && <small className={styles.note}>{reasonText(meter.notInUse)}</small>}{meter.status === "idle" && !meter.offlineSince && <small className={styles.note}>{t("idle.note")}</small>}</td>
+                {/* A meter only using nothing (idle) is in use, just rarely, so it is not offered "Mark not in use". */}
                 {canEdit && <td className={styles.actionCell}>{meter.status === "not_in_use"
                   ? <button type="button" className={styles.rowAction} disabled={busy} onClick={() => save(meter, null)}>{t("action.inUse")}</button>
+                  : meter.status === "idle" ? null
                   : <button type="button" className={styles.rowAction} disabled={busy} aria-expanded={editing?.meterId === meter.meterPointId} onClick={() => setEditing(editing?.meterId === meter.meterPointId ? null : { meterId: meter.meterPointId, other: false, reason: "" })}>{t("action.notInUse")}</button>}</td>}
               </tr>;
-              if (editing?.meterId !== meter.meterPointId) return [row];
+              if (editing?.meterId !== meter.meterPointId || meter.status === "idle") return [row];
               return [row, <tr key={`${meter.meterPointId}-edit`} className={styles.pickerRow}><td colSpan={columns}>
                 <div className={styles.picker} role="group" aria-label={t("notInUse.pick")}>
                   <span className={styles.pickLabel}>{t("notInUse.pick")}</span>

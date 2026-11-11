@@ -92,14 +92,17 @@ it("shows each meter against the target, the outages and stuck readings, and let
 it("shows a meter that is online but using nothing in neutral words, never as stopped or something to mark not in use", async () => {
   vi.stubGlobal("React", React); vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
-  // A rarely used pavilion fan: used on the first days, then nothing since 25 September; a lobby circuit that never ran.
+  // A rarely used pavilion fan: used on the first days, then nothing since 25 September; a lobby circuit that never ran;
+  // and a corridor lighting circuit still sending readings, but of 0 kWh for four days.
   const idle: EnergyDataAvailabilityDto = {
     from: "2026-09-03", to: "2026-10-02", timezone: "Asia/Singapore", targetPct: 95,
-    site: { availabilityPct: 70, metersCounted: 2, metersBelowTarget: 2, outageCount: 1, estimatedKwh: 0, checkCount: 1 },
+    site: { availabilityPct: 70, metersCounted: 3, metersBelowTarget: 2, outageCount: 1, estimatedKwh: 0, checkCount: 1 },
     meters: [
       { meterPointId: "fan", name: "Pavilion fan", status: "idle", availabilityPct: 73.3, realHours: 528, estimatedHours: 0, estimatedKwh: 0, missingHours: 192, longestOutageHours: 192, lastReadingAt: "2026-09-25T01:00:00.000Z",
         checks: [{ kind: "flat_zero", from: "2026-09-10T00:00:00.000Z", to: "2026-09-14T00:00:00.000Z", hours: 96, kwhPerHour: 0 }] },
       { meterPointId: "spare", name: "Spare lobby circuit", status: "idle", availabilityPct: 0, realHours: 0, estimatedHours: 0, estimatedKwh: 0, missingHours: 720, longestOutageHours: 720, lastReadingAt: "2026-08-01T01:00:00.000Z", checks: [] },
+      { meterPointId: "corridor", name: "Corridor lights", status: "ok", availabilityPct: 100, realHours: 720, estimatedHours: 0, estimatedKwh: 0, missingHours: 0, longestOutageHours: 0, lastReadingAt: "2026-10-02T15:00:00.000Z",
+        checks: [{ kind: "flat_zero", from: "2026-09-20T10:00:00.000Z", to: "2026-09-24T10:00:00.000Z", hours: 96, kwhPerHour: 0 }] },
     ],
     outages: [{ meterPointId: "fan", name: "Pavilion fan", from: "2026-09-25T01:00:00.000Z", to: "2026-10-02T16:00:00.000Z", hours: 183, kind: "missing", estimatedKwh: 0, ongoing: true, idle: true }],
   };
@@ -108,17 +111,24 @@ it("shows a meter that is online but using nothing in neutral words, never as st
     await act(async () => root.render(<EnergyIqLocaleProvider><DataAvailability projectId="estate" siteName="Estate" document={document_} canEdit busy={false} error="" onSave={vi.fn()} /></EnergyIqLocaleProvider>));
     await act(async () => undefined);
     const text = host.textContent ?? "";
-    expect(text).not.toMatch(/Stopped sending|Still offline|mark it not in use|Check it is not stuck/);
-    const row = (name: string) => Array.from(host.querySelectorAll("tbody tr")).find(item => item.textContent!.startsWith(name))!.textContent!;
-    expect(row("Pavilion fan")).toContain("No use since 25 Sept, 09:00 am");
-    expect(row("Pavilion fan")).toContain("Still online. Its reading has not changed, so no new readings come in until it next uses energy.");
-    // Days of no use stay a quiet note beside the meter, not something that needs a look.
-    expect(row("Pavilion fan")).toContain("No use for 96 hours from");
-    expect(Array.from(host.querySelectorAll("tbody small")).find(item => item.textContent!.startsWith("No use for 96 hours"))!.className).toBe("");
-    expect(host.querySelector('[role="note"]')).toBeNull();
-    expect(row("Spare lobby circuit")).toContain("No use in this period");
-    // An editor can still mark either not in use by hand; nothing on the page suggests it.
-    expect(Array.from(host.querySelectorAll("tbody tr button")).map(button => button.textContent)).toEqual(["Mark not in use", "Mark not in use"]);
+    expect(text).not.toMatch(/Stopped sending|Still offline/);
+    const row = (name: string) => Array.from(host.querySelectorAll("tbody tr")).find(item => item.textContent!.startsWith(name))!;
+    expect(row("Pavilion fan").textContent).toContain("No use since 25 Sept, 09:00 am");
+    expect(row("Pavilion fan").textContent).toContain("Still online. Its reading has not changed, so no new readings come in until it next uses energy.");
+    // Days of no use from the idle fan stay a quiet note beside it, not something that needs a look.
+    const note = (name: string) => Array.from(row(name).querySelectorAll("small")).find(item => item.textContent!.startsWith("No use for 96 hours"))!;
+    expect(note("Pavilion fan").className).toBe("");
+    expect(row("Spare lobby circuit").textContent).toContain("No use in this period");
+    // A circuit still sending 0 kWh for days is not idle: its lights may not be coming on, so it still needs a look.
+    const box = host.querySelector('[role="note"]')!;
+    expect(box.textContent).toContain("Corridor lights — No use at all for 96 hours from 20 Sept, 06:00 pm, though it uses energy at other times. Check it is not stuck, or mark it not in use.");
+    expect(box.textContent).not.toContain("Pavilion fan");
+    expect(note("Corridor lights").className).not.toBe("");
+    // Idle meters are in use, just rarely, so only the corridor circuit is offered "Mark not in use".
+    expect(row("Pavilion fan").querySelector("button")).toBeNull();
+    expect(row("Spare lobby circuit").querySelector("button")).toBeNull();
+    expect(Array.from(host.querySelectorAll("tbody tr button")).map(button => button.textContent)).toEqual(["Mark not in use"]);
+    expect(row("Corridor lights").querySelector("button")!.textContent).toBe("Mark not in use");
     const outage = Array.from(host.querySelectorAll("tbody tr")).at(-1)!.textContent!;
     expect(outage).toContain("Still using nothing");
     expect(outage).toContain("Online, but its reading has not changed, so no new readings came in.");
