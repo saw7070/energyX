@@ -3,7 +3,7 @@
  * weekly reports start on a Monday, monthly ones on the first of the month, and neither runs before
  * the chosen hour in the project's own timezone. Mirrors dueReportPeriods in the API's report-calendar.
  */
-export type ReportFrequency = "off" | "daily" | "weekly" | "monthly" | "weekly-monthly";
+export type ReportFrequency = "off" | "daily" | "weekly" | "monthly" | "weekly-monthly" | "daily-weekly-monthly";
 
 /** Today's date in a timezone, as YYYY-MM-DD, plus the hour there. */
 function localNow(now: Date, timezone: string) {
@@ -33,7 +33,8 @@ export function nextReportRun(now: Date, timezone: string, frequency: ReportFreq
   const hour = Number.isInteger(localHour) && localHour >= 0 && localHour <= 23 ? localHour : 3;
   const today = localNow(now, timezone);
   const hourPassed = today.hour >= hour;
-  const cadences = frequency === "weekly-monthly" ? (["weekly", "monthly"] as const) : ([frequency] as const);
+  const cadences = frequency === "daily-weekly-monthly" ? (["daily", "weekly", "monthly"] as const)
+    : frequency === "weekly-monthly" ? (["weekly", "monthly"] as const) : ([frequency] as const);
   const dates = cadences.map(cadence => nextDate(cadence, today.date, hourPassed)).sort();
   return { date: dates[0]!, hour };
 }

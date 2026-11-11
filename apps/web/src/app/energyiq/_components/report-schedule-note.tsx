@@ -35,6 +35,7 @@ export function ReportScheduleNote({ projectId, schedule: given, canSee = true, 
   const cadence = schedule.frequency === "daily" ? "scheduleDaily"
     : schedule.frequency === "weekly" ? "scheduleWeekly"
     : schedule.frequency === "weekly-monthly" ? "scheduleWeeklyMonthly"
+    : schedule.frequency === "daily-weekly-monthly" ? "scheduleDailyWeeklyMonthly"
     : "scheduleMonthly";
   const next = schedule.frequency === "off" ? null
     : nextReportRun(new Date(), schedule.timezone ?? "Asia/Singapore", schedule.frequency as ReportFrequency, schedule.localHour);
