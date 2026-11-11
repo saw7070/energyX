@@ -101,6 +101,8 @@ describe("DecisionSummary", () => {
     expect(markup).toContain("Always on by design, so left out of daytime use: Emergency lights.");
     expect(markup).toContain(">Always on by design</span>");
     expect(markup).not.toContain("Check whether Emergency lights must run in the daytime");
+    // Step 3 gives the same 13%; its bar splits every hour by the clock (30% with the emergency lights), and says so.
+    expect(markup).toContain("13% of the energy is used outside them, in the daytime. The bar below counts every hour outside them (30%), including lights that are always on by design and the 20 minutes allowed at each end.");
     // The level that never switches off, with what it adds up to in a day (1.6 kW all day is about 38.4 kWh).
     expect(markup).toContain("never below 1.6 kW (about 38.4 kWh a day)");
     // Steady use in the daytime table also reads as kWh a day: 3 kW for three daytime hours is about 9 kWh.
@@ -131,5 +133,7 @@ describe("DecisionSummary", () => {
     expect(markup).not.toContain("Can likely be switched off");
     expect(markup).not.toContain("Keep Carpark lamp off in the daytime");
     expect(markup).not.toContain("Keep daytime use down to your own best level");
+    // Step 3 agrees: none of it is daytime use, though the clock puts 4% outside the hours.
+    expect(markup).toContain("0% of the energy is used outside them, in the daytime. The bar below counts every hour outside them (4%)");
   });
 });

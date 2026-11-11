@@ -7,7 +7,7 @@ import {
   effectiveHours, openingLabel, percentChange, quietHours, savingsPlan, shortDate, statusFor, storyProfile, timeBuckets,
   type AnalysisAnomaly, type AnalysisDay, type HealthStatus, type HoursMeaning, type overnightFloor,
 } from "./analysis-model";
-import { alwaysOnByDesignIds, alwaysOnByDesignKw, buildSiteReport, daytimeUse, forHoursMeaning, type SiteReport } from "@datafoundry/site-report";
+import { alwaysOnByDesignIds, alwaysOnByDesignKw, buildSiteReport, daytimeUse, forHoursMeaning, ON_TIME_MARGIN_MINUTES, type SiteReport } from "@datafoundry/site-report";
 import { Rich } from "@datafoundry/site-report/rich";
 import type { AnalysisData } from "./analysis-data";
 import { analysisMessages, categoryLabel, confidenceLabel, effortLabel, holidayName, joinText, rich, timeBucketLabel } from "./analysis-messages";
@@ -95,7 +95,7 @@ function buildStory({ data, days, anomalies, floor, rate }: StoryInput, locale: 
   return {
     project, currency, rate, hours, meaning, split, closedHoursPerYear, alwaysOn, benchmark, closedUse, plan, days, daytime, closedKwh, report, completeDates,
     periodCost, closedShare: share(closedKwh), closedCost: periodCost != null ? periodCost * share(closedKwh) : null,
-    // Step 3's bar splits all use by the hour, always-on meters included; its sentence describes that bar.
+    // Step 3's bar splits all use by the clock: always-on meters and the 20 minutes allowed at each end included.
     timeSplitShare: share(split.closedKwh),
     yearlyCost: periodCost != null && days.length ? periodCost * 365 / days.length : null,
     // What never switching off costs, without the meters always on by design: those are meant to run all year.
@@ -369,10 +369,14 @@ function WhenSection({ story, money, inspect }: { story: Story; money: (amount: 
   const noCompleteDays = t(dayType === "all" ? "when.noComplete.all" : dayType === "weekend" ? "when.noComplete.weekend" : "when.noComplete.weekday");
   // Lights-on hours: then the report's own reading of the average day, when the lights come on and go off.
   const pattern = lighting ? story.report?.pattern?.intro ?? null : null;
-  const takeaway = <>{rich(t(story.usingDefaultHours ? "when.takeawayAssumed" : "when.takeaway", { pct: num(story.timeSplitShare * 100, 0) }), {
+  // The sentence gives the page's one daytime share, as the summary and step 2 do (meters always on by design left out,
+  // 20 minutes allowed at each end). The bar splits all use by the clock, so where the two round differently it says why.
+  const sharePct = num(story.closedShare * 100, 0), barPct = num(story.timeSplitShare * 100, 0);
+  const space = locale === "zh-Hans" ? "" : " ";
+  const takeaway = <>{rich(t(story.usingDefaultHours ? "when.takeawayAssumed" : "when.takeaway", { pct: sharePct }), {
     hours: <span className="font-medium text-slate-900">{openingLabel(story.hours, locale, story.meaning)}</span>,
     bucket: <span className="font-medium text-slate-900">{bucketLabel(biggestClosed).toLowerCase()}</span>,
-  })}{pattern ? <>{locale === "zh-Hans" ? "" : " "}<Rich text={pattern} /></> : null}</>;
+  })}{lighting && barPct !== sharePct ? <>{space}{t("lights.when.barNote", { pct: barPct, minutes: ON_TIME_MARGIN_MINUTES })}</> : null}{pattern ? <>{space}<Rich text={pattern} /></> : null}</>;
   const dayOptions = [...averages.map(type => [type, type === "all" ? "when.allAvg" : type === "weekend" ? "when.weekendAvg" : "when.weekdayAvg"] as const), ["day", "when.singleDay"] as const];
   return <StoryCard id="story-when" step={3} title={t("when.title")} takeaway={takeaway}>
     <div className="mb-2 flex h-9 w-full overflow-hidden rounded-lg" role="img" aria-label={joinText(segments.map(bucket => `${bucketLabel(bucket)} ${num(story.split.kwh[bucket] / story.split.total * 100, 0)}%`), locale)}>
