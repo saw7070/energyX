@@ -30,12 +30,12 @@ export const TOUR_PAGES: TourPage[] = [
     { title: "Downloads", text: "Download PDF gives a one-page summary for management. Carbon report (CSV) gives the carbon figures as a spreadsheet for sustainability reporting." },
     { title: "Totals", text: "Energy, cost and Scope 2 carbon for all sites together, with the change against the period before. Costs in different currencies are kept apart, never added together." },
     { title: "Budgets", text: "How many sites are heading over their monthly budget this month." },
-    { title: "One row per site", text: "Energy, change, cost, peak demand, the share used after working hours, energy per m² and carbon. Click a column name to sort by it; click a site to open its Overview." },
+    { title: "One row per site", text: "Energy, the average a day, a small daily trend line, change, cost, peak demand, the share used after working hours, energy per m² and carbon. Click a column name to sort by it; click a site to open its Overview." },
     { title: "Budget status", text: "On track, Heading over or Over budget, from this month's forecast against the budget set in Facility → Budget & carbon." },
     { title: "How carbon is worked out", text: "Opens the grid emission factor used for each country and where it comes from." },
   ] },
   { id: "overview", href: "/energyiq/key-points", title: "Overview", where: "Main menu → Overview", intro: "The one thing that matters most at this site right now, in plain words, with the money it involves. A good place for a quick weekly check.", parts: [
-    { title: "The headline", text: "The biggest finding from the latest report, with the energy and money involved. If you read one thing, read this." },
+    { title: "The headline", text: "The biggest finding from the latest report, with the energy and money involved. Where a site has groups, a line below shows each group's share. If you read one thing, read this." },
     { title: "Next month", text: "What next month is likely to use and cost. See the forecast opens the detail in Analysis." },
     { title: "See why in Analysis", text: "Opens Analysis on the same dates to show where the money goes and what to change." },
     { title: "Live now", text: "For sites with a live connection: power in use right now and the energy used so far today, refreshed every few minutes." },
@@ -52,8 +52,8 @@ export const TOUR_PAGES: TourPage[] = [
     { title: "Download data", text: "The readings behind the page as an Excel file." },
   ] },
   { id: "reports", href: "/energyiq/library", title: "Reports", where: "Main menu → Reports", intro: "Every report prepared for this site, newest first, to read, download or share.", parts: [
-    { title: "Create a report", text: "Asks the energy advisor for a report on any dates or question. It is saved here when it is finished." },
-    { title: "Automatic reports", text: "Weekly and monthly reports prepared on their own, around 8 am. If your role allows it, choose which ones and who receives them." },
+    { title: "Create a report", text: "Makes a report from your meter readings in a few seconds, as a Full report or a short Management review, or opens the energy advisor for any other question. It is saved here when it is finished." },
+    { title: "Automatic reports", text: "Weekly and monthly reports prepared on their own, around 8 am. If your role allows it, choose which ones, who receives them and the Site report style." },
     { title: "Materials and context", text: "For administrators: Project materials are files the advisor reads, such as bills; Project context is background about the site." },
     { title: "Search", text: "Find a report by its title or a date, for example “Sep 2026”." },
     { title: "Show and length", text: "Show all reports, only automatic ones or only the ones someone asked for, and filter by the length they cover, such as a week or a month." },
@@ -69,13 +69,13 @@ export const TOUR_PAGES: TourPage[] = [
     { title: "Invite someone", text: "Enter a name and email to create a one-time link. They choose a password and join as a Viewer." },
     { title: "What each role can do", text: "Every role in use and what it allows." },
   ] },
-  { id: "floor", href: `${FACILITY}?tab=structure`, title: "Facility and Floor layout", where: "Main menu → Facility → Floor layout", intro: "Facility holds the site's setup. The top part is the same on every Facility tab; Floor layout shows where every area, board and device is.", parts: [
+  { id: "floor", href: `${FACILITY}?tab=structure`, title: "Facility and Floor layout", where: "Main menu → Facility → Floor layout", intro: "Facility holds the site's setup. The top part is the same on every Facility tab; Floor layout shows how the meters are grouped and where every area and device is.", parts: [
     { title: "Facility actions", text: "Upload data adds meter files (CSV or Excel). Live connection links meters for live readings. Ask the advisor opens a chat about this site's setup. Shown to people who can change the setup." },
-    { title: "The site", text: "The site's name and time zone, how many locations and meters it has, and whether saved changes are in use yet." },
+    { title: "The site", text: "The site's name and time zone, how many groups and meters it has, and whether saved changes are in use yet." },
     { title: "Facility tabs", text: "Each part of the setup has its own tab. A number shows how many items a tab holds." },
     { title: "Suggestions", text: "Appears when something could be clearer, for example meters that could be sorted by what they power, so charts can show where the energy goes by type." },
-    { title: "Locations", text: "Every area and distribution board, with how many meters each has. Click one to see its meters." },
-    { title: "Floor plan", text: "A sketch of where each board and device sits. Click an area or a device to select it; the Locations list follows. Edit layout lets administrators draw rooms and place devices." },
+    { title: "Groups", text: "Meters grouped by what they serve, with how many each group has. Click one to see its meters. People who can change the setup can add groups, put one inside another, drag a meter to another group, or choose Arrange from a spreadsheet." },
+    { title: "Floor plan", text: "A sketch of where each board and device sits. Click a group in the list and its meters light up here. Edit layout lets administrators draw rooms and place devices. Totals and shares come from Groups, not from this drawing." },
   ] },
   { id: "devices", href: `${FACILITY}?tab=devices`, title: "Devices", where: "Main menu → Facility → Devices", intro: "What every device uses, what it costs and when it runs.", parts: [
     { title: "Show", text: "The whole site, one distribution board, or a single device: choose Open a device and search for it by name." },
@@ -100,11 +100,11 @@ export const TOUR_PAGES: TourPage[] = [
     { title: "Floor layout and boards", text: "The floor plan drawn from the site's documents, with the areas each board feeds. Enlarge shows it full size." },
     { title: "Project brief", text: "Background about the site and how it runs." },
   ] },
-  { id: "hours", href: `${FACILITY}?tab=policies`, title: "Operating hours", where: "Main menu → Facility → Operating hours", intro: "When the site is open each day. Everything used outside these hours counts as after working hours across the app.", parts: [
+  { id: "hours", href: `${FACILITY}?tab=policies`, title: "Operating hours", where: "Main menu → Facility → Operating hours", intro: "When the site is open each day or, for lighting that runs at night, when the lights should be on. Use outside these hours counts as after working hours, or as daytime use for lighting, across the app.", parts: [
     { title: "Status", text: "Published means these hours are in use everywhere in the app." },
     { title: "Summary", text: "The open days, the hours per week and the dates these hours apply." },
     { title: "The week", text: "Each day's opening hours as a bar on a 24-hour line, with the times and the hours on the right." },
-    { title: "Edit", text: "If your role allows it, change the hours here. Reports and charts use the new hours straight away." },
+    { title: "Edit", text: "If your role allows it, change the hours here and choose what they mean: Opening hours or Lights-on hours. Reports and charts use the new hours straight away." },
     { title: "Holidays and special days", text: "The next few holidays and days with different hours. View calendar opens the Holidays tab." },
   ] },
   { id: "holidays", href: `${FACILITY}?tab=holidays`, title: "Holidays", where: "Main menu → Facility → Holidays", intro: "Public holidays, planned closures and days with special hours. They are marked on charts so an expected dip is not mistaken for a saving or a fault.", parts: [
@@ -162,12 +162,12 @@ const TOUR_TEXT: Record<Exclude<EnergyIqLocale, "en">, TourText[]> = {
       { title: "下载", text: "“下载 PDF”生成给管理层的一页摘要；“碳排放报告（CSV）”以表格形式提供碳排放数据，用于可持续发展报告。" },
       { title: "合计", text: "所有站点合计的用电量、费用和范围二碳排放，以及与上一时段相比的变化。不同币种的费用分开显示，不会相加。" },
       { title: "预算", text: "本月有多少个站点可能超出月度预算。" },
-      { title: "每个站点一行", text: "用电量、变化、费用、峰值需量、非工作时间用电占比、单位面积用电和碳排放。点击列名可排序；点击站点可打开其概览。" },
+      { title: "每个站点一行", text: "用电量、日均用电、每日趋势小图、变化、费用、峰值需量、非工作时间用电占比、单位面积用电和碳排放。点击列名可排序；点击站点可打开其概览。" },
       { title: "预算状态", text: "“正常”“可能超支”或“已超支”，依据本月预测与“场地设施 → 预算与碳排放”中设定的预算比较得出。" },
       { title: "碳排放如何计算", text: "显示每个国家使用的电网排放因子及其来源。" },
     ] },
     { title: "概览", where: "主菜单 → 概览", intro: "用通俗的话说明此站点当前最重要的一件事，以及涉及的金额。适合每周快速查看。", parts: [
-      { title: "要点", text: "最新报告中最重要的发现，以及涉及的电量和金额。如果只看一处，就看这里。" },
+      { title: "要点", text: "最新报告中最重要的发现，以及涉及的电量和金额。如果站点设有分组，下方会显示各分组的占比。如果只看一处，就看这里。" },
       { title: "下个月", text: "下个月可能的用电量和费用。“查看预测”会在“用电分析”中打开详情。" },
       { title: "在用电分析中查看原因", text: "以相同日期打开“用电分析”，查看钱花在哪里以及该改变什么。" },
       { title: "实时数据", text: "适用于已接入实时连接的站点：当前功率和今天至今的用电量，每隔几分钟刷新一次。" },
@@ -184,8 +184,8 @@ const TOUR_TEXT: Record<Exclude<EnergyIqLocale, "en">, TourText[]> = {
       { title: "下载数据", text: "以 Excel 文件下载本页所依据的读数。" },
     ] },
     { title: "报告", where: "主菜单 → 报告", intro: "为此站点准备的所有报告，最新的排在最前，可阅读、下载或分享。", parts: [
-      { title: "创建报告", text: "请能源顾问针对任意日期或问题撰写报告，完成后会保存在这里。" },
-      { title: "自动报告", text: "每周和每月自动生成的报告，约在早上 8 点生成。若您的角色允许，可选择生成哪些报告以及由谁接收。" },
+      { title: "创建报告", text: "在几秒钟内根据电表读数生成“完整报告”或简短的“管理层回顾”，也可打开能源顾问询问其他问题。完成后会保存在这里。" },
+      { title: "自动报告", text: "每周和每月自动生成的报告，约在早上 8 点生成。若您的角色允许，可选择生成哪些报告、由谁接收以及“场地报告样式”。" },
       { title: "资料和背景", text: "供管理员使用：“项目资料”是顾问会阅读的文件，例如电费单；“项目背景”是有关站点的背景说明。" },
       { title: "搜索", text: "按标题或日期查找报告，例如“2026年9月”。" },
       { title: "显示与时长", text: "显示全部报告、仅自动报告或仅自定义报告，并按覆盖时长（如一周或一个月）筛选。" },
@@ -201,13 +201,13 @@ const TOUR_TEXT: Record<Exclude<EnergyIqLocale, "en">, TourText[]> = {
       { title: "邀请成员", text: "输入姓名和电子邮件，生成一次性链接。对方设置密码后以“查看者”身份加入。" },
       { title: "各角色权限", text: "列出所有在用的角色及其权限。" },
     ] },
-    { title: "场地设施与楼层布局", where: "主菜单 → 场地设施 → 楼层布局", intro: "“场地设施”保存站点的设置。顶部区域在每个“场地设施”标签页中都相同；“楼层布局”显示每个区域、配电箱和设备的位置。", parts: [
+    { title: "场地设施与楼层布局", where: "主菜单 → 场地设施 → 楼层布局", intro: "“场地设施”保存站点的设置。顶部区域在每个“场地设施”标签页中都相同；“楼层布局”显示电表如何分组，以及每个区域和设备的位置。", parts: [
       { title: "场地设施操作", text: "“上传数据”用于添加电表文件（CSV 或 Excel）。“实时连接”用于接入电表实时读数。“咨询顾问”会打开关于此站点设置的对话。仅向可更改设置的人显示。" },
-      { title: "站点", text: "站点名称和时区、位置和电表数量，以及已保存的更改是否已生效。" },
+      { title: "站点", text: "站点名称和时区、分组和电表数量，以及已保存的更改是否已生效。" },
       { title: "场地设施标签页", text: "设置的每个部分都有自己的标签页，数字表示该标签页中的项目数。" },
       { title: "建议", text: "在可以改进时出现，例如有些电表可按所供电的设备分类，这样图表就能按用途显示用电去向。" },
-      { title: "位置", text: "所有区域和配电箱，以及各自的电表数量。点击即可查看其电表。" },
-      { title: "平面图", text: "显示每个配电箱和设备所在位置的示意图。点击区域或设备即可选中，“位置”列表会同步。“编辑布局”供管理员绘制房间和放置设备。" },
+      { title: "分组", text: "按用途整理的电表，以及每个分组的电表数量。点击一个分组即可查看其电表。可更改设置的人可以新建分组、把分组放进另一个分组、把电表拖到别的分组，或选择“从表格整理分组”。" },
+      { title: "平面图", text: "显示每个配电箱和设备所在位置的示意图。点击列表中的分组，其电表会在图上高亮显示。“编辑布局”供管理员绘制房间和放置设备。合计和占比来自分组，而不是这张图。" },
     ] },
     { title: "设备", where: "主菜单 → 场地设施 → 设备", intro: "每台设备的用电量、费用以及运行时间。", parts: [
       { title: "显示", text: "整个站点、某个配电箱，或单台设备：选择“打开设备”并按名称搜索。" },
@@ -232,11 +232,11 @@ const TOUR_TEXT: Record<Exclude<EnergyIqLocale, "en">, TourText[]> = {
       { title: "楼层布局和配电箱", text: "根据站点文件绘制的平面图，以及每个配电箱供电的区域。“放大”可全尺寸查看。" },
       { title: "项目简介", text: "有关站点及其运作方式的背景信息。" },
     ] },
-    { title: "营业时间", where: "主菜单 → 场地设施 → 营业时间", intro: "站点每天的营业时间。在此时间以外的用电，在整个应用中都计为非工作时间用电。", parts: [
+    { title: "营业时间", where: "主菜单 → 场地设施 → 营业时间", intro: "站点每天的营业时间；对于夜间运行的照明，则是灯应开启的时间。在此时间以外的用电，在整个应用中都计为非工作时间用电，照明则计为白天用电。", parts: [
       { title: "状态", text: "“已发布”表示这些时间已在整个应用中使用。" },
       { title: "摘要", text: "营业日、每周营业小时数以及这些时间适用的日期。" },
       { title: "一周", text: "每天的营业时间显示为 24 小时时间轴上的一条横条，右侧注明时间和小时数。" },
-      { title: "编辑", text: "若您的角色允许，可在此更改时间。报告和图表会立即使用新的时间。" },
+      { title: "编辑", text: "若您的角色允许，可在此更改时间并选择它们的含义：“营业时间”或“亮灯时间”。报告和图表会立即使用新的时间。" },
       { title: "假日和特殊日子", text: "接下来的几个假日和营业时间不同的日子。“查看日历”会打开“假期”标签页。" },
     ] },
     { title: "假期", where: "主菜单 → 场地设施 → 假期", intro: "公共假日、计划停业和营业时间特殊的日子。它们会在图表上标出，避免把预期中的下降误认为节省或故障。", parts: [
@@ -292,12 +292,12 @@ const TOUR_TEXT: Record<Exclude<EnergyIqLocale, "en">, TourText[]> = {
       { title: "Muat turun", text: "Muat turun PDF memberi ringkasan satu halaman untuk pengurusan. Laporan karbon (CSV) memberi angka karbon sebagai hamparan untuk laporan kelestarian." },
       { title: "Jumlah", text: "Tenaga, kos dan karbon Skop 2 bagi semua premis bersama, dengan perubahan berbanding tempoh sebelumnya. Kos dalam mata wang berbeza diasingkan, tidak dicampur." },
       { title: "Bajet", text: "Berapa banyak premis yang mungkin melebihi bajet bulanan bulan ini." },
-      { title: "Satu baris setiap premis", text: "Tenaga, perubahan, kos, permintaan puncak, bahagian yang digunakan selepas waktu bekerja, tenaga per m² dan karbon. Klik nama lajur untuk menyusun; klik premis untuk membuka Gambaran keseluruhannya." },
+      { title: "Satu baris setiap premis", text: "Tenaga, purata sehari, garis trend harian kecil, perubahan, kos, permintaan puncak, bahagian yang digunakan selepas waktu bekerja, tenaga per m² dan karbon. Klik nama lajur untuk menyusun; klik premis untuk membuka Gambaran keseluruhannya." },
       { title: "Status bajet", text: "Mengikut sasaran, Hampir terlebih atau Terlebih bajet, berdasarkan ramalan bulan ini berbanding bajet yang ditetapkan dalam Premis → Bajet & karbon." },
       { title: "Cara karbon dikira", text: "Membuka faktor pelepasan grid yang digunakan bagi setiap negara dan sumbernya." },
     ] },
     { title: "Gambaran keseluruhan", where: "Menu utama → Gambaran keseluruhan", intro: "Perkara paling penting di premis ini sekarang, dalam bahasa mudah, dengan jumlah wang yang terlibat. Sesuai untuk semakan mingguan yang cepat.", parts: [
-      { title: "Tajuk utama", text: "Penemuan terbesar daripada laporan terkini, dengan tenaga dan wang yang terlibat. Jika anda hanya membaca satu perkara, bacalah ini." },
+      { title: "Tajuk utama", text: "Penemuan terbesar daripada laporan terkini, dengan tenaga dan wang yang terlibat. Jika premis mempunyai kumpulan, baris di bawahnya menunjukkan bahagian setiap kumpulan. Jika anda hanya membaca satu perkara, bacalah ini." },
       { title: "Bulan depan", text: "Anggaran penggunaan dan kos bulan depan. Lihat ramalan membuka butirannya dalam Analisis." },
       { title: "Lihat sebabnya dalam Analisis", text: "Membuka Analisis bagi tarikh yang sama untuk menunjukkan ke mana wang pergi dan apa yang perlu diubah." },
       { title: "Langsung sekarang", text: "Untuk premis dengan sambungan langsung: kuasa yang sedang digunakan dan tenaga yang digunakan setakat hari ini, dikemas kini setiap beberapa minit." },
@@ -314,8 +314,8 @@ const TOUR_TEXT: Record<Exclude<EnergyIqLocale, "en">, TourText[]> = {
       { title: "Muat turun data", text: "Bacaan di sebalik halaman ini sebagai fail Excel." },
     ] },
     { title: "Laporan", where: "Menu utama → Laporan", intro: "Setiap laporan yang disediakan untuk premis ini, terbaharu dahulu, untuk dibaca, dimuat turun atau dikongsi.", parts: [
-      { title: "Buat laporan", text: "Meminta penasihat tenaga menyediakan laporan bagi apa-apa tarikh atau soalan. Ia disimpan di sini apabila siap." },
-      { title: "Laporan automatik", text: "Laporan mingguan dan bulanan yang disediakan sendiri, sekitar 8 pagi. Jika peranan anda membenarkan, pilih laporan mana dan siapa yang menerimanya." },
+      { title: "Buat laporan", text: "Menghasilkan laporan daripada bacaan meter dalam beberapa saat, sama ada Laporan penuh atau Semakan pengurusan yang ringkas, atau membuka penasihat tenaga untuk soalan lain. Ia disimpan di sini apabila siap." },
+      { title: "Laporan automatik", text: "Laporan mingguan dan bulanan yang disediakan sendiri, sekitar 8 pagi. Jika peranan anda membenarkan, pilih laporan mana, siapa yang menerimanya dan Gaya laporan tapak." },
       { title: "Bahan dan konteks", text: "Untuk pentadbir: Bahan projek ialah fail yang dibaca penasihat, seperti bil; Konteks projek ialah latar belakang premis." },
       { title: "Cari", text: "Cari laporan mengikut tajuk atau tarikh, contohnya “Sep 2026”." },
       { title: "Tunjuk dan tempoh", text: "Tunjuk semua laporan, hanya yang automatik atau hanya yang diminta seseorang, dan tapis mengikut tempoh yang diliputi, seperti seminggu atau sebulan." },
@@ -331,13 +331,13 @@ const TOUR_TEXT: Record<Exclude<EnergyIqLocale, "en">, TourText[]> = {
       { title: "Jemput seseorang", text: "Masukkan nama dan e-mel untuk membuat pautan sekali guna. Mereka memilih kata laluan dan menyertai sebagai Pemerhati." },
       { title: "Apa yang setiap peranan boleh lakukan", text: "Setiap peranan yang digunakan dan apa yang dibenarkannya." },
     ] },
-    { title: "Premis dan Susun atur lantai", where: "Menu utama → Premis → Susun atur lantai", intro: "Premis menyimpan tetapan premis anda. Bahagian atas sama pada setiap tab Premis; Susun atur lantai menunjukkan lokasi setiap kawasan, papan agihan dan peranti.", parts: [
+    { title: "Premis dan Susun atur lantai", where: "Menu utama → Premis → Susun atur lantai", intro: "Premis menyimpan tetapan premis anda. Bahagian atas sama pada setiap tab Premis; Susun atur lantai menunjukkan cara meter dikumpulkan dan lokasi setiap kawasan dan peranti.", parts: [
       { title: "Tindakan premis", text: "Muat naik data menambah fail meter (CSV atau Excel). Sambungan langsung menyambungkan meter untuk bacaan langsung. Tanya penasihat membuka perbualan tentang tetapan premis ini. Dipaparkan kepada mereka yang boleh mengubah tetapan." },
-      { title: "Premis", text: "Nama dan zon waktu premis, bilangan lokasi dan meter, dan sama ada perubahan yang disimpan sudah digunakan." },
+      { title: "Premis", text: "Nama dan zon waktu premis, bilangan kumpulan dan meter, dan sama ada perubahan yang disimpan sudah digunakan." },
       { title: "Tab premis", text: "Setiap bahagian tetapan mempunyai tab sendiri. Nombor menunjukkan bilangan item dalam tab itu." },
       { title: "Cadangan", text: "Muncul apabila sesuatu boleh dijelaskan lagi, contohnya meter yang boleh diisih mengikut apa yang dikuasakan, supaya carta dapat menunjukkan ke mana tenaga pergi mengikut jenis." },
-      { title: "Lokasi", text: "Setiap kawasan dan papan agihan, dengan bilangan meter masing-masing. Klik satu untuk melihat meternya." },
-      { title: "Pelan lantai", text: "Lakaran lokasi setiap papan dan peranti. Klik kawasan atau peranti untuk memilihnya; senarai Lokasi turut mengikut. Edit susun atur membolehkan pentadbir melukis bilik dan meletakkan peranti." },
+      { title: "Kumpulan", text: "Meter yang dikumpulkan mengikut apa yang dibekalkannya, dengan bilangan meter setiap kumpulan. Klik satu untuk melihat meternya. Mereka yang boleh mengubah tetapan boleh menambah kumpulan, meletakkan kumpulan di dalam kumpulan lain, menyeret meter ke kumpulan lain, atau memilih Susun daripada hamparan." },
+      { title: "Pelan lantai", text: "Lakaran lokasi setiap papan dan peranti. Klik kumpulan dalam senarai dan meternya diserlahkan di sini. Edit susun atur membolehkan pentadbir melukis bilik dan meletakkan peranti. Jumlah dan bahagian datang daripada Kumpulan, bukan lukisan ini." },
     ] },
     { title: "Peranti", where: "Menu utama → Premis → Peranti", intro: "Berapa banyak tenaga yang digunakan setiap peranti, kosnya dan bila ia beroperasi.", parts: [
       { title: "Tunjuk", text: "Seluruh premis, satu papan agihan atau satu peranti: pilih Buka peranti dan cari mengikut nama." },
@@ -362,11 +362,11 @@ const TOUR_TEXT: Record<Exclude<EnergyIqLocale, "en">, TourText[]> = {
       { title: "Susun atur lantai dan papan", text: "Pelan lantai yang dilukis daripada dokumen premis, dengan kawasan yang dibekalkan setiap papan. Besarkan memaparkannya dalam saiz penuh." },
       { title: "Ringkasan projek", text: "Latar belakang tentang premis dan cara ia beroperasi." },
     ] },
-    { title: "Waktu operasi", where: "Menu utama → Premis → Waktu operasi", intro: "Bila premis dibuka setiap hari. Semua penggunaan di luar waktu ini dikira sebagai selepas waktu bekerja di seluruh aplikasi.", parts: [
+    { title: "Waktu operasi", where: "Menu utama → Premis → Waktu operasi", intro: "Bila premis dibuka setiap hari atau, bagi lampu yang menyala pada waktu malam, bila lampu patut menyala. Penggunaan di luar waktu ini dikira sebagai selepas waktu bekerja, atau penggunaan waktu siang bagi lampu, di seluruh aplikasi.", parts: [
       { title: "Status", text: "Diterbitkan bermaksud waktu ini digunakan di seluruh aplikasi." },
       { title: "Ringkasan", text: "Hari dibuka, jam seminggu dan tarikh waktu ini berkuat kuasa." },
       { title: "Seminggu", text: "Waktu dibuka setiap hari sebagai bar pada garis 24 jam, dengan masa dan jam di sebelah kanan." },
-      { title: "Edit", text: "Jika peranan anda membenarkan, ubah waktu di sini. Laporan dan carta menggunakan waktu baharu serta-merta." },
+      { title: "Edit", text: "Jika peranan anda membenarkan, ubah waktu di sini dan pilih maksudnya: Waktu buka atau Waktu lampu menyala. Laporan dan carta menggunakan waktu baharu serta-merta." },
       { title: "Cuti dan hari istimewa", text: "Beberapa cuti dan hari dengan waktu berbeza yang akan datang. Lihat kalendar membuka tab Cuti." },
     ] },
     { title: "Cuti", where: "Menu utama → Premis → Cuti", intro: "Cuti umum, penutupan terancang dan hari dengan waktu istimewa. Ia ditanda pada carta supaya penurunan yang dijangka tidak disangka penjimatan atau kerosakan.", parts: [
