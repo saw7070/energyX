@@ -90,11 +90,16 @@ export function ProjectConfigurationView({ setup, notes, policies, projectId, on
   const factCount = readFacts(notes).length;
   const spatial = readProjectSpatialReference(notes, pid);
   const planMeters = meters.map(meter => ({ id: meter.id, name: meterNames.get(meter.id) ?? meter.id, board: names.get(meter.scope_id) ?? t("unassigned"), type: measurementLabel(meter.category, locale) }));
-  const planBoards = [...new Set(meters.map(meter => names.get(meter.scope_id)).filter((name): name is string => !!name))];
+  // Every group with meters in it or in a group inside it, so a plan area can stand for a whole block as well as one group.
+  const ancestorsOf = (id: string | undefined) => { const found: string[] = []; for (let current = id ? parents.get(id) : undefined; current && !found.includes(current); current = parents.get(current)) found.push(current); return found; };
+  const planBoards = [...new Set(meters.flatMap(meter => names.has(meter.scope_id) ? [meter.scope_id, ...ancestorsOf(meter.scope_id)] : []).map(id => names.get(id)).filter((name): name is string => !!name))];
   const descendantsOf = (id: string) => { const found: string[] = []; const queue = [id]; while (queue.length) { const current = queue.shift()!; for (const node of nodes) if (node.parent_id === current && !found.includes(node.id)) { found.push(node.id); queue.push(node.id); } } return found; };
   // A space with no meters of its own shows the boards inside it instead of "0 meters".
   const childBoards = selected && selectedId !== "unassigned" && !assigned.length ? descendantsOf(selected.id).map(id => nodes.find(node => node.id === id)!).filter(node => meters.some(meter => meter.scope_id === node.id)) : [];
-  const highlight = selectedId === "unassigned" || !selected ? null : assigned.length ? [selected.name] : childBoards.length ? childBoards.map(node => node.name) : null;
+  // The selected group, the groups it sits in (so a block's area stays lit while one of its floors is selected) and,
+  // for a group with no meters of its own, the groups inside it.
+  const highlight = selectedId === "unassigned" || !selected || (!assigned.length && !childBoards.length) ? null
+    : [...new Set([selected.name, ...ancestorsOf(selected.id).map(id => names.get(id)!), ...(assigned.length ? [] : childBoards.map(node => node.name))])];
   // The exact meters, because groups in different places can share a name ("Ground floor" in two blocks).
   const highlightDevices = highlight && (assigned.length ? assigned : meters.filter(meter => childBoards.some(node => node.id === meter.scope_id))).map(meter => meter.id);
   const selectBoard = (board: string, deviceId?: string) => {
