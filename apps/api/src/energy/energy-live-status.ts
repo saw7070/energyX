@@ -62,6 +62,20 @@ export const readOfflineMeters = (input: { db: DatabaseSync; projectId: string; 
     .sort((left, right) => left.offlineSince.localeCompare(right.offlineSince) || left.meterPointId.localeCompare(right.meterPointId));
 };
 
+/**
+ * Meters Tuya says are online at a recent poll. Tuya meters send their running total only when it moves, so a meter
+ * that uses nothing sends nothing for days, exactly like one that has lost power. Being online tells them apart: such a
+ * meter is idle, not stopped. Meters with no recent status (no live connection, or the poll itself stopped) are left
+ * out, so nothing is assumed about them.
+ */
+export const readOnlineMeters = (input: { db: DatabaseSync; projectId: string; now?: number }): Set<string> => {
+  ensureTable(input.db);
+  const now = input.now ?? Date.now();
+  const rows = input.db.prepare(`SELECT * FROM energyiq_live_device_status WHERE project_id = ? AND online = 1`)
+    .all(input.projectId) as StoredStatus[];
+  return new Set(rows.filter((row) => now - Date.parse(row.checked_at) <= STATUS_STALE_MS).map((row) => row.meter_point_id));
+};
+
 /** Since when each meter Tuya says is offline has been offline, as of a recent poll; for showing, not for alerts. */
 export const readOfflineSince = (input: { db: DatabaseSync; projectId: string; now?: number }): Map<string, string> => {
   ensureTable(input.db);

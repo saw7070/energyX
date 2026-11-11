@@ -20,6 +20,7 @@ import {
 } from "@datafoundry/site-report";
 import { executeEnergyScopeAnalysisWithLatestAvailable } from "../energy/energy-analysis.js";
 import { readEnergyProjectInformation } from "../energy/energy-project-information.js";
+import { readIdleWhenQuietMeters } from "../energy/energy-idle-meters.js";
 import {
   resolveAllAvailableProjectAnalysisIdentity,
   resolvePublishedEnergyQueryContext,
@@ -72,8 +73,11 @@ export async function loadSiteReportData(input: SiteReportDataInput): Promise<Si
 
   const information = safely(() => readEnergyProjectInformation(input.metadata, input.actorUserId, input.workspaceId, input.projectId));
   const actions = safely(() => readProjectActions(input)) ?? [];
+  // Meters quiet only because they are using nothing right now, so the management review does not call them stopped.
+  const idle = [...(safely(() => readIdleWhenQuietMeters({ metadataStore: input.metadata, projectId: input.projectId })) ?? [])].sort();
+  const data = assembleAnalysisData({ projectId: input.projectId, project, spaces, spaceCurrent, previousProject, spacePrevious, history, information, actions });
   return {
-    data: assembleAnalysisData({ projectId: input.projectId, project, spaces, spaceCurrent, previousProject, spacePrevious, history, information, actions }),
+    data: idle.length ? { ...data, idleWhenQuiet: idle } : data,
     dataSnapshotId: dataSnapshotId ?? null,
   };
 }

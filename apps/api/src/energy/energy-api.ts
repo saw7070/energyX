@@ -26,6 +26,7 @@ import {
 } from "@datafoundry/data-gateway";
 import { localDayStarts, resolveDataAvailabilityPeriod, startAtFirstReading, summariseDataAvailability } from "./energy-data-availability.js";
 import { readOfflineMeters } from "./energy-live-status.js";
+import { readIdleWhenQuietMeters } from "./energy-idle-meters.js";
 import { normalizeProjectRegion, type EnergyIqProjectRegion, type MetadataStore } from "@datafoundry/metadata";
 import type {
   EnergyIqPermissionArea,
@@ -1864,6 +1865,7 @@ export const handleEnergyApiRequest = async (
         }));
         const counted = startAtFirstReading(period, Number.isFinite(firstReadingMs) ? firstReadingMs : undefined, project.timezone);
         const summary = summariseDataAvailability({
+          idleWhenQuiet: readIdleWhenQuietMeters({ metadataStore: context.metadataStore, projectId }),
           fromMs: counted.fromMs,
           toMs: counted.toMs,
           dayStartsMs: localDayStarts(counted.from, counted.to, project.timezone),
@@ -1924,6 +1926,9 @@ export const handleEnergyApiRequest = async (
           meterPoints,
         });
         const details = readPublishedMeterDetails(context.metadataStore, projectId, hierarchyRevisionId);
+        // Online at the latest live check and able to rightly use nothing: a meter quiet for hours is then idle (its
+        // total has not moved), not stopped. Never lighting on a lights-on-hours site, nor a meter always on by design.
+        const idle = readIdleWhenQuietMeters({ metadataStore: context.metadataStore, projectId });
         const meters = health.map((meterPoint) => ({
           meterPointId: meterPoint.meterPointId,
           name: details.get(meterPoint.meterPointId)?.name ?? meterPoint.sourceLabel,
@@ -1931,6 +1936,7 @@ export const handleEnergyApiRequest = async (
           status: meterPoint.status,
           ...(details.get(meterPoint.meterPointId)?.notInUse ? { notInUse: details.get(meterPoint.meterPointId)!.notInUse } : {}),
           ...(meterPoint.coverageTo ?? meterPoint.readingTo ? { lastReadingAt: meterPoint.coverageTo ?? meterPoint.readingTo } : {}),
+          ...(idle.has(meterPoint.meterPointId) ? { idleWhenQuiet: true } : {}),
         }));
         const summary = meters.reduce((total, meterPoint) => {
           if (meterPoint.status === "usable") total.usable += 1;
@@ -5398,12 +5404,22 @@ const parseTemplatePresentation = (
   };
 };
 
+/** Most light points one meter can feed; matches the meter form. */
+const MAX_METER_LIGHT_COUNT = 9999;
+
 const parseMeterPresentation = (value: unknown) => {
   const presentation = requireRecord(value, "ENERGYIQ_METER_PRESENTATION_INVALID");
-  return Object.fromEntries(["device_name", "circuit_name", "group", "not_in_use", "off_with_lights", "short_name", "panel"].flatMap(key => {
+  return Object.fromEntries(["device_name", "circuit_name", "group", "not_in_use", "off_with_lights", "short_name", "panel", "always_on", "light_count"].flatMap(key => {
     if (presentation[key] === undefined) return [];
     if (typeof presentation[key] !== "string") throw new Error(`ENERGYIQ_METER_PRESENTATION_INVALID:${key}`);
     const label = presentation[key].trim().slice(0, 160);
+    // Always on is a yes/no: "true" keeps it, anything else (an unticked box) leaves it out.
+    if (key === "always_on") return label === "true" ? [[key, label]] : [];
+    if (key === "light_count" && label) {
+      const count = /^\d+$/u.test(label) ? Number(label) : Number.NaN;
+      if (!(count >= 1 && count <= MAX_METER_LIGHT_COUNT)) throw new Error(`ENERGYIQ_METER_PRESENTATION_INVALID:${key}`);
+      return [[key, String(count)]];
+    }
     return label ? [[key, label]] : [];
   }));
 };

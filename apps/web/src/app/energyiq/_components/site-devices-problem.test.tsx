@@ -13,6 +13,7 @@ it("says which location has no meter instead of 'could not be loaded'", async ()
   const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
   vi.spyOn(configApi, "executeEnergyScopeAnalysis").mockRejectedValue(new Error("ENERGYIQ_PUBLISHED_METER_ROUTE_REQUIRED:space-3:electricity"));
   vi.spyOn(configApi, "getEnergyProjectInformation").mockResolvedValue({ locations: [{ id: "space-3", name: "Space 3 - Boss Room" }] } as never);
+  vi.spyOn(configApi, "getEnergyProjectMeterHealth").mockResolvedValue({ meters: [], summary: { total: 0, usable: 0, insufficientHistory: 0, noReadings: 0 } });
   try {
     await act(async () => root.render(<EnergyIqLocaleProvider><SiteDevices projectId="office" boardNames={new Map()} /></EnergyIqLocaleProvider>));
     await act(async () => undefined);

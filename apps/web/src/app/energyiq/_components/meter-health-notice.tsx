@@ -27,15 +27,28 @@ const daysSince = (value: string | undefined, now: Date) =>
  */
 const STOPPED_AFTER_MS = 12 * 60 * 60_000;
 
-/** The meters that were sending and went quiet, furthest behind first. */
-export function stoppedMeters(meters: ReadonlyArray<Quiet>): Quiet[] {
-  // A meter someone confirmed is not in use is quiet on purpose.
+/** Meters at least half a day behind the newest reading, furthest behind first; ones confirmed not in use are quiet on purpose. */
+function quietMeters(meters: ReadonlyArray<Quiet>): Quiet[] {
   const sending = meters.filter(meter => meter.status === "usable" && meter.lastReadingAt && !meter.notInUse);
   const newest = sending.reduce((latest, meter) => Math.max(latest, Date.parse(meter.lastReadingAt!)), 0);
   if (!newest) return [];
   return sending
     .filter(meter => newest - Date.parse(meter.lastReadingAt!) >= STOPPED_AFTER_MS)
     .sort((left, right) => left.lastReadingAt!.localeCompare(right.lastReadingAt!));
+}
+
+/**
+ * The meters that were sending and went quiet, furthest behind first. A meter sends its total only when it moves, so
+ * one that uses nothing goes as quiet as one that lost power; one the server calls idle when quiet (online, and able
+ * to rightly use nothing) is idle (see idleMeters), not stopped.
+ */
+export function stoppedMeters(meters: ReadonlyArray<Quiet>): Quiet[] {
+  return quietMeters(meters).filter(meter => !meter.idleWhenQuiet);
+}
+
+/** Quiet meters that are only using nothing, so their total has not moved and nothing is sent. */
+export function idleMeters(meters: ReadonlyArray<Quiet>): Quiet[] {
+  return quietMeters(meters).filter(meter => meter.idleWhenQuiet);
 }
 
 /**
@@ -62,7 +75,8 @@ export function useMeterHealth(projectId: string) {
   const [health, setHealth] = useState<EnergyMeterHealthDto | null>(null);
   useEffect(() => {
     let cancelled = false;
-    meterHealth(projectId)
+    // Started from a resolved promise, so a page without the reading (an older server, a test) is simply left without it.
+    Promise.resolve().then(() => meterHealth(projectId))
       .then(result => { if (!cancelled) setHealth(result); })
       .catch(() => undefined);   // The readings themselves already report their own failures.
     return () => { cancelled = true; };
@@ -94,6 +108,9 @@ export function PendingDayNote({ projectId, lastLocalDay, timezone, className }:
   // and saying otherwise sends the reader away to wait for nothing.
   const stopped = stoppedMeters(health.meters);
   if (stopped.length) return <p className={className}>{t(stopped.length === 1 ? "pendingDayStoppedOne" : "pendingDayStopped", { day, count: String(stopped.length) })}</p>;
+  // A meter using nothing sends nothing, so the day waits for its next reading rather than the next update.
+  const idle = idleMeters(health.meters).filter(meter => localDay(meter.lastReadingAt!) <= pendingDay);
+  if (idle.length) return <p className={className}>{t(idle.length === 1 ? "pendingDayIdleOne" : "pendingDayIdle", { day, devices: idle.map(meter => meter.name).join(", ") })}</p>;
   return <p className={className}>{t(waiting ? "pendingDay" : "pendingDayPlain", { day, count: String(waiting) })}</p>;
 }
 

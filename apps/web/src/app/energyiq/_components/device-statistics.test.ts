@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EnergyOperatingCalendarEntryDto } from "../../../lib/config-api";
-import { deviceStatistics, hourlyByDay, isOpenDay, openingHoursLabel, operatingMinutes, periodDates, type HourCell } from "./device-statistics";
+import { deviceStatistics, hourlyByDay, isOpenDay, openingHoursLabel, operatingMinutes, partialHourKwhByDay, periodDates, type HourCell } from "./device-statistics";
 
 const weekday = [{ from: "09:00", to: "18:00" }];
 const calendar = [{
@@ -84,5 +84,10 @@ describe("hourlyByDay", () => {
     expect([...byDay.keys()]).toEqual(["2026-09-01", "2026-09-02"]);
     expect(byDay.get("2026-09-01")!.slice(8, 12)).toEqual([null, 2, 2, null]);
     expect(byDay.get("2026-09-02")!.every(value => value === null)).toBe(true);
+  });
+
+  it("keeps the kWh really recorded in an hour only partly received, so it is never overstated", () => {
+    const byDay = partialHourKwhByDay([["2026-09-01", 9, 2, 60, 0], ["2026-09-01", 10, 0.1, 30, 0], ["2026-09-01", 11, null, 0, 0]], ["2026-09-01"]);
+    expect(byDay.get("2026-09-01")!.slice(8, 12)).toEqual([null, null, 0.1, null]);
   });
 });

@@ -8,6 +8,13 @@ describe("loadPercent", () => {
     expect(loadPercent(0, 0)).toBe(0);
     expect(loadPercent(null, 0.82)).toBeNull();
   });
+
+  it("reads 0% for an hour whose use shows as 0.00 kW, however small the busiest hour is", () => {
+    // 0.004 kW is 1% of a 0.3 kW busiest hour, but it shows as 0.00 kW, so 1% would only puzzle the reader.
+    expect(loadPercent(0.004, 0.3)).toBe(0);
+    expect(loadPercent(0.004, 0.004)).toBe(0);
+    expect(loadPercent(0.005, 0.3)).toBe(2);
+  });
 });
 
 describe("heatColour", () => {

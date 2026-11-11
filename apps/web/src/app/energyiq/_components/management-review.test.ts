@@ -215,6 +215,18 @@ describe("meters marked not in use", () => {
     expect(review.summary.decisions.map(decision => decision.title)).toContain("Get Pavilion lights reporting again");
     expect(review.method.meters.find(meter => meter.name === "Pavilion lights")?.note).toBe("Last reading 5 Aug, 6 pm");
   });
+
+  it("a meter that was only using nothing when the readings were loaded is not called stopped, nor given a fix", () => {
+    // A made-up pavilion fan: used until 5 Aug, then nothing; the live check found it online and able to use nothing.
+    const fan: Record<string, Def> = { ...LIGHTING, fan: { name: "Pavilion fan", group: "common", category: "load", kwh: (date, hour) => date < "2026-08-05" || (date === "2026-08-05" && hour < 19) ? (hour >= 9 && hour < 12 ? 0.3 : 0) : null } };
+    const review = buildManagementReview({ ...site(fan, { meaning: "lights_on" }), idleWhenQuiet: ["fan"] }, null, GENERATED);
+    expect(review.summary.findings.join(" ")).not.toContain("Pavilion fan");
+    expect(review.summary.decisions.some(decision => /reporting again/.test(decision.title))).toBe(false);
+    expect(review.method.meters.find(meter => meter.name === "Pavilion fan")?.note).toBe("No use since 5 Aug, 6 pm");
+    // Without that answer the same silence is still a meter that stopped.
+    expect(buildManagementReview(site(fan, { meaning: "lights_on" }), null, GENERATED).summary.decisions.map(decision => decision.title)).toContain("Get Pavilion fan reporting again");
+    expect(buildManagementReview({ ...site(fan, { meaning: "lights_on" }), idleWhenQuiet: ["fan"] }, null, GENERATED, "ms").method.meters.find(meter => meter.name === "Pavilion fan")?.note).toMatch(/^Tiada penggunaan sejak /);
+  });
 });
 
 describe("management review in other languages and as a document", () => {

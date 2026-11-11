@@ -5,13 +5,13 @@ import { configApi, type EnergyMeterCategoryDto, type EnergyOperatingCalendarEnt
 import { EnergyIcon } from "./icons";
 import { MEASUREMENT_LABELS, measurementLabel } from "./site-structure-editing";
 import { chartRange, DailyProfileChart, DailyUsageChart, UsageHeatmap, niceMax } from "./device-charts";
-import { deviceStatistics, hourlyByDay, isOpenDay, openingHoursLabel, operatingMinutes, periodDates, type DeviceStatistics, type HourCell } from "./device-statistics";
+import { deviceStatistics, hourlyByDay, isOpenDay, openingHoursLabel, operatingMinutes, partialHourKwhByDay, periodDates, type DeviceStatistics, type HourCell } from "./device-statistics";
 import { dayContext, dayKindBadge, describeDay, schoolPhases, schoolPhaseLabel, specialDays, type DayContext, type DayKind } from "./day-context";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { intlLocale, translatorFor, type EnergyIqLocale, type Translate } from "./energyiq-messages";
 import { formatPeriod as formatDateRange } from "./report-period";
 import { describeProblem, type ReportProblem } from "./site-report";
-import { MeterHealthNotice, PendingDayNote } from "./meter-health-notice";
+import { MeterHealthNotice, PendingDayNote, useMeterHealth } from "./meter-health-notice";
 import { siteReportMessages } from "./site-report-messages";
 import Link from "next/link";
 import { chartMessages, deviceMessages } from "./site-devices-messages";
@@ -41,6 +41,8 @@ export type DeviceRow = {
   status: DeviceStatus;
   /** When this meter last sent a reading, if it has since stopped. */
   stoppedAt?: string;
+  /** When this meter last sent a reading, if it has since used nothing: quiet but still online, so not stopped. */
+  idleSince?: string;
 };
 export type DeviceSummary = {
   rows: DeviceRow[];
@@ -106,6 +108,22 @@ export function summariseDevices(analysis: EnergyScopeAnalysisDto): DeviceSummar
     toExclusive: analysis.context.to,
     timezone: analysis.context.timezone,
   };
+}
+
+/**
+ * Meters the analysis calls stopped that are only using nothing (online, and able to: see idleWhenQuiet in meter
+ * health). A meter sends its total only when it moves, so one that uses nothing goes as quiet as one that lost power;
+ * these are idle, not stopped. They keep the status their readings earned, and say since when they have used nothing.
+ */
+export function withIdleDevices(summary: DeviceSummary, online: ReadonlySet<string>): DeviceSummary {
+  if (!summary.rows.some(row => row.status === "stopped" && row.stoppedAt && online.has(row.id))) return summary;
+  const rows = summary.rows.map((row): DeviceRow => {
+    if (row.status !== "stopped" || !row.stoppedAt || !online.has(row.id)) return row;
+    const { stoppedAt, ...rest } = row;
+    return { ...rest, idleSince: stoppedAt, status: (row.coveragePct ?? 0) >= COMPLETE_COVERAGE_PCT ? "reporting" : "gaps" };
+  });
+  const count = (status: DeviceStatus) => rows.filter(row => row.status === status).length;
+  return { ...summary, rows, reporting: count("reporting"), gaps: count("gaps"), stopped: count("stopped") };
 }
 
 /** Average price per kWh actually charged in the window, and the GST still to add when prices exclude it. */
@@ -199,6 +217,13 @@ export function siteFindings({ rows, stats, shares, siteKwh, rate, openingHours,
       detail: t("finding.stopped.detail", { when: lastSentText(earliest.stoppedAt!, timezone, locale), devices: stopped.map(row => row.name).join(t("list.separator")) }),
     });
   }
+  // Quiet but online: using nothing, which is normal for something rarely used. Said once, without alarm.
+  const idle = rows.filter(row => row.idleSince && !notInUse.has(row.id)).sort((left, right) => left.idleSince!.localeCompare(right.idleSince!));
+  if (idle.length && timezone) findings.push({
+    icon: "meter",
+    title: idle.length === 1 ? t("finding.idle.titleOne", { name: idle[0]!.name, when: lastSentText(idle[0]!.idleSince!, timezone, locale) }) : t("finding.idle.titleMany", { count: String(idle.length), when: lastSentText(idle[0]!.idleSince!, timezone, locale) }),
+    detail: t(idle.length === 1 ? "finding.idle.detailOne" : "finding.idle.detailMany", { devices: idle.map(row => row.name).join(t("list.separator")) }),
+  });
   if (silent.length) findings.push({ icon: "info", title: t(silent.length === 1 ? "finding.silent.titleOne" : "finding.silent.titleMany", { count: silent.length }), detail: t("finding.silent.detail", { devices: silent.map(row => row.circuit ? t("device.withCircuit", { name: row.name, circuit: row.circuit }) : row.name).join(t("list.separator")) }) });
   return findings;
 }
@@ -247,6 +272,7 @@ export function deviceFindings({ row, stat, rate, openingHours, locale = "en", t
   if (stat.alwaysOnKw !== null && stat.alwaysOnKw >= 0.05 && stat.dailyAverageKwh && stat.alwaysOnKw * 24 >= stat.dailyAverageKwh * 0.6) findings.push({ icon: "bolt", title: t("finding.deviceAlwaysOn.title"), detail: rate ? t("finding.deviceAlwaysOn.detailCost", { kw: kw(stat.alwaysOnKw), kwh: kwh(stat.alwaysOnKw * 24), amount: sgd(stat.alwaysOnKw * 24 * 365 * rate) }) : t("finding.deviceAlwaysOn.detail", { kw: kw(stat.alwaysOnKw), kwh: kwh(stat.alwaysOnKw * 24) }) });
   if (stat.openDays > 0 && stat.closedDays > 0 && stat.openDayAverageKwh && stat.closedDayAverageKwh !== null && stat.closedDayAverageKwh / stat.openDayAverageKwh >= 0.7) findings.push({ icon: "alert", title: t("finding.closedBusy.title"), detail: t("finding.closedBusy.detail", { closed: kwh(stat.closedDayAverageKwh), pct: pct(stat.closedDayAverageKwh / stat.openDayAverageKwh * 100), open: kwh(stat.openDayAverageKwh) }) });
   if (row.stoppedAt && timezone) findings.push({ icon: "alert", title: t("finding.deviceStopped.title"), detail: t("finding.deviceStopped.detail", { when: lastSentText(row.stoppedAt, timezone, locale) }) });
+  if (row.idleSince && timezone) findings.push({ icon: "meter", title: t("finding.deviceIdle.title", { when: lastSentText(row.idleSince, timezone, locale) }), detail: t("finding.deviceIdle.detail") });
   if (stat.receivedPct < COMPLETE_COVERAGE_PCT) findings.push({ icon: "info", title: t("finding.missing.title"), detail: t("finding.missing.detail", { pct: pct(stat.receivedPct) }) });
   if (!findings.length) findings.push({ icon: "meter", title: t("finding.none.title"), detail: t("finding.none.detail") });
   return findings;
@@ -520,6 +546,8 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
       .catch(reason => describeProblem(reason, projectId, locale).then(problem => { if (!cancelled) setError(problem); }));
     return () => { cancelled = true; };
   }, [projectId, refresh, locale]);
+  // Which quiet meters are only using nothing (online, and able to), so they are not called stopped.
+  const health = useMeterHealth(projectId);
 
   if (error) return <section className={styles.panel}><div role="alert" className={styles.problem}>
     <h3>{error.title}</h3>
@@ -527,7 +555,8 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
     <p>{error.fixTab ? <Link href={`/energyiq/project-configuration?${new URLSearchParams({ projectId, tab: error.fixTab })}`}>{problemText("problem.openFacility")}</Link> : null}<button type="button" className={styles.link} onClick={() => setRefresh(n => n + 1)}>{t("tryAgain")}</button></p>
   </div></section>;
   if (!loaded) return <section className={styles.panel}><p role="status" className={styles.muted}>{t("loading")}</p></section>;
-  const { summary, stats } = loaded;
+  const { stats } = loaded;
+  const summary = withIdleDevices(loaded.summary, new Set((health?.meters ?? []).filter(meter => meter.idleWhenQuiet).map(meter => meter.meterPointId)));
   if (!summary.rows.length) return <section className={styles.panel}><h3>{t("title")}</h3><p className={styles.muted}>{t("empty")}</p></section>;
   const openingHours = openingHoursLabel(loaded.calendar, locale);
 
@@ -624,6 +653,7 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
     const columns = rate ? 13 : 12;
     const stoppedRows = rows.filter(row => row.status === "stopped" && row.stoppedAt)
       .sort((left, right) => left.stoppedAt!.localeCompare(right.stoppedAt!));
+    const idleRows = rows.filter(row => row.idleSince).sort((left, right) => left.idleSince!.localeCompare(right.idleSince!));
     const reporting = rows.filter(row => row.status !== "silent").length;
     const silent = rows.length - reporting;
     return <>
@@ -646,7 +676,9 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
               silence is long enough to be certain; until then say only what is known. */}
           {isSite && loaded.shortDays.length > 0 && <p className={styles.chartNote}>{stoppedRows.length > 0
             ? t(stoppedRows.length === 1 ? "chart.stoppedNoteOne" : "chart.stoppedNote", { count: String(stoppedRows.length), total: String(rows.length), when: lastSentText(stoppedRows[0]!.stoppedAt!, summary.timezone, locale) })
-            : t("chart.shortDayNote", { day: dateText(loaded.shortDays[0]!.localDate, false) })}</p>}
+            : idleRows.length > 0
+              ? t(idleRows.length === 1 ? "chart.idleNoteOne" : "chart.idleNote", { count: String(idleRows.length), total: String(rows.length), when: lastSentText(idleRows[0]!.idleSince!, summary.timezone, locale) })
+              : t("chart.shortDayNote", { day: dateText(loaded.shortDays[0]!.localDate, false) })}</p>}
           <div className={styles.compare}>
             <h5>{t("compare.title")}{span && <span className={styles.chartPeriod}>{span}</span>}</h5>
             {facts(stat, label)}
@@ -734,9 +766,11 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
     const findings = deviceFindings({ row, stat, rate, openingHours, locale, timezone: summary.timezone });
     const profileMax = niceMax(Math.max(0, ...stat.openProfileKw.map(value => value ?? 0), ...stat.closedProfileKw.map(value => value ?? 0)));
     const byDay = hourlyByDay(loaded.cells.get(row.id) ?? [], loaded.dates);
+    // An hour only partly received shows its kW worked out from that part, but the kWh it really recorded.
+    const partByDay = partialHourKwhByDay(loaded.cells.get(row.id) ?? [], loaded.dates);
     const weekOf = (date: string) => { const weekday = (new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7; return t("weekOf", { date: dateText(new Date(Date.parse(`${date}T00:00:00Z`) - weekday * 86_400_000).toISOString().slice(0, 10)) }); };
     const tag = (date: string) => { const day = dayMap.get(date); if (!day || day.kind === "open") return ""; return ` · ${dayKindBadge(day.kind, locale) ?? t(day.kind === "weekend" ? "tag.weekend" : "tag.closed")}`; };
-    const dayRows = loaded.dates.map(date => ({ id: date, name: `${dateText(date)}${tag(date)}`, group: weekOf(date), profileKw: byDay.get(date) ?? [] }));
+    const dayRows = loaded.dates.map(date => ({ id: date, name: `${dateText(date)}${tag(date)}`, group: weekOf(date), profileKw: byDay.get(date) ?? [], partialKwh: partByDay.get(date) ?? [] }));
     return <>
       {nav}
       <div className={styles.glance}>

@@ -174,7 +174,9 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
       : gapDays ? t(gapDays === 1 ? "met.note.gaps.one" : "met.note.gaps.other", { count: gapDays }) : "";
     return { id: meter.id, name: meter.name, group: topGroupOf.get(meter.id) ?? place, perDay: meter.series ? perDayOf(kwh) : null, note, stopped: !!stopped, last };
   });
-  const stopped = meterRows.filter(row => row.stopped);
+  // Quiet but only using nothing when the readings were loaded (see AnalysisData.idleWhenQuiet): idle, not stopped.
+  const idleIds = new Set(data.idleWhenQuiet ?? []);
+  const stopped = meterRows.filter(row => row.stopped && !idleIds.has(row.id));
   const meterCount = meters.length || base.circuits.reduce((sum, circuit) => sum + circuit.meterIds.length, 0);
 
   // ---------- total energy ----------
@@ -310,7 +312,8 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
       ...(project.coverage != null ? [{ label: t("met.row.coverage"), value: t("met.coverageValue", { pct: pctText(project.coverage / 100) }) }] : []),
       { label: t("met.row.complete"), value: t("met.completeValue", { count: complete.length, days: dates.length }) },
     ],
-    meters: meterRows.map(({ id, name, group, perDay, note }) => ({ id, name, group, perDay, note })),
+    meters: meterRows.map(({ id, name, group, perDay, note, stopped: quiet, last }) => ({ id, name, group, perDay,
+      note: quiet && idleIds.has(id) ? last ? t("met.note.idle", { since: at(last.date, last.hour) }) : t("met.note.idleAll") : note })),
     notInUseNote: offCount ? t("met.notInUseText") : null,
   };
 

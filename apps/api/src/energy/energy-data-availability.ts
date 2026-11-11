@@ -24,7 +24,12 @@ const FLAT_ZERO_MIN_PERIOD_KWH = 1;
 const HOUR_MS = 3_600_000;
 
 export type DataAvailabilityMeterInput = { meterPointId: string; name: string; location?: string; notInUse?: string };
-export type DataAvailabilityStatus = "ok" | "below_target" | "stopped" | "no_readings" | "not_in_use";
+/**
+ * "idle": readings stopped arriving because the meter's total stopped moving, not because the meter stopped: the live
+ * check still finds it online. Tuya meters send their total only when it moves, so the readings alone cannot tell the
+ * two apart.
+ */
+export type DataAvailabilityStatus = "ok" | "below_target" | "stopped" | "idle" | "no_readings" | "not_in_use";
 export type DataAvailabilityCheck = { kind: "stuck_value" | "flat_zero"; from: string; to: string; hours: number; kwhPerHour: number };
 /** One site-local day of a meter: every reading arrived, some are missing (or only estimated), or none arrived. */
 export type DataAvailabilityDay = "all" | "some" | "none";
@@ -56,6 +61,8 @@ export type DataAvailabilityOutage = {
   estimatedKwh: number;
   /** Still going at the end of the period. */
   ongoing: boolean;
+  /** Still going, from a meter that is online but using nothing (see the "idle" status): quiet, not offline. */
+  idle?: true;
 };
 export type DataAvailabilitySummary = {
   targetPct: number;
@@ -143,6 +150,11 @@ export function summariseDataAvailability(input: {
   lastReadingAt: Map<string, string>;
   /** Start of each site-local day in the period (see localDayStarts), for the day-by-day strip. */
   dayStartsMs?: number[];
+  /**
+   * Meters whose quiet spell means they are using nothing: online now and able to rightly use nothing (see
+   * readIdleWhenQuietMeters). Left out, every quiet meter counts as stopped.
+   */
+  idleWhenQuiet?: ReadonlySet<string>;
 }): DataAvailabilitySummary {
   const periodMs = Math.max(1, input.toMs - input.fromMs);
   const byMeter = new Map<string, EnergyMeterIntervalCoverage[]>();
@@ -153,6 +165,10 @@ export function summariseDataAvailability(input: {
     const total = (kind: Segment["kind"]) => segments.filter(segment => segment.kind === kind).reduce((sum, segment) => sum + segment.end - segment.start, 0);
     const realMs = total("real"), estimatedMs = total("estimated"), missingMs = total("missing");
     const estimatedKwh = segments.filter(segment => segment.kind === "estimated").reduce((sum, segment) => sum + segment.kwh, 0);
+    const lastReadingAt = input.lastReadingAt.get(meter.meterPointId);
+    // Quiet since before the period's end: a meter that has sent readings before and can be idle now is using nothing.
+    const quiet = !lastReadingAt || Date.parse(lastReadingAt) < input.toMs - STOPPED_AFTER_MS;
+    const idle = quiet && !!lastReadingAt && !!input.idleWhenQuiet?.has(meter.meterPointId);
     // Neighbouring estimated and missing stretches are one outage.
     let longest = 0;
     let open: Segment[] = [];
@@ -165,6 +181,7 @@ export function summariseDataAvailability(input: {
         outages.push({
           meterPointId: meter.meterPointId, name: meter.name, from: iso(start), to: iso(end), hours: round((end - start) / HOUR_MS),
           kind: open.some(segment => segment.kind === "estimated") ? "estimated" : "missing", estimatedKwh: round(kwh, 2), ongoing: end >= input.toMs,
+          ...(idle && end >= input.toMs ? { idle: true as const } : {}),
         });
       }
       open = [];
@@ -174,12 +191,12 @@ export function summariseDataAvailability(input: {
       else open.push(segment);
     }
     flush();
-    const lastReadingAt = input.lastReadingAt.get(meter.meterPointId);
     const availabilityPct = round(realMs / periodMs * 100);
     const status: DataAvailabilityStatus = meter.notInUse ? "not_in_use"
-      : realMs === 0 && estimatedMs === 0 ? "no_readings"
-        : !lastReadingAt || Date.parse(lastReadingAt) < input.toMs - STOPPED_AFTER_MS ? "stopped"
-          : availabilityPct < DATA_AVAILABILITY_TARGET_PCT ? "below_target" : "ok";
+      : idle ? "idle"
+        : realMs === 0 && estimatedMs === 0 ? "no_readings"
+          : quiet ? "stopped"
+            : availabilityPct < DATA_AVAILABILITY_TARGET_PCT ? "below_target" : "ok";
     return {
       meterPointId: meter.meterPointId,
       name: meter.name,
@@ -208,7 +225,8 @@ export function summariseDataAvailability(input: {
       metersBelowTarget: counted.filter(meter => meter.availabilityPct < DATA_AVAILABILITY_TARGET_PCT).length,
       outageCount: listed.length,
       estimatedKwh: round(counted.reduce((sum, meter) => sum + meter.estimatedKwh, 0), 2),
-      checkCount: counted.reduce((sum, meter) => sum + meter.checks.length, 0),
+      // Readings that need a look: days of no use from a meter that is only using nothing (idle) are not among them.
+      checkCount: counted.reduce((sum, meter) => sum + meter.checks.filter(check => meter.status !== "idle" || check.kind !== "flat_zero").length, 0),
     },
     meters,
     outages: listed,

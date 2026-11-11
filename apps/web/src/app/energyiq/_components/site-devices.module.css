@@ -151,6 +151,7 @@
 .heatEmpty { background:repeating-linear-gradient(135deg,#f1f4f1 0 3px,#fff 3px 6px) !important; }
 .heatActive { outline:2px solid #1f2d25; outline-offset:1px; }
 .heatScale { display:inline-block; width:120px; height:10px; border-radius:5px; }
+.heatScaleLabel { font-weight:600; margin-right:4px; }
 .legendNote { margin:0 12px 0 8px; }
 
 /* All devices table */

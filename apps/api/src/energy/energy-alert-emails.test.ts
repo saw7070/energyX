@@ -80,6 +80,22 @@ describe("Alert emails", () => {
     });
   });
 
+  it("does not call a meter stopped when it is idle (online, and able to use nothing): it is using nothing, not broken", async () => {
+    await withMetadata(async (metadata) => {
+      // A pavilion fan that is rarely used: its total has not moved for a day, but Tuya still has it online.
+      const rows: MeterHealthRow[] = [
+        { meterPointId: "a", name: "Lobby lights", status: "usable", lastReadingAt: "2026-10-02T06:00:00.000Z" },
+        { meterPointId: "p", name: "Pavilion fan", status: "usable", lastReadingAt: "2026-10-01T05:00:00.000Z", idleWhenQuiet: true },
+      ];
+      expect(collectSiteAlertEmails({ metadataStore: metadata, projectId: TUYA_OFFICE_PROJECT_ID, meters: rows, publicBaseUrl: "" })
+        .filter((email) => email.key.startsWith("meters:"))).toEqual([]);
+      // With no live answer for it, the same silence is still reported.
+      const unknown = rows.map(({ idleWhenQuiet: _idle, ...row }) => row);
+      const emails = collectSiteAlertEmails({ metadataStore: metadata, projectId: TUYA_OFFICE_PROJECT_ID, meters: unknown, publicBaseUrl: "" });
+      expect(emails.find((email) => email.key.startsWith("meters:"))?.text).toContain("Pavilion fan");
+    });
+  });
+
   it("sends nothing when the site has no one to send to", async () => {
     await withMetadata(async (metadata) => {
       let sent = 0;
