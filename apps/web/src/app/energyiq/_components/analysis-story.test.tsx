@@ -114,4 +114,22 @@ describe("DecisionSummary", () => {
     expect(render(calm)).not.toContain("The load that never switches off costs");
     expect(render({ ...calm, alwaysOnByDesign: [] })).toContain("The load that never switches off costs about S$2,628 a year on its own.");
   });
+
+  it("never offers a light that came on and went off on time as a daytime saving", () => {
+    // A 2 kW lamp on at 18:45 and off at 07:15 every day: a quarter of an hour either side of 19:00–07:00, inside the
+    // 20-minute allowance. The report says no light was on in the daytime, so the steps below must agree.
+    const night = (hour: number) => hour >= 19 || hour < 7;
+    const lamp = (_date: string, hour: number) => night(hour) ? 2 : hour === 18 || hour === 7 ? 0.5 : 0;
+    const total = series("__scope__", lamp);
+    const kwh = total.cells.reduce((sum, cell) => sum + cell[2]!, 0);
+    const meters = [{ id: "carpark", name: "Carpark lamp", location: "Block A", category: "light" as const, official: true, series: series("carpark", lamp) }];
+    const estate = scope("estate", "Estate", { total, types: { light: series("__category__:light", lamp) }, meters, usageKwh: kwh, typeTotals: { light: kwh }, cost: { amount: kwh * 0.3, currency: "SGD", note: "0.3 SGD/kWh" } });
+    const nights = Object.fromEntries(["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].map(day => [day, [{ from: "19:00", to: "07:00" }]]));
+    const lightsData: AnalysisData = { ...data, projectName: "Estate", current: { project: estate, spaces: [{ ...estate, id: "block-a", name: "Block A" }] }, openingHours: nights, hoursMeaning: "lights_on" };
+    const markup = renderToStaticMarkup(<DecisionSummary data={lightsData} days={scopeDays(estate, lightsData.holidays)} anomalies={[]} floor={null} rate={0.3} />).replace(/<!-- -->/g, "");
+    expect(markup).toContain("No light was on in the daytime.");
+    expect(markup).not.toContain("Can likely be switched off");
+    expect(markup).not.toContain("Keep Carpark lamp off in the daytime");
+    expect(markup).not.toContain("Keep daytime use down to your own best level");
+  });
 });

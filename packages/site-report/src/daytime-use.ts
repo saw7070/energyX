@@ -46,6 +46,12 @@ export type DaytimeUse = {
   totalKwh: number;
   /** Meters that used power in the daytime, largest first (only those worth naming). */
   meters: DaytimeMeter[];
+  /**
+   * Every meter's daytime kWh as the rules count it, small amounts included, by meter id; always-on meters are not in
+   * it. What stays on in the daytime and the savings plan take each meter's figure from here (closedUseBreakdown), so
+   * a light the report calls on time is never offered as a saving.
+   */
+  byMeter: ReadonlyMap<string, number>;
   /** The always-on meters left out, as the readings name them. */
   alwaysOn: AlwaysOnMeter[];
 };
@@ -93,6 +99,7 @@ export function daytimeUse(data: AnalysisData, project: ScopeData = data.current
   const meters = standoutMeters([project, ...data.current.spaces]);
   let adjustment = 0;
   const named: DaytimeMeter[] = [];
+  const byMeter = new Map<string, number>();
   for (const meter of meters) {
     const series = meter.series!;
     // Each meter's own daytime by the hour, as in the site figure; replaced below by what the rules count.
@@ -114,6 +121,7 @@ export function daytimeUse(data: AnalysisData, project: ScopeData = data.current
       onAt.set(cell[1], (onAt.get(cell[1]) ?? new Set()).add(cell[0]));
     }
     adjustment += hourDaytime - counted;
+    if (!ids.has(meter.id)) byMeter.set(meter.id, counted);
     if (counted < DAYTIME_NAMED_MIN_KWH) continue;
     // The usual daytime hours: those it was on in on at least a third of its daytime days, so one odd hour does not stretch them.
     const usualHours = [...onAt].filter(([, on]) => on.size >= Math.max(1, Math.ceil(daysOn.size / 3))).map(([hour]) => hour);
@@ -122,5 +130,5 @@ export function daytimeUse(data: AnalysisData, project: ScopeData = data.current
   const kwh = Math.max(0, siteDaytime - adjustment);
   const alwaysOn = (data.alwaysOnByDesign ?? []).filter(item => meters.some(meter => meter.id === item.id) || project.meters.some(meter => meter.id === item.id))
     .map(item => ({ id: item.id, name: meters.find(meter => meter.id === item.id)?.name ?? item.name }));
-  return { kwh, share: totalKwh > 0 ? kwh / totalKwh : null, totalKwh, meters: named.sort((a, b) => b.kwh - a.kwh || a.name.localeCompare(b.name)), alwaysOn };
+  return { kwh, share: totalKwh > 0 ? kwh / totalKwh : null, totalKwh, meters: named.sort((a, b) => b.kwh - a.kwh || a.name.localeCompare(b.name)), byMeter, alwaysOn };
 }

@@ -79,8 +79,11 @@ function buildStory({ data, days, anomalies, floor, rate }: StoryInput, locale: 
   const alwaysOn = alwaysOnKw(project, quietHours(hours, meaning));
   const byDesignKw = alwaysOnByDesignKw(data, quietHours(hours, meaning));
   const benchmark = floor?.bestKw ?? alwaysOn;
-  const aboveBenchmark = benchmark != null ? aboveBenchmarkWhenClosed(project, days, hours, benchmark, meaning) : null;
-  const closedUse = closedUseBreakdown(project, data.current.spaces, data.holidays, hours, locale, meaning, alwaysOnByDesignIds(data));
+  // Lights-on hours: never more than the daytime use the rules count, and each meter's daytime use by the same rules,
+  // so a light the report calls on time is not offered as a saving here.
+  const rawAbove = benchmark != null ? aboveBenchmarkWhenClosed(project, days, hours, benchmark, meaning) : null;
+  const aboveBenchmark = rawAbove != null && daytime ? Math.min(rawAbove, daytime.kwh) : rawAbove;
+  const closedUse = closedUseBreakdown(project, data.current.spaces, data.holidays, hours, locale, meaning, alwaysOnByDesignIds(data), daytime?.byMeter);
   const plan = savingsPlan({ projectName: data.projectName, closedUse, closedHoursPerYear, rate, currency, aboveBenchmarkKwh: aboveBenchmark, benchmarkKw: benchmark, periodDays: days.length, anomalies, actions: data.actions, meaning }, locale);
   const counted = plan.filter(item => item.counted);
   const periodCost = project.cost?.amount ?? null;

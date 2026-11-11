@@ -96,6 +96,24 @@ describe("the 20-minute allowance either side of the lights-on hours", () => {
       "Lamp on at half past six: on 6–7 pm on 14 days, 8.4 kWh",
     ]);
   });
+
+  it("never offers a light that is on time as a daytime saving, in Analysis or the management review", () => {
+    // A 2 kW lamp on at 18:45 and off at 07:15 (0.5 kWh in each hour next to the set hours): on time.
+    const onTime = estate({ carpark: { name: "Carpark lamp", group: "Block A", kwh: (_date, hour) => night(hour) ? 2 : hour === 18 || hour === 7 ? 0.5 : 0 } });
+    expect(buildSiteReport(onTime, null, "2026-09-22T10:00:00Z").daytime!.none).toBe("No light was on in the daytime.");
+    const use = daytimeUse(onTime);
+    expect(use.byMeter.get("carpark")).toBe(0);
+    const closedUse = (data: AnalysisData) => closedUseBreakdown(data.current.project, data.current.spaces, data.holidays, NIGHTS, "en", "lights_on", new Set(), daytimeUse(data).byMeter);
+    const plan = (data: AnalysisData) => savingsPlan({ projectName: "Block Estate", closedUse: closedUse(data), closedHoursPerYear: 4380, rate: 0.3, currency: "SGD", aboveBenchmarkKwh: null, benchmarkKw: null, periodDays: 14, anomalies: [], actions: [], meaning: "lights_on" });
+    expect(closedUse(onTime)).toEqual([]);
+    expect(plan(onTime)).toEqual([]);
+    expect(buildManagementReview(onTime, null, "2026-09-22T10:00:00Z").savings.rows.map(row => row.title)).not.toContain("Keep Carpark lamp off in the daytime");
+    // Off at 07:30 instead is late: the whole of 07:00–08:00 (1 kWh a day) is daytime use, and still a saving.
+    const late = estate({ carpark: { name: "Carpark lamp", group: "Block A", kwh: (_date, hour) => night(hour) ? 2 : hour === 18 ? 0.5 : hour === 7 ? 1 : 0 } });
+    expect(closedUse(late)[0]).toMatchObject({ id: "carpark", closedKwh: 14 });
+    expect(plan(late).map(item => item.title)).toEqual(["Keep Carpark lamp off in the daytime"]);
+    expect(buildManagementReview(late, null, "2026-09-22T10:00:00Z").savings.rows.map(row => row.title)).toContain("Keep Carpark lamp off in the daytime");
+  });
 });
 
 describe("meters that are always on by design", () => {

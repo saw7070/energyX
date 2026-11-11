@@ -228,11 +228,14 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
 
   // ---------- saving energy ----------
   const split = timeBuckets(project, days, data.openingHours, meaning);
-  // Lights-on hours: daytime use as the full report counts it (always-on meters left out, 20 minutes allowed).
-  const closedShare = lighting ? daytimeUse(data, project).share : split.total > 0 ? split.closedKwh / split.total : null;
+  // Lights-on hours: daytime use as the full report counts it (always-on meters left out, 20 minutes allowed), for the
+  // share and for each meter in the savings plan, so a light the report calls on time is never offered as a saving.
+  const daytime = lighting ? daytimeUse(data, project) : null;
+  const closedShare = daytime ? daytime.share : split.total > 0 ? split.closedKwh / split.total : null;
   const alwaysOn = alwaysOnKw(project, quietHours(data.openingHours, meaning));
-  const above = alwaysOn != null ? aboveBenchmarkWhenClosed(project, days, data.openingHours, alwaysOn, meaning) : null;
-  const closedUse = closedUseBreakdown(project, data.current.spaces, data.holidays, data.openingHours, locale, meaning, alwaysOnByDesignIds(data));
+  const rawAbove = alwaysOn != null ? aboveBenchmarkWhenClosed(project, days, data.openingHours, alwaysOn, meaning) : null;
+  const above = rawAbove != null && daytime ? Math.min(rawAbove, daytime.kwh) : rawAbove;
+  const closedUse = closedUseBreakdown(project, data.current.spaces, data.holidays, data.openingHours, locale, meaning, alwaysOnByDesignIds(data), daytime?.byMeter);
   const plan = savingsPlan({
     projectName: data.projectName, closedUse, closedHoursPerYear: split.closedShareOfHours * 8760, rate, currency,
     aboveBenchmarkKwh: above, benchmarkKw: alwaysOn, periodDays: days.length, anomalies: findAnomalies(days, dayTypeBaselines(days)), actions: [], meaning,

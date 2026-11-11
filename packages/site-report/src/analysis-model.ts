@@ -371,13 +371,19 @@ export function lowestNightKw(series: TrendSeries | null | undefined, quiet: rea
 /**
  * What keeps using energy while the site is closed (in the daytime, for lights-on hours): each circuit inside each
  * space, or each meter type when there is no circuit detail. Meters in `alwaysOnByDesign` are marked `byDesign`.
+ *
+ * Lights-on hours: pass `daytimeKwh`, each meter's daytime kWh from daytimeUse (daytime-use.ts), so a meter's daytime
+ * use follows the same rules as the site report's (the 20-minute allowance, small amounts and estimated readings left
+ * out). A light that came on and went off on time then has no daytime use here either, so it is never offered as a
+ * saving. Without it, every kWh outside the hours counts.
  */
-export function closedUseBreakdown(project: ScopeData, spaces: ScopeData[], holidays: Map<string, string>, hours: HoursByDay | null, locale: EnergyIqLocale = "en", meaning: HoursMeaning = "opening", alwaysOnByDesign: ReadonlySet<string> = new Set()): ClosedUse[] {
+export function closedUseBreakdown(project: ScopeData, spaces: ScopeData[], holidays: Map<string, string>, hours: HoursByDay | null, locale: EnergyIqLocale = "en", meaning: HoursMeaning = "opening", alwaysOnByDesign: ReadonlySet<string> = new Set(), daytimeKwh?: ReadonlyMap<string, number>): ClosedUse[] {
   const open = effectiveHours(hours, meaning);
   const t = analysisText(locale);
   const quiet = quietHours(hours, meaning);
   const options: BucketOptions = { meaning, dayTypeOf: date => localDayType(date, holidays).dayType };
-  const measure = (series: TrendSeries | null | undefined) => {
+  /** `ruled`: the meter's daytime kWh by the daytime rules, in place of every kWh outside the hours. */
+  const measure = (series: TrendSeries | null | undefined, ruled?: number) => {
     const lowestKw = lowestNightKw(series, quiet);
     let totalKwh = 0, closedKwh = 0, closedHours = 0, aboveLowestKwh = 0;
     for (const cell of series?.cells ?? []) {
@@ -388,18 +394,23 @@ export function closedUseBreakdown(project: ScopeData, spaces: ScopeData[], holi
         if (lowestKw != null) aboveLowestKwh += Math.max(0, cell[2] - lowestKw);
       }
     }
+    // What the rules count never adds to more than they allow: the part above its quietest level is capped by it too.
+    if (ruled != null) { closedKwh = ruled; aboveLowestKwh = Math.min(aboveLowestKwh, ruled); }
     return { totalKwh, closedKwh, closedHours, closedKw: closedHours ? closedKwh / closedHours : 0, lowestKw, aboveLowestKwh };
   };
+  // Meters always on by design keep every kWh outside the hours: they are shown as always on, never as a saving.
+  const ruledFor = (id: string) => meaning === "lights_on" && !alwaysOnByDesign.has(id) ? daytimeKwh?.get(id) : undefined;
   const rows: ClosedUse[] = [];
   for (const space of spaces) {
     const withSeries = space.meters.filter(meter => meter.series && meter.category !== "overall");
     const subMeters = withSeries.filter(meter => !meter.official);
     const chosen = subMeters.length ? subMeters : withSeries;
-    for (const meter of chosen) rows.push({ id: meter.id, name: meter.name, space: space.name, category: meter.category, kind: "circuit", essential: ESSENTIAL.test(meter.name), ...measure(meter.series), ...(alwaysOnByDesign.has(meter.id) ? { byDesign: true } : {}) });
+    for (const meter of chosen) rows.push({ id: meter.id, name: meter.name, space: space.name, category: meter.category, kind: "circuit", essential: ESSENTIAL.test(meter.name), ...measure(meter.series, ruledFor(meter.id)), ...(alwaysOnByDesign.has(meter.id) ? { byDesign: true } : {}) });
     if (subMeters.length) {
-      // Energy in the space that no sub-meter explains, so the list still adds up to the space total.
+      // Energy in the space that no sub-meter explains, so the list still adds up to the space total. Worked out from
+      // every kWh outside the hours, as the space total is: the daytime rules need a meter's own readings.
       const whole = measure(space.total);
-      const covered = rows.filter(row => row.space === space.name);
+      const covered = chosen.map(meter => measure(meter.series));
       const rest = { totalKwh: whole.totalKwh - covered.reduce((sum, row) => sum + row.totalKwh, 0), closedKwh: whole.closedKwh - covered.reduce((sum, row) => sum + row.closedKwh, 0) };
       if (rest.closedKwh > whole.closedKwh * 0.05) rows.push({ id: `${space.id}:rest`, name: t("closed.rest", { space: space.name }), space: space.name, category: "other", kind: "remainder", essential: false, ...rest, closedHours: whole.closedHours, closedKw: whole.closedHours ? rest.closedKwh / whole.closedHours : 0, lowestKw: null, aboveLowestKwh: 0 });
     }
