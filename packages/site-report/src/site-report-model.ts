@@ -10,7 +10,7 @@ import type { ProjectSpatialReference } from "@datafoundry/contracts";
 import type { AnalysisData, ScopeData, ScopeMeter, TrendSeries } from "./analysis-types.js";
 import { alwaysOnKw, effectiveHours, hoursRangeLabel, isOvernight, localDayType, openWindowStart, quietHours, scopeDays, shortDate, timeBuckets, weekdayShort, type AnalysisCategory, type AnalysisDay, type HoursMeaning } from "./analysis-model.js";
 import { listText } from "./analysis-messages.js";
-import { forHoursMeaning, translatorFor, type EnergyIqLocale, type Translate } from "./locale.js";
+import { forHoursMeaning, forOneDay, translatorFor, type EnergyIqLocale, type Translate } from "./locale.js";
 import { formatPeriod } from "./report-period.js";
 import { analysisGroupTree, biggestMeterGroup, flattenMeterGroups, type MeterGroupNode, type MeterGroupTree } from "./meter-groups.js";
 import { DAY_PARTS, siteReportModelMessages, type SiteReportModelKey } from "./site-report-model-messages.js";
@@ -18,9 +18,10 @@ import { notInUseIds, withMetersInUse } from "./meters-in-use.js";
 import { standoutReport, type StandoutReport } from "./standout-report.js";
 
 type T = Translate<SiteReportModelKey>;
-const modelText = (locale: EnergyIqLocale) => translatorFor(siteReportModelMessages, locale);
+/** The report's wording; `oneDay` picks the "day." variant of a sentence for a report on a single day. */
+const modelText = (locale: EnergyIqLocale, oneDay = false) => forOneDay(translatorFor(siteReportModelMessages, locale), siteReportModelMessages, oneDay);
 /** The same wording, using the "lights." variant of a sentence when the hours are lights-on hours. */
-const hoursText = (locale: EnergyIqLocale, meaning: HoursMeaning) => forHoursMeaning(modelText(locale), siteReportModelMessages, meaning);
+const hoursText = (locale: EnergyIqLocale, meaning: HoursMeaning, oneDay = false) => forHoursMeaning(modelText(locale, oneDay), siteReportModelMessages, meaning);
 /** For lights-on hours, a daytime share at or above this is worth a warning headline; below it the lights ran as planned. */
 export const DAYTIME_NOTABLE_SHARE = 0.1;
 
@@ -259,7 +260,9 @@ function street(address: string) {
 
 // ---------- the report ----------
 export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpatialReference | null, generatedAt = new Date().toISOString(), locale: EnergyIqLocale = "en"): SiteReport {
-  const t = modelText(locale), en = locale === "en";
+  // A daily report covers one day: its sentences say "on this day" rather than "over 1 days".
+  const oneDay = data.current.project.dates.length === 1;
+  const t = modelText(locale, oneDay), en = locale === "en";
   const list = (items: string[]) => listText(items, locale);
   const count = (n: number) => numberWord(n, locale);
   const paragraph = (parts: string[]) => sentences(parts, locale);
@@ -275,7 +278,7 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   // Lights-on hours: lighting that should run at night, so use outside the hours is daytime use, on every day.
   const meaning: HoursMeaning = data.hoursMeaning ?? "opening";
   const lighting = meaning === "lights_on";
-  const lt = hoursText(locale, meaning);
+  const lt = hoursText(locale, meaning, oneDay);
   const hours = effectiveHours(data.openingHours, meaning);
   const hoursPublished = hours === data.openingHours;
   const dayOf = new Map(days.map(day => [day.date, day]));
@@ -293,6 +296,10 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const siteName = t(new RegExp(`\\b${siteWord}\\b`, "i").test(data.projectName) ? "siteName.named" : "siteName.withWord", { name: data.projectName, site });
   const tzLabel = data.timezone === "Asia/Singapore" ? "SGT" : data.timezone;
   const totalKwh = project.usageKwh ?? periodSum(project.total, dateSet);
+  // A daily report whose readings did not all arrive says so up front, so nobody reads part of a day as the whole day.
+  const received = (project.total?.cells ?? []).some(cell => dateSet.has(cell[0]) && (cell[2] != null || cell[3] > 0));
+  const noReadings = oneDay && !received;
+  const partDay = oneDay && received && !days[0]?.complete;
 
   // Days, averages and base load. Public holidays count with weekends as closed days.
   const reportDays: ReportDay[] = days.map(day => ({ date: day.date, dow: weekdayOf(day.date, locale), kwh: day.totalKwh, dayType: day.dayType, holidayName: day.holidayName, complete: day.complete }));
@@ -304,7 +311,9 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const readingHours = (project.total?.cells ?? []).filter(cell => dateSet.has(cell[0]) && cell[2] != null).length;
   const baseShare = baseKw != null && totalKwh > 0 ? Math.min(1, baseKw * readingHours / totalKwh) : null;
   const buckets = timeBuckets(project, days, data.openingHours, meaning);
-  const closedShare = buckets.total > 0 ? buckets.closedKwh / buckets.total : null;
+  // A part day misses some hours, often the evening's, which would skew the share used outside the hours (a lit estate
+  // would look as if it ran in the daytime): it is not worked out, and the lede and headline say nothing about it.
+  const closedShare = !partDay && buckets.total > 0 ? buckets.closedKwh / buckets.total : null;
   const daytimeNotable = lighting && closedShare != null && closedShare >= DAYTIME_NOTABLE_SHARE;
 
   // Circuits, largest first
@@ -339,12 +348,18 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   }).sort((a, b) => b.monthKwh - a.monthKwh);
   const monthKwh = raw.reduce((sum, circuit) => sum + circuit.monthKwh, 0);
   const monthCost = cost(monthKwh);
+  // A month can only be estimated from meters with at least one full day of readings.
+  const estimated = raw.some(circuit => circuit.weekdayPerDay != null || circuit.weekendPerDay != null);
+  // Meters that sent nothing at all on a daily report's day; meters marked not in use are meant to be silent.
+  const offIds = notInUseIds(data);
+  const silent = partDay ? raw.flatMap(circuit => circuit.meters).filter(meter => !offIds.has(meter.id) && !meter.series?.cells.some(cell => dateSet.has(cell[0]) && (cell[2] != null || cell[3] > 0))).map(meter => meter.name) : [];
   const circuits: ReportCircuit[] = raw.map((circuit, index) => {
     // Lights run every night, so every day counts for switching on and off on time.
     const screen = screenCircuit(circuit, { dates, weekdayDates: lighting ? dates : weekdayDates, isOpen, openRange, locale, meaning });
     return {
       key: circuit.key, name: circuit.name, code: circuit.code, codes: circuit.meters.map(meter => meter.name), label: circuit.zone ? t("circuit.inZone", { name: circuit.name, zone: zoneName(circuit.zone) }) : circuit.name, board: circuit.board, zone: circuit.zone, category: circuit.category, meterIds: circuit.meters.map(meter => meter.id),
-      weekdayPerDay: circuit.weekdayPerDay, weekendPerDay: circuit.weekendPerDay, periodKwh: circuit.periodKwh, monthKwh: circuit.monthKwh, monthCost: cost(circuit.monthKwh),
+      weekdayPerDay: circuit.weekdayPerDay, weekendPerDay: circuit.weekendPerDay, periodKwh: circuit.periodKwh, monthKwh: circuit.monthKwh,
+      monthCost: circuit.weekdayPerDay == null && circuit.weekendPerDay == null ? null : cost(circuit.monthKwh),
       share: monthKwh > 0 ? circuit.monthKwh / monthKwh : 0, openBase: circuit.openBase, closedBase: circuit.closedBase,
       ratio: circuit.openBase && circuit.closedBase != null ? circuit.closedBase / circuit.openBase : null, hours: circuit.cells.size, gapDays: circuit.gapDays,
       // Brand orange for the largest load, then a fixed order, as in the reference report; every slice is also labelled.
@@ -362,9 +377,11 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
       direction: zone.directionFromEntrance ?? null, rooms, circuitKeys: own.map(circuit => circuit.key), monthKwh: own.reduce((sum, circuit) => sum + circuit.monthKwh, 0), periodKwh: own.reduce((sum, circuit) => sum + circuit.periodKwh, 0),
       share: 0, alwaysOn: own.length > 0 && own.every(circuit => circuit.flat), colour: validColour((zone as { colour?: unknown }).colour) ?? chosenColour(zone.referenceBoard) ?? ZONE_PALETTE[index % ZONE_PALETTE.length]! };
   }) : spacesAsZones(raw.map((circuit, index) => ({ space: circuit.space, circuit: circuits[index]! })));
-  const zoneTotal = zoneList.reduce((sum, zone) => sum + zone.monthKwh, 0);
-  for (const zone of zoneList) zone.share = zoneTotal > 0 ? zone.monthKwh / zoneTotal : 0;
-  const zones = zoneList.filter(zone => zone.monthKwh > 0 || zone.rect);
+  // With no month estimated (no meter has a full day of readings), locations are weighed by what they measured instead.
+  const zoneKwh = (zone: ReportZone) => estimated ? zone.monthKwh : zone.periodKwh;
+  const zoneTotal = zoneList.reduce((sum, zone) => sum + zoneKwh(zone), 0);
+  for (const zone of zoneList) zone.share = zoneTotal > 0 ? zoneKwh(zone) / zoneTotal : 0;
+  const zones = zoneList.filter(zone => zoneKwh(zone) > 0 || zone.rect);
   const parentZone = (zone: ReportZone) => zones.find(item => !item.subgroup && zone.parentRoom && item.rooms.includes(zone.parentRoom));
   // Groups: the meters filed by what they serve. When the readings carry them, the profile, the shares and the
   // comparison follow the groups, wherever each meter is wired from; a floor layout is then only a drawing.
@@ -376,13 +393,17 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const place = [property?.address ? street(property.address) : null, property?.level !== undefined ? t("level", { level: property.level }) : null].filter(Boolean).join(", ");
   const periodText = dates.length ? formatPeriod(dates[0]!, dates.at(-1)!, locale) : "";
   const circuitCount = circuits.reduce((sum, circuit) => sum + circuit.meterIds.length, 0);
-  const lede = paragraph([
+  const coverage = project.coverage;
+  const lede = noReadings ? t("day.none.lede") : paragraph([
     t(circuitCount === 1 ? "lede.drew.one" : "lede.drew.other", { days: dates.length, site, kwh: kwhText(totalKwh), count: circuitCount }),
     // Lights-on hours: night use is the point, so only notable daytime use is a finding.
-    lighting ? daytimeNotable ? t("lights.lede.daytime", { pct: pctText(closedShare!) }) : t("lights.lede.night")
+    lighting ? closedShare == null ? "" : daytimeNotable ? t("lights.lede.daytime", { pct: pctText(closedShare) }) : t("lights.lede.night")
       : baseKw != null && baseShare != null && baseShare >= 0.5 ? t("lede.idles", { kw: kwText(baseKw) })
-      : closedShare != null && closedShare >= 0.4 ? t("lede.closed", { pct: pctText(closedShare), site })
+      : closedShare == null ? ""
+      : closedShare >= 0.4 ? t("lede.closed", { pct: pctText(closedShare), site })
       : t("lede.working"),
+    partDay ? coverage != null && coverage < 100 ? t("day.missing.lede", { pct: pctText(coverage / 100) }) : t("day.missing.ledePlain") : "",
+    silent.length ? t(silent.length === 1 ? "day.missing.silent.one" : "day.missing.silent.other", { names: list(silent) }) : "",
   ]);
   const keyFigures = [
     { value: kwhText(totalKwh), label: t("kf.total", { days: dates.length }) },
@@ -417,15 +438,16 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
     : captionPlace });
 
   // ---------- 2. 30-day estimate ----------
-  const ranked = [...zones].sort((a, b) => b.monthKwh - a.monthKwh);
+  const ranked = [...zones].sort((a, b) => zoneKwh(b) - zoneKwh(a));
   const largest = circuits[0];
   const flatCircuit = circuits.find(circuit => circuit.flat && circuit !== largest);
   const cheaper = flatCircuit && circuits.find(circuit => circuit.monthKwh < flatCircuit.monthKwh && circuit.zone !== flatCircuit.zone && !circuit.flat);
   const plural = isPlural;
   const comparison = paragraph([
-    groups ? groups.top.length > 1 ? t("cmp.hungriestGroup", { zone: groups.top[0]!.name, pct: pctText(groups.top[0]!.share), others: list(groups.top.slice(1).map(group => t("cmp.otherZone", { zone: group.name, pct: pctText(group.share) }))) }) : ""
-    : ranked.length > 1 ? t("cmp.hungriest", { zone: ranked[0]!.label, pct: pctText(ranked[0]!.share), others: list(ranked.slice(1).map(zone => t("cmp.otherZone", { zone: zone.label, pct: pctText(zone.share) }))) }) : "",
-    largest ? t(plural(largest) ? "cmp.largest.other" : "cmp.largest.one", { name: inl(largest.name), pct: pctText(largest.share), rest: flatCircuit?.monthCost != null
+    groups ? groups.top.length > 1 && groups.top[0]!.kwh > 0 ? t("cmp.hungriestGroup", { zone: groups.top[0]!.name, pct: pctText(groups.top[0]!.share), others: list(groups.top.slice(1).map(group => t("cmp.otherZone", { zone: group.name, pct: pctText(group.share) }))) }) : ""
+    // Shares of the month's energy, or of the energy measured when no month is estimated.
+    : ranked.length > 1 ? t(estimated ? "cmp.hungriest" : "cmp.hungriestGroup", { zone: ranked[0]!.label, pct: pctText(ranked[0]!.share), others: list(ranked.slice(1).map(zone => t("cmp.otherZone", { zone: zone.label, pct: pctText(zone.share) }))) }) : "",
+    largest && estimated ? t(plural(largest) ? "cmp.largest.other" : "cmp.largest.one", { name: inl(largest.name), pct: pctText(largest.share), rest: flatCircuit?.monthCost != null
       ? t(plural(flatCircuit) ? "cmp.flat.other" : "cmp.flat.one", { name: theName(flatCircuit.label), cost: money(flatCircuit.monthCost), more: cheaper ? t("cmp.more", { name: inl(cheaper.label) }) : "" })
       : t("cmp.end") }) : "",
   ]);
@@ -436,7 +458,7 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const zoneBoard = (zone: ReportZone, withEquipment = false) => t(withEquipment && zone.equipment ? "caption.zoneBoardEquipment" : "caption.zoneBoard", { zone: zone.label, board: zone.board, equipment: zone.equipment ?? "" });
   const estimate = {
     monthKwh, monthCost,
-    intro: paragraph([t("est.intro", { kwh: kwhText(monthKwh) }), monthCost != null ? t("est.bill", { rate: rateLabel ?? "", cost: money(monthCost) }) : t("est.noRate")]),
+    intro: estimated ? paragraph([t("est.intro", { kwh: kwhText(monthKwh) }), monthCost != null ? t("est.bill", { rate: rateLabel ?? "", cost: money(monthCost) }) : t("est.noRate")]) : t("est.none"),
     comparison,
     spaceCaption: groups ? t("caption.groupShares") : subgroupZones.length ? t("caption.split", {
       zones: list(subgroupZones.map(zone => zoneBoard(zone, true))),
@@ -452,27 +474,31 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   };
 
   // ---------- 3. benchmark ----------
-  const closeToWeekend = baseDayKwh != null && weekendAvg != null && Math.abs(weekendAvg - baseDayKwh) / baseDayKwh <= 0.08;
+  // One day is not an average of anything: a one-day report shows the day itself and what never switches off.
+  const benchWeekdayAvg = oneDay ? null : weekdayAvg;
+  const benchWeekendAvg = oneDay ? null : weekendAvg;
+  const closeToWeekend = baseDayKwh != null && benchWeekendAvg != null && Math.abs(benchWeekendAvg - baseDayKwh) / baseDayKwh <= 0.08;
   const baseMonthKwh = baseKw == null ? null : baseKw * 720;
   const baseMonthCost = baseMonthKwh == null ? null : cost(baseMonthKwh);
   const benchmarkRows = [
-    weekdayAvg != null ? { label: t("bench.weekday"), rate: t("bench.avg", { kw: kwText(weekdayAvg / 24) }), perDay: kwhText(weekdayAvg), perMonth: "—", cost: rate != null ? t("bench.perDay", { cost: money(weekdayAvg * rate, 2) }) : "—", hot: false } : null,
-    weekendAvg != null ? { label: t("bench.weekend"), rate: t("bench.avg", { kw: kwText(weekendAvg / 24) }), perDay: kwhText(weekendAvg), perMonth: "—", cost: rate != null ? t("bench.perDay", { cost: money(weekendAvg * rate, 2) }) : "—", hot: false } : null,
+    benchWeekdayAvg != null ? { label: t("bench.weekday"), rate: t("bench.avg", { kw: kwText(benchWeekdayAvg / 24) }), perDay: kwhText(benchWeekdayAvg), perMonth: "—", cost: rate != null ? t("bench.perDay", { cost: money(benchWeekdayAvg * rate, 2) }) : "—", hot: false } : null,
+    benchWeekendAvg != null ? { label: t("bench.weekend"), rate: t("bench.avg", { kw: kwText(benchWeekendAvg / 24) }), perDay: kwhText(benchWeekendAvg), perMonth: "—", cost: rate != null ? t("bench.perDay", { cost: money(benchWeekendAvg * rate, 2) }) : "—", hot: false } : null,
     baseKw != null ? { label: t("bench.base"), rate: kwText(baseKw), perDay: kwhText(baseDayKwh!), perMonth: kwhText(baseMonthKwh!), cost: baseMonthCost != null ? t("bench.perMonth", { cost: money(baseMonthCost) }) : "—", hot: true } : null,
   ].filter((row): row is NonNullable<typeof row> => !!row);
   const baseBillShare = baseMonthKwh != null && monthKwh > 0 ? Math.min(1, baseMonthKwh / monthKwh) : null;
   const benchmark = {
-    days: reportDays, weekdayAvg, weekendAvg, baseKw, baseDayKwh, closeToWeekend, rows: benchmarkRows,
-    intro: weekdayAvg != null && baseKw != null
+    days: reportDays, weekdayAvg: benchWeekdayAvg, weekendAvg: benchWeekendAvg, baseKw, baseDayKwh, closeToWeekend, rows: benchmarkRows,
+    intro: benchWeekdayAvg != null && baseKw != null
       ? paragraph([
-        t(weekendAvg != null ? "bench.intro" : "bench.introNoWeekend", { weekday: kwhText(weekdayAvg), weekend: weekendAvg != null ? kwhText(weekendAvg) : "", kw: kwText(baseKw), day: kwhText(baseDayKwh!) }),
-        closeToWeekend ? t("bench.same") : weekendAvg != null ? t("bench.weekendsAdd", { kwh: kwhText(Math.max(0, weekendAvg - baseDayKwh!)) }) : "",
+        t(benchWeekendAvg != null ? "bench.intro" : "bench.introNoWeekend", { weekday: kwhText(benchWeekdayAvg), weekend: benchWeekendAvg != null ? kwhText(benchWeekendAvg) : "", kw: kwText(baseKw), day: kwhText(baseDayKwh!) }),
+        closeToWeekend ? t("bench.same") : benchWeekendAvg != null ? t("bench.weekendsAdd", { kwh: kwhText(Math.max(0, benchWeekendAvg - baseDayKwh!)) }) : "",
       ])
       : t("bench.none"),
     caption: paragraph([
       t("cap.daily"),
-      weekdayAvg != null ? t("cap.solidValue", { kwh: kwhText(weekdayAvg) }) : t("cap.solid"),
-      t("cap.dashed", { value: baseKw != null ? t("cap.dashedValue", { kw: kwText(baseKw), day: kwhText(baseDayKwh!) }) : "", same: closeToWeekend && weekendAvg != null ? t("cap.sameAsWeekend", { kwh: kwhText(weekendAvg) }) : "" }),
+      // A one-day chart has no average line to describe.
+      oneDay ? "" : benchWeekdayAvg != null ? t("cap.solidValue", { kwh: kwhText(benchWeekdayAvg) }) : t("cap.solid"),
+      t("cap.dashed", { value: baseKw != null ? t("cap.dashedValue", { kw: kwText(baseKw), day: kwhText(baseDayKwh!) }) : "", same: closeToWeekend && benchWeekendAvg != null ? t("cap.sameAsWeekend", { kwh: kwhText(benchWeekendAvg) }) : "" }),
       t("cap.paler"),
     ]),
     outro: baseMonthKwh == null || baseBillShare == null ? ""
@@ -524,13 +550,18 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const headlineTopic: HeadlineTopic = lighting ? daytimeNotable ? "daytime" : "night"
     : baseBillShare != null && baseBillShare >= 0.5 && baseMonthCost != null && monthCost != null ? "always-on"
     : closedShare != null && closedShare >= 0.4 ? "after-hours" : "working-hours";
+  const title = noReadings ? { before: t("day.none.title"), emphasis: t("day.none.titleEmphasis") }
+    : partDay ? { before: t("day.missing.title"), emphasis: t("day.missing.titleEmphasis") }
+    : lighting ? lightsHeadline(closedShare, daytimeNotable, lt) : headline(site, baseShare, closedShare, t);
   const generatedDay = generatedAt.slice(0, 10);
   return {
     locale, hoursMeaning: meaning, projectName: data.projectName, siteWord, timezone: data.timezone, tzLabel, from: dates[0] ?? "", to: dates.at(-1) ?? "", dayCount: dates.length, generatedAt,
     currency, rate, rateLabel,
     masthead: { site: data.projectName, detail: [place, t(`mast.report.${siteWord}`)].filter(Boolean).join(" · "), period: periodText, periodNote: t("mast.periodNote", { days: dates.length, tz: tzLabel }) },
-    title: lighting ? lightsHeadline(closedShare, daytimeNotable, lt) : headline(site, baseShare, closedShare, t), lede, keyFigures,
-    headline: headlineTopic === "daytime" ? t(rate != null ? "lights.head.daytimeCost" : "lights.head.daytime", { pct: pctText(closedShare!), cost: rate != null ? money(buckets.closedKwh * rate * 30 / Math.max(dates.length, 1)) : "" })
+    title, lede, keyFigures,
+    // A day with readings missing, or none at all, says only that: nothing is read into part of a day.
+    headline: noReadings || partDay ? `${title.before}${title.emphasis}`
+      : headlineTopic === "daytime" ? t(rate != null ? "lights.head.daytimeCost" : "lights.head.daytime", { pct: pctText(closedShare!), cost: rate != null ? money(buckets.closedKwh * rate * 30 / Math.max(dates.length, 1)) : "" })
       : headlineTopic === "night" ? t("lights.head.night")
       : headlineTopic === "always-on" ? t("head.alwaysOn", { base: money(baseMonthCost), month: money(monthCost) })
       : headlineTopic === "after-hours" ? t(rate != null ? "head.closedCost" : "head.closed", { pct: pctText(closedShare!), cost: rate != null ? money(buckets.closedKwh * rate * 30 / Math.max(dates.length, 1)) : "" })
@@ -739,9 +770,11 @@ function weekdayPattern(input: { project: ScopeData; days: AnalysisDay[]; openRa
  * how much of the day's use falls inside the lights-on hours. `weekdayCount` holds the number of days averaged.
  */
 function lightsPattern(input: { project: ScopeData; days: AnalysisDay[]; openRange: { from: number; to: number }; published: string | null; locale: EnergyIqLocale }): SiteReport["pattern"] {
-  const { locale, openRange } = input, t = modelText(locale);
+  // A daily report draws its one day, when that day is complete; a longer report averages three days or more.
+  const oneDay = input.days.length === 1;
+  const { locale, openRange } = input, t = modelText(locale, oneDay);
   const complete = input.days.filter(day => day.complete).map(day => day.date);
-  if (complete.length < 3 || !input.project.total) return null;
+  if (complete.length < (oneDay ? 1 : 3) || !input.project.total) return null;
   const cells = completeCells(input.project.total, new Set(complete));
   const profile = Array.from({ length: 24 }, (_, hour) => mean(complete.map(date => cells.get(cellKey(date, hour))).filter((value): value is number => value !== undefined)) ?? 0);
   const low = Math.min(...profile), high = Math.max(...profile);
@@ -770,7 +803,10 @@ function lightsPattern(input: { project: ScopeData; days: AnalysisDay[]; openRan
 type ScreenInput = { name: string; category: AnalysisCategory | "overall"; cells: Cells; perMeter: Cells[]; openBase: number | null; closedBase: number | null; meters: ScopeMeter[] };
 function screenCircuit(circuit: ScreenInput, context: { dates: string[]; weekdayDates: string[]; isOpen: (date: string, hour: number) => boolean; openRange: { from: number; to: number }; locale: EnergyIqLocale; meaning: HoursMeaning }) {
   const { openBase, closedBase } = circuit;
-  const { locale } = context, t = modelText(locale), lt = hoursText(locale, context.meaning), at = (hour: number) => clock(hour, locale);
+  const oneDay = context.dates.length === 1;
+  const { locale } = context, t = modelText(locale, oneDay), lt = hoursText(locale, context.meaning, oneDay), at = (hour: number) => clock(hour, locale);
+  // No complete hour to compare: say so, rather than calling a silent meter "steady".
+  if (!circuit.cells.size) return { finding: t("find.noReadings"), eveningKwh: null, earlyKwh: null, flat: false };
   // Lights-on hours: "open" is the lights-on hours and "closed" the daytime; the morning tail is lights left on too late.
   const lighting = context.meaning === "lights_on";
   const flagged = (value: number, base: number) => value > base * (1 + SCREEN_PCT) && value - base >= SCREEN_KWH;

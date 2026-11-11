@@ -5,7 +5,7 @@ import type { MetadataStore } from "@datafoundry/metadata";
 import type { ConfigApiContext, ConfigApiResponse } from "../routes/types.js";
 import { authorizeReportConversation } from "./report-access.js";
 import { listReportArtifacts, readReportArtifact } from "./report-artifacts.js";
-import { hasReportArtifact } from "./report-store.js";
+import { hasReportArtifact, type ReportRun } from "./report-store.js";
 import { findReportService } from "./report-service.js";
 import { canUseActions } from "./action-access.js";
 
@@ -57,14 +57,23 @@ export async function handleReportLibraryApi(request: IncomingMessage, segments:
       return { status: 200, headers, body: createSuccessResult({ snapshot: service.siteReportSnapshot(projectId, run.id) }) };
     }
     if (segments.length !== 1) return missing();
-    const allRuns = service.store.list(projectId).filter(run=>run.workspaceId===context.workspaceId);
+    // The finished reports, where daily ones have a window of their own and never push the weekly, monthly and custom
+    // reports out. The newest weekly and monthly site reports are always listed, so the Overview can still find the report it shows.
+    const inWorkspace = (run: ReportRun) => run.workspaceId === context.workspaceId;
+    const allRuns = service.store.libraryReports(projectId).filter(inWorkspace);
+    for (const cadence of ["weekly", "monthly"] as const) {
+      const latest = service.store.latestSiteReport(projectId, cadence);
+      if (latest && latest.workspaceId === context.workspaceId && !allRuns.some(run => run.id === latest.id)) allRuns.push(latest);
+    }
     const requestedId = new URL(request.url ?? "/", "http://localhost").searchParams.get("reportId");
     if (requestedId) {
       let requested; try { requested = service.store.get(projectId, requestedId); } catch { return missing(); }
       if (requested.workspaceId !== context.workspaceId || requested.status !== "succeeded" || !hasReportArtifact(requested)) return missing();
       if (!allRuns.some(run => run.id === requestedId)) allRuns.push(requested);
     }
-    const byId = new Map(allRuns.map(run=>[run.id,run]));
+    // Earlier versions are traced through the newest runs of every kind too, failed attempts included.
+    const recentRuns = service.store.list(projectId).filter(inWorkspace);
+    const byId = new Map([...recentRuns, ...allRuns].map(run=>[run.id,run]));
     const runs = allRuns
       .filter(run => ["report", "chat"].includes(run.kind) && run.status === "succeeded" && run.workspaceId === context.workspaceId);
     const reports = runs.filter(run => !run.actionFeedback).filter(hasReportArtifact).map(run => {
@@ -83,7 +92,8 @@ export async function handleReportLibraryApi(request: IncomingMessage, segments:
         ...(run.siteReport?.style === "management" ? { style: "management" as const } : {}),
         ...(run.finishedAt ? { finishedAt: run.finishedAt } : {}), ...(run.parentRunId ? { parentRunId: run.parentRunId } : {}) };
     });
-    const artifacts = canChat ? runs.filter(run => !run.actionFeedback && run.actorUserId === context.userId).flatMap(run =>
+    // Supporting files belong to the reader's own recent runs, the ones the advisor panel lists.
+    const artifacts = canChat ? recentRuns.filter(run => ["report", "chat"].includes(run.kind) && run.status === "succeeded" && !run.actionFeedback && run.actorUserId === context.userId).flatMap(run =>
       listReportArtifacts(service.archivedOutputDirectory(run.id)).map(file => ({ runId: run.id, ...file, createdAt: run.finishedAt ?? run.createdAt }))
     ).slice(0, 200) : [];
     const settings = service.store.settings(projectId);
@@ -113,12 +123,12 @@ function overviewCadence(metadata: MetadataStore, projectId: string): "monthly" 
   } catch { return "monthly"; }
 }
 
-function reportTitle(category: "scheduled" | "custom", period: { from: string; toExclusive: string }, siteReport?: { cadence?: "weekly" | "monthly"; style?: "management" }): string {
+function reportTitle(category: "scheduled" | "custom", period: { from: string; toExclusive: string }, siteReport?: { cadence?: "daily" | "weekly" | "monthly"; style?: "management" }): string {
   const format = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
   const start = format.format(new Date(period.from));
   const end = format.format(new Date(Date.parse(period.toExclusive) - 86400000));
   const what = siteReport?.style === "management" ? "Management Review" : "Site Report";
-  const kind = siteReport?.cadence ? `${siteReport.cadence === "weekly" ? "Weekly" : "Monthly"} ${what}`
+  const kind = siteReport?.cadence ? `${siteReport.cadence === "daily" ? "Daily" : siteReport.cadence === "weekly" ? "Weekly" : "Monthly"} ${what}`
     : siteReport ? `Custom ${what}` : `${category === "scheduled" ? "Scheduled" : "Custom"} Energy Report`;
   return `${kind} — ${start === end ? start : `${start} to ${end}`}`;
 }

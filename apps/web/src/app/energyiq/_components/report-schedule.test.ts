@@ -25,6 +25,13 @@ describe("when the next automatic report is due", () => {
     expect(nextReportRun(at("2026-09-23T08:00:00Z"), sgt, "off", 3)).toBeNull();
   });
 
+  it("gives tomorrow's daily report when daily, weekly and monthly reports are all on", () => {
+    // Wednesday 23 Sep 2026, 16:00 SGT: the next one is the daily report on Thursday morning.
+    expect(nextReportRun(at("2026-09-23T08:00:00Z"), sgt, "daily-weekly-monthly", 6)).toEqual({ date: "2026-09-24", hour: 6 });
+    // Before the hour on the 1st, today's run is still to come.
+    expect(nextReportRun(at("2026-09-30T20:00:00Z"), sgt, "daily-weekly-monthly", 6)).toEqual({ date: "2026-10-01", hour: 6 });
+  });
+
   it("reads the date in the project's timezone, not the reader's", () => {
     // 30 Sep 23:00 UTC is already 07:00 on 1 Oct in Singapore, so that month's run has been and gone.
     expect(nextReportRun(at("2026-09-30T23:00:00Z"), sgt, "monthly", 3)).toEqual({ date: "2026-11-01", hour: 3 });

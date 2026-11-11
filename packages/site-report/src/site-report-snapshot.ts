@@ -15,7 +15,8 @@ export const SITE_REPORT_SNAPSHOT_VERSION = 1;
 /** The file the server writes next to the rendered page, and the name the web app asks for. */
 export const SITE_REPORT_SNAPSHOT_FILE = "site-report-input.json";
 
-export type SiteReportCadence = "weekly" | "monthly";
+/** How often the schedule writes a site report: a daily report covers the day before, in the site's time zone. */
+export type SiteReportCadence = "daily" | "weekly" | "monthly";
 /** How often a saved report is issued, or "custom" for one somebody asked for on their own dates. */
 export type SiteReportSnapshotCadence = SiteReportCadence | "custom";
 
@@ -54,7 +55,7 @@ export function serializeSiteReportSnapshot(snapshot: SiteReportSnapshot): Store
 export function parseSiteReportSnapshot(value: unknown): SiteReportSnapshot {
   const stored = value as StoredSiteReportSnapshot | null;
   if (!stored || typeof stored !== "object" || stored.schemaVersion !== SITE_REPORT_SNAPSHOT_VERSION || !stored.data) throw new Error("SITE_REPORT_SNAPSHOT_INVALID");
-  if (stored.cadence !== "weekly" && stored.cadence !== "monthly" && stored.cadence !== "custom") throw new Error("SITE_REPORT_SNAPSHOT_INVALID");
+  if (stored.cadence !== "daily" && stored.cadence !== "weekly" && stored.cadence !== "monthly" && stored.cadence !== "custom") throw new Error("SITE_REPORT_SNAPSHOT_INVALID");
   const holidays = Array.isArray(stored.data.holidays) ? stored.data.holidays : [];
   return { ...stored, data: { ...stored.data, holidays: new Map(holidays) } };
 }

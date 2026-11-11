@@ -24,7 +24,7 @@ import { ReportScheduleNote } from "./report-schedule-note";
 import { SiteReportCreateDialog } from "./site-report-create";
 // `source` says who wrote a report: "site" reports are the ones the server writes for the whole site on the schedule
 // and the Overview shows; "advisor" reports are the ones somebody asked for.
-type Report = { canDiscuss?: boolean; previousReportId?: string; id: string; kind: "report"; period: { from: string; toExclusive: string }; createdAt: string; finishedAt?: string; parentRunId?: string; category: "scheduled" | "custom"; version: number; title: string; source?: "site" | "advisor"; cadence?: "weekly" | "monthly"; style?: "management" };
+type Report = { canDiscuss?: boolean; previousReportId?: string; id: string; kind: "report"; period: { from: string; toExclusive: string }; createdAt: string; finishedAt?: string; parentRunId?: string; category: "scheduled" | "custom"; version: number; title: string; source?: "site" | "advisor"; cadence?: "daily" | "weekly" | "monthly"; style?: "management" };
 type Skill = { id?: string; revision?: number; isDefault?: boolean; required?: boolean; readOnly?: boolean; scope?: "general" | "project" | "personal"; category?: "analysis" | "presentation" | "other"; name: string; version: string; content: string; sourceRunId?: string; sourceSessionId?: string; projectId: string };
 export type Artifact = { runId: string; filename: string; mimeType: string; bytes: number; encoding: "utf8" | "base64"; createdAt: string };
 export type ReportLibrary = { reports: Report[]; skills: Skill[]; tools: Array<{ name: string; description: string }>; canChat: boolean; canManageProject?: boolean; canUseActions?: boolean; artifacts?: Artifact[]; overviewCadence?: "weekly" | "monthly" };
@@ -92,8 +92,9 @@ function ProjectLibrary({ projectId, view }: { projectId: string; view: "reports
   // The Overview shows one of these: the newest site report for the cadence this project chose. Pointing at it here
   // answers "where is the report I see on the Overview?" without opening anything. The server lists newest first.
   const siteReports = (library?.reports ?? []).filter(report=>report.source === "site");
-  // Only automatic site reports can be the Overview's; a custom one somebody asked for on their own dates never is.
-  const overviewReportId = (siteReports.find(report=>report.cadence === (library?.overviewCadence === "weekly" ? "weekly" : "monthly")) ?? siteReports.find(report=>report.cadence))?.id;
+  // Only weekly and monthly site reports can be the Overview's; a daily one, or a custom one somebody asked for on
+  // their own dates, never is.
+  const overviewReportId = (siteReports.find(report=>report.cadence === (library?.overviewCadence === "weekly" ? "weekly" : "monthly")) ?? siteReports.find(report=>report.cadence === "weekly" || report.cadence === "monthly"))?.id;
   const reports = (library?.reports ?? []).filter(report=>showVersions || !superseded.has(report.id)).filter(report => `${report.title} ${report.period.from} ${formatPeriod(report.period.from, shiftDate(report.period.toExclusive,-1), locale)}`.toLowerCase().includes(search.toLowerCase())).sort((a,b) => dayKey(b).localeCompare(dayKey(a)) || Number(b.category === "scheduled") - Number(a.category === "scheduled") || (b.finishedAt || b.createdAt).localeCompare(a.finishedAt || a.createdAt));
   const kindCounts = { all: reports.length, scheduled: reports.filter(report=>report.category === "scheduled").length, custom: reports.filter(report=>report.category !== "scheduled").length };
   const byKind = kind === "all" ? reports : reports.filter(report => kind === "scheduled" ? report.category === "scheduled" : report.category !== "scheduled");

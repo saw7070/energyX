@@ -16,7 +16,7 @@ import { siteReportStyleOf } from "@datafoundry/site-report";
 const settingsSchema = z.object({
   contextNotes: z.string().max(100_000), fileRefIds: z.array(z.string().min(1)).max(20),
   useProjectData: z.boolean(), skill: z.string().max(100_000), revision: z.number().int().nonnegative(),
-  frequency: z.enum(["off", "daily", "weekly", "monthly", "weekly-monthly"]), localHour: z.number().int().min(0).max(23),
+  frequency: z.enum(["off", "daily", "weekly", "monthly", "weekly-monthly", "daily-weekly-monthly"]), localHour: z.number().int().min(0).max(23),
   scheduledPrompt: z.string().max(20_000),
   comparisonPeriod: z.object({ from: z.string(), toExclusive: z.string() }).optional(),
   skillRefs: z.array(z.object({ name: z.string().min(1).max(100), version: z.string().min(1).max(100), content: z.string().min(1).max(50000), scope: z.enum(["general", "project"]).optional(), category: z.enum(["analysis", "presentation", "other"]).optional(), sourceRunId: z.string().uuid().optional(), sourceSessionId: z.string().uuid().optional() })).max(5).optional(),

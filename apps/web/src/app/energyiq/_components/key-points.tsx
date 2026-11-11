@@ -139,7 +139,7 @@ export function KeyPoints({projectId}:{projectId:string}) {
       {/* Circuits that went dark: the figures above stop where their readings do. */}
       <StoppedMetersNote projectId={projectId} className={styles.stopped} />
       {/* When the next report arrives by itself, so nobody waits for one that is already scheduled. */}
-      <ReportScheduleNote projectId={projectId} className={styles.schedule} />
+      <ReportScheduleNote projectId={projectId} overview className={styles.schedule} />
       </>}
       {/* The saved report itself. Until one exists it is built here, for the same dates as the priorities. */}
       {result && !error && <SiteReportPanel state={site.state} onRetry={site.retry} projectId={projectId} saved={saved} />}
