@@ -7,7 +7,7 @@
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { shortDate } from "./analysis-model.js";
-import { forHoursMeaning, translatorFor } from "./locale.js";
+import { forHoursMeaning, forOneDay, translatorFor } from "./locale.js";
 import type { ProjectSpatialReference } from "@datafoundry/contracts";
 import type { AnalysisData } from "./analysis-types.js";
 import type { EnergyIqLocale } from "./locale.js";
@@ -19,7 +19,8 @@ import { niceTicks, ProfileChart, renderSiteReportHtml, useWidth } from "./site-
 import { buildSiteReport, kwhText, moneyText, pctText, REPORT_COLOURS as C } from "./site-report-model.js";
 import { REPORT_CSS } from "./site-report-styles.js";
 
-const reviewText = (review: Pick<ManagementReview, "locale" | "hoursMeaning">) => forHoursMeaning(translatorFor(managementReviewMessages, review.locale), managementReviewMessages, review.hoursMeaning);
+const reviewText = (review: Pick<ManagementReview, "locale" | "hoursMeaning"> & { dayCount?: number | undefined }) =>
+  forHoursMeaning(forOneDay(translatorFor(managementReviewMessages, review.locale), managementReviewMessages, review.dayCount === 1), managementReviewMessages, review.hoursMeaning);
 const num = (value: number | null, digits = 1) => value == null ? "—" : value.toLocaleString("en-SG", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 const whole = (value: number) => Math.round(value).toLocaleString("en-SG");
 

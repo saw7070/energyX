@@ -345,6 +345,77 @@ describe("a daily report", () => {
     expect(plain(renderStyledSiteReportHtml("management", data, null, GENERATED))).not.toMatch(/Total energy, by day|undefined|NaN/);
   });
 
+  it("works out no daytime share from part of a day, where the missing evening would make night use look like daytime use", () => {
+    // The whole day: the lights ran at night as planned.
+    expect(buildManagementReview(oneDay(LIT, DAY), null, GENERATED).summary.findings).toContain("The lights ran at night as planned: only **7%** of the energy was used in the daytime.");
+    expect(buildSiteReport(oneDay(LIT, DAY), null, GENERATED).keyFigures[3]!.value).toBe("7.0%");
+    // Readings stop at 18:00. By the hours that arrived, 11% would look like daytime use: over the warning line.
+    const data = oneDay(LIT, DAY, { until: 18 });
+    const review = buildManagementReview(data, null, GENERATED);
+    expect(review.summary.findings.join(" ")).not.toMatch(/daytime|at night/);
+    expect(review.keyFigures.some(figure => figure.value.endsWith("%"))).toBe(false);
+    const report = buildSiteReport(data, null, GENERATED);
+    expect(report.lede).not.toMatch(/daytime|lights-on hours/);
+    expect(report.keyFigures[3]!.value).toBe("—");
+    expect(report.headline).toBe("Some readings for this day are missing");
+    expect(plain(renderStyledSiteReportHtml("full", data, null, GENERATED))).not.toMatch(/when the lights should be off|\b1[01](\.\d)?% /);
+    expect(plain(renderStyledSiteReportHtml("management", data, null, GENERATED))).not.toContain("when the lights should be off");
+  });
+
+  it("on a day with no readings, says why there is no cost and shows no use a day for any meter", () => {
+    // The method table's fifth row is the electricity rate, in every language.
+    const rate = (review: ReturnType<typeof buildManagementReview>) => review.method.rows[4]!.value;
+    const empty = buildManagementReview(oneDay(LIT, DAY, { until: 0 }), null, GENERATED);
+    expect(empty.method.rows[4]!.label).toBe("Electricity rate");
+    expect(rate(empty)).toBe("No readings, so no cost is worked out");
+    expect(empty.method.meters.map(meter => meter.perDay)).toEqual(empty.method.meters.map(() => null));
+    expect(plain(renderStyledSiteReportHtml("management", oneDay(LIT, DAY, { until: 0 }), null, GENERATED))).not.toMatch(/Not set|0\.00/);
+    expect(rate(buildManagementReview(oneDay(LIT, DAY, { until: 0 }), null, GENERATED, "zh-Hans"))).toBe("没有读数，所以不计算电费");
+    expect(rate(buildManagementReview(oneDay(LIT, DAY, { until: 0 }), null, GENERATED, "ms"))).toBe("Tiada bacaan, jadi kos tidak dikira");
+    // A day with readings keeps its rate, and a rate that is really missing still says so.
+    expect(rate(buildManagementReview(oneDay(LIT, DAY), null, GENERATED))).toMatch(/^S\$0\.3000/);
+    expect(rate(buildManagementReview(oneDay(site(LIGHTING, { meaning: "lights_on", rate: null }), DAY), null, GENERATED))).toBe("Not set, so costs are not shown");
+  });
+
+  it("words the full report's 30 days as days like this one, with no average of one day to compare with", () => {
+    const report = buildSiteReport(oneDay(LIT, DAY), null, GENERATED);
+    expect(report.estimate.intro).toMatch(/^If every day were like this one, 30 days would use about \*\*[\d,]+ kWh\*\*\. At \*\*S\$0\.3000\/kWh before GST\*\*, that is about \*\*S\$[\d,]+\*\* for 30 days like this one\.$/);
+    expect(report.estimate.note).toMatch(/^How we estimate: we count 30 days as if every one were like this day\./);
+    expect(report.benchmark.weekdayAvg).toBeNull();
+    expect(report.benchmark.weekendAvg).toBeNull();
+    expect(report.benchmark.rows.map(row => row.label)).not.toEqual(expect.arrayContaining(["Average weekday"]));
+    expect(report.benchmark.intro).toBe("A single day has no weekday or weekend average to compare with. The chart shows this day's total.");
+    const html = plain(renderStyledSiteReportHtml("full", oneDay(LIT, DAY), null, GENERATED));
+    expect(html).toContain("30 days like this one: use and bill");
+    expect(html).toContain("This day, and what never switches off");
+    expect(html).not.toMatch(/Based on a normal weekday|Average weekday|Average weekend day|weekday avg|weekend avg|Weekday average|21\.4 weekdays/);
+    for (const [locale, intro] of [["zh-Hans", /^如果每天都和这一天一样，30 天约用电/], ["ms", /^Jika setiap hari sama seperti hari itu, 30 hari akan menggunakan kira-kira/]] as const) {
+      expect(buildSiteReport(oneDay(LIT, DAY), null, GENERATED, locale).estimate.intro).toMatch(intro);
+    }
+    // A longer report keeps its averages.
+    expect(buildSiteReport(LIT, null, GENERATED).estimate.intro).toMatch(/^Based on a normal weekday and weekend day/);
+    // The review's hour-by-hour section is about this day, not an average one.
+    expect(plain(renderStyledSiteReportHtml("management", oneDay(LIT, DAY), null, GENERATED))).toContain("This day, hour by hour");
+    expect(plain(renderStyledSiteReportHtml("management", LIT, null, GENERATED))).toContain("The average 24 hours");
+    expect(plain(renderStyledSiteReportHtml("management", oneDay(LIT, DAY), null, GENERATED, "zh-Hans"))).toContain("当天的逐小时用电");
+    expect(plain(renderStyledSiteReportHtml("management", oneDay(LIT, DAY), null, GENERATED, "ms"))).toContain("Hari itu, jam demi jam");
+  });
+
+  it("still lists every location on part of a day at a site with no groups, by what each measured", () => {
+    const data = oneDay(site(LIGHTING, { meaning: "lights_on", groups: null }), DAY, { until: 18 });
+    const report = buildSiteReport(data, null, GENERATED);
+    expect(report.groups).toBeNull();
+    expect(report.zones.map(zone => zone.label).sort()).toEqual(["block-a", "block-b", "common"]);
+    expect(report.zones.reduce((sum, zone) => sum + zone.share, 0)).toBeCloseTo(1, 6);
+    expect(report.profile.intro).toContain("grouped into three locations:");
+    expect(report.estimate.comparison).toMatch(/uses the most, at \*\*\d+%\*\* of the energy, compared with/);
+    const html = plain(renderStyledSiteReportHtml("full", data, null, GENERATED));
+    expect(html).toContain("Measured on the day (kWh)");
+    expect(html).not.toMatch(/no locations|Est\. kWh per 30 days|of the month's energy/);
+    expect(plain(renderStyledSiteReportHtml("full", data, null, GENERATED, "zh-Hans"))).toContain("分为 3 个位置：");
+    expect(plain(renderStyledSiteReportHtml("full", data, null, GENERATED, "ms"))).toContain("dikumpulkan kepada 3 lokasi:");
+  });
+
   it("speaks Chinese and Malay for one day, and for a day with readings missing", () => {
     const zh = buildSiteReport(oneDay(LIT, DAY, { until: 18 }), null, GENERATED, "zh-Hans");
     expect(zh.masthead.periodNote).toBe("1 天，SGT");

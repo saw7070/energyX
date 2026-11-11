@@ -179,7 +179,8 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
       : stopped ? last ? t("met.note.stopped", { since: at(last.date, last.hour) }) : t("met.note.none")
       : meter.series && !received.length ? t("met.note.none")
       : gapDays ? t(gapDays === 1 ? "met.note.gaps.one" : "met.note.gaps.other", { count: gapDays }) : "";
-    return { id: meter.id, name: meter.name, group: topGroupOf.get(meter.id) ?? place, perDay: meter.series ? perDayOf(kwh) : null, note, stopped: !!stopped, last };
+    // A meter that sent nothing has no use a day to show, not 0.00.
+    return { id: meter.id, name: meter.name, group: topGroupOf.get(meter.id) ?? place, perDay: meter.series && received.length ? perDayOf(kwh) : null, note, stopped: !!stopped, last };
   });
   const stopped = meterRows.filter(row => row.stopped);
   const meterCount = meters.length || base.circuits.reduce((sum, circuit) => sum + circuit.meterIds.length, 0);
@@ -243,7 +244,9 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
 
   // ---------- saving energy ----------
   const split = timeBuckets(project, days, data.openingHours, meaning);
-  const closedShare = split.total > 0 ? split.closedKwh / split.total : null;
+  // A part day misses some hours, often the evening's, which would skew the share used outside the hours (a lit estate
+  // would look as if it ran in the daytime): it is not worked out, and nothing below says it.
+  const closedShare = !partDay && split.total > 0 ? split.closedKwh / split.total : null;
   const alwaysOn = alwaysOnKw(project, quietHours(data.openingHours, meaning));
   const above = alwaysOn != null ? aboveBenchmarkWhenClosed(project, days, data.openingHours, alwaysOn, meaning) : null;
   const closedUse = closedUseBreakdown(project, data.current.spaces, data.holidays, data.openingHours, locale, meaning);
@@ -320,7 +323,8 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
       { label: t("met.row.period"), value: t("met.periodValue", { period: periodText, days: dates.length }) },
       { label: t("met.row.first"), value: firstText },
       { label: t("met.row.hours"), value: hoursPublished ? hoursValue : t("met.hoursAssumed", { hours: hoursValue }) },
-      { label: t("met.row.rate"), value: base.rateLabel ?? t("met.rateNone") },
+      // With no readings there is no use to price, which is not the same as no rate being set.
+      { label: t("met.row.rate"), value: base.rateLabel ?? t(noReadings ? "met.rateNoReadings" : "met.rateNone") },
       ...(project.coverage != null ? [{ label: t("met.row.coverage"), value: t("met.coverageValue", { pct: pctText(project.coverage / 100) }) }] : []),
       { label: t("met.row.complete"), value: t("met.completeValue", { count: complete.length, days: dates.length }) },
     ],

@@ -28,6 +28,9 @@ const reportText = (locale: EnergyIqLocale) => translatorFor(siteReportMessages,
 const reportHoursText = (report: Pick<SiteReport, "locale" | "hoursMeaning"> & { dayCount?: number | undefined }) =>
   forHoursMeaning(forOneDay(reportText(report.locale), siteReportMessages, report.dayCount === 1), siteReportMessages, report.hoursMeaning);
 
+/** A month is estimated only from meters with a full day of readings; with none, every 30-day figure is left blank. */
+const monthEstimated = (report: SiteReport) => report.circuits.some(circuit => circuit.weekdayPerDay != null || circuit.weekendPerDay != null);
+
 /** Axis ticks at a round step (1, 2, 2.5 or 5 × 10ⁿ) from zero to just above the maximum. */
 export function niceTicks(max: number, target = 5) {
   if (!(max > 0)) return [0, 1];
@@ -100,8 +103,9 @@ function FloorPlan({ report }: { report: SiteReport }) {
   const leftEdge = Math.max(...areas.filter(zone => zone.rect![0] + zone.rect![2] <= ex).map(zone => zone.rect![0] + zone.rect![2]), -Infinity);
   const rightEdge = Math.min(...areas.filter(zone => zone.rect![0] >= ex).map(zone => zone.rect![0]), Infinity);
   const hasCorridor = !!entrance && Number.isFinite(leftEdge) && Number.isFinite(rightEdge);
-  // With groups the plan is a drawing only: figures come from the groups, not from where an area's panel is.
-  const est = (zone: ReportZone) => report.groups ? "" : t("plan.estimate", { kwh: whole(zone.monthKwh) });
+  // With groups the plan is a drawing only: figures come from the groups, not from where an area's panel is. With no
+  // month estimated, an area has no 30-day figure to show.
+  const est = (zone: ReportZone) => report.groups || !monthEstimated(report) ? "" : t("plan.estimate", { kwh: whole(zone.monthKwh) });
   const circuitsOf = (board: string) => report.circuits.filter(circuit => circuit.board === board);
   const markers = Object.entries(reference.layout.boardMarkers ?? {});
   const parentOf = (zone: ReportZone) => areas.find(area => zone.parentRoom && area.rooms.includes(zone.parentRoom));
@@ -272,7 +276,7 @@ function BenchChart({ benchmark, locale, standalone }: { benchmark: SiteReport["
   return <div className="figure">
     <div className="legend" aria-hidden="true">
       <span><i style={{ background: C.ember }} />{t("bench.legend.weekday")}</span><span><i style={{ background: C.slate }} />{t("bench.legend.closed")}</span><span><i style={{ background: C.emberSoft }} />{t("bench.legend.missing")}</span>
-      <span><i className="line" />{t("bench.legend.average")}</span><span><i className="dash" />{t("bench.legend.base")}</span>
+      {weekdayAvg != null && <span><i className="line" />{t("bench.legend.average")}</span>}<span><i className="dash" />{t("bench.legend.base")}</span>
     </div>
     <div className="chart-scroll" ref={ref}><div className="chart-wrap" style={{ minWidth: width }} onMouseLeave={() => setHover(null)}>
       <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={t("bench.aria")}>
@@ -384,8 +388,7 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
   const { estimate, benchmark, pattern, screening, locale } = report;
   const t = reportHoursText(report);
   const rate = report.rate;
-  // A month is estimated only from meters with a full day of readings; with none, the estimate is left blank.
-  const estimated = report.circuits.some(circuit => circuit.weekdayPerDay != null || circuit.weekendPerDay != null);
+  const estimated = monthEstimated(report);
   const monthOf = (circuit: SiteReport["circuits"][number]) => circuit.weekdayPerDay == null && circuit.weekendPerDay == null ? "—" : whole(circuit.monthKwh);
   const sumOf = (values: Array<number | null>) => values.some(value => value != null) ? num(values.reduce<number>((sum, value) => sum + (value ?? 0), 0)) : "—";
   // A daily report on a day with no readings at all says so in its headline, and has no figures to show below it.
@@ -409,8 +412,8 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
         <div className="zones">{report.profile.zones.map(zone => <p key={zone.heading}><strong>{zone.heading}</strong>{t("doc.zoneSeparator")}<Rich text={zone.text} /></p>)}</div>
         {report.groups && <GroupTable report={report} />}
         {report.reference ? <div className="figure"><div className="plan-wrap"><FloorPlan report={report} /></div><div className="caption">{report.profile.caption}</div></div>
-          : report.groups ? null : <div className="table-wrap"><table><thead><tr><th>{t("doc.col.zone")}</th><th>{t("doc.col.board")}</th><th>{t("doc.col.circuits")}</th><th className="r">{t("doc.col.zoneEstimate")}</th></tr></thead>
-            <tbody>{report.zones.map(zone => <tr key={zone.key}><td>{zone.label}</td><td>{zone.board}</td><td>{joinText(zone.circuitKeys.map(key => report.circuits.find(circuit => circuit.key === key)?.name ?? ""), locale)}</td><td className="r">{whole(zone.monthKwh)}</td></tr>)}</tbody></table></div>}
+          : report.groups ? null : <div className="table-wrap"><table><thead><tr><th>{t("doc.col.zone")}</th><th>{t("doc.col.board")}</th><th>{t("doc.col.circuits")}</th><th className="r">{estimated ? t("doc.col.zoneEstimate") : t("doc.col.recorded", { days: report.dayCount })}</th></tr></thead>
+            <tbody>{report.zones.map(zone => <tr key={zone.key}><td>{zone.label}</td><td>{zone.board}</td><td>{joinText(zone.circuitKeys.map(key => report.circuits.find(circuit => circuit.key === key)?.name ?? ""), locale)}</td><td className="r">{whole(estimated ? zone.monthKwh : zone.periodKwh)}</td></tr>)}</tbody></table></div>}
       </section>
 
       <section id="estimate">
