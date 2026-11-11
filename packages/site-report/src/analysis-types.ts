@@ -30,6 +30,12 @@ export type AnalysisData = {
   holidays: Map<string, string>; openingHours: HoursByDay | null; actions: ProjectAction[];
   /** What the published hours mean; absent means opening hours. "lights_on": lighting that should run in them, usually at night. */
   hoursMeaning?: HoursMeaning | undefined;
+  /**
+   * Meters whose quiet spell meant they were using nothing when these readings were loaded: the live check found them
+   * online and they can rightly use nothing (never lighting on a lights-on-hours site, nor a meter always on by design).
+   * A meter sends its total only when it moves, so such a meter is idle, not stopped. Absent on older readings.
+   */
+  idleWhenQuiet?: string[] | undefined;
   /** Missing on readings saved before groups existed; everything then falls back to the old per-space view. */
   groups?: AnalysisGroups | undefined;
   /**
