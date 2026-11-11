@@ -48,6 +48,12 @@ it("constructs plain tool definitions without reading or authorizing metadata", 
   expect(tools.tools).toHaveLength(13);
   expect(JSON.parse(JSON.stringify(tools.tools))[1].parameters.additionalProperties).toBe(false);
 });
+it("tells the advisor to keep every floor layout key it does not know, and to change only what was asked", () => {
+  const metadata = new Proxy({}, { get: () => { throw Error("MUST_NOT_READ"); } }) as MetadataStore;
+  const update = createProjectConfigurationTools({ metadata, run: { actorUserId: "u", workspaceId: "w", projectId: "p" } }).tools.find(tool => tool.name === "project_context_update")!.description;
+  expect(update).toContain("every key you do not recognise at the top level, in layout, and in each zone, room, device and entrance");
+  expect(update).toContain("Never add, remove, rename, move or rewrite labels, symbols, lines, openings, points, levels or devices unless asked");
+});
 it("round trips a valid structure/meter/virtual draft through the existing store without publishing", async () => {
   const { metadata, executeTool } = fixture();
   const before = metadata.energyIq.getProject("project");
