@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildManagementReview, buildSiteReport, comparableGroups, groupKind, buildMeterGroupTree, type AnalysisData, type ScopeData, type ScopeMeter, type TrendSeries } from "@datafoundry/site-report";
 import { renderManagementReviewHtml, renderStyledSiteReportHtml } from "@datafoundry/site-report/management-review-document";
+import { translatorFor } from "./energyiq-messages";
+import { dataAvailabilityMessages } from "./data-availability-messages";
 
 // One week from Monday 3 Aug 2026. Made-up estate lighting: two blocks and a common area, lights on 19:00–07:00.
 const DATES = Array.from({ length: 7 }, (_, index) => new Date(Date.parse("2026-08-03T00:00:00Z") + index * 86_400_000).toISOString().slice(0, 10));
@@ -231,6 +233,21 @@ describe("meters marked not in use", () => {
     // Without that answer the same silence is still a meter that stopped.
     expect(buildManagementReview(site(fan, { meaning: "lights_on" }), null, GENERATED).summary.decisions.map(decision => decision.title)).toContain("Get Pavilion fan reporting again");
     expect(buildManagementReview({ ...site(fan, { meaning: "lights_on" }), idleWhenQuiet: ["fan"] }, null, GENERATED, "ms").method.meters.find(meter => meter.name === "Pavilion fan")?.note).toMatch(/^Tiada penggunaan sejak /);
+  });
+
+  it("words a meter that used nothing as Data availability does, whether it went quiet or sent readings of nothing", () => {
+    // The made-up pavilion fan went quiet, online and idle; the store-room fan sent readings, all of them zero.
+    const meters: Record<string, Def> = { ...LIGHTING,
+      fan: { name: "Pavilion fan", group: "common", category: "load", kwh: (date, hour) => date < "2026-08-05" || (date === "2026-08-05" && hour < 19) ? (hour >= 9 && hour < 12 ? 0.3 : 0) : null },
+      store: { name: "Store room fan", group: "common", category: "load", kwh: () => 0 } };
+    for (const locale of ["en", "zh-Hans", "ms"] as const) {
+      const review = buildManagementReview({ ...site(meters, { meaning: "lights_on" }), idleWhenQuiet: ["fan"] }, null, GENERATED, locale);
+      const note = (name: string) => review.method.meters.find(meter => meter.name === name)?.note;
+      const page = translatorFor(dataAvailabilityMessages, locale);
+      expect(note("Store room fan")).toBe(page("status.idle"));
+      const since = page("status.idleSince", { when: "\u0000" }).split("\u0000").map(part => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+      expect(note("Pavilion fan")).toMatch(new RegExp(`^${since[0]}.+${since[1]}$`));
+    }
   });
 });
 

@@ -254,7 +254,8 @@ describe("meters that used nothing", () => {
 
   it("are noted in the management review's meter list and findings", () => {
     const review = buildManagementReview(estate(), null, GENERATED);
-    expect(review.method.meters.find(meter => meter.name === "Pavilion fan")!.note).toBe("No use in these dates");
+    // The same words as a meter only using nothing on Data availability, and an idle meter in this same list.
+    expect(review.method.meters.find(meter => meter.name === "Pavilion fan")!.note).toBe("No use in this period");
     expect(review.noUse!.items).toEqual(["Pavilion fan: no use from 2–15 Nov"]);
     // Only worth knowing, so it comes after the five findings that matter more here.
     expect(review.summary.findings.join(" ")).not.toContain("Pavilion fan");
