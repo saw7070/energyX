@@ -60,7 +60,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   // The plan and the selection, with every step Undo and Redo can go to (see floor-plan-history).
   const [history, setHistory] = useState(() => startHistory(previous ? planFromReference(previous, locale) : starterPlan(boards, locale)));
   const { plan, selection } = history.present;
-  const opened = useRef(plan).current;
+  const [opened] = useState(plan);
   const changed = plan !== opened;
   const dirtyListener = useRef(onDirtyChange);
   useEffect(() => { dirtyListener.current = onDirtyChange; });

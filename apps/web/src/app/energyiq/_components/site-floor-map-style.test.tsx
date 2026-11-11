@@ -65,7 +65,7 @@ it("colours a panel the same in the editor as on the saved plan, whatever other 
   const map = await render(<SiteFloorMap reference={reference()} devices={[{ ...meters[0]!, position: [240, 180] }]} />);
   expect(map.host.querySelector("svg")!.outerHTML).toContain("var(--zone-1)");
   await map.unmount();
-  const editing = await render(<FloorPlanEditor projectId="estate" notes="" block={null} previous={reference()} meters={meters} boards={["Amenities", "Block A"]} onCancel={() => undefined} onSaved={() => undefined} />);
+  const editing = await render(<FloorPlanEditor projectId="estate" notes="" block={null} previous={reference()} meters={[{ ...meters[0]!, type: "Lighting" }]} boards={["Amenities", "Block A"]} onCancel={() => undefined} onSaved={() => undefined} />);
   const canvas = editing.host.querySelector("svg")!.outerHTML;
   expect(canvas).toContain("var(--zone-1)");
   expect(canvas).not.toContain("var(--zone-2)");
