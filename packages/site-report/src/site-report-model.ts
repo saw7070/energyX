@@ -421,7 +421,12 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const estimated = raw.some(circuit => circuit.weekdayPerDay != null || circuit.weekendPerDay != null);
   // Meters that sent nothing at all on a daily report's day; meters marked not in use are meant to be silent.
   const offIds = notInUseIds(data);
-  const silent = partDay ? raw.flatMap(circuit => circuit.meters).filter(meter => !offIds.has(meter.id) && !meter.series?.cells.some(cell => dateSet.has(cell[0]) && (cell[2] != null || cell[3] > 0))).map(meter => meter.name) : [];
+  const quietMeters = partDay ? raw.flatMap(circuit => circuit.meters).filter(meter => !offIds.has(meter.id) && !meter.series?.cells.some(cell => dateSet.has(cell[0]) && (cell[2] != null || cell[3] > 0))) : [];
+  // A meter that was online and only using nothing when the readings were loaded (AnalysisData.idleWhenQuiet) sent
+  // nothing because it had nothing to send: said so, in Data availability's words, rather than that it went silent.
+  const idleIds = new Set(data.idleWhenQuiet ?? []);
+  const silent = quietMeters.filter(meter => !idleIds.has(meter.id)).map(meter => meter.name);
+  const idleNames = quietMeters.filter(meter => idleIds.has(meter.id)).map(meter => meter.name);
   const circuits: ReportCircuit[] = raw.map((circuit, index) => {
     // Lights run every night, so every day counts for switching on and off on time.
     const screen = screenCircuit(circuit, { dates, weekdayDates: lighting ? dates : weekdayDates, isOpen, openRange, locale, meaning, allowance: lighting ? (date, hour) => allowedShare(hours, date, hour) : null });
@@ -480,6 +485,7 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
       : t("lede.working"),
     partDay ? coverage != null && coverage < 100 ? t("day.missing.lede", { pct: pctText(coverage / 100) }) : t("day.missing.ledePlain") : "",
     silent.length ? t(silent.length === 1 ? "day.missing.silent.one" : "day.missing.silent.other", { names: list(silent) }) : "",
+    idleNames.length ? t(idleNames.length === 1 ? "day.missing.idle.one" : "day.missing.idle.other", { names: list(idleNames) }) : "",
   ]);
   const keyFigures = [
     { value: kwhText(totalKwh), label: t("kf.total", { days: dates.length }) },
@@ -547,7 +553,8 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
       zones: list(subgroupZones.map(zone => zoneBoard(zone, true))),
       parents: list([...new Set(subgroupZones.map(zone => { const parent = parentZone(zone); return parent ? zoneBoard(parent) : t("caption.parentUnknown"); }))]),
     }) : t("caption.shares"),
-    loadCaption: groups ? t("caption.breakdown") : largest ? t(plural(largest) ? "caption.largest.other" : "caption.largest.one", { name: capitalise(largest.name), rest: flatCircuit
+    // Without an average day (no complete day, as on part of a day) the breakdown gives shares only.
+    loadCaption: groups ? t(averageDayKwh == null ? "caption.breakdownShares" : "caption.breakdown") : largest ? t(plural(largest) ? "caption.largest.other" : "caption.largest.one", { name: capitalise(largest.name), rest: flatCircuit
       ? t(plural(flatCircuit) ? "caption.rank.other" : "caption.rank.one", { name: inl(flatCircuit.name), rank: en ? ordinal(circuits.indexOf(flatCircuit) + 1) : t("rank", { n: circuits.indexOf(flatCircuit) + 1 }) }) : "" }) : "",
     note: paragraph([
       t("note.method"),
@@ -668,7 +675,7 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
     groups,
     reference: hasMap ? reference : null,
     zones, circuits, estimate, benchmark, pattern, screening, standout: standoutReport(project === data.current.project ? data : { ...data, current: { ...data.current, project } }, locale),
-    daytime: daytime ? daytimeBlock(daytime, locale) : null,
+    daytime: daytime ? daytimeBlock(daytime, locale, oneDay) : null,
     averageDay,
     blocks: groupTree ? blockComparison(groupTree, averageDayKwh, { t, list }) : null,
     perLight: data.lightCounts?.length ? perLightBlock(energyPerLight({ counts: data.lightCounts, tree: groupTree, series, dates, names: new Map(raw.flatMap(circuit => circuit.meters.map(meter => [meter.id, meter.name] as const))) }), t) : null,
@@ -989,8 +996,9 @@ function lightsPattern(input: { project: ScopeData; days: AnalysisDay[]; openRan
 }
 
 /** Which lights were on in the daytime, and when, in the reader's language (see SiteReport.daytime). */
-function daytimeBlock(daytime: DaytimeUse, locale: EnergyIqLocale): ReportDaytime {
-  const t = modelText(locale);
+function daytimeBlock(daytime: DaytimeUse, locale: EnergyIqLocale, oneDay = false): ReportDaytime {
+  // A daily report has one day: "on 7–9 am" rather than "on 7–9 am on 1 day".
+  const t = modelText(locale, oneDay);
   const shown = daytime.meters.slice(0, daytime.meters.length === DAYTIME_LISTED + 1 ? DAYTIME_LISTED + 1 : DAYTIME_LISTED);
   const rest = daytime.meters.length - shown.length;
   const names = daytime.alwaysOn.map(meter => meter.name);

@@ -215,7 +215,7 @@ export function ManagementReviewDocument({ review, standalone }: { review: Manag
         {review.perLight && <>
           <h3>{review.perLight.heading}</h3>
           <p>{review.perLight.intro}</p>
-          <PerLightTable perLight={review.perLight} locale={review.locale} />
+          <PerLightTable perLight={review.perLight} locale={review.locale} oneDay={review.dayCount === 1} />
           <p className="note">{review.perLight.note}</p>
         </>}
       </Section>}

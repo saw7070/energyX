@@ -250,7 +250,8 @@ function Donut({ title, slices, caption, report }: { title: string; slices: Slic
  * an average day and the share of the whole site. Bars share one scale, so the groups inside a group add up to it.
  */
 export function GroupBreakdown({ report }: { report: SiteReport }) {
-  const t = reportText(report.locale);
+  // A daily report's figures are that day's, not "a day".
+  const t = reportHoursText(report);
   const groups = report.groups!;
   const colourOf = new Map(groups.top.map(group => [group.key, group.colour]));
   const scale = Math.max(0.001, ...groups.breakdown.map(row => row.share));
@@ -299,9 +300,12 @@ function BlocksTable({ blocks, locale }: { blocks: NonNullable<SiteReport["block
   </table></div>;
 }
 
-/** kWh per light a day: meters with a number of lights recorded, and their groups. The management review shows it too. */
-export function PerLightTable({ perLight, locale }: { perLight: NonNullable<SiteReport["perLight"]>; locale: EnergyIqLocale }) {
-  const t = reportText(locale);
+/**
+ * kWh per light a day: meters with a number of lights recorded, and their groups. The management review shows it too.
+ * `oneDay`: a daily report, whose columns are that day's.
+ */
+export function PerLightTable({ perLight, locale, oneDay }: { perLight: NonNullable<SiteReport["perLight"]>; locale: EnergyIqLocale; oneDay?: boolean | undefined }) {
+  const t = forOneDay(reportText(locale), siteReportMessages, !!oneDay);
   const small = (value: number | null) => value == null ? "—" : num(value, value < 0.1 ? 3 : 2);
   return <div className="table-wrap"><table>
     <thead><tr><th>{t("perLight.col.meter")}</th><th>{t("perLight.col.group")}</th><th className="r">{t("perLight.col.lights")}</th><th className="r">{t("perLight.col.perDay")}</th><th className="r">{t("perLight.col.perLight")}</th></tr></thead>
@@ -410,8 +414,9 @@ export function DaytimeBlock({ daytime }: { daytime: NonNullable<SiteReport["day
 
 // ---------- 4. weekday hour by hour ----------
 /** An average day hour by hour with the opening (or lights-on) hours shaded; the management review draws it too. */
-export function ProfileChart({ pattern, report, standalone }: { pattern: Pick<NonNullable<SiteReport["pattern"]>, "hours" | "openFrom" | "openTo" | "notes" | "caption"> & { lines?: Array<ProfileLine & { colour: string }> | undefined }; report: Pick<SiteReport, "locale" | "hoursMeaning">; standalone?: boolean | undefined }) {
+export function ProfileChart({ pattern, report, standalone }: { pattern: Pick<NonNullable<SiteReport["pattern"]>, "hours" | "openFrom" | "openTo" | "notes" | "caption"> & { lines?: Array<ProfileLine & { colour: string }> | undefined }; report: Pick<SiteReport, "locale" | "hoursMeaning"> & { dayCount?: number | undefined }; standalone?: boolean | undefined }) {
   const { locale } = report;
+  // A daily report's lines are that day's: "Block lighting · 22 kWh", not "a day".
   const t = reportHoursText(report);
   const [ref, width] = useWidth(780);
   const [hover, setHover] = useState<number | null>(null);
@@ -570,7 +575,7 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
         {report.perLight && <>
           <h3 className="sub-head">{report.perLight.heading}</h3>
           <p>{report.perLight.intro}</p>
-          <PerLightTable perLight={report.perLight} locale={locale} />
+          <PerLightTable perLight={report.perLight} locale={locale} oneDay={report.dayCount === 1} />
           <p className="note">{report.perLight.note}</p>
         </>}
         <p className="note">{estimate.note}</p>

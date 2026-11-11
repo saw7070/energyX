@@ -82,6 +82,10 @@ export const siteReportMessages = defineMessages({
   "day.doc.noPattern": "The hour-by-hour pattern needs several complete weekdays, so a one-day report leaves it out.",
   "day.lights.doc.section.pattern": "This day, hour by hour",
   "day.lights.doc.noPattern": "Some readings for this day are missing, so the hour-by-hour pattern is not drawn.",
+  "day.breakdown.value": "{kwh} · {pct}",
+  "day.profile.lineDay": "{name} · {kwh}",
+  "day.perLight.col.perDay": "kWh on the day",
+  "day.perLight.col.perLight": "kWh per light on the day",
 
   "plan.aria": "Simplified floor plan of {name}",
   "plan.estimate": "about {kwh} kWh per 30 days",
@@ -227,6 +231,10 @@ export const siteReportMessages = defineMessages({
     "day.doc.noPattern": "逐小时规律需要几个读数完整的工作日，所以一天的报告不绘制。",
     "day.lights.doc.section.pattern": "当天的逐小时用电",
     "day.lights.doc.noPattern": "当天有部分读数缺失，所以不绘制逐小时规律。",
+    "day.breakdown.value": "{kwh} · {pct}",
+    "day.profile.lineDay": "{name} · {kwh}",
+    "day.perLight.col.perDay": "当天 kWh",
+    "day.perLight.col.perLight": "当天每盏灯 kWh",
 
     "plan.aria": "{name} 的简化楼层图",
     "plan.estimate": "约 {kwh} kWh / 30 天",
@@ -372,6 +380,10 @@ export const siteReportMessages = defineMessages({
     "day.doc.noPattern": "Corak mengikut jam memerlukan beberapa hari bekerja yang lengkap, jadi laporan satu hari tidak menunjukkannya.",
     "day.lights.doc.section.pattern": "Hari itu, jam demi jam",
     "day.lights.doc.noPattern": "Sebahagian bacaan hari itu tidak diterima, jadi corak mengikut jam tidak dilukis.",
+    "day.breakdown.value": "{kwh} · {pct}",
+    "day.profile.lineDay": "{name} · {kwh}",
+    "day.perLight.col.perDay": "kWh pada hari itu",
+    "day.perLight.col.perLight": "kWh bagi setiap lampu pada hari itu",
 
     "plan.aria": "Pelan lantai ringkas {name}",
     "plan.estimate": "kira-kira {kwh} kWh setiap 30 hari",
