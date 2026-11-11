@@ -59,3 +59,15 @@ it("lets an editor choose the plan's look, with a live preview, and saves the ch
   expect(editor.host.querySelector('svg[data-look="blueprint"]')).not.toBeNull();
   await editor.unmount();
 });
+
+it("colours a panel the same in the editor as on the saved plan, whatever other group names the site has", async () => {
+  // "Amenities" is a group that has no area on the plan; it must not push Block A along the colour order.
+  const map = await render(<SiteFloorMap reference={reference()} devices={[{ ...meters[0]!, position: [240, 180] }]} />);
+  expect(map.host.querySelector("svg")!.outerHTML).toContain("var(--zone-1)");
+  await map.unmount();
+  const editing = await render(<FloorPlanEditor projectId="estate" notes="" block={null} previous={reference()} meters={meters} boards={["Amenities", "Block A"]} onCancel={() => undefined} onSaved={() => undefined} />);
+  const canvas = editing.host.querySelector("svg")!.outerHTML;
+  expect(canvas).toContain("var(--zone-1)");
+  expect(canvas).not.toContain("var(--zone-2)");
+  await editing.unmount();
+});

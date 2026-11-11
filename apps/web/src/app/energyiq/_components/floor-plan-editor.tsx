@@ -58,8 +58,11 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   const unit = vw / 100;
   // Panels are optional: an area may name none (""), and it is never offered as a panel to choose.
   const allBoards = [...new Set([...boards, ...plan.areas.map(item => item.board)].filter(Boolean))];
-  const colours = boardColours(allBoards, plan.colours);
-  const noBoardColours = boardlessColours(allBoards, plan.areas.filter(item => !item.board).map(item => item.key));
+  // Colours count only the panels the plan's areas name, exactly as the saved map does, so a panel keeps the same
+  // colour while editing and after saving (other groups' names never shift it).
+  const planBoards = plan.areas.map(item => item.board);
+  const colours = boardColours(planBoards, plan.colours);
+  const noBoardColours = boardlessColours(planBoards, plan.areas.filter(item => !item.board).map(item => item.key));
   /** An area's colour: its own, else its panel's, else (no panel) the next colour after the panels. */
   const areaColour = (item: PlanArea) => item.colour ?? (item.board ? colours.get(item.board) : noBoardColours.get(item.key)) ?? "var(--zone-6)";
   /** Each area, equipment box, room and device can have its own colour; without one it follows its panel (a room, its area). */
@@ -338,7 +341,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
           {waiting.length > 0 && <button type="button" className={styles.tool} onClick={() => commit(autoPlace(plan, meters))}>{t("panel.placeRest")}</button>}
           <p className={styles.hint}>{t("panel.hint")}</p>
           {allBoards.filter(board => meters.some(meter => meter.board === board)).map(board => <div key={board} className={styles.paletteGroup}>
-            <p><span className={styles.swatch} style={{ background: colours.get(board) }} />{board}</p>
+            <p><span className={styles.swatch} style={{ background: colours.get(board) ?? "var(--zone-6)" }} />{board}</p>
             <ul>{meters.filter(meter => meter.board === board).map(meter => { const onPlan = placedIds.has(meter.id); return <li key={meter.id} draggable onDragStart={event => { event.dataTransfer.setData("text/plain", meter.id); event.dataTransfer.effectAllowed = "move"; }} className={onPlan ? styles.onPlan : undefined}>
               <span className={styles.grip} aria-hidden="true">⋮⋮</span>
               <span className={styles.deviceName}><strong>{meter.name}</strong><small>{meter.type}</small></span>
