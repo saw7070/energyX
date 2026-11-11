@@ -1,12 +1,12 @@
 "use client";
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { configApi } from "../../../lib/config-api";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { floorPlanMessages } from "./floor-plan-messages";
 import { EnergyIcon } from "./icons";
 import { boardColours, boardlessColours, DeviceBox, mapDevices, PANEL_COLOURS, pinLabel, roomHasPins, SiteFloorMap, wrapLabel } from "./site-floor-map";
 import {
-  asOwnArea, autoPlace, centre, clampPoint, clampRect, contains, NO_PASSENGERS, settleRooms, defaultDeviceSize, deviceRect, moveSelection, resizeCanvas, notesWithReference, passengers, planFromReference, referenceFromPlan, removeSelection, resizeRect, snap, starterPlan,
+  asOwnArea, autoPlace, centre, PLAN_STYLES, planStyleOf, clampPoint, clampRect, contains, NO_PASSENGERS, settleRooms, defaultDeviceSize, deviceRect, moveSelection, resizeCanvas, notesWithReference, passengers, planFromReference, referenceFromPlan, removeSelection, resizeRect, snap, starterPlan,
   type FloorPlan, type Handle, type PlanArea, type Point, type Rect, type Selection, type StoredSpatialReference,
 } from "./floor-plan-model";
 import mapStyles from "./site-floor-map.module.css";
@@ -223,6 +223,8 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   const [placingBefore, placingAfter = ""] = t("editor.placing").split("{name}");
   const areaName = (label: string) => label.length <= 2 ? t("name.area", { id: label }) : label;
 
+  // A live picture of the saved look, from the plan as it stands; nothing while the drawing is not yet valid.
+  const preview = useMemo(() => { try { return referenceFromPlan(plan, projectId, previous, locale); } catch { return null; } }, [plan, projectId, previous, locale]);
   return <section className={`${styles.card} ${styles.editing}`} aria-label={t("editor.title")}>
     <header className={styles.cardHeader}>
       <div><h4>{t("editor.title")}</h4><p>{t("editor.help", { undoKey: typeof navigator !== "undefined" && /Mac/.test(navigator.platform) ? "⌘Z" : "Ctrl+Z" })}</p><p>{t("editor.drawingOnly")}</p></div>
@@ -322,6 +324,15 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
           <button type="button" className={styles.danger} onClick={remove}>{t("panel.removeEntrance")}</button>
         </div>}
 
+        <div className={styles.panel} role="radiogroup" aria-label={t("style.title")}>
+          <h5>{t("style.title")}</h5>
+          <p className={styles.hint}>{t("style.hint")}</p>
+          <div className={styles.styleChoices}>{PLAN_STYLES.map(look => { const chosen = planStyleOf(plan) === look; return <button key={look} type="button" role="radio" aria-checked={chosen} className={`${styles.styleChoice} ${chosen ? styles.styleChosen : ""}`} onClick={() => { if (!chosen) commit({ ...plan, style: look }); }}>
+            <span className={`${styles.styleSwatch} ${styles[`swatch_${look}`]}`} aria-hidden="true" />
+            <span><strong>{t(`style.${look}`)}</strong><small>{t(`style.${look}Hint`)}</small></span>
+          </button>; })}</div>
+          {preview && <><p className={styles.previewTitle}>{t("style.preview")}</p><div className={styles.previewFrame}><SiteFloorMap reference={preview} devices={mapDevices(preview, meters)} /></div></>}
+        </div>
         <div className={styles.panel}>
           <div className={styles.paletteHead}><h5>{t("panel.devices")}</h5><span>{t("panel.placedCount", { placed: plan.devices.filter(item => meterById.has(item.meterId)).length, total: meters.length })}</span></div>
           {waiting.length > 0 && <button type="button" className={styles.tool} onClick={() => commit(autoPlace(plan, meters))}>{t("panel.placeRest")}</button>}

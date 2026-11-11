@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readProjectSpatialReference } from "@datafoundry/contracts";
-import { autoPlace, clampRect, deviceRect, roomFor, moveSelection, notesWithReference, planFromReference, referenceFromPlan, removeSelection, resizeRect, starterPlan, type FloorPlan, type StoredSpatialReference } from "./floor-plan-model";
+import { autoPlace, clampRect, deviceRect, planStyleOf, roomFor, moveSelection, notesWithReference, planFromReference, referenceFromPlan, removeSelection, resizeRect, starterPlan, type FloorPlan, type StoredSpatialReference } from "./floor-plan-model";
 
 const stored: StoredSpatialReference = {
   schemaVersion: 1, projectId: "office", provenance: { file: "Office plan.pdf", status: "Reference-derived" },
@@ -168,5 +168,17 @@ describe("a drawing only", () => {
     expect(zones.map(zone => [zone.id, zone.meterLocations])).toEqual([["North wing", ["DB1 Area"]], ["B", ["DB2 Area"]], ["C", ["DB3 Area"]]]);
     const read = readProjectSpatialReference(notesWithReference("", null, referenceFromPlan(plan, "office", filed)), "office")!;
     expect(read.reference.layout.zones.map(zone => zone.meterLocations)).toEqual([["DB1 Area"], ["DB2 Area"], ["DB3 Area"]]);
+  });
+});
+
+describe("plan style", () => {
+  it("keeps the chosen look through saving and reading, and treats a missing or unknown one as a building drawing", () => {
+    expect(planStyleOf(stored.layout)).toBe("drawing");
+    expect(planStyleOf({ style: "neon" })).toBe("drawing");
+    const saved = referenceFromPlan({ ...planFromReference(stored), style: "blueprint" }, "office", stored);
+    expect(saved.layout.style).toBe("blueprint");
+    expect(planFromReference(saved).style).toBe("blueprint");
+    // A plan that never chose a look saves none, so older layouts read exactly as before.
+    expect(referenceFromPlan(planFromReference(stored), "office", stored).layout.style).toBeUndefined();
   });
 });

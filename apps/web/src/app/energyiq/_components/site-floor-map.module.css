@@ -46,3 +46,51 @@
 :global(:where(html[data-energyiq-theme="dark"])) .legend strong { color:#e6ede9; }
 :global(:where(html[data-energyiq-theme="dark"])) .legend strong span, :global(:where(html[data-energyiq-theme="dark"])) .legend p { color:#9aa8a0; }
 :global(:where(html[data-energyiq-theme="dark"])) .chips span { background:#191919; border-color:#32363b; color:#b9c5be; }
+
+/* The map as a floor-plan drawing (the layout editor keeps the classes above). Tokens first, then each part. */
+.map { --plan-paper:#fbfbf8; --plan-grid:#ebeee8; --plan-grid-major:#dfe4dd; --plan-floor:#f3f5f0; --plan-wall:#2f3b35; --plan-partition:#8a948e; --plan-room:#ffffff; --plan-ink:#24312a; --plan-ink-muted:#6a7570; --plan-frame:#c3cbc5; }
+.sheet { fill:var(--plan-paper); }
+.gridMinor { fill:none; stroke:var(--plan-grid); }
+.gridMajor { fill:none; stroke:var(--plan-grid-major); }
+.frame, .titleBlock { fill:none; stroke:var(--plan-frame); }
+.titleBlock { fill:var(--plan-paper); }
+.planZone { fill:color-mix(in srgb, var(--area) 4%, var(--plan-floor)); stroke:var(--plan-wall); transition:fill 150ms, stroke 150ms; }
+.planZoneActive { fill:color-mix(in srgb, var(--area) 10%, var(--plan-floor)); stroke:var(--area); }
+.planBand, .planSwatch { fill:var(--area); }
+.planBand { opacity:.85; }
+.planZoneLabel { font-weight:700; fill:var(--plan-ink); letter-spacing:.01em; }
+.planZoneSub { font-weight:500; fill:var(--plan-ink-muted); }
+.planRoom { fill:var(--plan-room); stroke:var(--plan-partition); }
+.planRoomOwn { fill:color-mix(in srgb, var(--area) 10%, var(--plan-room)); stroke:var(--area); }
+.planDoorGap { stroke:var(--plan-room); }
+.planDoor { stroke:var(--plan-partition); }
+.planDoorSwing { fill:none; stroke:var(--plan-partition); opacity:.7; }
+.planRoomLabel { fill:var(--plan-ink); font-weight:600; letter-spacing:.015em; }
+.planEquip { fill:color-mix(in srgb, var(--area) 7%, transparent); stroke:var(--area); }
+.planEquipActive { fill:color-mix(in srgb, var(--area) 16%, transparent); }
+.planEquipLabel { fill:var(--plan-ink); font-weight:600; }
+.planEntrance { fill:var(--plan-wall); }
+.planEntranceLabel { fill:var(--plan-ink); font-weight:650; text-transform:uppercase; letter-spacing:.08em; }
+.planPinHalo { opacity:.16; }
+.planPin { stroke:var(--plan-room); }
+.planPinLabel { fill:var(--plan-ink); font-weight:600; paint-order:stroke; stroke:var(--plan-room); stroke-linejoin:round; }
+.map .caption { fill:var(--plan-ink-muted); letter-spacing:.04em; }
+.areaLink:hover .planZone, .areaLink:focus-visible .planZone { fill:color-mix(in srgb, var(--area) 9%, var(--plan-floor)); }
+.areaLink:hover .planRoom, .areaLink:focus-visible .planRoom { stroke:var(--area); }
+.areaLink:focus-visible .planZone { stroke:var(--area); }
+.pinLink:hover .planPin, .pinLink:focus-visible .planPin { stroke:var(--plan-wall); }
+.pinLink:hover .planPinLabel, .pinLink:focus-visible .planPinLabel { text-decoration:underline; }
+:global(:where(html[data-energyiq-theme="dark"])) .map { --plan-paper:#141719; --plan-grid:#1d2225; --plan-grid-major:#252b2f; --plan-floor:#1a1e21; --plan-wall:#c4cdc7; --plan-partition:#5e6964; --plan-room:#101315; --plan-ink:#e3e9e5; --plan-ink-muted:#8e9a93; --plan-frame:#353c41; }
+
+
+/* Keyboard focus: a ring of its own, so it never looks like hover, selection or a room's own colour. */
+.areaLink:focus-visible, .pinLink:focus-visible { outline:2px solid var(--plan-ink); outline-offset:2px; }
+/* Blueprint: white lines on blue in both themes, like a printed blueprint. */
+.map.lookBlueprint, :global(:where(html[data-energyiq-theme="dark"])) .map.lookBlueprint { --plan-paper:#0f3a63; --plan-grid:#1a4a77; --plan-grid-major:#255b8e; --plan-floor:#123f6b; --plan-wall:#f1f6fb; --plan-partition:#a9c8e6; --plan-room:#0f3a63; --plan-ink:#f4f8fc; --plan-ink-muted:#b3cde6; --plan-frame:#7aa3c9; }
+.lookBlueprint .planZone { fill:color-mix(in srgb, var(--area) 10%, var(--plan-floor)); }
+/* Colour blocks: the plain look, with soft coloured areas and no drawing furniture. */
+.map.lookBlocks { --plan-paper:#fbfcfb; --plan-floor:#ffffff; }
+:global(:where(html[data-energyiq-theme="dark"])) .map.lookBlocks { --plan-paper:#161819; --plan-floor:#1d2022; }
+.lookBlocks .planZone { fill:color-mix(in srgb, var(--area) 8%, var(--plan-floor)); stroke:color-mix(in srgb, var(--area) 60%, transparent); }
+.lookBlocks .planZoneActive { fill:color-mix(in srgb, var(--area) 14%, var(--plan-floor)); stroke:var(--area); }
+.lookBlocks .planRoom { stroke:color-mix(in srgb, var(--area, var(--plan-partition)) 45%, transparent); }
