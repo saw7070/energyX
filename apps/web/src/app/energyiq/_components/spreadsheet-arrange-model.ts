@@ -11,7 +11,7 @@ import { addGroup, metersInGroup, moveMetersToGroup, removeGroup } from "./meter
 import { applyMeterEdit } from "./site-structure-editing";
 import { projectMeterFullName } from "./project-meter-name";
 import { decodeXmlText } from "./live-device-list";
-import { DEFAULT_VIEWBOX, MAX_PLAN_SIZE, contentExtent, planFromReference, starterPlan, type FloorPlan, type PlanArea, type StoredSpatialReference } from "./floor-plan-model";
+import { DEFAULT_VIEWBOX, MAX_PLAN_SIZE, contentExtent, hiddenZones, planFromReference, starterPlan, type FloorPlan, type PlanArea, type StoredSpatialReference } from "./floor-plan-model";
 import type { EnergyIqLocale } from "./energyiq-messages";
 
 /** What a column holds. Several columns may be groups (read left to right); the others are used once each. */
@@ -422,7 +422,8 @@ export function templateCsv(): string {
  */
 export function floorPlanWithGroupAreas(previous: StoredSpatialReference | null, groups: string[], locale: EnergyIqLocale = "en"): { plan: FloorPlan; added: string[] } | null {
   const existing = previous ? planFromReference(previous, locale) : null;
-  const taken = new Set((existing?.areas ?? []).map(area => key(area.label)));
+  // Areas the layout keeps off the drawing count too, so a new area never takes the same label.
+  const taken = new Set([...(existing?.areas ?? []).map(area => area.label), ...(existing ? hiddenZones(existing).map(zone => zone.id) : [])].map(key));
   const added: string[] = [];
   for (const name of groups.map(cleanText).filter(Boolean)) if (!taken.has(key(name))) { taken.add(key(name)); added.push(name); }
   if (!added.length) return null;

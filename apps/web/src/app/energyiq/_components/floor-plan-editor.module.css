@@ -31,6 +31,15 @@
 .placing { margin-top:10px; padding:8px 12px; border-radius:8px; background:#e4efe7; color:#1d513a; font-size:13px; }
 .placing button { margin-left:8px; font-weight:600; text-decoration:underline; }
 .error { margin-top:10px; padding:8px 12px; border-radius:8px; background:#fdecec; color:#a4262c; font-size:13px; }
+/* Cancel with changes not saved: asked inside the page. */
+.unsaved { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:10px; padding:8px 12px; border-radius:8px; background:#fff4e0; color:#6b4a00; font-size:13px; }
+.unsaved span { flex:1 1 220px; }
+.unsaved button { min-height:30px; padding:4px 10px; border:1px solid #d0dbd2; border-radius:7px; background:white; color:#1d513a; font-size:13px; font-weight:600; }
+.unsaved .leave { border-color:#e3b4b1; color:#a4262c; }
+.hiddenList { display:grid; gap:4px; margin:0; padding:0; list-style:none; font-size:13px; color:#1f2d25; }
+.editing:focus { outline:none; }
+.canvas:focus { outline:none; }
+.canvas:focus-visible { outline:2px solid #3b8a63; outline-offset:2px; }
 
 .editorBody { display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:16px; margin-top:12px; align-items:start; }
 .canvasFrame { padding:10px 14px 14px 8px; border:1px solid #e1e7e1; border-radius:12px; background:#fbfcfb; overflow:auto; }
@@ -147,3 +156,8 @@
 :global(:where(html[data-energyiq-theme="dark"])) .styleChoice strong { color:#e6ede9; }
 :global(:where(html[data-energyiq-theme="dark"])) .styleChoice small, :global(:where(html[data-energyiq-theme="dark"])) .previewTitle { color:#9aa8a0; }
 :global(:where(html[data-energyiq-theme="dark"])) .previewFrame { background:#161819; border-color:#32363b; }
+:global(:where(html[data-energyiq-theme="dark"])) .unsaved { background:#2a2416; color:#f1d48f; }
+:global(:where(html[data-energyiq-theme="dark"])) .unsaved button { background:#1d2022; border-color:#32363b; color:#8bc3b9; }
+:global(:where(html[data-energyiq-theme="dark"])) .unsaved .leave { border-color:#5a2f2d; color:#f3908b; }
+:global(:where(html[data-energyiq-theme="dark"])) .hiddenList { color:#e6ede9; }
+:global(:where(html[data-energyiq-theme="dark"])) .canvas:focus-visible { outline-color:#8bc3b9; }

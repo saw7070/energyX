@@ -2,11 +2,14 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { configApi } from "../../../lib/config-api";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
+import { intlLocale } from "./energyiq-messages";
 import { floorPlanMessages } from "./floor-plan-messages";
+import { canRedo, canUndo, commitPlan, finishChange, redo, selectIn, showPlan, startHistory, undo, type HistoryEntry } from "./floor-plan-history";
+import { planShortcut } from "./floor-plan-keys";
 import { EnergyIcon } from "./icons";
 import { boardColours, boardlessColours, DeviceBox, mapDevices, PANEL_COLOURS, pinLabel, roomHasPins, SiteFloorMap, wrapLabel } from "./site-floor-map";
 import {
-  asOwnArea, autoPlace, centre, PLAN_STYLES, planStyleOf, clampPoint, clampRect, contains, NO_PASSENGERS, settleRooms, defaultDeviceSize, deviceRect, moveSelection, resizeCanvas, notesWithReference, passengers, planFromReference, referenceFromPlan, removeSelection, resizeRect, snap, starterPlan,
+  asGroupIn, asOwnArea, autoPlace, centre, hiddenZones, NOTES_LIMIT, PLAN_STYLES, planStyleOf, clampPoint, clampRect, contains, NO_PASSENGERS, settleRooms, defaultDeviceSize, deviceRect, moveSelection, resizeCanvas, notesWithReference, passengers, planFromReference, referenceFromPlan, removeSelection, resizeRect, snap, starterPlan,
   type FloorPlan, type Handle, type PlanArea, type Point, type Rect, type Selection, type StoredSpatialReference,
 } from "./floor-plan-model";
 import mapStyles from "./site-floor-map.module.css";
@@ -37,22 +40,29 @@ export function FloorPlanView({ reference, meters, highlight, highlightDevices =
   </section>;
 }
 
-type Drag = { mode: "move" | "resize"; selection: Selection; handle?: Handle; start: Point; original: FloorPlan; riders: ReturnType<typeof passengers>; moved: boolean };
+type Drag = { mode: "move" | "resize"; selection: Selection; handle?: Handle; start: Point; original: FloorPlan; before: HistoryEntry; riders: ReturnType<typeof passengers>; moved: boolean };
 /** Which edge of the drawing space is being pulled: right (wider), bottom (taller) or the corner (both). */
 type Edge = "e" | "s" | "se";
-type EdgeDrag = { edge: Edge; startX: number; startY: number; scale: number; original: FloorPlan; moved: boolean };
+type EdgeDrag = { edge: Edge; startX: number; startY: number; scale: number; original: FloorPlan; before: HistoryEntry; moved: boolean };
+const isMac = () => typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
 
 /** Full-width editor: design areas and rooms, place devices, then save to the layout block in Project notes. */
 export function FloorPlanEditor({ projectId, notes, block, previous, meters, boards, onCancel, onSaved }: { projectId: string; notes: string; block: string | null; previous: StoredSpatialReference | null; meters: PlanMeter[]; boards: string[]; onCancel: () => void; onSaved: (message: string) => void }) {
   const t = useMessages(floorPlanMessages);
   const { locale } = useEnergyIqLocale();
-  const [plan, setPlan] = useState<FloorPlan>(() => previous ? planFromReference(previous, locale) : starterPlan(boards, locale));
-  const [history, setHistory] = useState<FloorPlan[]>([]);
-  const [selection, setSelection] = useState<Selection | null>(null);
+  // The plan and the selection, with every step Undo and Redo can go to (see floor-plan-history).
+  const [history, setHistory] = useState(() => startHistory(previous ? planFromReference(previous, locale) : starterPlan(boards, locale)));
+  const { plan, selection } = history.present;
+  const opened = useRef(plan).current;
+  const changed = plan !== opened;
+  const setSelection = (next: Selection | null) => setHistory(current => selectIn(current, next));
   const [placing, setPlacing] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [leaving, setLeaving] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
+  /** Keys work while the plan has focus; clicking it gives it focus. */
+  const focusCanvas = () => { const svg = svgRef.current as (SVGSVGElement & { focus?: (options?: FocusOptions) => void }) | null; svg?.focus?.({ preventScroll: true }); };
   const drag = useRef<Drag | null>(null);
   const [vx, vy, vw, vh] = plan.viewBox;
   const unit = vw / 100;
@@ -77,21 +87,25 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   const meterById = new Map(meters.map(meter => [meter.id, meter]));
   const placedIds = new Set(plan.devices.map(item => item.meterId));
 
-  const commit = (next: FloorPlan) => { setHistory(current => [...current.slice(-49), plan]); setPlan(next); setError(""); };
-  const undo = () => { const last = history[history.length - 1]; if (!last) return; setHistory(history.slice(0, -1)); setPlan(last); setSelection(null); };
+  /** One undo step; `merge` makes letters typed into one field a single step. */
+  const commit = (next: FloorPlan, options?: { selection?: Selection | null; merge?: string }) => { setHistory(current => commitPlan(current, next, options)); setError(""); };
+  const show = (next: FloorPlan) => setHistory(current => showPlan(current, next));
+  const undoStep = () => { setHistory(undo); setError(""); };
+  const redoStep = () => { setHistory(redo); setError(""); };
   const toPoint = (clientX: number, clientY: number): Point => {
     const svg = svgRef.current, matrix = svg?.getScreenCTM();
     if (!svg || !matrix) return [vx + vw / 2, vy + vh / 2];
     const point = new DOMPoint(clientX, clientY).matrixTransform(matrix.inverse());
     return [point.x, point.y];
   };
-  const place = (meterId: string, at: Point) => { commit({ ...plan, devices: [...plan.devices.filter(item => item.meterId !== meterId), { meterId, position: clampPoint([snap(at[0], GRID), snap(at[1], GRID)], plan.viewBox) }] }); setSelection({ kind: "device", key: meterId }); setPlacing(null); };
-  const remove = () => { if (!selection) return; commit(removeSelection(plan, selection)); setSelection(null); };
-  const nextLabel = () => { for (let index = 0; index < 26; index += 1) { const label = String.fromCharCode(65 + index); if (!plan.areas.some(item => item.label === label)) return label; } return t("name.area", { id: plan.areas.length + 1 }); };
+  const place = (meterId: string, at: Point) => { commit({ ...plan, devices: [...plan.devices.filter(item => item.meterId !== meterId), { meterId, position: clampPoint([snap(at[0], GRID), snap(at[1], GRID)], plan.viewBox) }] }, { selection: { kind: "device", key: meterId } }); setPlacing(null); focusCanvas(); };
+  const remove = () => { if (!selection) return; commit(removeSelection(plan, selection), { selection: null }); };
+  const hidden = hiddenZones(plan);
+  const nextLabel = () => { for (let index = 0; index < 26; index += 1) { const label = String.fromCharCode(65 + index); if (!plan.areas.some(item => item.label === label) && !hidden.some(item => item.id === label)) return label; } return t("name.area", { id: plan.areas.length + 1 }); };
   const addArea = (board: string) => {
     const key = `area-${Date.now()}`;
-    commit({ ...plan, areas: [...plan.areas, { key, label: nextLabel(), board, rect: clampRect([vx + 20, vy + 20, vw * 0.35, vh * 0.55], plan.viewBox) }] });
-    setSelection({ kind: "area", key });
+    commit({ ...plan, areas: [...plan.areas, { key, label: nextLabel(), board, rect: clampRect([vx + 20, vy + 20, vw * 0.35, vh * 0.55], plan.viewBox) }] }, { selection: { kind: "area", key } });
+    focusCanvas();
   };
   const addRoom = () => {
     const host = (selection?.kind === "area" ? plan.areas.find(item => item.key === selection.key && !item.insideRoom) : undefined) ?? plan.areas.find(item => !item.insideRoom);
@@ -99,8 +113,8 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     const key = `room-${Date.now()}`;
     const roomName = (number: number) => t("name.newRoom", { number });
     let number = plan.rooms.length + 1; while (plan.rooms.some(room => room.name === roomName(number))) number += 1;
-    commit({ ...plan, rooms: [...plan.rooms, { key, name: roomName(number), rect: clampRect([hx + 20, hy + 50, 180, 110], plan.viewBox), ...(host ? { area: host.key } : {}) }] });
-    setSelection({ kind: "room", key });
+    commit({ ...plan, rooms: [...plan.rooms, { key, name: roomName(number), rect: clampRect([hx + 20, hy + 50, 180, 110], plan.viewBox), ...(host ? { area: host.key } : {}) }] }, { selection: { kind: "room", key } });
+    focusCanvas();
   };
   /** An equipment group inside a room, such as a DB3 bank of LED screens in the showroom: pick its board and what it supplies next. */
   const addEquipment = () => {
@@ -110,18 +124,18 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     const board = allBoards.find(item => !plan.areas.some(area => area.board === item)) ?? hostBoard ?? allBoards[0] ?? "";
     const [rx, ry, rw, rh] = room.rect, height = Math.min(60, rh * 0.4);
     const key = `group-${Date.now()}`;
-    commit({ ...plan, areas: [...plan.areas, { key, label: nextLabel(), board, insideRoom: room.key, equipment: "", rect: clampRect([rx + 12, ry + rh - height - 12, Math.max(20, rw - 24), height], plan.viewBox) }] });
-    setSelection({ kind: "area", key });
+    commit({ ...plan, areas: [...plan.areas, { key, label: nextLabel(), board, insideRoom: room.key, equipment: "", rect: clampRect([rx + 12, ry + rh - height - 12, Math.max(20, rw - 24), height], plan.viewBox) }] }, { selection: { kind: "area", key } });
+    focusCanvas();
   };
-  const addEntrance = () => { commit({ ...plan, entrance: { label: t("name.mainEntrance"), position: [vx + vw / 2, vy + vh - 40] } }); setSelection({ kind: "entrance", key: "entrance" }); };
-  const updateArea = (key: string, patch: Partial<PlanArea>) => commit({ ...plan, areas: plan.areas.map(item => item.key === key ? { ...item, ...patch } : item) });
+  const addEntrance = () => { commit({ ...plan, entrance: { label: t("name.mainEntrance"), position: [vx + vw / 2, vy + vh - 40] } }, { selection: { kind: "entrance", key: "entrance" } }); focusCanvas(); };
+  const updateArea = (key: string, patch: Partial<PlanArea>, merge?: string) => commit({ ...plan, areas: plan.areas.map(item => item.key === key ? { ...item, ...patch } : item) }, merge ? { merge } : undefined);
 
   const startDrag = (event: ReactPointerEvent, next: Selection, mode: Drag["mode"] = "move", handle?: Handle) => {
     if (placing || event.button !== 0) return;
     event.stopPropagation();
     (event.currentTarget as Element).setPointerCapture?.(event.pointerId);
-    setSelection(next);
-    drag.current = { mode, selection: next, ...(handle ? { handle } : {}), start: toPoint(event.clientX, event.clientY), original: plan, riders: event.altKey ? NO_PASSENGERS() : passengers(plan, next), moved: false };
+    setSelection(next); focusCanvas();
+    drag.current = { mode, selection: next, ...(handle ? { handle } : {}), start: toPoint(event.clientX, event.clientY), original: plan, before: { plan, selection: next }, riders: event.altKey ? NO_PASSENGERS() : passengers(plan, next), moved: false };
   };
   const onPointerMove = (event: ReactPointerEvent) => {
     const current = drag.current;
@@ -130,11 +144,11 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     const dx = snap(x - current.start[0], GRID), dy = snap(y - current.start[1], GRID);
     if (!dx && !dy && !current.moved) return;
     current.moved = true;
-    if (current.mode === "move") setPlan(moveSelection(current.original, current.selection, dx, dy, current.riders));
+    if (current.mode === "move") show(moveSelection(current.original, current.selection, dx, dy, current.riders));
     else {
       const resize = (rect: Rect) => resizeRect(rect, current.handle!, dx, dy, current.original.viewBox);
       const key = current.selection.key;
-      setPlan(current.selection.kind === "area" ? { ...current.original, areas: current.original.areas.map(item => item.key === key ? { ...item, rect: resize(item.rect) } : item) }
+      show(current.selection.kind === "area" ? { ...current.original, areas: current.original.areas.map(item => item.key === key ? { ...item, rect: resize(item.rect) } : item) }
         : current.selection.kind === "device" ? { ...current.original, devices: current.original.devices.map(item => { const rect = item.meterId === key ? deviceRect(item) : null; if (!rect) return item; const [x, y, w, h] = resize(rect); return { ...item, position: [x + w / 2, y + h / 2] as Point, size: [w, h] as Point }; }) }
         : { ...current.original, rooms: current.original.rooms.map(item => item.key === key ? { ...item, rect: resize(item.rect) } : item) });
     }
@@ -147,7 +161,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     event.preventDefault(); event.stopPropagation();
     (event.currentTarget as Element).setPointerCapture?.(event.pointerId);
     const width = svgRef.current?.getBoundingClientRect().width ?? 0;
-    edgeDrag.current = { edge, startX: event.clientX, startY: event.clientY, scale: width > 0 ? width / vw : 1, original: plan, moved: false };
+    edgeDrag.current = { edge, startX: event.clientX, startY: event.clientY, scale: width > 0 ? width / vw : 1, original: plan, before: history.present, moved: false };
   };
   const moveEdge = (event: ReactPointerEvent) => {
     const current = edgeDrag.current;
@@ -158,14 +172,14 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     const next = resizeCanvas(current.original, width, height);
     if (!current.moved && next.viewBox[2] === ow && next.viewBox[3] === oh) return;
     current.moved = true;
-    setPlan(next);
+    show(next);
     // Keep the drawing at the same scale while pulling, so the edge follows the pointer; the frame scrolls if needed.
     if (current.edge !== "s") setStretch(next.viewBox[2] * current.scale);
   };
   const endEdge = () => {
     const current = edgeDrag.current;
     edgeDrag.current = null; setStretch(null);
-    if (current?.moved) { setHistory(list => [...list.slice(-49), current.original]); setError(""); }
+    if (current?.moved) { setHistory(list => finishChange(list, current.before)); setError(""); }
   };
   const nudgeEdge = (event: React.KeyboardEvent, edge: Edge) => {
     const step = event.shiftKey ? GRID * 10 : GRID * 5;
@@ -179,35 +193,46 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     onPointerDown={event => startEdge(event, edge)} onPointerMove={moveEdge} onPointerUp={endEdge} onPointerCancel={endEdge} onKeyDown={event => nudgeEdge(event, edge)}><span /></button>;
 
   // Once dropped, a room belongs to the area it now sits in (it keeps its area where areas overlap).
-  const endDrag = () => { const current = drag.current; drag.current = null; if (current?.moved) { setHistory(list => [...list.slice(-49), current.original]); setPlan(settleRooms(plan)); setError(""); } };
+  // A drag is one undo step, however far it went; once dropped, a room belongs to the area it now sits in.
+  const endDrag = () => { const current = drag.current; drag.current = null; if (current?.moved) { setHistory(list => finishChange(list, current.before, settleRooms(list.present.plan))); setError(""); } };
 
+  // Shortcuts only while focus is inside the editor, and never while typing in a field or on a button (see floor-plan-keys).
+  const onKeyDown = (event: React.KeyboardEvent) => {
+    const shortcut = planShortcut(event, GRID);
+    if (!shortcut) return;
+    if (shortcut.kind === "undo" || shortcut.kind === "redo") { event.preventDefault(); if (shortcut.kind === "undo") undoStep(); else redoStep(); return; }
+    if (shortcut.kind === "escape") { setPlacing(null); setSelection(null); setLeaving(false); return; }
+    if (!selection) return;
+    event.preventDefault();
+    if (shortcut.kind === "delete") { remove(); return; }
+    commit(settleRooms(moveSelection(plan, selection, shortcut.by[0], shortcut.by[1], shortcut.alone ? NO_PASSENGERS() : passengers(plan, selection))));
+  };
+
+  // Leaving the page with changes not saved asks first; so does Cancel, inside the page.
   useEffect(() => {
-    const keys = (event: KeyboardEvent) => {
-      const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement;
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z" && !typing) { event.preventDefault(); undo(); return; }
-      if (event.key === "Escape") { setPlacing(null); setSelection(null); return; }
-      if (typing || !selection) return;
-      if (event.key === "Delete" || event.key === "Backspace") { event.preventDefault(); remove(); return; }
-      const step = event.shiftKey ? GRID * 5 : GRID;
-      const arrows: Record<string, Point> = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
-      const move = arrows[event.key];
-      if (move) { event.preventDefault(); commit(settleRooms(moveSelection(plan, selection, move[0], move[1], event.altKey ? NO_PASSENGERS() : passengers(plan, selection)))); }
-    };
-    window.addEventListener("keydown", keys);
-    return () => window.removeEventListener("keydown", keys);
-  });
+    if (!changed) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [changed]);
+  const cancel = () => { if (changed) setLeaving(true); else onCancel(); };
 
   const save = async () => {
-    setError("");
+    setError(""); setLeaving(false);
     let reference: StoredSpatialReference;
     try { reference = referenceFromPlan(plan, projectId, previous, locale); } catch (reason) { setError(reason instanceof Error ? reason.message : t("editor.checkLayout")); return; }
+    // The plan is saved inside Project notes, which have a size limit: say so plainly instead of failing.
+    const nextNotes = notesWithReference(notes, block, reference);
+    if (nextNotes.length > NOTES_LIMIT) { const format = (value: number) => value.toLocaleString(intlLocale(locale)); setError(t("editor.tooBig", { limit: format(NOTES_LIMIT), size: format(nextNotes.length) })); return; }
     setSaving(true);
     try {
+      // The notes must still be the ones this page opened with. The save also sends the revision just read, which the
+      // server checks for administrators (notes-only editors are checked by the notes text alone).
       const current = await configApi.reportAgentRequest<{ settings: Record<string, unknown> & { contextNotes: string } }>(projectId, "");
       if (current.settings.contextNotes !== notes) { setError(t("editor.notesChanged")); return; }
-      await configApi.reportAgentRequest(projectId, "settings", { method: "PUT", body: JSON.stringify({ ...current.settings, contextNotes: notesWithReference(notes, block, reference) }) });
+      await configApi.reportAgentRequest(projectId, "settings", { method: "PUT", body: JSON.stringify({ ...current.settings, contextNotes: nextNotes }) });
       onSaved(t("editor.saved"));
-    } catch (reason) { setError(reason instanceof Error && /ADMIN/.test(reason.message) ? t("editor.adminOnly") : t("editor.saveFailed")); }
+    } catch (reason) { const message = reason instanceof Error ? reason.message : ""; setError(/SETTINGS_CHANGED/.test(message) ? t("editor.notesChanged") : /ADMIN/.test(message) ? t("editor.adminOnly") : t("editor.saveFailed")); }
     finally { setSaving(false); }
   };
 
@@ -228,11 +253,12 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
 
   // A live picture of the saved look, from the plan as it stands; nothing while the drawing is not yet valid.
   const preview = useMemo(() => { try { return referenceFromPlan(plan, projectId, previous, locale); } catch { return null; } }, [plan, projectId, previous, locale]);
-  return <section className={`${styles.card} ${styles.editing}`} aria-label={t("editor.title")}>
+  const redoKey = isMac() ? "⇧⌘Z" : "Ctrl+Y";
+  return <section className={`${styles.card} ${styles.editing}`} aria-label={t("editor.title")} tabIndex={-1} onKeyDown={onKeyDown}>
     <header className={styles.cardHeader}>
-      <div><h4>{t("editor.title")}</h4><p>{t("editor.help", { undoKey: typeof navigator !== "undefined" && /Mac/.test(navigator.platform) ? "⌘Z" : "Ctrl+Z" })}</p><p>{t("editor.drawingOnly")}</p></div>
+      <div><h4>{t("editor.title")}</h4><p>{t("editor.help", { undoKey: isMac() ? "⌘Z" : "Ctrl+Z", redoKey })}</p><p>{t("editor.drawingOnly")}</p></div>
       <div className={styles.actions}>
-        <button type="button" className={styles.secondary} disabled={saving} onClick={onCancel}>{t("editor.cancel")}</button>
+        <button type="button" className={styles.secondary} disabled={saving} onClick={cancel}>{t("editor.cancel")}</button>
         <button type="button" className={styles.primary} disabled={saving} onClick={() => void save()}>{saving ? t("editor.saving") : t("editor.save")}</button>
       </div>
     </header>
@@ -243,9 +269,11 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
       <button type="button" className={styles.tool} disabled={!plan.rooms.length} title={plan.rooms.length ? t("editor.hintEquipment") : t("editor.addRoomFirst")} onClick={addEquipment}>{t("editor.addEquipment")}</button>
       {!plan.entrance && <button type="button" className={styles.tool} title={t("editor.hintEntrance")} onClick={addEntrance}>{t("editor.addEntrance")}</button>}
       <span className={styles.toolGap} />
-      <button type="button" className={styles.tool} disabled={!history.length} onClick={undo}>{t("editor.undo")}</button>
+      <button type="button" className={styles.tool} disabled={!canUndo(history)} onClick={undoStep}>{t("editor.undo")}</button>
+      <button type="button" className={styles.tool} disabled={!canRedo(history)} title={t("editor.hintRedo", { redoKey })} onClick={redoStep}>{t("editor.redo")}</button>
       <button type="button" className={styles.tool} disabled={!selection} title={t("editor.hintDelete")} onClick={remove}>{t("editor.delete")}</button>
     </div>
+    {leaving && <div className={styles.unsaved} role="alert"><span>{t("editor.unsaved")}</span><button type="button" onClick={() => setLeaving(false)}>{t("editor.keepEditing")}</button><button type="button" className={styles.leave} onClick={onCancel}>{t("editor.discard")}</button></div>}
     {placingName && <p className={styles.placing} role="status">{placingBefore}<strong>{placingName}</strong>{placingAfter} <button type="button" onClick={() => setPlacing(null)}>{t("editor.cancel")}</button></p>}
     {error && <p role="alert" className={styles.error}>{error}</p>}
 
@@ -253,9 +281,9 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
       <div className={styles.canvasFrame}>
         {/* The drawing space; pull its right or bottom edge (or the corner) to make it bigger or smaller. */}
         <div className={styles.stage} style={stretch ? { width: stretch } : undefined}>
-        <svg ref={svgRef} viewBox={`${vx} ${vy} ${vw} ${vh}`} className={`${mapStyles.map} ${styles.canvas} ${placing ? styles.placingCursor : ""}`} role="application" aria-label={t("editor.canvas")}
+        <svg ref={svgRef} viewBox={`${vx} ${vy} ${vw} ${vh}`} className={`${mapStyles.map} ${styles.canvas} ${placing ? styles.placingCursor : ""}`} role="application" aria-label={t("editor.canvas")} tabIndex={0}
           onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag}
-          onPointerDown={event => { if (placing) place(placing, toPoint(event.clientX, event.clientY)); else if (event.target === event.currentTarget || (event.target as Element).getAttribute("data-grid")) setSelection(null); }}
+          onPointerDown={event => { focusCanvas(); if (placing) place(placing, toPoint(event.clientX, event.clientY)); else if (event.target === event.currentTarget || (event.target as Element).getAttribute("data-grid")) setSelection(null); }}
           onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); const id = event.dataTransfer.getData("text/plain"); if (meterById.has(id)) place(id, toPoint(event.clientX, event.clientY)); }}>
           <defs><pattern id="floor-plan-grid" width={GRID * 2} height={GRID * 2} patternUnits="userSpaceOnUse"><path d={`M${GRID * 2} 0 L0 0 0 ${GRID * 2}`} className={styles.gridLine} /></pattern></defs>
           <rect data-grid="1" x={vx} y={vy} width={vw} height={vh} fill="url(#floor-plan-grid)" />
@@ -297,18 +325,18 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
       <aside className={styles.side}>
         {selectedArea && <div className={styles.panel}>
           <h5>{selectedArea.insideRoom ? t("panel.group") : t("panel.area")}</h5>
-          <label>{t("panel.label")}<input value={selectedArea.label} maxLength={40} onChange={event => updateArea(selectedArea.key, { label: event.target.value })} /></label>
+          <label>{t("panel.label")}<input value={selectedArea.label} maxLength={40} onChange={event => updateArea(selectedArea.key, { label: event.target.value }, `label:${selectedArea.key}`)} /></label>
           <label>{t("panel.board")}<select value={selectedArea.board} onChange={event => updateArea(selectedArea.key, { board: event.target.value })}><option value="">{t("panel.noBoard")}</option>{allBoards.map(board => <option key={board} value={board}>{board}</option>)}</select></label>
           {colourPicker(selectedArea.colour, selectedArea.board ? t("panel.colourAuto", { board: selectedArea.board }) : t("panel.colourAutoNone"), hex => commit({ ...plan, areas: plan.areas.map(item => item.key === selectedArea.key ? recolour(item, hex) : item) }))}
-          <label>{t("panel.shownAs")}<select value={selectedArea.insideRoom ?? ""} onChange={event => { const room = plan.rooms.find(item => item.key === event.target.value); if (!room) { commit({ ...plan, areas: plan.areas.map(item => item.key === selectedArea.key ? asOwnArea(item) : item) }); return; } const [rx, ry, rw, rh] = room.rect; updateArea(selectedArea.key, { insideRoom: room.key, rect: [rx + 12, ry + rh - Math.min(60, rh * 0.4) - 12, Math.max(20, rw - 24), Math.min(60, rh * 0.4)] }); }}>
+          <label>{t("panel.shownAs")}<select value={selectedArea.insideRoom ?? ""} onChange={event => { const room = plan.rooms.find(item => item.key === event.target.value); commit({ ...plan, areas: plan.areas.map(item => item.key !== selectedArea.key ? item : room ? asGroupIn(item, room) : asOwnArea(item)) }); }}>
             <option value="">{t("panel.ownArea")}</option>{plan.rooms.map(room => <option key={room.key} value={room.key}>{t("panel.insideRoom", { room: room.name })}</option>)}
           </select></label>
-          {selectedArea.insideRoom && <label>{t("panel.supplies")}<input value={selectedArea.equipment ?? ""} maxLength={80} placeholder={t("panel.suppliesExample")} onChange={event => updateArea(selectedArea.key, { equipment: event.target.value })} /></label>}
+          {selectedArea.insideRoom && <label>{t("panel.supplies")}<input value={selectedArea.equipment ?? ""} maxLength={80} placeholder={t("panel.suppliesExample")} onChange={event => updateArea(selectedArea.key, { equipment: event.target.value }, `equipment:${selectedArea.key}`)} /></label>}
           <button type="button" className={styles.danger} onClick={remove}>{selectedArea.insideRoom ? t("panel.deleteGroup") : t("panel.deleteArea")}</button>
         </div>}
         {selectedRoom && <div className={styles.panel}>
           <h5>{t("panel.room")}</h5>
-          <label>{t("panel.name")}<input value={selectedRoom.name} maxLength={60} onChange={event => commit({ ...plan, rooms: plan.rooms.map(item => item.key === selectedRoom.key ? { ...item, name: event.target.value } : item) })} /></label>
+          <label>{t("panel.name")}<input value={selectedRoom.name} maxLength={60} onChange={event => commit({ ...plan, rooms: plan.rooms.map(item => item.key === selectedRoom.key ? { ...item, name: event.target.value } : item) }, { merge: `name:${selectedRoom.key}` })} /></label>
           {colourPicker(selectedRoom.colour, t("panel.colourAutoRoom"), hex => commit({ ...plan, rooms: plan.rooms.map(item => item.key === selectedRoom.key ? recolour(item, hex) : item) }))}
           <button type="button" className={styles.danger} onClick={remove}>{t("panel.deleteRoom")}</button>
         </div>}
@@ -323,10 +351,15 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
         </div>}
         {selection?.kind === "entrance" && plan.entrance && <div className={styles.panel}>
           <h5>{t("panel.entrance")}</h5>
-          <label>{t("panel.label")}<input value={plan.entrance.label} maxLength={40} onChange={event => commit({ ...plan, entrance: { ...plan.entrance!, label: event.target.value } })} /></label>
+          <label>{t("panel.label")}<input value={plan.entrance.label} maxLength={40} onChange={event => commit({ ...plan, entrance: { ...plan.entrance!, label: event.target.value } }, { merge: "entrance:label" })} /></label>
           <button type="button" className={styles.danger} onClick={remove}>{t("panel.removeEntrance")}</button>
         </div>}
 
+        {hidden.length > 0 && <div className={styles.panel}>
+          <h5>{t("hidden.title")}</h5>
+          <p className={styles.hint}>{t("hidden.hint")}</p>
+          <ul className={styles.hiddenList}>{hidden.map((item, index) => <li key={index}>{areaName(item.id)}{item.board ? <small> · {item.board}</small> : null}</li>)}</ul>
+        </div>}
         <div className={styles.panel} role="radiogroup" aria-label={t("style.title")}>
           <h5>{t("style.title")}</h5>
           <p className={styles.hint}>{t("style.hint")}</p>
