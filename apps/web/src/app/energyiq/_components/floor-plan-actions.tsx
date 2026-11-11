@@ -5,7 +5,8 @@ import styles from "./floor-plan-editor.module.css";
 
 /**
  * The shared actions for what is selected: Duplicate, Lock, Bring to front and Send to back. An action that does not
- * apply (nothing to copy, already in front) is left out or greyed out.
+ * apply (nothing to copy, already in front) is left out or greyed out. The lock button's label says what it will do
+ * ("Lock in place" / "Unlock"), so it is a plain button, not a pressed toggle.
  */
 export function ArrangeActions({ onDuplicate, duplicateKey, locked, many, onLock, order, onFront, onBack }: { onDuplicate?: () => void; duplicateKey: string; locked: boolean; many: boolean; onLock?: () => void; order: boolean; onFront?: () => void; onBack?: () => void }) {
   const t = useMessages(floorPlanMessages);
@@ -13,7 +14,7 @@ export function ArrangeActions({ onDuplicate, duplicateKey, locked, many, onLock
   return <div className={styles.arrange} role="group" aria-label={t("panel.arrange")}>
     <div className={styles.arrangeRow}>
       {onDuplicate && <button type="button" className={styles.tool} title={t("panel.duplicateHint", { duplicateKey })} onClick={onDuplicate}>{t("panel.duplicate")}</button>}
-      {onLock && <button type="button" className={styles.tool} aria-pressed={locked} onClick={onLock}>{lockLabel}</button>}
+      {onLock && <button type="button" className={styles.tool} onClick={onLock}>{lockLabel}</button>}
     </div>
     {order && <div className={styles.arrangeRow} title={t("panel.orderHint")}>
       <button type="button" className={styles.tool} disabled={!onFront} onClick={onFront}>{t("panel.front")}</button>

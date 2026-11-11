@@ -55,6 +55,8 @@ export type StoredSpatialReference = ProjectSpatialReference & {
 };
 
 export const MIN_SIZE = 20;
+/** Most areas (including those not on the drawing) and rooms a saved layout can hold (the stored format's limits). */
+export const MAX_AREAS = 100, MAX_ROOMS = 200;
 export const DEFAULT_VIEWBOX: Rect = [0, 0, 1000, 640];
 /** A colour chosen for one item (#rrggbb); items without one use their panel's colour. */
 const colourOf = (item: unknown) => { const value = (item as { colour?: unknown } | null)?.colour; return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? { colour: value } : {}; };
@@ -74,9 +76,12 @@ export function asGroupIn(item: PlanArea, room: PlanRoom): PlanArea {
 const lockedOf = (item: unknown) => (item as { locked?: unknown } | null)?.locked === true ? { locked: true as const } : {};
 /** A room id the editor wrote (or could have): short letters, digits, - and _. Anything else rides along as saved. */
 export const ROOM_ID = /^[A-Za-z0-9_-]{1,64}$/;
-const roomIdOf = (room: unknown) => { const value = (room as { id?: unknown } | null)?.id; return typeof value === "string" && ROOM_ID.test(value) ? { id: value } : {}; };
-/** The keys the editor owns on an item: its usual ones, plus `id` and `locked` when they hold a value it understands. */
-const owned = (raw: unknown, keys: readonly string[], room = false) => [...keys, ...(room && "id" in roomIdOf(raw) ? ["id"] : []), ...("locked" in lockedOf(raw) ? ["locked"] : [])];
+const roomIdOf = (room: unknown): { id?: string } => { const value = (room as { id?: unknown } | null)?.id; return typeof value === "string" && ROOM_ID.test(value) ? { id: value } : {}; };
+/**
+ * The keys the editor owns on an item: its usual ones, plus `locked` when it holds a value the editor understands, and
+ * for a room `id` when `roomId` holds it (a well-formed id no earlier room uses).
+ */
+const owned = (raw: unknown, keys: readonly string[], roomId: { id?: string } = {}) => [...keys, ...("id" in roomId ? ["id"] : []), ...("locked" in lockedOf(raw) ? ["locked"] : [])];
 const isPoint = (value: unknown): value is Point => Array.isArray(value) && value.length === 2 && value.every(n => typeof n === "number" && Number.isFinite(n));
 const isRect = (value: unknown): value is Rect => Array.isArray(value) && value.length === 4 && value.every(n => typeof n === "number" && Number.isFinite(n));
 
@@ -128,7 +133,14 @@ export function planFromReference(reference: StoredSpatialReference, locale: Ene
   const hidden: HiddenZone[] = layout.zones.flatMap((zone, index) => drawable(zone) ? [] : [{ index, zone: withoutFilledBoard(zone as unknown as Json), ...("rooms" in zone ? { rooms: filedUnder(zone.id) } : {}) }]);
   const hiddenIds = new Set(hidden.map(item => item.zone.id));
   const ownZones = new Set(layout.zones.filter(zone => zone.independentSpace !== false && zone.rect).map(zone => zone.id));
-  const rooms = layout.rooms.map((room, index): PlanRoom => ({ key: `room-${index + 1}`, name: room.name, rect: [...room.rect] as Rect, ...(ownZones.has(room.zone) ? { area: room.zone } : {}), ...colourOf(room), ...(hiddenIds.has(room.zone) ? { zone: room.zone, zoneRect: [...room.rect] as Rect } : {}), ...roomIdOf(room), ...lockedOf(room), ...carriedOf(room, owned(room, ROOM_KEYS, true)) }));
+  // A room id is the room's own only the first time it appears: a repeat (written by hand or by the advisor) stays in the
+  // saved data as it was, so it is saved back unchanged but never taken as that room's identity.
+  const seenIds = new Set<string>();
+  const rooms = layout.rooms.map((room, index): PlanRoom => {
+    const found = roomIdOf(room), id = found.id !== undefined && !seenIds.has(found.id) ? found : {};
+    if (id.id !== undefined) seenIds.add(id.id);
+    return { key: `room-${index + 1}`, name: room.name, rect: [...room.rect] as Rect, ...(ownZones.has(room.zone) ? { area: room.zone } : {}), ...colourOf(room), ...(hiddenIds.has(room.zone) ? { zone: room.zone, zoneRect: [...room.rect] as Rect } : {}), ...id, ...lockedOf(room), ...carriedOf(room, owned(room, ROOM_KEYS, id)) };
+  });
   // Where each area stood, kept only when something depends on it staying put (board markers, its room list, its direction).
   const markers = isRecord(layout.boardMarkers);
   const baseline = (zone: object, rect: Rect, derived: boolean): { saved?: AreaBaseline } => markers || derived || "rooms" in zone || "directionFromEntrance" in zone
@@ -341,6 +353,8 @@ export function referenceFromPlan(plan: FloorPlan, projectId: string, previous: 
   if (!own.length) throw new Error(t("check.noArea"));
   if (!plan.rooms.length) throw new Error(t("check.noRoom"));
   const hidden = plan.carried?.zones ?? [];
+  if (plan.areas.length + hidden.length > MAX_AREAS) throw new Error(t("check.tooManyAreas", { max: MAX_AREAS }));
+  if (plan.rooms.length > MAX_ROOMS) throw new Error(t("check.tooManyRooms", { max: MAX_ROOMS }));
   const hiddenIds = new Set(hidden.map(item => String(item.zone.id)));
   const labels = plan.areas.map(item => item.label.trim());
   if (labels.some(label => !label)) throw new Error(t("check.areaLabel"));

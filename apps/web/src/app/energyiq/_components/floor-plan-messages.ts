@@ -24,7 +24,7 @@ export const floorPlanMessages = defineMessages({
   "style.preview": "How it will look",
 
   "editor.title": "Edit floor plan",
-  "editor.help": "Drag to move, pull a corner to resize. Shift-click to pick several, or drag across empty space to pick everything inside the box; they then move, nudge and delete together. Pull the right or bottom edge of the drawing space to make it bigger. Rooms and devices move with the area they belong to. Click the plan first, then arrow keys nudge (hold Alt (⌥) to nudge an area on its own), Delete removes, {undoKey} undoes and {redoKey} redoes. {copyKey} and {pasteKey} copy and paste, {duplicateKey} duplicates, and holding Alt (⌥) while dragging drags out a copy.",
+  "editor.help": "Drag to move, pull a corner to resize. Shift-click to pick several, or drag across empty space (or hold Shift and drag inside an area) to pick everything inside the box; they then move, nudge and delete together. Pull the right or bottom edge of the drawing space to make it bigger. Rooms and devices move with the area they belong to. Click the plan first, then arrow keys nudge (hold Alt (⌥) to nudge an area on its own), Delete removes, {undoKey} undoes and {redoKey} redoes. {copyKey} and {pasteKey} copy and paste, {duplicateKey} duplicates, and holding Alt (⌥) while dragging drags out a copy.",
   "editor.drawingOnly": "This is a drawing only: moving areas or devices here changes no totals. To change what counts where, move meters between Groups.",
   "editor.cancel": "Cancel",
   "editor.saving": "Saving…",
@@ -64,6 +64,8 @@ export const floorPlanMessages = defineMessages({
   "editor.equipmentNeedsRoom": "Equipment goes inside a room. Draw it over a room.",
   "editor.locked": "Locked items stay where they are. Unlock them first to move, resize or delete them.",
   "editor.notCopied": "Devices and the entrance are not copied: each one goes on the plan once.",
+  "editor.roomNeedsArea": "Rooms go inside an area. Draw it over an area, or add an area first.",
+  "editor.tooMany": "A plan can hold up to {areas} areas and {rooms} rooms. Remove some, then try again.",
   "editor.copied": "Copied. Press {pasteKey} to paste.",
   "editor.lockedBadge": "Locked",
   "panel.selected": "{count} items selected",
@@ -143,6 +145,8 @@ export const floorPlanMessages = defineMessages({
   "check.duplicateRoom": "Two rooms are called \"{name}\". Give each room its own name.",
   "check.outside": "\"{name}\" is outside every area. Drag it into an area.",
   "check.insidePlan": "Keep every area and room inside the plan, then try again.",
+  "check.tooManyAreas": "A plan can hold up to {max} areas, counting those not on the drawing. Remove some, then try again.",
+  "check.tooManyRooms": "A plan can hold up to {max} rooms. Remove some, then try again.",
 }, {
   "zh-Hans": {
     "view.title": "平面图",
@@ -164,7 +168,7 @@ export const floorPlanMessages = defineMessages({
     "style.preview": "效果预览",
 
     "editor.title": "修改平面图",
-    "editor.help": "拖动可移动位置，拖拉边角可调整大小。按住 Shift 点击可选择多项，或在空白处拖出一个框，选中框内的所有内容；选中的内容会一起移动、微调和删除。拖拉绘图空间的右边或下边可把空间变大。房间和设备会随所属区域一起移动。先点击平面图，然后方向键可微调位置（按住 Alt（⌥）可只微调区域本身），Delete 键可删除，{undoKey} 可撤销，{redoKey} 可重做。{copyKey} 和 {pasteKey} 可复制和粘贴，{duplicateKey} 可创建副本，拖动时按住 Alt（⌥）可拖出一个副本。",
+    "editor.help": "拖动可移动位置，拖拉边角可调整大小。按住 Shift 点击可选择多项，或在空白处拖出一个框（也可以按住 Shift 在区域内拖动），选中框内的所有内容；选中的内容会一起移动、微调和删除。拖拉绘图空间的右边或下边可把空间变大。房间和设备会随所属区域一起移动。先点击平面图，然后方向键可微调位置（按住 Alt（⌥）可只微调区域本身），Delete 键可删除，{undoKey} 可撤销，{redoKey} 可重做。{copyKey} 和 {pasteKey} 可复制和粘贴，{duplicateKey} 可创建副本，拖动时按住 Alt（⌥）可拖出一个副本。",
     "editor.drawingOnly": "这只是一张示意图：在这里移动区域或设备不会改变任何总量。要改变能耗计入哪里，请在“分组”之间移动电表。",
     "editor.cancel": "取消",
     "editor.saving": "正在保存…",
@@ -204,6 +208,8 @@ export const floorPlanMessages = defineMessages({
     "editor.equipmentNeedsRoom": "设备要画在房间里面。请在房间上方画。",
     "editor.locked": "已锁定的项目会固定在原位。要移动、调整大小或删除，请先解锁。",
     "editor.notCopied": "设备和入口不会被复制：每一个只在平面图上放置一次。",
+    "editor.roomNeedsArea": "房间要画在区域里面。请在区域上方画，或先添加一个区域。",
+    "editor.tooMany": "一张平面图最多可容纳 {areas} 个区域和 {rooms} 个房间。请删除一些，然后重试。",
     "editor.copied": "已复制。按 {pasteKey} 粘贴。",
     "editor.lockedBadge": "已锁定",
     "panel.selected": "已选中 {count} 项",
@@ -283,6 +289,8 @@ export const floorPlanMessages = defineMessages({
     "check.duplicateRoom": "有两个房间都叫“{name}”。请给每个房间取不同的名称。",
     "check.outside": "“{name}”不在任何区域内。请把它拖进一个区域。",
     "check.insidePlan": "请把所有区域和房间都放在平面图范围内，然后重试。",
+    "check.tooManyAreas": "一张平面图最多可容纳 {max} 个区域（包括不在图上的区域）。请删除一些，然后重试。",
+    "check.tooManyRooms": "一张平面图最多可容纳 {max} 个房间。请删除一些，然后重试。",
   },
   ms: {
     "view.title": "Pelan lantai",
@@ -304,7 +312,7 @@ export const floorPlanMessages = defineMessages({
     "style.preview": "Rupa akhirnya",
 
     "editor.title": "Ubah pelan lantai",
-    "editor.help": "Seret untuk mengalihkan, tarik sudut untuk mengubah saiz. Klik sambil menekan Shift untuk memilih beberapa item, atau seret merentasi ruang kosong untuk memilih semua yang berada dalam kotak itu; item yang dipilih bergerak, dianjak dan dipadam bersama. Tarik tepi kanan atau bawah ruang lukisan untuk membesarkannya. Bilik dan peranti bergerak bersama kawasan miliknya. Klik pelan dahulu, kemudian kekunci anak panah menganjak sedikit (tahan Alt (⌥) untuk menganjak kawasan sahaja), Delete membuang, {undoKey} membuat asal dan {redoKey} membuat semula. {copyKey} dan {pasteKey} menyalin dan menampal, {duplicateKey} membuat pendua, dan menahan Alt (⌥) semasa menyeret akan menyeret keluar satu salinan.",
+    "editor.help": "Seret untuk mengalihkan, tarik sudut untuk mengubah saiz. Klik sambil menekan Shift untuk memilih beberapa item, atau seret merentasi ruang kosong (atau tahan Shift dan seret di dalam kawasan) untuk memilih semua yang berada dalam kotak itu; item yang dipilih bergerak, dianjak dan dipadam bersama. Tarik tepi kanan atau bawah ruang lukisan untuk membesarkannya. Bilik dan peranti bergerak bersama kawasan miliknya. Klik pelan dahulu, kemudian kekunci anak panah menganjak sedikit (tahan Alt (⌥) untuk menganjak kawasan sahaja), Delete membuang, {undoKey} membuat asal dan {redoKey} membuat semula. {copyKey} dan {pasteKey} menyalin dan menampal, {duplicateKey} membuat pendua, dan menahan Alt (⌥) semasa menyeret akan menyeret keluar satu salinan.",
     "editor.drawingOnly": "Ini lukisan sahaja: mengalihkan kawasan atau peranti di sini tidak mengubah sebarang jumlah. Untuk mengubah di mana tenaga dikira, alihkan meter antara Kumpulan.",
     "editor.cancel": "Batal",
     "editor.saving": "Menyimpan…",
@@ -344,6 +352,8 @@ export const floorPlanMessages = defineMessages({
     "editor.equipmentNeedsRoom": "Peralatan diletakkan di dalam bilik. Lukis ia di atas bilik.",
     "editor.locked": "Item yang dikunci kekal di tempatnya. Buka kuncinya dahulu untuk mengalihkan, mengubah saiz atau memadamnya.",
     "editor.notCopied": "Peranti dan pintu masuk tidak disalin: setiap satu diletakkan pada pelan sekali sahaja.",
+    "editor.roomNeedsArea": "Bilik diletakkan di dalam kawasan. Lukis ia di atas kawasan, atau tambah kawasan dahulu.",
+    "editor.tooMany": "Satu pelan boleh memuatkan sehingga {areas} kawasan dan {rooms} bilik. Buang sebahagian, kemudian cuba lagi.",
     "editor.copied": "Disalin. Tekan {pasteKey} untuk menampal.",
     "editor.lockedBadge": "Dikunci",
     "panel.selected": "{count} item dipilih",
@@ -423,5 +433,7 @@ export const floorPlanMessages = defineMessages({
     "check.duplicateRoom": "Dua bilik bernama \"{name}\". Berikan setiap bilik nama tersendiri.",
     "check.outside": "\"{name}\" berada di luar semua kawasan. Seret ia ke dalam sesuatu kawasan.",
     "check.insidePlan": "Pastikan setiap kawasan dan bilik berada di dalam pelan, kemudian cuba lagi.",
+    "check.tooManyAreas": "Satu pelan boleh memuatkan sehingga {max} kawasan, termasuk yang tiada pada lukisan. Buang sebahagian, kemudian cuba lagi.",
+    "check.tooManyRooms": "Satu pelan boleh memuatkan sehingga {max} bilik. Buang sebahagian, kemudian cuba lagi.",
   },
 });

@@ -2,9 +2,9 @@
  * Working on several items at once: selecting, moving, deleting, locking, drawing order, and duplicate / copy / paste.
  * Every function returns the same plan object when nothing changes, so a press that does nothing leaves no undo step.
  */
-import { freshCopy } from "./floor-plan-carry";
+import { freshCopy, sameRect } from "./floor-plan-carry";
 import { clampDelta, within } from "./floor-plan-geometry";
-import { asOwnArea, clampPoint, clampRect, deviceRect, moveSelection, NO_PASSENGERS, passengers, removeSelection, roomOwner, settleRooms, type FloorPlan, type PlanArea, type PlanRoom, type Point, type Rect, type Selection } from "./floor-plan-model";
+import { asOwnArea, clampPoint, clampRect, deviceRect, MAX_AREAS, MAX_ROOMS, moveSelection, NO_PASSENGERS, passengers, removeSelection, roomOwner, settleRooms, type FloorPlan, type PlanArea, type PlanRoom, type Point, type Rect, type Selection } from "./floor-plan-model";
 
 export type Riders = ReturnType<typeof NO_PASSENGERS>;
 export const sameItem = (a: Selection, b: Selection) => a.kind === b.kind && a.key === b.key;
@@ -176,11 +176,18 @@ export function newRoomId(taken: Iterable<string>): string {
   for (;;) { const id = `rm-${Math.random().toString(36).slice(2, 10).padEnd(8, "0")}`; if (!used.has(id)) return id; }
 }
 export const roomIds = (plan: FloorPlan) => plan.rooms.flatMap(room => room.id ? [room.id] : []);
+/**
+ * Whether adding `areas` areas and `rooms` rooms keeps the plan within what a saved layout can hold. `hidden` is how
+ * many areas the layout holds that are not on the drawing: they count too.
+ */
+export const fitsLimits = (plan: FloorPlan, hidden: number, areas: number, rooms: number) => plan.areas.length + hidden + areas <= MAX_AREAS && plan.rooms.length + rooms <= MAX_ROOMS;
 
 /**
  * Puts a copy of what Copy holds on the plan, `offset` units down and to the right (kept inside the plan), on top of
  * everything of its kind. Copies get new labels, names and room ids, and start unlocked. Nothing carried from the
- * saved layout comes along (meter locations, report notes): it described the original only. Equipment whose room was
+ * saved layout comes along (meter locations, report notes): it described the original only. Copies name no panel, so
+ * the report keeps linking the panel's meters to the original until the reader picks one for the copy. A room filed
+ * under an area that is not on the drawing keeps that filing for its copy while the copy stays put. Equipment whose room was
  * not copied goes back into that room, or becomes its own area when that room is gone. `reserved` are labels used by
  * areas that are not on the drawing. The copies of what was picked come back selected.
  */
@@ -195,7 +202,7 @@ export function pasteClip(plan: FloorPlan, clip: Clip, offset: number, copyOf: (
   const areas = clip.areas.map((source): PlanArea => {
     const { locked: _locked, boardFilled: _filled, ...copy } = freshCopy(source);
     const label = uniqueLabel(source.label, labels, copyOf); labels.add(label);
-    const next: PlanArea = { ...copy, key: areaKeys.get(source.key)!, label, rect: shift(source.rect) };
+    const next: PlanArea = { ...copy, key: areaKeys.get(source.key)!, label, board: "", rect: shift(source.rect) };
     if (!source.insideRoom) return next;
     const room = roomKeys.get(source.insideRoom) ?? (plan.rooms.some(item => item.key === source.insideRoom) ? source.insideRoom : undefined);
     return room ? { ...next, insideRoom: room } : asOwnArea(next);
@@ -204,8 +211,10 @@ export function pasteClip(plan: FloorPlan, clip: Clip, offset: number, copyOf: (
     const { locked: _locked, zone: _zone, zoneRect: _zoneRect, area: from, ...copy } = freshCopy(source);
     const name = uniqueRoomName(source.name, names); names.add(name);
     const id = newRoomId(ids); ids.add(id);
-    const area = from === undefined ? undefined : areaKeys.get(from) ?? from;
-    return { ...copy, key: roomKeys.get(source.key)!, name, rect: shift(source.rect), ...(area ? { area } : {}), id };
+    const area = from === undefined ? undefined : areaKeys.get(from) ?? from, rect = shift(source.rect);
+    // Filed under an area not on the drawing (and not moved out of it): the copy is filed there too.
+    const filed = source.zone !== undefined && (!roomOwner(plan, source) || sameRect(source.zoneRect, source.rect)) ? { zone: source.zone, zoneRect: [...rect] as Rect } : {};
+    return { ...copy, key: roomKeys.get(source.key)!, name, rect, ...(area ? { area } : {}), ...filed, id };
   });
   const selection = clip.roots.flatMap((root): Selection[] => { const key = (root.kind === "area" ? areaKeys : roomKeys).get(root.key); return key ? [{ kind: root.kind, key }] : []; });
   return { plan: settleRooms({ ...plan, areas: [...plan.areas, ...areas], rooms: [...plan.rooms, ...rooms] }), selection };

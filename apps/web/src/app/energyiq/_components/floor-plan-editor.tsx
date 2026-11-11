@@ -4,7 +4,7 @@ import { configApi } from "../../../lib/config-api";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { intlLocale } from "./energyiq-messages";
 import { ArrangeActions } from "./floor-plan-actions";
-import { boxOf, copyItems, everything, inBox, isIn, isLocked, lockItems, moveItems, newRoomId, pasteClip, removeItems, reorderItems, ridersOf, roomIds, stillThere, toggled, type Clip, type Riders } from "./floor-plan-arrange";
+import { boxOf, copyItems, everything, fitsLimits, inBox, isIn, isLocked, lockItems, moveItems, newRoomId, pasteClip, removeItems, reorderItems, ridersOf, roomIds, stillThere, toggled, type Clip, type Riders } from "./floor-plan-arrange";
 import { boxBetween, centredBox, isClick, snappedBox } from "./floor-plan-geometry";
 import { floorPlanMessages } from "./floor-plan-messages";
 import { canRedo, canUndo, commitPlan, endTyping, finishChange, redo, selectIn, showPlan, startHistory, undo, type HistoryEntry } from "./floor-plan-history";
@@ -13,7 +13,7 @@ import { EnergyIcon } from "./icons";
 import { LockBadge } from "./plan-symbols";
 import { boardColours, boardlessColours, DeviceBox, mapDevices, PANEL_COLOURS, pinLabel, roomHasPins, SiteFloorMap, wrapLabel } from "./site-floor-map";
 import {
-  asGroupIn, asOwnArea, autoPlace, centre, hiddenZones, NOTES_LIMIT, PLAN_STYLES, planStyleOf, clampPoint, clampRect, contains, NO_PASSENGERS, sameGeometry, settleRooms, defaultDeviceSize, deviceRect, resizeCanvas, notesWithReference, planFromReference, referenceFromPlan, resizeRect, snap, starterPlan,
+  asGroupIn, asOwnArea, autoPlace, centre, hiddenZones, MAX_AREAS, MAX_ROOMS, NOTES_LIMIT, roomOwner, PLAN_STYLES, planStyleOf, clampPoint, clampRect, contains, NO_PASSENGERS, sameGeometry, settleRooms, defaultDeviceSize, deviceRect, resizeCanvas, notesWithReference, planFromReference, referenceFromPlan, resizeRect, snap, starterPlan,
   type FloorPlan, type Handle, type PlanArea, type Point, type Rect, type Selection, type StoredSpatialReference,
 } from "./floor-plan-model";
 import mapStyles from "./site-floor-map.module.css";
@@ -46,8 +46,11 @@ export function FloorPlanView({ reference, meters, highlight, highlightDevices =
 
 /** A drag on an item: moving the selection (or, with Alt, a copy of it), or resizing one item from a corner. */
 type Drag = { mode: "move" | "resize"; selection: Selection[]; handle?: Handle; start: Point; original: FloorPlan; before: HistoryEntry; riders: Riders; moved: boolean; copied: boolean; warned: boolean; narrow?: Selection };
-/** A drag on empty space: a selection box, or the box of a new area, room or equipment. */
-type Sweep = { kind: "marquee" | "draw"; start: Point; additive: boolean; base: Selection[] };
+/**
+ * A drag on empty space (or a Shift-drag inside an area): a selection box, or the box of a new area, room or equipment.
+ * `click` is the area pressed, which a Shift-click without dragging adds to the selection.
+ */
+type Sweep = { kind: "marquee" | "draw"; start: Point; additive: boolean; base: Selection[]; click?: Selection };
 /** What the next drag (or click) on the plan draws. */
 type Tool = "area" | "room" | "equipment";
 const TOOL_STATUS = { area: "editor.drawArea", room: "editor.drawRoom", equipment: "editor.drawEquipment" } as const satisfies Record<Tool, string>;
@@ -81,7 +84,8 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   useEffect(() => { dirtyListener.current = onDirtyChange; });
   useEffect(() => { dirtyListener.current?.(changed); }, [changed]);
   useEffect(() => () => dirtyListener.current?.(false), []);
-  const setSelection = (next: Selection[]) => setHistory(current => selectIn(current, next));
+  // A new selection clears a message about the last one ("Copied", "Locked items stay where they are").
+  const setSelection = (next: Selection[]) => { setHistory(current => selectIn(current, next)); setNotice(""); };
   const [placing, setPlacing] = useState<string | null>(null);
   const [tool, setTool] = useState<Tool | null>(null);
   const [error, setError] = useState("");
@@ -157,6 +161,8 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
    * from the keyboard (neither), at its usual place. One undo step; the new item comes back selected.
    */
   const create = (kind: Tool, at: Point | null, drawn: Rect | null) => {
+    // A saved layout holds at most so many areas and rooms: say so instead of adding one that cannot be saved.
+    if (!fitsLimits(plan, hidden.length, kind === "room" ? 0 : 1, kind === "room" ? 1 : 0)) { setNotice(tooMany()); return; }
     const box = drawn && !isClick(drawn) ? clampRect(drawn, plan.viewBox) : null;
     const done = (next: FloorPlan, item: Selection) => { commit(next, { selection: [item] }); setTool(null); focusCanvas(); };
     if (kind === "area") {
@@ -173,7 +179,10 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
       let number = plan.rooms.length + 1; while (plan.rooms.some(room => room.name === roomName(number))) number += 1;
       const rect = box ?? (at ? centredBox(at, [180, 110], plan.viewBox, GRID) : clampRect([hx + 20, hy + 50, 180, 110], plan.viewBox));
       // A new room gets a stable id, so later things can point at it even after it is renamed.
-      done(settleRooms({ ...plan, rooms: [...plan.rooms, { key, name: roomName(number), rect, ...(host && !box && !at ? { area: host.key } : {}), id: newRoomId(roomIds(plan)) }] }), { kind: "room", key });
+      const next = settleRooms({ ...plan, rooms: [...plan.rooms, { key, name: roomName(number), rect, ...(host && !box && !at ? { area: host.key } : {}), id: newRoomId(roomIds(plan)) }] });
+      // A room belongs to an area: one drawn outside every area is not added (the tool stays on), as for equipment.
+      if (!roomOwner(next, next.rooms[next.rooms.length - 1]!)) { setNotice(t("editor.roomNeedsArea")); return; }
+      done(next, { kind: "room", key });
       return;
     }
     // Equipment on its own panel inside a room, such as a DB3 bank of LED screens in the showroom: pick its board and what it supplies next.
@@ -192,29 +201,43 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   const updateArea = (key: string, patch: Partial<PlanArea>, merge?: string) => commit({ ...plan, areas: plan.areas.map(item => item.key === key ? { ...item, ...patch } : item) }, merge ? { merge } : undefined);
 
   // Duplicate, copy and paste: areas and rooms come with what is inside them; devices are placed once, so never copied.
-  const putCopy = (clip: Clip, offset: number) => { const result = pasteClip(plan, clip, offset, copyName, reserved); commit(result.plan, { selection: result.selection }); focusCanvas(); };
-  const duplicate = () => { const clip = copyItems(plan, selection); if (clip) putCopy(clip, GRID); else if (selection.length) setNotice(t("editor.notCopied")); };
-  const copy = () => { const clip = copyItems(plan, selection); if (!clip) { setNotice(t("editor.notCopied")); return false; } setClipboard({ clip, pasted: 0 }); setNotice(t("editor.copied", { pasteKey: keyName("V") })); return true; };
+  const tooMany = () => t("editor.tooMany", { areas: MAX_AREAS, rooms: MAX_ROOMS });
+  const fits = (clip: Clip) => fitsLimits(plan, hidden.length, clip.areas.length, clip.rooms.length);
+  /** Devices and the entrance in the selection have no copy: say so, so the reader knows why they were left out. */
+  const leftOut = () => selection.some(item => item.kind === "device" || item.kind === "entrance");
+  /** Puts a copy on the plan; refused, with a message, when the plan could then not be saved. */
+  const putCopy = (clip: Clip, offset: number) => {
+    if (!fits(clip)) { setNotice(tooMany()); return false; }
+    const result = pasteClip(plan, clip, offset, copyName, reserved); commit(result.plan, { selection: result.selection }); focusCanvas(); return true;
+  };
+  const duplicate = () => { const clip = copyItems(plan, selection); if (clip) { if (putCopy(clip, GRID) && leftOut()) setNotice(t("editor.notCopied")); } else if (selection.length) setNotice(t("editor.notCopied")); };
+  const copy = () => { const clip = copyItems(plan, selection); if (!clip) { setNotice(t("editor.notCopied")); return false; } setClipboard({ clip, pasted: 0 }); const copied = t("editor.copied", { pasteKey: keyName("V") }); setNotice(leftOut() ? `${copied} ${t("editor.notCopied")}` : copied); return true; };
   /** Each paste lands one grid step further on, so pasting again does not stack copies on top of each other. */
-  const paste = () => { if (!clipboard) return; const pasted = clipboard.pasted + 1; putCopy(clipboard.clip, GRID * pasted); setClipboard({ ...clipboard, pasted }); };
+  const paste = () => { if (!clipboard) return; const pasted = clipboard.pasted + 1; if (putCopy(clipboard.clip, GRID * pasted)) setClipboard({ ...clipboard, pasted }); };
 
   const startDrag = (event: ReactPointerEvent, item: Selection, mode: Drag["mode"] = "move", handle?: Handle) => {
     if (placing || tool || event.button !== 0) return;
+    const adding = event.shiftKey || event.metaKey || event.ctrlKey;
+    // Shift- or Cmd/Ctrl-pressing an area not yet selected starts a selection box, so the rooms inside a block can be
+    // boxed even where areas cover the whole plan; a click without dragging still adds the area itself.
+    if (mode === "move" && adding && item.kind === "area" && !isIn(selection, item)) { event.stopPropagation(); beginSweep(event, item); return; }
     event.stopPropagation();
     (event.currentTarget as Element).setPointerCapture?.(event.pointerId);
     focusCanvas();
     const start = toPoint(event.clientX, event.clientY);
     if (mode === "resize") { drag.current = { mode, selection: [item], ...(handle ? { handle } : {}), start, original: plan, before: { plan, selection }, riders: NO_PASSENGERS(), moved: false, copied: false, warned: false }; return; }
     // Shift- or Cmd/Ctrl-click adds or takes out one item; pressing an item already selected drags the whole selection.
-    const next = event.shiftKey || event.metaKey || event.ctrlKey ? toggled(selection, item) : isIn(selection, item) ? selection : [item];
+    const next = adding ? toggled(selection, item) : isIn(selection, item) ? selection : [item];
     setSelection(next);
     if (!isIn(next, item)) return;
-    // Alt-drag drags out a copy and leaves the original where it was.
-    const clip = event.altKey ? copyItems(plan, next) : null, copied = clip ? pasteClip(plan, clip, 0, copyName, reserved) : null;
+    // Alt-drag drags out a copy and leaves the original where it was (unless the plan could then not be saved).
+    const clip = event.altKey ? copyItems(plan, next) : null;
+    if (clip && !fits(clip)) { setNotice(tooMany()); return; }
+    const copied = clip ? pasteClip(plan, clip, 0, copyName, reserved) : null;
     if (copied) setHistory(current => showPlan(current, copied.plan, copied.selection));
     const original = copied?.plan ?? plan, moving = copied?.selection ?? next;
     // A plain click on one of several selected items, without dragging, selects just that one.
-    const narrow = !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey && next.length > 1 ? item : undefined;
+    const narrow = !adding && !event.altKey && next.length > 1 ? item : undefined;
     drag.current = { mode: "move", selection: moving, start, original, before: { plan, selection: next }, riders: ridersOf(original, moving), moved: false, copied: !!copied, warned: false, ...(narrow ? { narrow } : {}) };
   };
   const onPointerMove = (event: ReactPointerEvent) => {
@@ -290,16 +313,20 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     setHistory(list => { const settled = settleRooms(list.present.plan); return finishChange(list, current.before, sameGeometry(settled, current.before.plan) ? current.before.plan : settled); });
     setError("");
   };
+  /** Starts a selection box (or, with a tool chosen, the new item's box) where the pointer was pressed. */
+  const beginSweep = (event: ReactPointerEvent, click?: Selection) => {
+    focusCanvas();
+    svgRef.current?.setPointerCapture?.(event.pointerId);
+    sweep.current = { kind: tool ? "draw" : "marquee", start: toPoint(event.clientX, event.clientY), additive: event.shiftKey || event.metaKey || event.ctrlKey, base: selection, ...(click ? { click } : {}) };
+  };
   // Pressing empty space starts a selection box; with a tool chosen, pressing anywhere starts the new item's box.
   const startSweep = (event: ReactPointerEvent<SVGSVGElement>) => {
     focusCanvas();
     if (event.button !== 0) return;
-    const at = toPoint(event.clientX, event.clientY);
-    if (placing) { place(placing, at); return; }
+    if (placing) { place(placing, toPoint(event.clientX, event.clientY)); return; }
     const empty = event.target === event.currentTarget || !!(event.target as Element).getAttribute?.("data-grid");
     if (!tool && !empty) return;
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    sweep.current = { kind: tool ? "draw" : "marquee", start: at, additive: event.shiftKey || event.metaKey || event.ctrlKey, base: selection };
+    beginSweep(event);
   };
   const endPointer = (event: ReactPointerEvent) => {
     const area = sweep.current;
@@ -309,7 +336,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     if (area.kind === "draw") { if (tool) create(tool, area.start, snappedBox(area.start, end, GRID)); return; }
     // A click on empty space clears the selection (Shift keeps it); a box selects everything fully inside it.
     const box = boxBetween(area.start, end);
-    if (Math.max(box[2], box[3]) < unit * 0.8) { if (!area.additive) setSelection([]); return; }
+    if (Math.max(box[2], box[3]) < unit * 0.8) { if (area.click) setSelection(toggled(area.base, area.click)); else if (!area.additive) setSelection([]); return; }
     const found = inBox(plan, box, shown);
     setSelection(area.additive ? [...area.base, ...found.filter(item => !isIn(area.base, item))] : found);
   };
@@ -328,10 +355,11 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     if (shortcut.kind === "escape") { setPlacing(null); setTool(null); setNotice(""); sweep.current = null; setSweepBox(null); setSelection([]); setLeaving(false); return; }
     if (shortcut.kind === "selectAll") { if (textPicked()) return; event.preventDefault(); setSelection(everything(plan, shown)); return; }
     if (shortcut.kind === "paste") { if (clipboard) { event.preventDefault(); paste(); } return; }
+    // Cmd/Ctrl+D always means Duplicate here, even with nothing selected (never the browser's "Bookmark this page").
+    if (shortcut.kind === "duplicate") { event.preventDefault(); duplicate(); return; }
     if (!selection.length) return;
     if (shortcut.kind === "copy") { if (!textPicked() && copy()) event.preventDefault(); return; }
     event.preventDefault();
-    if (shortcut.kind === "duplicate") { duplicate(); return; }
     if (shortcut.kind === "delete") { remove(); return; }
     if (!event.repeat) nudgeRun.current += 1;
     const moved = moveItems(plan, selection, shortcut.by[0], shortcut.by[1], shortcut.alone ? NO_PASSENGERS() : ridersOf(plan, selection));
@@ -417,7 +445,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     </div>
     {leaving && <UnsavedBar onKeep={() => setLeaving(false)} onLeave={onCancel} />}
     {placingName && <p className={styles.placing} role="status">{placingBefore}<strong>{placingName}</strong>{placingAfter} <button type="button" onClick={() => setPlacing(null)}>{t("editor.cancel")}</button></p>}
-    {tool && <p className={styles.placing} role="status">{t(TOOL_STATUS[tool])} <button type="button" onClick={() => setTool(null)}>{t("editor.cancel")}</button></p>}
+    {tool && <p className={styles.placing} role="status">{t(TOOL_STATUS[tool])} <button type="button" onClick={() => { setTool(null); setNotice(""); }}>{t("editor.cancel")}</button></p>}
     {notice && <p className={styles.notice} role="status">{notice}</p>}
     {error && <p role="alert" className={styles.error}>{error}</p>}
 

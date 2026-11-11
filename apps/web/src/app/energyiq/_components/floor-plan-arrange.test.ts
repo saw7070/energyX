@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { readProjectSpatialReference } from "@datafoundry/contracts";
-import { copyItems, everything, inBox, lockItems, moveItems, pasteClip, removeItems, reorderItems, ridersOf, uniqueLabel, uniqueRoomName } from "./floor-plan-arrange";
+import { copyItems, everything, fitsLimits, inBox, lockItems, moveItems, pasteClip, removeItems, reorderItems, ridersOf, uniqueLabel, uniqueRoomName } from "./floor-plan-arrange";
 import { clampDelta } from "./floor-plan-geometry";
 import { notesWithReference, planFromReference, referenceFromPlan, type FloorPlan, type Selection, type StoredSpatialReference } from "./floor-plan-model";
 
@@ -76,7 +76,9 @@ describe("duplicate, copy and paste", () => {
     const { plan: next, selection } = pasteClip(base, clip, 10, copyOf);
     expect(next.devices).toBe(base.devices);
     const copy = next.areas.find(item => item.label === "Block 264F copy")!;
-    expect(copy).toMatchObject({ rect: [570, 30, 500, 600], board: "DB-F" });
+    // The copy names no panel: the report keeps linking DB-F's meters to the original until a panel is picked for it.
+    expect(copy).toMatchObject({ rect: [570, 30, 500, 600], board: "" });
+    expect(next.areas.find(item => item.label === "LED copy")!.board).toBe("");
     // Meter locations and report-only keys described the original only.
     expect(copy.meterLocations).toBeUndefined(); expect(copy.extra).toBeUndefined(); expect(copy.saved).toBeUndefined();
     const rooms = next.rooms.slice(3);
@@ -91,7 +93,10 @@ describe("duplicate, copy and paste", () => {
     expect(next.areas.slice(0, 3)).toEqual(base.areas);
     const saved = save(next);
     expect(saved.layout.rooms.map(item => item.name)).toEqual(["Store", "Lobby", "Store 2", "Lobby 2", "Store 3"]);
-    expect(saved.layout.zones.find(item => item.id === "Block 264F copy")).toEqual({ id: "Block 264F copy", referenceBoard: "DB-F", rect: [570, 30, 500, 600] });
+    expect(saved.layout.zones.find(item => item.id === "Block 264F copy")).toEqual({ id: "Block 264F copy", referenceBoard: "", rect: [570, 30, 500, 600] });
+    // Each panel and meter location is claimed by one zone only, so no meter moves to the copy.
+    const claims = saved.layout.zones.flatMap(zone => [zone.referenceBoard, ...(zone.meterLocations ?? [])].filter(Boolean));
+    expect(new Set(claims).size).toBe(claims.length);
     expect(saved.layout.zones.find(item => item.id === "Block 264F")).toMatchObject({ meterLocations: ["264F"], directionFromEntrance: "right", futureKey: { keep: true } });
     expect(readProjectSpatialReference(notesWithReference("", null, saved), "sktc")).not.toBeNull();
   });
@@ -125,6 +130,33 @@ describe("duplicate, copy and paste", () => {
     const roomless = { ...locked, rooms: locked.rooms.filter(item => item.key !== "room-2") };
     expect(pasteClip(roomless, ledClip, 10, copyOf).plan.areas[3]!.insideRoom).toBeUndefined();
   });
+
+  it("keeps a copied room filed under an area that is not on the drawing, so the copy saves too", () => {
+    const hiddenZone = { ...stored, layout: { ...stored.layout, zones: [...stored.layout.zones, { id: "Roof", referenceBoard: "DB-R" }], rooms: [...stored.layout.rooms, { name: "Plant", zone: "Roof", rect: [1080, 400, 100, 100] }] } } as StoredSpatialReference;
+    const base = planFromReference(hiddenZone);
+    const plant = base.rooms[3]!;
+    const copied = pasteClip(base, copyItems(base, [room(plant.key)])!, 10, copyOf).plan;
+    expect(copied.rooms[4]).toMatchObject({ name: "Plant 2", zone: "Roof", rect: [1090, 410, 100, 100], zoneRect: [1090, 410, 100, 100] });
+    const saved = referenceFromPlan(copied, "sktc", hiddenZone);
+    expect(saved.layout.rooms.slice(3).map(item => [item.name, item.zone])).toEqual([["Plant", "Roof"], ["Plant 2", "Roof"]]);
+  });
+});
+
+describe("what a saved layout can hold", () => {
+  it("refuses a copy past 100 areas or 200 rooms, and save explains the limit in plain words", () => {
+    const base = plan();
+    const clip = copyItems(base, [area("Block 264F")])!;
+    expect(fitsLimits(base, 0, clip.areas.length, clip.rooms.length)).toBe(true);
+    // Areas not on the drawing count toward the 100.
+    expect(fitsLimits(base, 96, clip.areas.length, clip.rooms.length)).toBe(false);
+    const crowded = { ...base, rooms: [...base.rooms, ...Array.from({ length: 196 }, (_, index) => ({ ...base.rooms[2]!, key: `extra-${index}`, name: `Extra ${index}` }))] };
+    expect(fitsLimits(crowded, 0, 0, 1)).toBe(true);
+    expect(fitsLimits(crowded, 0, clip.areas.length, clip.rooms.length)).toBe(false);
+    const over = { ...crowded, rooms: [...crowded.rooms, { ...base.rooms[2]!, key: "one-more", name: "One more" }, { ...base.rooms[2]!, key: "two-more", name: "Two more" }] };
+    expect(() => save(over)).toThrow("A plan can hold up to 200 rooms. Remove some, then try again.");
+    const areas = { ...base, areas: [...base.areas, ...Array.from({ length: 98 }, (_, index) => ({ ...base.areas[0]!, key: `extra-${index}`, label: `Extra ${index}` }))] };
+    expect(() => save(areas)).toThrow("A plan can hold up to 100 areas, counting those not on the drawing. Remove some, then try again.");
+  });
 });
 
 describe("lock and drawing order", () => {
@@ -155,6 +187,17 @@ describe("lock and drawing order", () => {
     expect(referenceFromPlan(read, "sktc", odd).layout.rooms.slice(0, 2)).toEqual([{ name: "Store", zone: "Block 264E", rect: [40, 80, 200, 150], id: "<script>", locked: "yes" }, { name: "Lobby", zone: "Block 264F", rect: [580, 80, 220, 180], note: "carried", id: "rm-lobby" }]);
   });
 
+  it("owns a saved room id only on the first room that uses it; a repeat is saved back unchanged and its copy gets a new id", () => {
+    const twice = { ...stored, layout: { ...stored.layout, rooms: [{ ...stored.layout.rooms[0]!, id: "rm-lobby" }, { ...stored.layout.rooms[1]!, id: "rm-lobby" }, stored.layout.rooms[2]!] } } as StoredSpatialReference;
+    const text = notesWithReference("", null, twice), found = readProjectSpatialReference(text, "sktc")!;
+    const read = planFromReference(found.reference as StoredSpatialReference);
+    expect([read.rooms[0]!.id, read.rooms[1]!.id]).toEqual(["rm-lobby", undefined]);
+    expect(read.rooms[1]!.extra).toEqual({ note: "carried", id: "rm-lobby" });
+    expect(notesWithReference(text, found.block, referenceFromPlan(read, "sktc", found.reference as StoredSpatialReference))).toBe(text);
+    const copy = pasteClip(read, copyItems(read, [room("room-2")])!, 10, copyOf).plan.rooms[3]!;
+    expect(copy.id).toMatch(/^rm-[a-z0-9]{8}$/);
+  });
+
   it("brings items to the front or sends them to the back within their own kind, and saves that order", () => {
     const base = plan();
     const front = reorderItems(base, [room("room-1")], "front");
@@ -177,4 +220,9 @@ describe("lock and drawing order", () => {
 it("gives every new mark on the editor canvas a dark-mode colour", () => {
   const css = readFileSync(new URL("./floor-plan-editor.module.css", import.meta.url), "utf8");
   for (const name of ["marquee", "drawBox", "lockBadge", "notice", "tool[aria-pressed=\"true\"]"]) expect(css).toContain(`[data-energyiq-theme="dark"])) .${name}`);
+});
+
+it("shows a crosshair over items while drawing, not the move cursor", () => {
+  const css = readFileSync(new URL("./floor-plan-editor.module.css", import.meta.url), "utf8");
+  expect(css).toContain(".placingCursor .item, .placingCursor .lockedItem { cursor:crosshair; }");
 });

@@ -70,6 +70,8 @@
 .marquee { fill:rgba(29,81,58,.08); stroke:#1d513a; stroke-width:1.5; stroke-dasharray:5 4; pointer-events:none; }
 .drawBox { fill:rgba(42,120,214,.10); stroke:#2a78d6; stroke-width:2; stroke-dasharray:8 5; pointer-events:none; }
 .lockedItem { cursor:default; }
+/* While drawing or placing, a press draws (or places) even over an item: show that, not the move cursor. */
+.placingCursor .item, .placingCursor .lockedItem { cursor:crosshair; }
 .lockBadge [data-part="plate"] { fill:#ffffff; stroke:#58645d; stroke-width:1; }
 .lockBadge [data-part="shackle"] { stroke:#3c4a42; }
 .lockBadge [data-part="body"] { fill:#3c4a42; }
