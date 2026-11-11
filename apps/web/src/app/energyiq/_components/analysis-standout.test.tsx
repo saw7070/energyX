@@ -36,18 +36,18 @@ async function render(locale: EnergyIqLocale, node: ReactNode) {
 
 describe("why a day was different, on the Analysis daily chart", () => {
   it("explains a bar that stood out in its tooltip, naming the meters and their groups", async () => {
-    const page = await render("en", <DayTip date={THURSDAY} item={on(THURSDAY)} siteName="SKTC" totalLabel={totalLabel} />);
+    const page = await render("en", <DayTip date={THURSDAY} item={on(THURSDAY)} siteName="Estate" totalLabel={totalLabel} />);
     expect(page.host.querySelector("p")?.textContent).toBe("Thu 5 Nov");
     expect(page.text()).toContain("Thu 5 Nov used 48.4 kWh, 2.3 kWh more than a usual day (46.1 kWh).");
     expect(page.text()).toContain("Most of the extra:");
     const items = [...page.host.querySelectorAll("li")].map(item => [...item.children].map(child => child.textContent));
-    expect(items).toEqual([["Compassvale Bow entrance", "Common area", "+1.5 kWh"], ["Pavilion DL & fan", "Common area › Pavilion", "+0.6 kWh"]]);
+    expect(items).toEqual([["Estate entrance", "Common area", "+1.5 kWh"], ["Pavilion lights & fan", "Common area › Pavilion", "+0.6 kWh"]]);
     expect(page.host.querySelector("li small")?.className).toContain("text-[11px]");
     await page.unmount();
   });
 
   it("says readings were missing instead of blaming a meter", async () => {
-    const page = await render("en", <DayTip date={GAP_DAY} item={on(GAP_DAY)} siteName="SKTC" totalLabel={totalLabel} />);
+    const page = await render("en", <DayTip date={GAP_DAY} item={on(GAP_DAY)} siteName="Estate" totalLabel={totalLabel} />);
     expect(page.text()).toContain("Daily Total: 46.1 kWh (missing readings)");
     expect(page.text()).toContain("Readings were missing on this day, so it is not compared with a usual day.");
     expect(page.host.querySelector("li")).toBeNull();
@@ -55,7 +55,7 @@ describe("why a day was different, on the Analysis daily chart", () => {
   });
 
   it("lists the same explanations under the chart, with the rule, so they can be read without hovering", async () => {
-    const page = await render("en", <StandoutDayList items={explained} lighting siteName="SKTC" hint="Outlined bars stood out. Hover over or tap a bar to see why." />);
+    const page = await render("en", <StandoutDayList items={explained} lighting siteName="Estate" hint="Outlined bars stood out. Hover over or tap a bar to see why." />);
     const section = page.host.querySelector("section")!;
     expect(section.getAttribute("aria-labelledby")).toBe(section.querySelector("h3")!.id);
     expect(section.querySelector("h3")?.textContent).toBe("Days that stood out");
@@ -63,7 +63,7 @@ describe("why a day was different, on the Analysis daily chart", () => {
     expect([...section.querySelector("ul")!.children].map(item => item.querySelector("p")?.textContent)).toEqual(["Thu 5 Nov used 48.4 kWh, 2.3 kWh more than a usual day (46.1 kWh)."]);
     await page.unmount();
 
-    const quiet = await render("ms", <StandoutDayList items={explained.filter(item => item.date !== THURSDAY)} lighting siteName="SKTC" hint="" />);
+    const quiet = await render("ms", <StandoutDayList items={explained.filter(item => item.date !== THURSDAY)} lighting siteName="Estate" hint="" />);
     expect(quiet.text()).toContain("Hari yang menonjol");
     expect(quiet.text()).toContain("Tiada hari yang menonjol berbanding hari biasa.");
     await quiet.unmount();
@@ -71,7 +71,7 @@ describe("why a day was different, on the Analysis daily chart", () => {
 
   it("shows a lights-on site's days as one kind on the Analysis page, in English and Chinese", async () => {
     mock.load.mockResolvedValue(DATA);
-    const en = await render("en", <AnalysisView projectId="sktc" />);
+    const en = await render("en", <AnalysisView projectId="estate" />);
     expect(en.text()).toContain("Daily total · kWh · every day");
     expect(en.text()).toContain("Days that stood out");
     expect(en.text()).toContain("Thu 5 Nov used 48.4 kWh, 2.3 kWh more than a usual day (46.1 kWh).");
@@ -84,7 +84,7 @@ describe("why a day was different, on the Analysis daily chart", () => {
     expect(trend.textContent).toContain("Unusual days: 0 of 13 complete days");
     await en.unmount();
 
-    const zh = await render("zh-Hans", <AnalysisView projectId="sktc" />);
+    const zh = await render("zh-Hans", <AnalysisView projectId="estate" />);
     expect(zh.text()).toContain("与平常不同的日子");
     expect(zh.text()).toContain("11月5日 周四用电 48.4 kWh，比正常日子（46.1 kWh）多 2.3 kWh。");
     expect(zh.text()).toContain("正常日子：46.1 kWh");

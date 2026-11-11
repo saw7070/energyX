@@ -64,6 +64,29 @@ export const REPORT_CSS = `
 .eiq-report .standout ul{margin-top:6px;padding-left:20px;display:grid;gap:6px}
 .eiq-report .standout p{margin-top:6px}
 .eiq-report .standout .rule{font-size:13px;color:var(--muted)}
+.eiq-report .sub-head{font-size:17px;font-weight:700;margin-top:30px}
+.eiq-report .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.eiq-report tr.subtotal td{font-weight:600}
+.eiq-report tr.group-head td{font-weight:700;padding-top:16px;border-bottom:1px solid var(--ink)}
+.eiq-report .bd-lead{font-size:15px;font-weight:700;margin:2px 0 8px}
+.eiq-report .breakdown{list-style:none;display:grid;gap:2px;font-size:14px}
+.eiq-report .breakdown ul{list-style:none;display:grid;gap:2px;margin:2px 0 8px 6px;padding-left:10px;border-left:2px solid var(--line)}
+.eiq-report .bd-row{display:grid;grid-template-columns:minmax(0,1fr) 18% auto;gap:8px;align-items:center;padding:5px 0}
+.eiq-report .bd-name{overflow-wrap:anywhere;padding-left:16px}
+.eiq-report .breakdown summary{display:block;cursor:pointer;list-style:none;border-radius:3px}
+.eiq-report .breakdown summary::-webkit-details-marker{display:none}
+.eiq-report .breakdown summary .bd-name{position:relative;font-weight:600}
+.eiq-report .breakdown summary .bd-name::before{content:"";position:absolute;left:2px;top:.45em;border:5px solid transparent;border-left-color:var(--muted);transition:transform .15s;transform-origin:2px 5px}
+.eiq-report .breakdown details[open]>summary .bd-name::before{transform:rotate(90deg)}
+.eiq-report .breakdown summary:hover .bd-name{text-decoration:underline}
+.eiq-report .breakdown summary:focus-visible{outline:2px solid var(--steel);outline-offset:2px}
+.eiq-report .bd-bar{height:10px;background:#fff;border:1px solid var(--line);position:relative}
+.eiq-report .bd-bar i{position:absolute;left:0;top:0;bottom:0}
+.eiq-report .bd-value{font-variant-numeric:tabular-nums;white-space:nowrap;font-size:12.5px}
+.eiq-report .bd-meters{display:block;font-size:12px;color:var(--muted);padding:0 0 4px 16px}
+.eiq-report .tip .tip-line{display:flex;align-items:center;gap:6px}
+.eiq-report .tip .tip-line i{display:inline-block;width:8px;height:8px;border-radius:2px}
+@media (prefers-reduced-motion:reduce){.eiq-report .breakdown summary .bd-name::before{transition:none}}
 .eiq-report footer{margin-top:64px;border-top:1px solid var(--line);padding-top:16px;font-size:12.5px;color:var(--muted);display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px}
 .eiq-report .svgt{font-family:inherit}
 .eiq-report .tick{font-size:11px;fill:var(--muted)}
@@ -87,4 +110,6 @@ export const REPORT_CSS = `
 @container (max-width:760px){.eiq-report .page{padding:36px 18px 56px}.eiq-report .keyfigs{grid-template-columns:1fr 1fr}.eiq-report .keyfigs div:nth-child(odd){border-left:none;padding-left:0}.eiq-report .keyfigs div:nth-child(even){border-left:1px solid var(--line);padding-left:16px}}
 @container (max-width:620px){.eiq-report .pies{grid-template-columns:1fr}.eiq-report .figure{padding:16px 12px 10px}.eiq-report table{font-size:13.5px}}
 @media print{.eiq-report .page{padding:20px 0}.eiq-report .figure{break-inside:avoid}.eiq-report section{break-inside:avoid-page;margin-top:36px}.eiq-report .tip{display:none}}
+/* On paper every group shows what is inside it; a rule of its own, so a browser that does not know it skips only this. */
+@media print{.eiq-report .breakdown details::details-content{content-visibility:visible;display:block}}
 `;

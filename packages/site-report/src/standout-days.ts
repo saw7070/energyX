@@ -32,11 +32,14 @@ export const STANDOUT_MIN_DAYS = 5;
 /** At most this many meters are named for one day. */
 export const STANDOUT_MAX_METERS = 3;
 /** A meter is named only when it explains at least this share of the difference. */
-const NAMED_SHARE = 0.1;
+export const STANDOUT_NAMED_SHARE = 0.1;
+const NAMED_SHARE = STANDOUT_NAMED_SHARE;
 /** Differences smaller than this would print as "+0.0 kWh". */
-const NAMED_MIN_KWH = 0.05;
+export const STANDOUT_NAMED_MIN_KWH = 0.05;
+const NAMED_MIN_KWH = STANDOUT_NAMED_MIN_KWH;
 /** Named meters that explain at least this share of the difference are "most of" it. */
-const MOST_SHARE = 0.5;
+export const STANDOUT_MOST_SHARE = 0.5;
+const MOST_SHARE = STANDOUT_MOST_SHARE;
 /** Median absolute deviation × 1.4826 is comparable with a standard deviation for normally spread days. */
 const MAD_TO_SPREAD = 1.4826;
 
@@ -64,6 +67,11 @@ export type DayExplanation = {
   otherKwh: number;
   /** most: the named meters explain most of it. spread: they explain less than half. none: no single meter stands out. Null without meter readings. */
   lead: "most" | "spread" | "none" | null;
+  /**
+   * For a standout day: every meter's change that day (meters with complete readings and a usual day of their own),
+   * so the change can also be added up by group. Absent on other days.
+   */
+  moves?: StandoutContributor[] | undefined;
 };
 
 export const dayKindOf = (day: Pick<AnalysisDay, "dayType">, lighting: boolean): DayKind => lighting ? "any" : day.dayType;
@@ -191,7 +199,7 @@ export function explainDays(input: { days: AnalysisDay[]; meters?: ScopeMeter[];
       .sort((a, b) => b.deltaKwh * sign - a.deltaKwh * sign).slice(0, STANDOUT_MAX_METERS);
     const named = contributors.reduce((sum, move) => sum + move.deltaKwh, 0);
     const lead = !meters.length ? null : !contributors.length ? "none" : named * sign >= Math.abs(deltaKwh) * MOST_SHARE ? "most" : "spread";
-    return { ...compared, status: "standout", contributors, otherKwh: deltaKwh - named, lead };
+    return { ...compared, status: "standout", contributors, otherKwh: deltaKwh - named, lead, moves };
   });
 }
 

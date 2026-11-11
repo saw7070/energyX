@@ -10,7 +10,7 @@ import { holidayName, joinText } from "./analysis-messages.js";
 import { shortDate } from "./analysis-model.js";
 import { forHoursMeaning, forOneDay, translatorFor, type EnergyIqLocale } from "./locale.js";
 import { rich, Rich } from "./rich.js";
-import { clock, hourRange, kwhText, moneyText, pctText, REPORT_COLOURS as C, type ProfileNote, type ReportDay, type ReportZone, type SiteReport } from "./site-report-model.js";
+import { clock, hourRange, kwhText, moneyText, pctText, REPORT_COLOURS as C, type BreakdownRow, type ProfileLine, type ProfileNote, type ReportDay, type ReportZone, type SiteReport } from "./site-report-model.js";
 import { siteReportMessages } from "./site-report-messages.js";
 import { REPORT_CSS } from "./site-report-styles.js";
 import { wrapLabel } from "./wrap-label.js";
@@ -244,6 +244,83 @@ function Donut({ title, slices, caption, report }: { title: string; slices: Slic
   </div>;
 }
 
+/**
+ * Where the energy goes, by group: the top-level groups in their saved order, each opening (a native disclosure, so it
+ * works by keyboard, with a screen reader and in the saved file without scripts) into the groups inside it, with kWh on
+ * an average day and the share of the whole site. Bars share one scale, so the groups inside a group add up to it.
+ */
+export function GroupBreakdown({ report }: { report: SiteReport }) {
+  const t = reportText(report.locale);
+  const groups = report.groups!;
+  const colourOf = new Map(groups.top.map(group => [group.key, group.colour]));
+  const scale = Math.max(0.001, ...groups.breakdown.map(row => row.share));
+  const value = (row: BreakdownRow) => row.perDay == null ? `${row.pct}%` : t("breakdown.value", { kwh: kwhText(row.perDay), pct: `${row.pct}%` });
+  const line = (row: BreakdownRow, colour: string) => <span className="bd-row">
+    <span className="bd-name">{row.name}</span>
+    <span className="bd-bar" aria-hidden="true"><i style={{ width: `${Math.min(1, row.share / scale) * 100}%`, background: colour }} /></span>
+    <span className="bd-value">{value(row)}</span>
+  </span>;
+  const item = (row: BreakdownRow, colour: string, depth: number): ReactNode => {
+    const inside = row.rows.filter(child => child.kind === "group");
+    const meters = row.rows.filter(child => child.kind !== "group");
+    // A top-level group opens onto everything in it; deeper down, only groups open and meters are listed by name.
+    const opens = depth === 0 ? row.rows.length > 0 : inside.length > 0;
+    return <li key={row.key} className={opens ? "bd-open" : undefined}>
+      {opens ? <details>
+        <summary>{line(row, colour)}</summary>
+        <ul>{(depth === 0 ? row.rows : inside).map(child => item(child, colour, depth + 1))}</ul>
+        {depth > 0 && meters.length > 0 && <small className="bd-meters">{t("breakdown.meters", { names: joinText(meters.map(meter => meter.name), report.locale) })}</small>}
+      </details> : <>
+        {line(row, colour)}
+        {row.kind === "group" && meters.length > 0 && <small className="bd-meters">{t("breakdown.meters", { names: joinText(meters.map(meter => meter.name), report.locale) })}</small>}
+      </>}
+    </li>;
+  };
+  return <div className="figure">
+    <div className="pie-title">{t("breakdown.title")}</div>
+    {report.averageDay && <p className="bd-lead">{report.averageDay.text}</p>}
+    <ul className="breakdown">{groups.breakdown.map(row => item(row, colourOf.get(row.key) ?? C.slate, 0))}</ul>
+    <div className="caption">{report.estimate.loadCaption}</div>
+  </div>;
+}
+
+/** Alike top-level groups side by side, group for group, in kWh on an average day. */
+function BlocksTable({ blocks, locale }: { blocks: NonNullable<SiteReport["blocks"]>; locale: EnergyIqLocale }) {
+  const t = reportText(locale);
+  const two = blocks.groups.length === 2;
+  return <div className="table-wrap"><table>
+    <caption className="sr-only">{blocks.heading}</caption>
+    <thead><tr><th>{t("blocks.col.group")}</th>{blocks.groups.map(group => <th key={group.key} className="r">{group.name}</th>)}{two && <th className="r">{t("blocks.col.diff")}</th>}</tr></thead>
+    <tbody>{blocks.rows.map(row => <tr key={row.name} className={row.total ? "total" : undefined}>
+      <td>{row.name}</td>
+      {row.perDay.map((value, index) => <td key={blocks.groups[index]!.key} className="r">{kwhText(value)}</td>)}
+      {two && <td className="r">{row.diff}</td>}
+    </tr>)}</tbody>
+  </table></div>;
+}
+
+/** kWh per light a day: meters with a number of lights recorded, and their groups. The management review shows it too. */
+export function PerLightTable({ perLight, locale }: { perLight: NonNullable<SiteReport["perLight"]>; locale: EnergyIqLocale }) {
+  const t = reportText(locale);
+  const small = (value: number | null) => value == null ? "—" : num(value, value < 0.1 ? 3 : 2);
+  return <div className="table-wrap"><table>
+    <thead><tr><th>{t("perLight.col.meter")}</th><th>{t("perLight.col.group")}</th><th className="r">{t("perLight.col.lights")}</th><th className="r">{t("perLight.col.perDay")}</th><th className="r">{t("perLight.col.perLight")}</th></tr></thead>
+    <tbody>{perLight.rows.map(row => <tr key={`${row.kind}:${row.name}:${row.group}`} className={row.kind === "group" ? "subtotal" : undefined}>
+      <td>{row.name}</td><td>{row.kind === "group" ? "" : row.group || "—"}</td><td className="r">{whole(row.lights)}</td>
+      <td className="r">{row.perDay == null ? t("doc.notEnough") : num(row.perDay, 2)}</td><td className="r">{small(row.perLight)}</td>
+    </tr>)}</tbody>
+  </table></div>;
+}
+
+/** Meters that used nothing in the dates, one plain line each, and that this is not a fault. */
+export function NoUseBlock({ noUse }: { noUse: NonNullable<SiteReport["noUse"]> }) {
+  return <div className="standout no-use">
+    <h3>{noUse.heading}</h3>
+    <ul>{noUse.items.map(item => <li key={item}>{item}</li>)}</ul>
+    <p className="rule">{noUse.note}</p>
+  </div>;
+}
+
 // ---------- 3. daily benchmark ----------
 function BenchChart({ benchmark, locale, standalone }: { benchmark: SiteReport["benchmark"]; locale: EnergyIqLocale; standalone?: boolean | undefined }) {
   const t = reportText(locale);
@@ -320,9 +397,20 @@ function StandoutBlock({ standout }: { standout: SiteReport["standout"] }) {
   </div>;
 }
 
+/** Lights-on hours: which lights were on in the daytime, and when; the always-on meters left out; the 20-minute rule. */
+export function DaytimeBlock({ daytime }: { daytime: NonNullable<SiteReport["daytime"]> }) {
+  return <div className="standout daytime">
+    <h3>{daytime.heading}</h3>
+    {daytime.items.length > 0 && <ul>{daytime.items.map(item => <li key={item}>{item}</li>)}{daytime.more && <li>{daytime.more}</li>}</ul>}
+    {daytime.none && <p>{daytime.none}</p>}
+    {daytime.alwaysOn && <p>{daytime.alwaysOn}</p>}
+    <p className="rule">{daytime.rule}</p>
+  </div>;
+}
+
 // ---------- 4. weekday hour by hour ----------
 /** An average day hour by hour with the opening (or lights-on) hours shaded; the management review draws it too. */
-export function ProfileChart({ pattern, report, standalone }: { pattern: Pick<NonNullable<SiteReport["pattern"]>, "hours" | "openFrom" | "openTo" | "notes" | "caption">; report: Pick<SiteReport, "locale" | "hoursMeaning">; standalone?: boolean | undefined }) {
+export function ProfileChart({ pattern, report, standalone }: { pattern: Pick<NonNullable<SiteReport["pattern"]>, "hours" | "openFrom" | "openTo" | "notes" | "caption"> & { lines?: Array<ProfileLine & { colour: string }> | undefined }; report: Pick<SiteReport, "locale" | "hoursMeaning">; standalone?: boolean | undefined }) {
   const { locale } = report;
   const t = reportHoursText(report);
   const [ref, width] = useWidth(780);
@@ -330,7 +418,9 @@ export function ProfileChart({ pattern, report, standalone }: { pattern: Pick<No
   const height = Math.round(Math.min(380, Math.max(280, width * 0.46)));
   const m = { l: 50, r: 14, t: 14, b: 30 };
   const pw = width - m.l - m.r, ph = height - m.t - m.b;
-  const ticks = niceTicks(Math.max(...pattern.hours) * 1.15);
+  // With groups, one line per group in place of the site's single line, on a scale that fits the groups.
+  const lines = pattern.lines?.length ? pattern.lines : null;
+  const ticks = niceTicks(Math.max(...(lines ? lines.flatMap(item => item.hours) : pattern.hours)) * 1.15);
   const top = ticks.at(-1)!;
   const x = (hour: number) => m.l + hour / 23 * pw;
   const y = (value: number) => m.t + ph - value / top * ph;
@@ -351,8 +441,9 @@ export function ProfileChart({ pattern, report, standalone }: { pattern: Pick<No
     return px - 8 - w < m.l ? { px, py, tx: px + 8, ty: py + dy, anchor: "start" as const } : { px, py, tx: px - 8, ty: py + dy, anchor: "end" as const };
   };
   return <div className="figure">
+    {lines && <div className="legend">{lines.map(item => <span key={item.key}><i style={{ background: item.colour }} />{t("profile.lineDay", { name: item.name, kwh: kwhText(item.dayKwh) })}</span>)}</div>}
     <div className="chart-scroll" ref={ref}><div className="chart-wrap" style={{ minWidth: width }} onMouseLeave={() => setHover(null)}>
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={t("profile.aria", { kw: Math.max(...pattern.hours).toFixed(2) })}>
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={lines ? t("profile.linesAria", { names: joinText(lines.map(item => item.name), locale) }) : t("profile.aria", { kw: Math.max(...pattern.hours).toFixed(2) })}>
         {bands.map(([from, to]) => <rect key={from} x={from} y={m.t} width={Math.max(0, to! - from!)} height={ph} fill={C.ember} fillOpacity={0.06} />)}
         <line x1={bandFrom} x2={bandFrom} y1={m.t} y2={m.t + ph} stroke={C.ember} strokeOpacity={0.35} strokeDasharray="4 4" />
         <line x1={bandTo} x2={bandTo} y1={m.t} y2={m.t + ph} stroke={C.ember} strokeOpacity={0.35} strokeDasharray="4 4" />
@@ -360,23 +451,43 @@ export function ProfileChart({ pattern, report, standalone }: { pattern: Pick<No
         <text className="chart-label" {...bandLabel} y={m.t + 14} fill={C.muted}>{t("profile.band", { range: hourRange(pattern.openFrom, pattern.openTo, locale) })}</text>
         <text className="axis-title" transform={`translate(13 ${m.t + ph / 2}) rotate(-90)`} textAnchor="middle">{t("profile.axis")}</text>
         {pattern.hours.map((_, hour) => hour % every === 0 && <text key={hour} className="tick dark" x={x(hour)} y={height - 10} textAnchor="middle">{String(hour).padStart(2, "0")}:00</text>)}
-        <path d={`${line}L${x(23).toFixed(1)},${y(0).toFixed(1)}L${x(0).toFixed(1)},${y(0).toFixed(1)}Z`} fill={C.ember} fillOpacity={0.1} />
-        <path d={line} fill="none" stroke={C.ember} strokeWidth={2.5} />
-        {pattern.hours.map((value, hour) => <circle key={hour} cx={x(hour)} cy={y(value)} r={6} fill="transparent"><title>{`${String(hour).padStart(2, "0")}:00 · ${value.toFixed(2)} kW`}</title></circle>)}
+        {lines ? lines.map(item => <path key={item.key} d={monotonePath(item.hours.map((value, hour) => [x(hour), y(value)] as [number, number]))} fill="none" stroke={item.colour} strokeWidth={2.2}><title>{item.name}</title></path>) : <>
+          <path d={`${line}L${x(23).toFixed(1)},${y(0).toFixed(1)}L${x(0).toFixed(1)},${y(0).toFixed(1)}Z`} fill={C.ember} fillOpacity={0.1} />
+          <path d={line} fill="none" stroke={C.ember} strokeWidth={2.5} />
+          {pattern.hours.map((value, hour) => <circle key={hour} cx={x(hour)} cy={y(value)} r={6} fill="transparent"><title>{`${String(hour).padStart(2, "0")}:00 · ${value.toFixed(2)} kW`}</title></circle>)}
+        </>}
         {pattern.notes.map(note => { const at = place(note); return <g key={note.text} pointerEvents="none">
           <circle cx={at.px} cy={at.py} r={3} fill={C.ink} />
           <text className="chart-label" x={at.tx} y={at.ty} textAnchor={at.anchor} fill={C.ink} style={{ fontSize: 10.5 }}>{note.text}</text>
         </g>; })}
-        {hover != null && <g pointerEvents="none"><line x1={x(hover)} x2={x(hover)} y1={m.t} y2={m.t + ph} stroke={C.ink} strokeOpacity={0.35} /><circle cx={x(hover)} cy={y(pattern.hours[hover]!)} r={4.5} fill={C.ember} stroke="#fff" strokeWidth={2} /></g>}
+        {hover != null && <g pointerEvents="none"><line x1={x(hover)} x2={x(hover)} y1={m.t} y2={m.t + ph} stroke={C.ink} strokeOpacity={0.35} />
+          {lines ? lines.map(item => <circle key={item.key} cx={x(hover)} cy={y(item.hours[hover]!)} r={4} fill={item.colour} stroke="#fff" strokeWidth={1.5} />)
+            : <circle cx={x(hover)} cy={y(pattern.hours[hover]!)} r={4.5} fill={C.ember} stroke="#fff" strokeWidth={2} />}</g>}
         <rect className="hit" x={m.l} y={m.t} width={pw} height={ph} onMouseMove={event => {
           const box = event.currentTarget.getBoundingClientRect();
           setHover(Math.max(0, Math.min(23, Math.round((event.clientX - box.left) / box.width * 23))));
         }} />
       </svg>
-      {!standalone && hover != null && <Tip x={x(hover)} y={y(pattern.hours[hover]!)}><b>{String(hover).padStart(2, "0")}:00 – {String(hover + 1).padStart(2, "0")}:00</b>{t("profile.average", { kw: pattern.hours[hover]!.toFixed(2) })}</Tip>}
+      {!standalone && hover != null && (lines
+        ? <Tip x={x(hover)} y={y(Math.max(...lines.map(item => item.hours[hover]!)))}><b>{String(hover).padStart(2, "0")}:00 – {String(hover + 1).padStart(2, "0")}:00</b>{lines.map(item => <span key={item.key} className="tip-line"><i style={{ background: item.colour }} />{item.name}: {item.hours[hover]!.toFixed(2)} kW</span>)}</Tip>
+        : <Tip x={x(hover)} y={y(pattern.hours[hover]!)}><b>{String(hover).padStart(2, "0")}:00 – {String(hover + 1).padStart(2, "0")}:00</b>{t("profile.average", { kw: pattern.hours[hover]!.toFixed(2) })}</Tip>)}
     </div></div>
     <div className="caption">{pattern.caption}</div>
   </div>;
+}
+
+/**
+ * The report's meters under their top-level group, groups in the breakdown's (saved) order and meters largest first
+ * within each; a meter in no group comes last under `noGroup`. A line made of several meters goes where its first is.
+ */
+function circuitsByGroup(report: SiteReport, noGroup: string) {
+  const topOf = new Map<string, string>();
+  const visit = (row: BreakdownRow, top: string) => { if (row.kind === "meter") topOf.set(row.key, top); for (const child of row.rows) visit(child, top); };
+  const tops = report.groups!.breakdown.filter(row => row.kind === "group");
+  for (const row of tops) visit(row, row.key);
+  const lists = tops.map(row => ({ key: row.key, name: row.name, circuits: report.circuits.filter(circuit => topOf.get(circuit.meterIds[0] ?? "") === row.key) }));
+  const rest = report.circuits.filter(circuit => !topOf.has(circuit.meterIds[0] ?? ""));
+  return [...lists, ...(rest.length ? [{ key: "__none__", name: noGroup, circuits: rest }] : [])].filter(group => group.circuits.length > 0);
 }
 
 // ---------- the document ----------
@@ -389,10 +500,17 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
   const t = reportHoursText(report);
   const rate = report.rate;
   const estimated = monthEstimated(report);
-  const monthOf = (circuit: SiteReport["circuits"][number]) => circuit.weekdayPerDay == null && circuit.weekendPerDay == null ? "—" : whole(circuit.monthKwh);
   const sumOf = (values: Array<number | null>) => values.some(value => value != null) ? num(values.reduce<number>((sum, value) => sum + (value ?? 0), 0)) : "—";
   // A daily report on a day with no readings at all says so in its headline, and has no figures to show below it.
   const empty = report.dayCount === 1 && report.circuits.every(circuit => circuit.hours === 0 && circuit.periodKwh === 0);
+  const tableGroups = report.groups?.breakdown.length ? circuitsByGroup(report, t("doc.noGroup")) : null;
+  const circuitRow = (circuit: SiteReport["circuits"][number], hot: boolean) => <tr key={circuit.key}>
+    <td>{circuit.label}<small className="code">{circuit.code}</small></td>
+    {/* Not one full day of readings: no usual day, so nothing is estimated rather than a guess from part of a day. */}
+    {circuit.fullDays === 0 ? <td className="r" colSpan={2}>{t("doc.notEnough")}</td> : <><td className="r">{num(circuit.weekdayPerDay)}</td><td className="r">{num(circuit.weekendPerDay)}</td></>}
+    <td className="r">{whole(circuit.periodKwh)}</td>
+    <td className={`r${hot ? " hot" : ""}`}>{circuit.fullDays === 0 ? "—" : whole(circuit.monthKwh)}</td>{rate != null && <td className={`r${hot ? " hot" : ""}`}>{circuit.monthCost == null || circuit.fullDays === 0 ? "—" : moneyText(circuit.monthCost, report.currency)}</td>}
+  </tr>;
   return <article className="eiq-report" aria-label={t("doc.aria", { name: report.projectName })}>
     <div className="page">
       <header className="masthead">
@@ -422,21 +540,39 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
         <div className="table-wrap"><table>
           <thead><tr><th>{t("doc.col.feeds")}</th><th className="r">{t("doc.col.weekday")}</th><th className="r">{t("doc.col.weekend")}</th><th className="r">{t("doc.col.recorded", { days: report.dayCount })}</th><th className="r">{t("doc.col.month")}</th>{rate != null && <th className="r">{t("doc.col.cost")}</th>}</tr></thead>
           <tbody>
-            {report.circuits.map((circuit, index) => <tr key={circuit.key}>
-              <td>{circuit.label}<small className="code">{circuit.code}</small></td><td className="r">{num(circuit.weekdayPerDay)}</td><td className="r">{num(circuit.weekendPerDay)}</td><td className="r">{whole(circuit.periodKwh)}</td>
-              <td className={`r${index === 0 ? " hot" : ""}`}>{monthOf(circuit)}</td>{rate != null && <td className={`r${index === 0 ? " hot" : ""}`}>{circuit.monthCost == null ? "—" : moneyText(circuit.monthCost, report.currency)}</td>}
-            </tr>)}
+            {/* With groups, the meters are listed under their top-level group, in the saved order: ranked by group, not by circuit. */}
+            {tableGroups ? tableGroups.flatMap(group => [
+              <tr key={`group:${group.key}`} className="group-head"><td colSpan={rate != null ? 6 : 5}>{group.name}</td></tr>,
+              ...group.circuits.map(circuit => circuitRow(circuit, false)),
+            ]) : report.circuits.map((circuit, index) => circuitRow(circuit, index === 0))}
             <tr className="total"><td>{t(report.siteWord === "office" ? "doc.total.office" : "doc.total.site")}</td><td className="r">{sumOf(report.circuits.map(circuit => circuit.weekdayPerDay))}</td><td className="r">{sumOf(report.circuits.map(circuit => circuit.weekendPerDay))}</td>
               <td className="r">{whole(report.circuits.reduce((sum, circuit) => sum + circuit.periodKwh, 0))}</td><td className="r">{estimated ? whole(estimate.monthKwh) : "—"}</td>{rate != null && <td className="r">{!estimated || estimate.monthCost == null ? "—" : moneyText(estimate.monthCost, report.currency)}</td>}</tr>
           </tbody>
         </table></div>
+        {report.noUse && <NoUseBlock noUse={report.noUse} />}
         {estimate.comparison && <p><Rich text={estimate.comparison} /></p>}
-        {estimated && <div className="pies">
-          {report.groups
+        {/* With groups, the energy is ranked by group: the breakdown replaces the slice for every meter. With no month
+            estimated (no meter has a full day, as on a part day), the slices have nothing to show, but the breakdown still
+            shares out what was measured. */}
+        {(estimated || !!report.groups?.breakdown.length) && <div className="pies">
+          {!estimated ? null : report.groups
             ? <Donut title={t("donut.byGroup")} report={report} caption={estimate.spaceCaption} slices={report.groups.top.map(group => ({ key: group.key, label: group.name, value: group.monthKwh, colour: group.colour }))} />
             : <Donut title={t("donut.bySpace")} report={report} caption={estimate.spaceCaption} slices={report.zones.map(zone => ({ key: zone.key, label: zone.area && zone.area !== zone.label ? `${zone.label} · ${zone.area}` : zone.label, value: zone.monthKwh, colour: zone.colour }))} />}
-          <Donut title={t("donut.byLoad")} report={report} caption={estimate.loadCaption} slices={report.circuits.map(circuit => ({ key: circuit.key, label: circuit.label, value: circuit.monthKwh, colour: circuit.colour }))} />
+          {report.groups && report.groups.breakdown.length ? <GroupBreakdown report={report} />
+            : <Donut title={t("donut.byLoad")} report={report} caption={estimate.loadCaption} slices={report.circuits.map(circuit => ({ key: circuit.key, label: circuit.label, value: circuit.monthKwh, colour: circuit.colour }))} />}
         </div>}
+        {report.blocks && <>
+          <h3 className="sub-head">{report.blocks.heading}</h3>
+          <p><Rich text={report.blocks.intro} /></p>
+          <BlocksTable blocks={report.blocks} locale={locale} />
+          <p className="note">{report.blocks.caption}</p>
+        </>}
+        {report.perLight && <>
+          <h3 className="sub-head">{report.perLight.heading}</h3>
+          <p>{report.perLight.intro}</p>
+          <PerLightTable perLight={report.perLight} locale={locale} />
+          <p className="note">{report.perLight.note}</p>
+        </>}
         <p className="note">{estimate.note}</p>
       </section>
 
@@ -460,6 +596,7 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
           {pattern.cause && <p><strong>{t("doc.lunchCause")}</strong> <Rich text={pattern.cause} /></p>}
           <ProfileChart pattern={pattern} report={report} standalone={standalone} />
         </> : <p>{t("doc.noPattern")}</p>}
+        {report.daytime && <DaytimeBlock daytime={report.daytime} />}
       </section>
 
       <section id="screening">

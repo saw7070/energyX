@@ -12,10 +12,13 @@ import { alwaysOnKw, effectiveHours, hoursRangeLabel, isOvernight, localDayType,
 import { listText } from "./analysis-messages.js";
 import { forHoursMeaning, forOneDay, translatorFor, type EnergyIqLocale, type Translate } from "./locale.js";
 import { formatPeriod } from "./report-period.js";
-import { analysisGroupTree, biggestMeterGroup, flattenMeterGroups, type MeterGroupNode, type MeterGroupTree } from "./meter-groups.js";
+import { analysisGroupTree, biggestMeterGroup, inSavedOrder, type MeterGroupNode, type MeterGroupTree } from "./meter-groups.js";
+import { comparableGroups, energyPerLight, groupBreakdown, groupProfileLines, LIKE_CLOSE_SHARE, likeForLike, meterSeries, metersWithNoUse, NO_USE_KWH, type BreakdownRow, type ProfileLine } from "./group-insights.js";
 import { DAY_PARTS, siteReportModelMessages, type SiteReportModelKey } from "./site-report-model-messages.js";
 import { notInUseIds, withMetersInUse } from "./meters-in-use.js";
 import { standoutReport, type StandoutReport } from "./standout-report.js";
+import { alwaysOnByDesignIds, alwaysOnByDesignKw } from "./always-on-by-design.js";
+import { allowedShare, daytimeUse, onTime, ON_TIME_MARGIN_MINUTES, type DaytimeUse } from "./daytime-use.js";
 
 type T = Translate<SiteReportModelKey>;
 /** The report's wording; `oneDay` picks the "day." variant of a sentence for a report on a single day. */
@@ -111,27 +114,59 @@ export type ReportCircuit = {
   gapDays: number; finding: string;
   /** Extra kWh a day still used after closing (after lights-off time, for lights-on hours), and for lights-on hours before lights-on time. */
   eveningKwh: number | null; earlyKwh: number | null; flat: boolean; colour: string;
+  /**
+   * Days with every hour's readings. A usual day comes only from these: with none, there are not enough readings, so
+   * the weekday and weekend figures are null and nothing is estimated for the month.
+   */
+  fullDays: number;
+  /** Meant to run day and night (emergency lighting): always on by design, never a saving or a problem. */
+  alwaysOnByDesign: boolean;
 };
 export type ProfileNote = { hour: number; kw: number; text: string; place: "left" | "below" | "above-left" | "above-right" };
 /** One group in reading order, with its total for the dates and its share of the group above it. */
 export type ReportGroupRow = { key: string; name: string; depth: number; kwh: number; share: number; parent: string; meters: string[]; singleMeter: boolean };
+export type { BreakdownRow, ProfileLine };
 /** The meters filed by what they serve. The electrical panel is only a detail; a floor layout is only a drawing. */
 export type ReportGroups = {
   /** "Block 264F 40% · Block 264E 38% · Common area 22% — biggest single group: Entrance". */
   summary: string;
-  /** The top-level groups, largest first; `monthKwh` is their part of the 30-day estimate, `colour` follows the name. */
-  top: Array<{ key: string; name: string; kwh: number; share: number; monthKwh: number; colour: string }>;
+  /**
+   * The top-level groups, largest first; `monthKwh` is their part of the 30-day estimate, `colour` follows the name and
+   * `pct` is the breakdown's whole percentage of the site.
+   */
+  top: Array<{ key: string; name: string; kwh: number; share: number; pct: number; monthKwh: number; colour: string }>;
   rows: ReportGroupRow[];
-  /** The most specific group that uses the most, and whether one meter measures all of it. */
-  biggest: { name: string; singleMeter: boolean } | null;
+  /**
+   * The most specific group that uses the most, whether one meter measures all of it, its share of the whole site and
+   * the group it sits in (null for a top-level group).
+   */
+  biggest: { name: string; singleMeter: boolean; share: number; parent: string | null } | null;
   /** What the main meter recorded that no sub-meter explains. */
   unmeteredKwh: number;
+  /**
+   * Where the energy goes: the top-level groups in their saved order, each opening into the groups inside it and those
+   * into their meters, with kWh on an average day and the share of the whole site (see group-insights.ts).
+   */
+  breakdown: BreakdownRow[];
 };
+/**
+ * Two or more top-level groups of the same kind (two blocks) side by side: the groups found in every one of them,
+ * matched by name, in kWh on an average day. `diff` says, for two, which uses more and by how much.
+ */
+export type ReportBlocks = { heading: string; intro: string; caption: string; groups: Array<{ key: string; name: string }>; rows: Array<{ name: string; perDay: number[]; diff: string; total: boolean }> };
+/** kWh per light point a day, for the meters with a number of lights recorded, and their groups (rows with `kind` "group"). */
+export type ReportPerLight = { heading: string; intro: string; note: string; rows: Array<{ kind: "meter" | "group"; name: string; group: string; lights: number; perDay: number | null; perLight: number | null }> };
+/** Meters that used nothing in the dates, in one plain line each ("Pavilion fan: no use from 4–10 Nov"). Never a fault. */
+export type ReportNoUse = { heading: string; items: string[]; note: string };
 /**
  * What the Overview headline is about, the same in every language (the headline itself is translated). Lights-on
  * sites use "daytime" (notable use while the lights should be off) or "night" (the lights ran as planned).
  */
 export type HeadlineTopic = "always-on" | "after-hours" | "working-hours" | "daytime" | "night";
+/** Which lights were on in the daytime, and when; see SiteReport.daytime. */
+export type ReportDaytime = { heading: string; items: string[]; more: string | null; none: string | null; alwaysOn: string | null; rule: string };
+/** How many meters the daytime list names before counting the rest ("and 2 more"); a lone extra one is named too. */
+export const DAYTIME_LISTED = 3;
 export type SiteReport = {
   /** The language every sentence of this report is written in. */
   locale: EnergyIqLocale;
@@ -144,6 +179,11 @@ export type SiteReport = {
   title: { before: string; emphasis: string }; lede: string;
   /** One plain money sentence for the Overview heading. */
   headline: string;
+  /**
+   * The site's average day (complete days only; a week of five weekdays and two weekend days for opening hours) and its
+   * cost, with the sentence the Overview leads with: "Uses about 47 kWh a day (about S$13)". Null with no complete day.
+   */
+  averageDay: { kwh: number; cost: number | null; text: string } | null;
   headlineTopic: HeadlineTopic;
   keyFigures: Array<{ value: string; label: string }>;
   profile: { intro: string; zones: Array<{ heading: string; text: string }>; caption: string; hasMap: boolean };
@@ -152,11 +192,25 @@ export type SiteReport = {
   reference: SpatialExtras | null;
   zones: ReportZone[]; circuits: ReportCircuit[];
   estimate: { monthKwh: number; monthCost: number | null; intro: string; comparison: string; spaceCaption: string; loadCaption: string; note: string };
-  benchmark: { days: ReportDay[]; weekdayAvg: number | null; weekendAvg: number | null; baseKw: number | null; baseDayKwh: number | null; intro: string; caption: string; closeToWeekend: boolean; rows: Array<{ label: string; rate: string; perDay: string; perMonth: string; cost: string; hot: boolean }>; outro: string };
-  pattern: { hours: number[]; openFrom: number; openTo: number; notes: ProfileNote[]; intro: string; cause: string | null; caption: string; weekdayCount: number } | null;
+  /** `byDesignKw`: the steady draw of meters always on by design, left out wherever the always-on level is read as something to cut. */
+  benchmark: { days: ReportDay[]; weekdayAvg: number | null; weekendAvg: number | null; baseKw: number | null; baseDayKwh: number | null; byDesignKw: number; intro: string; caption: string; closeToWeekend: boolean; rows: Array<{ label: string; rate: string; perDay: string; perMonth: string; cost: string; hot: boolean }>; outro: string };
+  /** `lines`: lights-on hours with groups only, the average day as one line per group (group-insights.ts), each with its colour. */
+  pattern: { hours: number[]; openFrom: number; openTo: number; notes: ProfileNote[]; intro: string; cause: string | null; caption: string; weekdayCount: number; lines?: Array<ProfileLine & { colour: string }> | undefined } | null;
   screening: { intro: string; rows: Array<{ label: string; code: string; open: string; closed: string; finding: string }>; callout: string; note: string };
   /** The days that used clearly more or less than a usual day of the same kind, and the meters behind each. */
   standout: StandoutReport;
+  /**
+   * Lights-on hours only: the meters that used power in the daytime, largest first, each with its usual daytime hours,
+   * its days and its kWh ("Driveway lamp: on 7–9 am on 3 days, 0.4 kWh"); a few are named and the rest counted.
+   * `alwaysOn` says which meters are always on by design and left out; `rule` is the 20-minute allowance.
+   */
+  daytime: ReportDaytime | null;
+  /** Alike top-level groups side by side, group for group; null when no two top-level groups are alike. */
+  blocks: ReportBlocks | null;
+  /** Energy per light; null when no meter has a number of lights recorded. */
+  perLight: ReportPerLight | null;
+  /** Meters with no use at all in the dates; null when every meter used something. */
+  noUse: ReportNoUse | null;
   footer: { left: string; right: string };
 };
 
@@ -165,6 +219,8 @@ export const REPORT_COLOURS = { ink: "#1C2530", ember: "#FF4E16", emberSoft: "#F
 // Colour follows the zone (sorted by name), never its size.
 const ZONE_PALETTE = [REPORT_COLOURS.steel, REPORT_COLOURS.ember, REPORT_COLOURS.amber, "#6B4E9B", "#3E8E7E", "#B3446C"];
 const LOAD_PALETTE = [REPORT_COLOURS.ember, REPORT_COLOURS.amber, REPORT_COLOURS.bronze, REPORT_COLOURS.steel, REPORT_COLOURS.slate, "#6B4E9B", "#3E8E7E", "#B3446C"];
+/** One colour per line of the average day by group, in the lines' order; distinct enough to tell apart side by side. */
+export const LINE_PALETTE = [REPORT_COLOURS.steel, REPORT_COLOURS.ember, REPORT_COLOURS.amber, "#3E8E7E", "#6B4E9B", "#B3446C", REPORT_COLOURS.bronze, REPORT_COLOURS.slate];
 export const SCREEN_PCT = 0.3;
 export const SCREEN_KWH = 0.15;
 
@@ -198,19 +254,21 @@ function withoutTrailingNumber(name: string) {
 }
 
 /** Official circuits across the spaces; channels with the same board, type and name apart from a number become one row ("LED Display ×3"). */
-function officialCircuits(data: AnalysisData, locale: EnergyIqLocale): Array<{ key: string; name: string; code: string; board: string; space: string; category: AnalysisCategory | "overall"; meters: ScopeMeter[] }> {
+function officialCircuits(data: AnalysisData, locale: EnergyIqLocale): Array<{ key: string; name: string; code: string; board: string; space: string; category: AnalysisCategory | "overall"; meters: ScopeMeter[]; byDesign: boolean }> {
   const t = modelText(locale);
   const sources = data.current.spaces.length ? data.current.spaces : [data.current.project];
   const seen = new Set<string>();
-  const groups = new Map<string, { key: string; name: string; board: string; space: string; category: AnalysisCategory | "overall"; meters: ScopeMeter[]; short?: boolean }>();
+  const byDesign = alwaysOnByDesignIds(data);
+  const groups = new Map<string, { key: string; name: string; board: string; space: string; category: AnalysisCategory | "overall"; meters: ScopeMeter[]; short?: boolean; byDesign: boolean }>();
   for (const space of sources) for (const meter of space.meters) {
     if (!meter.official || meter.category === "overall" || !meter.series || seen.has(meter.id)) continue;
     seen.add(meter.id);
-    // Someone gave this meter a short name: it is a line of its own under that name, its full label the detail.
-    if (meter.fullName) { groups.set(`short|${meter.id}`, { key: meter.id, name: meter.name, board: meter.location, space: space.name, category: meter.category, meters: [meter], short: true }); continue; }
+    // Someone gave this meter a short name, or said it is meant to run day and night: it is a line of its own under its
+    // own name, its full label the detail, so an always-on meter is never mixed with ones that should switch off.
+    if (meter.fullName || byDesign.has(meter.id)) { groups.set(`short|${meter.id}`, { key: meter.id, name: meter.name, board: meter.location, space: space.name, category: meter.category, meters: [meter], short: true, byDesign: byDesign.has(meter.id) }); continue; }
     const stem = withoutTrailingNumber(meter.name);
     const key = `${meter.location}|${meter.category}|${stem}`;
-    const group = groups.get(key) ?? { key: meter.id, name: stem, board: meter.location, space: space.name, category: meter.category, meters: [] };
+    const group = groups.get(key) ?? { key: meter.id, name: stem, board: meter.location, space: space.name, category: meter.category, meters: [], byDesign: false };
     group.meters.push(meter);
     groups.set(key, group);
   }
@@ -310,10 +368,18 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const baseDayKwh = baseKw == null ? null : baseKw * 24;
   const readingHours = (project.total?.cells ?? []).filter(cell => dateSet.has(cell[0]) && cell[2] != null).length;
   const baseShare = baseKw != null && totalKwh > 0 ? Math.min(1, baseKw * readingHours / totalKwh) : null;
+  // Meters always on by design (emergency lighting) are part of that level, but never the problem it points at: the
+  // stories about what never switches off use what is left once they are taken out. With none marked, nothing changes.
+  const byDesignKw = alwaysOnByDesignKw(data, quietHours(data.openingHours, meaning));
+  const cutKw = baseKw == null ? null : Math.max(0, baseKw - byDesignKw);
+  const cutShare = cutKw != null && totalKwh > 0 ? Math.min(1, cutKw * readingHours / totalKwh) : null;
   const buckets = timeBuckets(project, days, data.openingHours, meaning);
+  // Lights-on hours: daytime use leaves out meters always on by design and allows 20 minutes at each end (daytime-use.ts).
+  const daytime: DaytimeUse | null = lighting ? daytimeUse(data, project) : null;
+  const closedKwh = daytime ? daytime.kwh : buckets.closedKwh;
   // A part day misses some hours, often the evening's, which would skew the share used outside the hours (a lit estate
   // would look as if it ran in the daytime): it is not worked out, and the lede and headline say nothing about it.
-  const closedShare = !partDay && buckets.total > 0 ? buckets.closedKwh / buckets.total : null;
+  const closedShare = partDay ? null : daytime ? daytime.share : buckets.total > 0 ? buckets.closedKwh / buckets.total : null;
   const daytimeNotable = lighting && closedShare != null && closedShare >= DAYTIME_NOTABLE_SHARE;
 
   // Circuits, largest first
@@ -337,14 +403,17 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
       for (let hour = 0; hour < 24; hour += 1) { const value = cells.get(cellKey(date, hour)); if (value === undefined) return null; total += value; }
       return total;
     };
+    // A usual day comes only from days with every hour's readings. A meter that read for part of a day and then went
+    // quiet has no usual day: nothing is scaled up from the hours it did send, and the report says so instead.
     const dailyValues = dates.map(date => ({ date, kwh: daily(date) }));
+    const fullDays = dailyValues.filter(item => item.kwh != null).length;
     const weekdayPerDay = mean(dailyValues.filter(item => item.kwh != null && dayOf.get(item.date)?.dayType === "weekday").map(item => item.kwh!));
     const weekendPerDay = mean(dailyValues.filter(item => item.kwh != null && dayOf.get(item.date)?.dayType !== "weekday").map(item => item.kwh!));
-    const monthKwh = (weekdayPerDay ?? weekendPerDay ?? 0) * 30 * 5 / 7 + (weekendPerDay ?? weekdayPerDay ?? 0) * 30 * 2 / 7;
+    const monthKwh = fullDays ? (weekdayPerDay ?? weekendPerDay ?? 0) * 30 * 5 / 7 + (weekendPerDay ?? weekdayPerDay ?? 0) * 30 * 2 / 7 : 0;
     const periodKwh = group.meters.reduce((sum, meter) => sum + periodSum(meter.series, dateSet), 0);
     const open: number[] = [], closed: number[] = [];
     for (const [key, value] of cells) { const [date, hour] = key.split("|"); (isOpen(date!, Number(hour)) ? open : closed).push(value); }
-    return { ...group, cells, perMeter, weekdayPerDay, weekendPerDay, monthKwh, periodKwh, openBase: mean(open), closedBase: mean(closed), zone: zoneForBoard.get(group.board) ?? null, gapDays: dailyValues.filter(item => item.kwh == null).length };
+    return { ...group, cells, perMeter, weekdayPerDay, weekendPerDay, monthKwh, fullDays, periodKwh, openBase: mean(open), closedBase: mean(closed), zone: zoneForBoard.get(group.board) ?? null, gapDays: dailyValues.filter(item => item.kwh == null).length };
   }).sort((a, b) => b.monthKwh - a.monthKwh);
   const monthKwh = raw.reduce((sum, circuit) => sum + circuit.monthKwh, 0);
   const monthCost = cost(monthKwh);
@@ -355,7 +424,7 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const silent = partDay ? raw.flatMap(circuit => circuit.meters).filter(meter => !offIds.has(meter.id) && !meter.series?.cells.some(cell => dateSet.has(cell[0]) && (cell[2] != null || cell[3] > 0))).map(meter => meter.name) : [];
   const circuits: ReportCircuit[] = raw.map((circuit, index) => {
     // Lights run every night, so every day counts for switching on and off on time.
-    const screen = screenCircuit(circuit, { dates, weekdayDates: lighting ? dates : weekdayDates, isOpen, openRange, locale, meaning });
+    const screen = screenCircuit(circuit, { dates, weekdayDates: lighting ? dates : weekdayDates, isOpen, openRange, locale, meaning, allowance: lighting ? (date, hour) => allowedShare(hours, date, hour) : null });
     return {
       key: circuit.key, name: circuit.name, code: circuit.code, codes: circuit.meters.map(meter => meter.name), label: circuit.zone ? t("circuit.inZone", { name: circuit.name, zone: zoneName(circuit.zone) }) : circuit.name, board: circuit.board, zone: circuit.zone, category: circuit.category, meterIds: circuit.meters.map(meter => meter.id),
       weekdayPerDay: circuit.weekdayPerDay, weekendPerDay: circuit.weekendPerDay, periodKwh: circuit.periodKwh, monthKwh: circuit.monthKwh,
@@ -364,6 +433,7 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
       ratio: circuit.openBase && circuit.closedBase != null ? circuit.closedBase / circuit.openBase : null, hours: circuit.cells.size, gapDays: circuit.gapDays,
       // Brand orange for the largest load, then a fixed order, as in the reference report; every slice is also labelled.
       finding: screen.finding, eveningKwh: screen.eveningKwh, earlyKwh: screen.earlyKwh, flat: screen.flat, colour: LOAD_PALETTE[index % LOAD_PALETTE.length]!,
+      fullDays: circuit.fullDays, alwaysOnByDesign: circuit.byDesign,
     };
   });
   const circuitName = (key: string) => circuits.find(circuit => circuit.key === key)!.name;
@@ -386,7 +456,13 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   // Groups: the meters filed by what they serve. When the readings carry them, the profile, the shares and the
   // comparison follow the groups, wherever each meter is wired from; a floor layout is then only a drawing.
   const groupTree = analysisGroupTree(data, t("group.unmetered"));
-  const groups = groupTree ? reportGroups(groupTree, raw.reduce((sum, circuit) => sum + circuit.monthKwh, 0), t) : null;
+  // The average day: every complete day for lights-on hours, a week of five weekdays and two weekend days otherwise.
+  const averageDayKwh = lighting ? mean(days.filter(day => day.complete).map(day => day.totalKwh))
+    : weekdayAvg != null && weekendAvg != null ? (weekdayAvg * 5 + weekendAvg * 2) / 7 : weekdayAvg ?? weekendAvg;
+  const averageDayCost = averageDayKwh == null ? null : cost(averageDayKwh);
+  const averageDay = averageDayKwh == null ? null : { kwh: averageDayKwh, cost: averageDayCost,
+    text: t(averageDayCost != null ? "avgDay.cost" : "avgDay.plain", { kwh: kwhText(averageDayKwh), cost: averageDayCost != null ? money(averageDayCost, averageDayCost < 10 ? 2 : 0) : "" }) };
+  const groups = groupTree ? reportGroups(groupTree, raw.reduce((sum, circuit) => sum + circuit.monthKwh, 0), t, averageDayKwh) : null;
 
   // ---------- masthead, title, key figures ----------
   const property = reference?.property;
@@ -398,7 +474,7 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
     t(circuitCount === 1 ? "lede.drew.one" : "lede.drew.other", { days: dates.length, site, kwh: kwhText(totalKwh), count: circuitCount }),
     // Lights-on hours: night use is the point, so only notable daytime use is a finding.
     lighting ? closedShare == null ? "" : daytimeNotable ? t("lights.lede.daytime", { pct: pctText(closedShare) }) : t("lights.lede.night")
-      : baseKw != null && baseShare != null && baseShare >= 0.5 ? t("lede.idles", { kw: kwText(baseKw) })
+      : baseKw != null && cutShare != null && cutShare >= 0.5 ? t("lede.idles", { kw: kwText(baseKw), day: kwhText(baseKw * 24) })
       : closedShare == null ? ""
       : closedShare >= 0.4 ? t("lede.closed", { pct: pctText(closedShare), site })
       : t("lede.working"),
@@ -408,15 +484,16 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const keyFigures = [
     { value: kwhText(totalKwh), label: t("kf.total", { days: dates.length }) },
     { value: weekdayAvg != null && weekendAvg != null ? `${grouped(weekdayAvg)} / ${grouped(weekendAvg)}` : "—", label: t("kf.weekdayWeekend") },
-    { value: baseKw != null ? kwText(baseKw) : "—", label: baseShare != null ? t("kf.baseShare", { pct: pctText(baseShare) }) : t("kf.base") },
-    { value: closedShare != null ? pctText(closedShare, 1) : "—", label: lt("kf.closed", { kwh: kwhText(buckets.closedKwh) }) },
+    // A steady draw also in kWh a day, as the Tuya app shows it: 0.10 kW all day is about 2.4 kWh.
+    { value: baseKw != null ? kwText(baseKw) : "—", label: baseKw == null ? t("kf.base") : baseShare != null ? t("kf.baseShare", { pct: pctText(baseShare), day: kwhText(baseKw * 24) }) : t("kf.baseDay", { day: kwhText(baseKw * 24) }) },
+    { value: closedShare != null ? pctText(closedShare, 1) : "—", label: lt("kf.closed", { kwh: kwhText(closedKwh) }) },
   ];
 
   // ---------- 1. property profile ----------
   const boards = [...new Set(circuits.map(circuit => circuit.board).filter(Boolean))];
   const boardsText = t(boards.length === 1 ? "profile.boards.one" : "profile.boards.other", { count: count(boards.length) });
   const zonesText = t(zones.length === 1 ? "profile.zones.one" : "profile.zones.other", { count: count(zones.length) });
-  const groupsIntro = groupTree && groups ? t(groupTree.meterCount === 1 ? "profile.groups.one" : "profile.groups.other", { count: groupTree.meterCount, groups: list(groups.top.map(group => t("group.share", { name: group.name, pct: pctText(group.share) }))) }) : null;
+  const groupsIntro = groupTree && groups ? t(groupTree.meterCount === 1 ? "profile.groups.one" : "profile.groups.other", { count: groupTree.meterCount, groups: list(groups.top.map(group => t("group.share", { name: group.name, pct: `${group.pct}%` }))) }) : null;
   const profileIntro = property?.address
     ? paragraph([
       t("profile.occupies", { site: siteName, where: t(property.approximateAreaM2 ? "profile.whereArea" : "profile.where", { occupancy: occupancyText(property, t), street: street(property.address), m2: grouped(property.approximateAreaM2 ?? 0) }) }),
@@ -425,7 +502,7 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
     : groupsIntro ?? t("profile.grouped", { boards: boardsText, zones: zonesText });
   const meteredAs = (zone: ReportZone) => zone.circuitKeys.length ? list(zone.circuitKeys.map(key => { const item = circuits.find(circuit => circuit.key === key)!; return t("metered.item", { name: inl(item.name), code: item.code }); })) : t("metered.none");
   const direction = (value: string) => value === "left" || value === "right" ? t(`direction.${value}`) : value;
-  const profileZones = groupTree ? groupProfile(groupTree, { t, list, paragraph, inl }) : zones.map(zone => zone.subgroup
+  const profileZones = groupTree ? groupProfile(groupTree, { t, list, paragraph, inl, pct: new Map((groups?.top ?? []).map(group => [group.key, group.pct])) }) : zones.map(zone => zone.subgroup
     ? { heading: t("zone.subHeading", { zone: zone.label, board: zone.board }), text: t(zone.parentRoom ? "zone.subText" : "zone.subTextNoRoom", {
       equipment: zone.equipment ? en ? zone.equipment.charAt(0).toLowerCase() + zone.equipment.slice(1) : zone.equipment : t("zone.equipment"),
       room: zone.parentRoom ? en ? zone.parentRoom.toLowerCase() : zone.parentRoom : "", metered: meteredAs(zone), board: zone.board, zone: zone.label }) }
@@ -443,18 +520,24 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const flatCircuit = circuits.find(circuit => circuit.flat && circuit !== largest);
   const cheaper = flatCircuit && circuits.find(circuit => circuit.monthKwh < flatCircuit.monthKwh && circuit.zone !== flatCircuit.zone && !circuit.flat);
   const plural = isPlural;
+  // With groups, the ranking is by group: the biggest single group, never one circuit, is named.
+  const biggestGroup = groups?.biggest;
   const comparison = paragraph([
-    groups ? groups.top.length > 1 && groups.top[0]!.kwh > 0 ? t("cmp.hungriestGroup", { zone: groups.top[0]!.name, pct: pctText(groups.top[0]!.share), others: list(groups.top.slice(1).map(group => t("cmp.otherZone", { zone: group.name, pct: pctText(group.share) }))) }) : ""
+    groups ? groups.top.length > 1 && groups.top[0]!.kwh > 0 ? t("cmp.hungriestGroup", { zone: groups.top[0]!.name, pct: `${groups.top[0]!.pct}%`, others: list(groups.top.slice(1).map(group => t("cmp.otherZone", { zone: group.name, pct: `${group.pct}%` }))) }) : ""
     // Shares of the month's energy, or of the energy measured when no month is estimated.
     : ranked.length > 1 ? t(estimated ? "cmp.hungriest" : "cmp.hungriestGroup", { zone: ranked[0]!.label, pct: pctText(ranked[0]!.share), others: list(ranked.slice(1).map(zone => t("cmp.otherZone", { zone: zone.label, pct: pctText(zone.share) }))) }) : "",
-    largest && estimated ? t(plural(largest) ? "cmp.largest.other" : "cmp.largest.one", { name: inl(largest.name), pct: pctText(largest.share), rest: flatCircuit?.monthCost != null
+    groups ? biggestGroup && groups.breakdown.length > 1 ? t(biggestGroup.parent ? "cmp.biggestGroupIn" : "cmp.biggestGroup", { name: biggestGroup.name, parent: biggestGroup.parent ?? "", pct: pctText(biggestGroup.share) }) : ""
+    : largest && estimated ? t(plural(largest) ? "cmp.largest.other" : "cmp.largest.one", { name: inl(largest.name), pct: pctText(largest.share), rest: flatCircuit?.monthCost != null
       ? t(plural(flatCircuit) ? "cmp.flat.other" : "cmp.flat.one", { name: theName(flatCircuit.label), cost: money(flatCircuit.monthCost), more: cheaper ? t("cmp.more", { name: inl(cheaper.label) }) : "" })
       : t("cmp.end") }) : "",
+    groups && flatCircuit?.monthCost != null ? t(plural(flatCircuit) ? "cmp.flatAlone.other" : "cmp.flatAlone.one", { name: capitalise(theName(flatCircuit.label)), cost: money(flatCircuit.monthCost) }) : "",
   ]);
   const subgroupZones = zones.filter(zone => zone.subgroup);
   // Days every circuit misses (the edges of the data) are not gaps; name only circuits with extra missing days.
   const commonGap = Math.min(...circuits.map(circuit => circuit.gapDays));
-  const gapCircuits = circuits.filter(circuit => circuit.gapDays > commonGap && circuit.gapDays < dates.length);
+  const gapCircuits = circuits.filter(circuit => circuit.gapDays > commonGap && circuit.gapDays < dates.length && circuit.fullDays > 0);
+  // Meters with readings but not one full day: no usual day, so nothing is estimated for them.
+  const thinCircuits = circuits.filter(circuit => circuit.fullDays === 0 && circuit.periodKwh > 0);
   const zoneBoard = (zone: ReportZone, withEquipment = false) => t(withEquipment && zone.equipment ? "caption.zoneBoardEquipment" : "caption.zoneBoard", { zone: zone.label, board: zone.board, equipment: zone.equipment ?? "" });
   const estimate = {
     monthKwh, monthCost,
@@ -464,11 +547,12 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
       zones: list(subgroupZones.map(zone => zoneBoard(zone, true))),
       parents: list([...new Set(subgroupZones.map(zone => { const parent = parentZone(zone); return parent ? zoneBoard(parent) : t("caption.parentUnknown"); }))]),
     }) : t("caption.shares"),
-    loadCaption: largest ? t(plural(largest) ? "caption.largest.other" : "caption.largest.one", { name: capitalise(largest.name), rest: flatCircuit
+    loadCaption: groups ? t("caption.breakdown") : largest ? t(plural(largest) ? "caption.largest.other" : "caption.largest.one", { name: capitalise(largest.name), rest: flatCircuit
       ? t(plural(flatCircuit) ? "caption.rank.other" : "caption.rank.one", { name: inl(flatCircuit.name), rank: en ? ordinal(circuits.indexOf(flatCircuit) + 1) : t("rank", { n: circuits.indexOf(flatCircuit) + 1 }) }) : "" }) : "",
     note: paragraph([
       t("note.method"),
       gapCircuits.length ? t(gapCircuits.length === 1 ? "note.gaps.one" : "note.gaps.other", { items: list(gapCircuits.map(circuit => t(circuit.gapDays === 1 ? "note.gapDays.one" : "note.gapDays.other", { name: inl(circuit.name), days: circuit.gapDays }))) }) : "",
+      thinCircuits.length ? t(thinCircuits.length === 1 ? "note.notEnough.one" : "note.notEnough.other", { names: list(thinCircuits.map(circuit => inl(circuit.name))) }) : "",
       rate != null ? t("note.cost", { rate: rateLabel ?? "" }) : "",
     ]),
   };
@@ -480,14 +564,17 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const closeToWeekend = baseDayKwh != null && benchWeekendAvg != null && Math.abs(benchWeekendAvg - baseDayKwh) / baseDayKwh <= 0.08;
   const baseMonthKwh = baseKw == null ? null : baseKw * 720;
   const baseMonthCost = baseMonthKwh == null ? null : cost(baseMonthKwh);
+  // What never switches off and could: the always-on level without the meters always on by design.
+  const cutMonthKwh = cutKw == null ? null : cutKw * 720;
+  const cutMonthCost = cutMonthKwh == null ? null : cost(cutMonthKwh);
   const benchmarkRows = [
     benchWeekdayAvg != null ? { label: t("bench.weekday"), rate: t("bench.avg", { kw: kwText(benchWeekdayAvg / 24) }), perDay: kwhText(benchWeekdayAvg), perMonth: "—", cost: rate != null ? t("bench.perDay", { cost: money(benchWeekdayAvg * rate, 2) }) : "—", hot: false } : null,
     benchWeekendAvg != null ? { label: t("bench.weekend"), rate: t("bench.avg", { kw: kwText(benchWeekendAvg / 24) }), perDay: kwhText(benchWeekendAvg), perMonth: "—", cost: rate != null ? t("bench.perDay", { cost: money(benchWeekendAvg * rate, 2) }) : "—", hot: false } : null,
     baseKw != null ? { label: t("bench.base"), rate: kwText(baseKw), perDay: kwhText(baseDayKwh!), perMonth: kwhText(baseMonthKwh!), cost: baseMonthCost != null ? t("bench.perMonth", { cost: money(baseMonthCost) }) : "—", hot: true } : null,
   ].filter((row): row is NonNullable<typeof row> => !!row);
-  const baseBillShare = baseMonthKwh != null && monthKwh > 0 ? Math.min(1, baseMonthKwh / monthKwh) : null;
+  const cutBillShare = cutMonthKwh != null && monthKwh > 0 ? Math.min(1, cutMonthKwh / monthKwh) : null;
   const benchmark = {
-    days: reportDays, weekdayAvg: benchWeekdayAvg, weekendAvg: benchWeekendAvg, baseKw, baseDayKwh, closeToWeekend, rows: benchmarkRows,
+    days: reportDays, weekdayAvg: benchWeekdayAvg, weekendAvg: benchWeekendAvg, baseKw, baseDayKwh, byDesignKw, closeToWeekend, rows: benchmarkRows,
     intro: benchWeekdayAvg != null && baseKw != null
       ? paragraph([
         t(benchWeekendAvg != null ? "bench.intro" : "bench.introNoWeekend", { weekday: kwhText(benchWeekdayAvg), weekend: benchWeekendAvg != null ? kwhText(benchWeekendAvg) : "", kw: kwText(baseKw), day: kwhText(baseDayKwh!) }),
@@ -501,16 +588,23 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
       t("cap.dashed", { value: baseKw != null ? t("cap.dashedValue", { kw: kwText(baseKw), day: kwhText(baseDayKwh!) }) : "", same: closeToWeekend && benchWeekendAvg != null ? t("cap.sameAsWeekend", { kwh: kwhText(benchWeekendAvg) }) : "" }),
       t("cap.paler"),
     ]),
-    outro: baseMonthKwh == null || baseBillShare == null ? ""
-      : baseBillShare >= 0.5
-        ? t("outro.high", { kwh: kwhText(baseMonthKwh), pct: pctText(baseBillShare), costs: baseMonthCost != null && monthCost != null ? t("outro.costs", { base: money(baseMonthCost), month: money(monthCost) }) : "",
-          extra: monthCost != null && baseMonthCost != null ? t("bench.perMonth", { cost: money(Math.max(0, monthCost - baseMonthCost)) }) : kwhText(Math.max(0, monthKwh - baseMonthKwh)) })
-        : t("outro.low", { kwh: kwhText(baseMonthKwh), pct: pctText(baseBillShare) }),
+    outro: cutMonthKwh == null || cutBillShare == null ? ""
+      : cutKw! < 0.005 && byDesignKw > 0 ? t("outro.allByDesign", { kw: kwText(byDesignKw), day: kwhText(byDesignKw * 24) })
+      : paragraph([cutBillShare >= 0.5
+        ? t("outro.high", { kwh: kwhText(cutMonthKwh), pct: pctText(cutBillShare), costs: cutMonthCost != null && monthCost != null ? t("outro.costs", { base: money(cutMonthCost), month: money(monthCost) }) : "",
+          extra: monthCost != null && cutMonthCost != null ? t("bench.perMonth", { cost: money(Math.max(0, monthCost - cutMonthCost)) }) : kwhText(Math.max(0, monthKwh - cutMonthKwh)) })
+        : t("outro.low", { kwh: kwhText(cutMonthKwh), pct: pctText(cutBillShare) }),
+        byDesignKw > 0 ? t("outro.byDesign", { kw: kwText(byDesignKw), day: kwhText(byDesignKw * 24) }) : ""]),
   };
 
   // ---------- 4. weekday pattern (an average day, for lights-on hours) ----------
+  // Lights-on hours with groups: the average day as one line per group, over the same complete days.
+  const series = meterSeries([project, ...data.current.spaces]);
+  const lines = lighting && groupTree ? groupProfileLines({ tree: groupTree, series, dates: days.filter(day => day.complete).map(day => day.date), otherLabel: t("group.other") }) : [];
+  const alikeNames = groupTree ? (comparableGroups(groupTree) ?? []).map(group => group.name) : [];
   const pattern = lighting
-    ? lightsPattern({ project, days, openRange, published: hoursPublished ? openingLabelText(hours, locale) : null, locale })
+    ? lightsPattern({ project, days, openRange, published: hoursPublished ? openingLabelText(hours, locale) : null, locale,
+      lines: lines.map((line, index) => ({ ...line, colour: LINE_PALETTE[index % LINE_PALETTE.length]! })), alikeNames: list(alikeNames) })
     : weekdayPattern({ project, days, openRange, baseKw, circuits: raw.map((circuit, index) => ({ name: circuits[index]!.name, plural: isPlural(circuits[index]!), category: circuit.category, cells: circuit.cells })), hoursPublished, site, locale });
 
   // ---------- 5. screening ----------
@@ -519,6 +613,8 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const early = circuits.filter(circuit => circuit.earlyKwh != null && circuit.earlyKwh >= 0.3);
   const habits = tail.length + early.length;
   const flat = circuits.filter(circuit => circuit.flat);
+  // Always on by design: running day and night is their job, so they are named once, never as a saving.
+  const byDesign = circuits.filter(circuit => circuit.alwaysOnByDesign);
   const target = flat.find(circuit => !isEquipment(circuit.category)) ?? flat[0];
   // Lights run every day; opening hours count five working days a week.
   const closedHoursPerMonth = lighting ? 30 * (24 - openLength(openRange)) : 30 * 24 - 30 * 5 / 7 * openLength(openRange);
@@ -531,11 +627,12 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   ]);
   const flatNames = list(flat.map(circuit => inl(circuit.name)));
   const callout = paragraph([
-    habits || flat.length ? lt(habits ? "call.habits" : "call.alwaysOn") : t("call.none"),
+    habits || flat.length ? lt(habits ? "call.habits" : "call.alwaysOn") : t(byDesign.length ? "call.noneElse" : "call.none"),
     habits ? lt(habits === 1 ? "call.timer.one" : "call.timer.other", { items: capitalise(tailNames), worth: tailSaving != null ? lt("call.worth", { cost: money(tailSaving) }) : "", end: t(flat.length ? "call.semicolon" : "call.period") }) : "",
     // A new sentence when nothing came before it; after "…timer;" it carries on the same sentence.
     flat.length ? lt(flat.length === 1 ? "call.flat.one" : "call.flat.other", { names: habits ? flatNames : en ? `The ${flatNames}` : capitalise(flatNames), site }) : "",
     target && targetSaving != null && target.monthCost != null ? lt(plural(target) ? "call.target.other" : "call.target.one", { name: theName(target.name), saving: money(targetSaving), cost: money(target.monthCost), year: money(targetSaving * 12) }) : "",
+    byDesign.length ? t("call.byDesign", { names: list(byDesign.map(circuit => circuit.name)) }) : "",
   ]);
   const screening = {
     intro: lt("scr.intro", { days: dates.length, range: hourRange(openRange.from, openRange.to, locale), pct: pctText(SCREEN_PCT), kwh: SCREEN_KWH }),
@@ -548,11 +645,11 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   };
 
   const headlineTopic: HeadlineTopic = lighting ? daytimeNotable ? "daytime" : "night"
-    : baseBillShare != null && baseBillShare >= 0.5 && baseMonthCost != null && monthCost != null ? "always-on"
+    : cutBillShare != null && cutBillShare >= 0.5 && cutMonthCost != null && monthCost != null ? "always-on"
     : closedShare != null && closedShare >= 0.4 ? "after-hours" : "working-hours";
   const title = noReadings ? { before: t("day.none.title"), emphasis: t("day.none.titleEmphasis") }
     : partDay ? { before: t("day.missing.title"), emphasis: t("day.missing.titleEmphasis") }
-    : lighting ? lightsHeadline(closedShare, daytimeNotable, lt) : headline(site, baseShare, closedShare, t);
+    : lighting ? lightsHeadline(closedShare, daytimeNotable, lt) : headline(site, cutShare, closedShare, t);
   const generatedDay = generatedAt.slice(0, 10);
   return {
     locale, hoursMeaning: meaning, projectName: data.projectName, siteWord, timezone: data.timezone, tzLabel, from: dates[0] ?? "", to: dates.at(-1) ?? "", dayCount: dates.length, generatedAt,
@@ -561,9 +658,9 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
     title, lede, keyFigures,
     // A day with readings missing, or none at all, says only that: nothing is read into part of a day.
     headline: noReadings || partDay ? `${title.before}${title.emphasis}`
-      : headlineTopic === "daytime" ? t(rate != null ? "lights.head.daytimeCost" : "lights.head.daytime", { pct: pctText(closedShare!), cost: rate != null ? money(buckets.closedKwh * rate * 30 / Math.max(dates.length, 1)) : "" })
+      : headlineTopic === "daytime" ? t(rate != null ? "lights.head.daytimeCost" : "lights.head.daytime", { pct: pctText(closedShare!), cost: rate != null ? money(closedKwh * rate * 30 / Math.max(dates.length, 1)) : "" })
       : headlineTopic === "night" ? t("lights.head.night")
-      : headlineTopic === "always-on" ? t("head.alwaysOn", { base: money(baseMonthCost), month: money(monthCost) })
+      : headlineTopic === "always-on" ? t("head.alwaysOn", { base: money(cutMonthCost), month: money(monthCost) })
       : headlineTopic === "after-hours" ? t(rate != null ? "head.closedCost" : "head.closed", { pct: pctText(closedShare!), cost: rate != null ? money(buckets.closedKwh * rate * 30 / Math.max(dates.length, 1)) : "" })
       : t("head.working"),
     headlineTopic,
@@ -571,6 +668,11 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
     groups,
     reference: hasMap ? reference : null,
     zones, circuits, estimate, benchmark, pattern, screening, standout: standoutReport(project === data.current.project ? data : { ...data, current: { ...data.current, project } }, locale),
+    daytime: daytime ? daytimeBlock(daytime, locale) : null,
+    averageDay,
+    blocks: groupTree ? blockComparison(groupTree, averageDayKwh, { t, list }) : null,
+    perLight: data.lightCounts?.length ? perLightBlock(energyPerLight({ counts: data.lightCounts, tree: groupTree, series, dates, names: new Map(raw.flatMap(circuit => circuit.meters.map(meter => [meter.id, meter.name] as const))) }), t) : null,
+    noUse: noUseBlock(metersWithNoUse(raw.flatMap(circuit => circuit.meters), dates), { t, list, locale }),
     footer: { left: t("foot.left", { count: circuitCount, tz: tzLabel }), right: t("foot.right", { date: en ? `${shortDate(generatedDay)} ${generatedAt.slice(0, 4)}` : formatPeriod(generatedDay, generatedDay, locale) }) },
   };
 }
@@ -622,20 +724,94 @@ function headline(site: string, baseShare: number | null, closedShare: number | 
   return { before: t("title.steady", { site }), emphasis: t("title.steadyEmphasis") };
 }
 
-/** The groups for the report: top-level shares for the donut and comparison, and every group in reading order. */
-function reportGroups(tree: MeterGroupTree, monthKwh: number, t: T): ReportGroups {
+/** The groups for the report: top-level shares for the donut and comparison, every group in reading order, and the breakdown. */
+function reportGroups(tree: MeterGroupTree, monthKwh: number, t: T, averageDayKwh: number | null): ReportGroups {
   const measured = tree.kwh - tree.unmeteredKwh;
   // Colour follows the group (sorted by name), never its size, like the zones.
   const byName = [...tree.children].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-  const top = tree.children.map(group => ({ key: group.id, name: group.name, kwh: group.kwh, share: group.share, monthKwh: measured > 0 ? group.kwh / measured * monthKwh : 0, colour: ZONE_PALETTE[byName.indexOf(group) % ZONE_PALETTE.length]! }));
+  const breakdown = groupBreakdown(tree, averageDayKwh);
+  // The same whole percentages as the breakdown, so a sentence and the bars beside it never disagree by a point.
+  const pctOf = new Map(breakdown.map(row => [row.key, row.pct]));
+  const top = tree.children.map(group => ({ key: group.id, name: group.name, kwh: group.kwh, share: group.share, pct: pctOf.get(group.id) ?? Math.round(group.share * 100), monthKwh: measured > 0 ? group.kwh / measured * monthKwh : 0, colour: ZONE_PALETTE[byName.indexOf(group) % ZONE_PALETTE.length]! }));
   const parentOf = new Map<string, string>();
   const visit = (node: MeterGroupNode) => { for (const child of node.children) { parentOf.set(child.id, node.name); visit(child); } };
   visit(tree);
-  const rows = flattenMeterGroups(tree).map(group => ({ key: group.id, name: group.name, depth: group.depth - 1, kwh: group.kwh, share: group.share, parent: parentOf.get(group.id) ?? tree.name,
+  // Every group in reading order, each followed by the groups inside it, in the order someone saved for them.
+  const inOrder = (node: MeterGroupNode): MeterGroupNode[] => inSavedOrder(node.children).flatMap(child => [child, ...inOrder(child)]);
+  const rows = inOrder(tree).map(group => ({ key: group.id, name: group.name, depth: group.depth - 1, kwh: group.kwh, share: group.share, parent: parentOf.get(group.id) ?? tree.name,
     meters: group.meters.filter(meter => !meter.unmetered).map(meter => meter.name), singleMeter: group.singleMeter }));
   const biggest = biggestMeterGroup(tree);
-  const summary = [top.map(group => t("summary.share", { name: group.name, pct: pctText(group.share) })).join(" · "), biggest ? t("summary.biggest", { name: biggest.name }) : ""].filter(Boolean).join(" — ");
-  return { summary, top, rows, biggest: biggest ? { name: biggest.name, singleMeter: biggest.singleMeter } : null, unmeteredKwh: tree.unmeteredKwh };
+  const summary = [top.map(group => t("summary.share", { name: group.name, pct: `${group.pct}%` })).join(" · "), biggest ? t("summary.biggest", { name: biggest.name }) : ""].filter(Boolean).join(" — ");
+  const biggestParent = biggest ? parentOf.get(biggest.id) ?? null : null;
+  return {
+    summary, top, rows, unmeteredKwh: tree.unmeteredKwh, breakdown,
+    biggest: biggest ? { name: biggest.name, singleMeter: biggest.singleMeter, share: tree.kwh > 0 ? biggest.kwh / tree.kwh : 0, parent: biggestParent === tree.name ? null : biggestParent } : null,
+  };
+}
+
+/**
+ * Alike top-level groups side by side (group-insights.ts): the groups every one of them has, matched by name, in kWh on
+ * an average day, so Block lighting is set against Block lighting rather than one circuit against another. Null when
+ * no two top-level groups are alike, they share no group, or the site has no average day.
+ */
+function blockComparison(tree: MeterGroupTree, averageDayKwh: number | null, text: { t: T; list: (items: string[]) => string }): ReportBlocks | null {
+  const { t, list } = text;
+  const alike = comparableGroups(tree);
+  if (!alike || averageDayKwh == null || tree.kwh <= 0) return null;
+  const { shared } = likeForLike(alike);
+  if (!shared.length) return null;
+  const perDay = (kwh: number) => averageDayKwh * kwh / tree.kwh;
+  const names = alike.map(group => group.name);
+  const two = alike.length === 2;
+  // For two: which uses more, and by how much; within LIKE_CLOSE_SHARE they are close.
+  const diff = (values: number[]) => {
+    if (!two) return "";
+    const [a = 0, b = 0] = values, high = Math.max(a, b), low = Math.min(a, b);
+    return low > 0 && high / low - 1 >= LIKE_CLOSE_SHARE ? t("blocks.more", { name: a >= b ? names[0]! : names[1]!, pct: pctText(high / low - 1) }) : low > 0 || high === 0 ? t("blocks.close") : t("blocks.only", { name: a >= b ? names[0]! : names[1]! });
+  };
+  const rows = shared.map(part => ({ name: part.name, perDay: part.kwh.map(perDay), diff: diff(part.kwh), total: false }));
+  const totals = alike.map(group => perDay(group.kwh));
+  const day = (value: number) => kwhText(value);
+  let finding: string;
+  const gaps = rows.map(row => {
+    const high = Math.max(...row.perDay), low = Math.min(...row.perDay);
+    return { row, high, low, gap: low > 0 ? high / low - 1 : 0, highName: names[row.perDay.indexOf(high)]!, lowName: names[row.perDay.indexOf(low)]! };
+  }).filter(item => item.low > 0 && item.high - item.low >= 0.05).sort((a, b) => b.gap - a.gap);
+  const widest = gaps[0];
+  if (!widest || widest.gap < LIKE_CLOSE_SHARE) finding = t("blocks.close.all", { pct: pctText(LIKE_CLOSE_SHARE) });
+  else finding = t(two ? "blocks.widest" : "blocks.widestMany", { part: widest.row.name, high: widest.highName, low: widest.lowName, pct: pctText(widest.gap), highKwh: day(widest.high), lowKwh: day(widest.low) });
+  return {
+    heading: two ? t("blocks.headingTwo", { a: names[0]!, b: names[1]! }) : t("blocks.headingMany", { names: list(names) }),
+    intro: t("blocks.intro", { finding }),
+    caption: t("blocks.caption"),
+    groups: alike.map(group => ({ key: group.id, name: group.name })),
+    rows: [...rows, { name: t("blocks.total"), perDay: totals, diff: diff(alike.map(group => group.kwh)), total: true }],
+  };
+}
+
+/** Energy per light for the report: each meter with a count, grouped by the group it is filed in, with a group row after two or more. */
+function perLightBlock(found: ReturnType<typeof energyPerLight>, t: T): ReportPerLight {
+  const rows: ReportPerLight["rows"] = [];
+  const groupRow = (key: string | null) => {
+    const group = key ? found.groups.find(item => item.key === key) : undefined;
+    if (group && group.meters >= 2) rows.push({ kind: "group", name: t("perLight.groupRow", { name: group.name }), group: group.name, lights: group.lights, perDay: group.perDay, perLight: group.perLight });
+  };
+  found.meters.forEach((meter, index) => {
+    rows.push({ kind: "meter", name: meter.name, group: meter.group, lights: meter.lights, perDay: meter.perDay, perLight: meter.perLight });
+    if (found.meters[index + 1]?.groupKey !== meter.groupKey) groupRow(meter.groupKey);
+  });
+  return { heading: t("perLight.heading"), intro: t("perLight.intro"), note: found.groups.some(group => group.meters >= 2) ? t("perLight.note") : t("perLight.noteMeters"), rows };
+}
+
+/** Meters that used nothing in the dates, said plainly and never as a fault: "Pavilion fan: no use from 4–10 Nov". */
+function noUseBlock(found: ReturnType<typeof metersWithNoUse>, text: { t: T; list: (items: string[]) => string; locale: EnergyIqLocale }): ReportNoUse | null {
+  const { t, list, locale } = text;
+  if (!found.length) return null;
+  return {
+    heading: t("noUse.heading"),
+    items: found.map(({ meter, dates }) => { const runs = dateRuns(dates, locale); return t(runs.length === 1 && dates.length > 1 ? "noUse.item" : "noUse.itemOn", { name: meter.name, dates: list(runs) }); }),
+    note: t("noUse.note"),
+  };
 }
 
 /**
@@ -643,18 +819,19 @@ function reportGroups(tree: MeterGroupTree, monthKwh: number, t: T): ReportGroup
  * meters that measure it, and the panels it is wired from as a detail. The biggest part of a group that one meter
  * measures on its own is named, because nothing below it can say more.
  */
-function groupProfile(tree: MeterGroupTree, text: { t: T; list: (items: string[]) => string; paragraph: (parts: string[]) => string; inl: (name: string) => string }): Array<{ heading: string; text: string }> {
+function groupProfile(tree: MeterGroupTree, text: { t: T; list: (items: string[]) => string; paragraph: (parts: string[]) => string; inl: (name: string) => string; pct: ReadonlyMap<string, number> }): Array<{ heading: string; text: string }> {
   const { t, list, paragraph, inl } = text;
   const part = (item: { name: string; kwh: number; share: number }) => t("group.part", { name: item.name, kwh: kwhText(item.kwh), pct: pctText(item.share) });
   const panelsIn = (node: MeterGroupNode): string[] => [...new Set([...node.meters.flatMap(meter => meter.panel ? [meter.panel] : []), ...node.children.flatMap(panelsIn)])].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  const entries = tree.children.map(group => {
+  // Groups in the order someone saved for them, as on the Overview; `lead` is still the biggest group inside one.
+  const entries = inSavedOrder(tree.children).map(group => {
     const meters = group.meters.filter(meter => !meter.unmetered);
     const lead = group.children[0];
     const panels = panelsIn(group);
     return {
-      heading: t("group.heading", { name: group.name, kwh: kwhText(group.kwh), pct: pctText(group.share) }),
+      heading: t("group.heading", { name: group.name, kwh: kwhText(group.kwh), pct: text.pct.has(group.id) ? `${text.pct.get(group.id)}%` : pctText(group.share) }),
       text: paragraph([
-        group.children.length ? t("group.split", { parts: list(group.children.map(part)) }) : "",
+        group.children.length ? t("group.split", { parts: list(inSavedOrder(group.children).map(part)) }) : "",
         !group.children.length && group.singleMeter && meters[0] ? t("group.oneMeter", { name: meters[0].name }) : meters.length ? t("group.meters", { meters: list(meters.map(part)) }) : "",
         lead && lead.singleMeter && group.children.length > 1 ? t("group.biggestSingle", { name: lead.name, parent: inl(group.name) }) : "",
         panels.length ? t(panels.length === 1 ? "group.panels.one" : "group.panels.other", { panels: list(panels) }) : "",
@@ -769,7 +946,7 @@ function weekdayPattern(input: { project: ScopeData; days: AnalysisDay[]; openRa
  * Lights-on hours: an average day hour by hour (lights run every day), when the lights seem to come on and go off, and
  * how much of the day's use falls inside the lights-on hours. `weekdayCount` holds the number of days averaged.
  */
-function lightsPattern(input: { project: ScopeData; days: AnalysisDay[]; openRange: { from: number; to: number }; published: string | null; locale: EnergyIqLocale }): SiteReport["pattern"] {
+function lightsPattern(input: { project: ScopeData; days: AnalysisDay[]; openRange: { from: number; to: number }; published: string | null; locale: EnergyIqLocale; lines: Array<ProfileLine & { colour: string }>; alikeNames: string }): SiteReport["pattern"] {
   // A daily report draws its one day, when that day is complete; a longer report averages three days or more.
   const oneDay = input.days.length === 1;
   const { locale, openRange } = input, t = modelText(locale, oneDay);
@@ -791,22 +968,55 @@ function lightsPattern(input: { project: ScopeData; days: AnalysisDay[]; openRan
   const range = hourRange(openRange.from, openRange.to, locale);
   return {
     hours: profile, openFrom: openRange.from, openTo: openRange.to, notes: [], cause: null, weekdayCount: complete.length,
+    ...(input.lines.length ? { lines: input.lines } : {}),
     intro: sentences([
       onAt !== undefined && offAt !== undefined ? t(input.published ? "lights.pat.timingPublished" : "lights.pat.timing", { on: clock(onAt, locale), off: clock(offAt, locale), published: input.published ?? "" }) : "",
       t("lights.pat.level", { night: kwText(nightKw), day: kwText(dayKw) }),
     ], locale),
-    caption: t("lights.pat.caption", { count: complete.length, range, openKwh: kwhText(openKwh), pct: pctText(share), total: kwhText(total), rest: pctText(1 - share) }),
+    caption: sentences([
+      t("lights.pat.caption", { count: complete.length, range, openKwh: kwhText(openKwh), pct: pctText(share), total: kwhText(total), rest: pctText(1 - share) }),
+      input.lines.length ? t(input.alikeNames ? "lights.pat.linesAlike" : "lights.pat.lines", { names: input.alikeNames }) : "",
+    ], locale),
+  };
+}
+
+/** Which lights were on in the daytime, and when, in the reader's language (see SiteReport.daytime). */
+function daytimeBlock(daytime: DaytimeUse, locale: EnergyIqLocale): ReportDaytime {
+  const t = modelText(locale);
+  const shown = daytime.meters.slice(0, daytime.meters.length === DAYTIME_LISTED + 1 ? DAYTIME_LISTED + 1 : DAYTIME_LISTED);
+  const rest = daytime.meters.length - shown.length;
+  const names = daytime.alwaysOn.map(meter => meter.name);
+  return {
+    heading: t("daytime.heading"),
+    items: shown.map(meter => t(meter.days === 1 ? "daytime.item.one" : "daytime.item.other", {
+      name: meter.name, hours: listText(meter.hours.map(run => hourRange(run.from, run.to, locale)), locale), days: meter.days, kwh: kwhText(meter.kwh),
+    })),
+    more: rest > 0 ? t("daytime.more", { count: rest }) : null,
+    none: daytime.meters.length ? null : t("daytime.none"),
+    alwaysOn: names.length ? t("daytime.alwaysOn", { names: listText(names, locale) }) : null,
+    rule: t("daytime.rule", { minutes: ON_TIME_MARGIN_MINUTES }),
   };
 }
 
 // ---------- 5. circuit screening ----------
-type ScreenInput = { name: string; category: AnalysisCategory | "overall"; cells: Cells; perMeter: Cells[]; openBase: number | null; closedBase: number | null; meters: ScopeMeter[] };
-function screenCircuit(circuit: ScreenInput, context: { dates: string[]; weekdayDates: string[]; isOpen: (date: string, hour: number) => boolean; openRange: { from: number; to: number }; locale: EnergyIqLocale; meaning: HoursMeaning }) {
+type ScreenInput = { name: string; category: AnalysisCategory | "overall"; cells: Cells; perMeter: Cells[]; openBase: number | null; closedBase: number | null; meters: ScopeMeter[]; byDesign: boolean; periodKwh?: number | undefined };
+/**
+ * `allowance` (lights-on hours only) gives the share of a usual lights-on hour a light may rightly use in a clock hour:
+ * the 20-minute allowance of daytime-use.ts. The hour just before the lights-on time and the first hour after the
+ * lights-off time are on time when their use is within it, so a light that comes on or goes off within 20 minutes of
+ * the set hours is never called early or late.
+ */
+function screenCircuit(circuit: ScreenInput, context: { dates: string[]; weekdayDates: string[]; isOpen: (date: string, hour: number) => boolean; openRange: { from: number; to: number }; locale: EnergyIqLocale; meaning: HoursMeaning; allowance: ((date: string, hour: number) => number) | null }) {
   const { openBase, closedBase } = circuit;
   const oneDay = context.dates.length === 1;
   const { locale } = context, t = modelText(locale, oneDay), lt = hoursText(locale, context.meaning, oneDay), at = (hour: number) => clock(hour, locale);
   // No complete hour to compare: say so, rather than calling a silent meter "steady".
   if (!circuit.cells.size) return { finding: t("find.noReadings"), eveningKwh: null, earlyKwh: null, flat: false };
+  // Used nothing at all in these dates: said plainly, not as a fault.
+  if (circuit.periodKwh != null && circuit.periodKwh < NO_USE_KWH) return { finding: t("find.noUse"), eveningKwh: null, earlyKwh: null, flat: false };
+  // Meant to run day and night: nothing about it is a finding.
+  if (circuit.byDesign) return { finding: t("find.byDesign"), eveningKwh: null, earlyKwh: null, flat: false };
+  const allowed = (date: string, hour: number, value: number) => !!context.allowance && onTime(value, openBase, context.allowance(date, hour));
   // Lights-on hours: "open" is the lights-on hours and "closed" the daytime; the morning tail is lights left on too late.
   const lighting = context.meaning === "lights_on";
   const flagged = (value: number, base: number) => value > base * (1 + SCREEN_PCT) && value - base >= SCREEN_KWH;
@@ -816,7 +1026,8 @@ function screenCircuit(circuit: ScreenInput, context: { dates: string[]; weekday
     const [date = "", hourText = "0"] = key.split("|"), hour = Number(hourText), open = context.isOpen(date, hour);
     if (open) openCells.push({ date, hour, value });
     const base = open ? openBase : closedBase;
-    if (base != null && flagged(value, base)) { flags += 1; maxOver = Math.max(maxOver, value - base); }
+    // An hour next to the lights-on hours that is within the 20-minute allowance is on time, not a mark.
+    if (base != null && flagged(value, base) && (open || !allowed(date, hour, value))) { flags += 1; maxOver = Math.max(maxOver, value - base); }
   }
   const ratio = openBase && closedBase != null ? closedBase / openBase : null;
   const flat = ratio != null && ratio >= 0.85 && (closedBase ?? 0) >= 0.05;
@@ -839,7 +1050,7 @@ function screenCircuit(circuit: ScreenInput, context: { dates: string[]; weekday
       const first = circuit.cells.get(cellKey(date, close));
       if (first === undefined) continue;
       seen += 1;
-      if (!flagged(first, closedBase)) continue;
+      if (!flagged(first, closedBase) || allowed(date, close, first)) continue;
       let hour = close, extra = 0;
       for (let value = circuit.cells.get(cellKey(date, hour)); hour < 24 && value !== undefined && flagged(value, closedBase); hour += 1, value = circuit.cells.get(cellKey(date, hour))) extra += value - closedBase;
       tails.push({ first, offAt: hour, extra });
@@ -858,8 +1069,10 @@ function screenCircuit(circuit: ScreenInput, context: { dates: string[]; weekday
       const earlies: Array<{ onAt: number; extra: number }> = [];
       let evenings = 0;
       for (const date of context.weekdayDates) {
-        if (circuit.cells.get(cellKey(date, lightsOn - 1)) === undefined) continue;
+        const before = circuit.cells.get(cellKey(date, lightsOn - 1));
+        if (before === undefined) continue;
         evenings += 1;
+        if (allowed(date, lightsOn - 1, before)) continue;
         let hour = lightsOn - 1, extra = 0;
         for (let value = circuit.cells.get(cellKey(date, hour)); hour >= 0 && value !== undefined && flagged(value, closedBase); hour -= 1, value = circuit.cells.get(cellKey(date, hour))) extra += value - closedBase;
         if (hour < lightsOn - 1) earlies.push({ onAt: hour + 1, extra });

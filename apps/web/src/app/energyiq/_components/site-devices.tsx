@@ -600,7 +600,7 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
     <div><dt>{t("facts.closedDays")}</dt><dd>{stat.closedDays}</dd></div>
     <div><dt>{t("facts.closedAverage")}</dt><dd>{stat.closedDayAverageKwh === null ? "—" : `${kwh(stat.closedDayAverageKwh)} · ${money(stat.closedDayAverageKwh)}`}</dd></div>
     <div><dt>{t("facts.ratio")}</dt><dd>{stat.openDayAverageKwh && stat.closedDayAverageKwh !== null ? pct(stat.closedDayAverageKwh / stat.openDayAverageKwh * 100) : "—"}</dd></div>
-    <div><dt>{t("facts.alwaysOn", { label })}</dt><dd>{stat.alwaysOnKw === null ? "—" : `${kw(stat.alwaysOnKw)}${rate ? ` · ${t("perYear", { amount: sgd(stat.alwaysOnKw * 24 * 365 * rate) })}` : ""}`}</dd></div>
+    <div><dt>{t("facts.alwaysOn", { label })}</dt><dd>{stat.alwaysOnKw === null ? "—" : `${kw(stat.alwaysOnKw)} · ${t("aboutPerDay", { kwh: kwh(stat.alwaysOnKw * 24) })}${rate ? ` · ${t("perYear", { amount: sgd(stat.alwaysOnKw * 24 * 365 * rate) })}` : ""}`}</dd></div>
     <div><dt>{t("facts.readings")}</dt><dd>{pct(stat.receivedPct)}</dd></div>
   </dl>;
 
@@ -778,7 +778,7 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
         {rate && <div className={styles.tile}><span>{t("tile.cost")}</span><strong>{sgd(row.usageKwh * rate)}</strong><small>{stat.dailyAverageKwh === null ? t("tile.inPeriod", { days }) : t("aboutPerYear", { amount: sgd(stat.dailyAverageKwh * 365 * rate) })}</small></div>}
         <div className={styles.tile}><span>{t("tile.shareOfSite")}</span><strong>{siteKwh ? pct(row.usageKwh / siteKwh * 100) : "—"}</strong><small>{boardKwh ? t("tile.shareOfBoard", { pct: pct(row.usageKwh / boardKwh * 100), board: boardName(row.boardId) }) : boardName(row.boardId)}</small></div>
         <div className={styles.tile}><span>{t("tile.afterHours")}</span><strong>{stat.outOfHoursPct === null ? "—" : pct(stat.outOfHoursPct)}</strong><small>{stat.outOfHoursKwh === null ? t("tile.noHours") : `${kwh(stat.outOfHoursKwh)}${rate ? ` · ${sgd(stat.outOfHoursKwh * rate)}` : ""}`}</small></div>
-        <div className={styles.tile}><span>{t("tile.alwaysOn")}</span><strong>{stat.alwaysOnKw === null ? "—" : kw(stat.alwaysOnKw)}</strong><small>{stat.alwaysOnKw !== null && rate ? t("aboutPerYear", { amount: sgd(stat.alwaysOnKw * 24 * 365 * rate) }) : t("tile.alwaysOnNote")}</small></div>
+        <div className={styles.tile}><span>{t("tile.alwaysOn")}</span><strong>{stat.alwaysOnKw === null ? "—" : kw(stat.alwaysOnKw)}</strong><small>{stat.alwaysOnKw === null ? t("tile.alwaysOnNote") : `${t("aboutPerDay", { kwh: kwh(stat.alwaysOnKw * 24) })}${rate ? ` · ${t("aboutPerYear", { amount: sgd(stat.alwaysOnKw * 24 * 365 * rate) })}` : ""}`}</small></div>
         <div className={styles.tile}><span>{t("tile.peak")}</span><strong>{row.peakKw === null ? "—" : kw(row.peakKw)}</strong><small>{t("tile.peakNote")}</small></div>
       </div>
 
