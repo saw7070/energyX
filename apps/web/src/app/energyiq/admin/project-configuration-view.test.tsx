@@ -293,3 +293,37 @@ it("lights up only the chosen group's meters when groups in different places sha
     expect(host.querySelector("#meter-row-west")).toBeNull();
   } finally { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); }
 });
+
+it("lets a plan area stand for a whole block: offered as its panel, lit while a group inside is chosen, and selecting the block when clicked", async () => {
+  vi.stubGlobal("React", React); globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
+  const row = (id: string, name: string, scope: string) => ({ id, source_label: id, display_name: id, presentation: { device_name: name }, scope_id: scope, navigation_scope_id: scope, resource: "electricity", category: "light", coverage: "partial", meter_role: "component", aggregation_usage: "official" });
+  const node = (id: string, name: string, order: number, parent?: string) => ({ id, tier_definition_id: "area", name, sort_order: order, metadata_status: "confirmed", ...(parent ? { parent_id: parent } : {}) });
+  const doc = { project: { name: "Estate", timezone: "Asia/Singapore" }, tier_structure_locked: true, tiers: [{ id: "area", ordinal: 1, alias: "Area" }],
+    nodes: [node("a", "Block A", 10), node("a-gf", "Ground floor", 10, "a"), node("a-up", "Upper floors", 20, "a")],
+    meter_mapping: { schema_version: 2, source_kind: "tuya", confirmed: true, rows: [row("lobby", "Lobby lights", "a-gf"), row("stairs", "Stair lights", "a-up")], virtual_meters: [] } };
+  const setup = { project: { id: "estate", has_unpublished_changes: false, root_scope_id: "root" }, draft: { revision: 3, document: doc } } as unknown as EnergyProjectSetupDto;
+  const plan = { schemaVersion: 1, projectId: "estate", provenance: { file: "plan", status: "drawn" }, layout: { viewBox: [0, 0, 500, 300],
+    zones: [{ id: "A", referenceBoard: "Block A", rect: [10, 10, 400, 260] }], rooms: [{ name: "Lobby", zone: "A", rect: [20, 40, 180, 160] }],
+    devices: [{ meterId: "lobby", position: [100, 100] }, { meterId: "stairs", position: [300, 100] }] } };
+  const area = () => host.querySelector('g[aria-label="Select Block A, Area A"]')!;
+  const button = (text: string, index = 0) => Array.from(host.querySelectorAll("button")).filter(item => item.textContent?.startsWith(text))[index]!;
+  try {
+    await act(async () => root.render(<ProjectConfigurationView setup={setup} notes={"```json\n" + JSON.stringify(plan) + "\n```"} policies={null} projectId="estate" canEditSetup canEditNotes />));
+    await act(async () => button("Ground floor").click());
+    // The block's area stays lit while one of its groups is chosen.
+    expect(area().getAttribute("aria-pressed")).toBe("true");
+    // Clicking the area chooses the whole block.
+    await act(async () => area().dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(host.querySelector("[data-location-title] h3")?.textContent).toBe("Block A");
+    // In the layout editor the block can be chosen as an area's panel.
+    await act(async () => button("Edit layout").click());
+    // The editor lists its panels as the devices palette's headings and the area's panel choices.
+    const editor = host.querySelector('section[aria-label="Edit floor plan"]')!;
+    const areaShape = [...editor.querySelector("svg")!.querySelectorAll("rect")].find(rect => (rect.getAttribute("class") ?? "").includes("zone"))!;
+    await act(async () => areaShape.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: 50, clientY: 50 })));
+    await act(async () => window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true })));
+    const panelChoices = [...editor.querySelectorAll("select")].find(select => [...select.options].some(option => option.value === "Ground floor"));
+    expect([...panelChoices!.options].map(option => option.value)).toEqual(expect.arrayContaining(["Block A", "Ground floor", "Upper floors"]));
+  } finally { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); }
+});
