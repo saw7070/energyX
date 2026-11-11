@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useMessages } from "./energyiq-locale";
 import type { AlignHow } from "./floor-plan-align";
 import { floorPlanMessages } from "./floor-plan-messages";
@@ -36,7 +36,7 @@ export function LineUpActions({ count, sizable, onAlign, onDistribute, onSize }:
   const t = useMessages(floorPlanMessages);
   return <div className={styles.arrange} role="group" aria-label={t("align.title")}>
     <p className={styles.subhead}>{t("align.title")}</p>
-    <div className={styles.alignGrid}>{ALIGNS.map(how => <button key={how} type="button" className={styles.tool} onClick={() => onAlign(how)}>{t(`align.${how}`)}</button>)}</div>
+    <div className={styles.alignGrid}>{ALIGNS.map(how => <button key={how} type="button" className={styles.tool} title={t(`align.${how}Hint`)} aria-label={`${t(`align.${how}`)}: ${t(`align.${how}Hint`)}`} onClick={() => onAlign(how)}>{t(`align.${how}`)}</button>)}</div>
     <div className={styles.arrangeRow}>
       <button type="button" className={styles.tool} disabled={count < 3} onClick={() => onDistribute("x")}>{t("align.across")}</button>
       <button type="button" className={styles.tool} disabled={count < 3} onClick={() => onDistribute("y")}>{t("align.down")}</button>
@@ -57,15 +57,18 @@ export function GridMenu({ prefs, onChange, commandKey }: { prefs: EditorPrefs; 
   const t = useMessages(floorPlanMessages);
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const popover = useId();
   useEffect(() => {
     if (!open) return;
     const away = (event: PointerEvent) => { if (root.current && !root.current.contains(event.target as Node)) setOpen(false); };
     document.addEventListener("pointerdown", away);
     return () => document.removeEventListener("pointerdown", away);
   }, [open]);
-  return <div className={styles.gridMenu} ref={root} onKeyDown={event => { if (event.key === "Escape" && open) { event.stopPropagation(); setOpen(false); } }}>
-    <button type="button" className={styles.tool} aria-expanded={open} aria-haspopup="true" title={t("grid.title")} onClick={() => setOpen(current => !current)}>{t("grid.menu")}</button>
-    {open && <div className={styles.gridPopover} role="group" aria-label={t("grid.title")}>
+  return <div className={styles.gridMenu} ref={root} onKeyDown={event => { if (event.key === "Escape" && open) { event.stopPropagation(); setOpen(false); button.current?.focus(); } }}>
+    {/* Esc puts focus back on the Grid button, so it never falls out of the editor (and its keys keep working). */}
+    <button ref={button} type="button" className={styles.tool} aria-expanded={open} aria-controls={open ? popover : undefined} title={t("grid.title")} onClick={() => setOpen(current => !current)}>{t("grid.menu")}</button>
+    {open && <div id={popover} className={styles.gridPopover} role="group" aria-label={t("grid.title")}>
       <label className={styles.check}><input type="checkbox" checked={prefs.snap} onChange={event => onChange({ ...prefs, snap: event.target.checked })} />{t("grid.snap")}</label>
       <label>{t("grid.size")}<select value={prefs.grid} onChange={event => onChange({ ...prefs, grid: Number(event.target.value) as GridSize })}>{GRID_SIZES.map(size => <option key={size} value={size}>{t(`grid.size${size}`)}</option>)}</select></label>
       <label className={styles.check}><input type="checkbox" checked={prefs.showGrid} onChange={event => onChange({ ...prefs, showGrid: event.target.checked })} />{t("grid.show")}</label>

@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { flushSync } from "react-dom";
 import { configApi } from "../../../lib/config-api";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { intlLocale } from "./energyiq-messages";
@@ -11,7 +12,7 @@ import { boxOf, copyItems, everything, fitsLimits, inBox, isIn, isLocked, lockIt
 import { boxBetween, centredBox, isClick, snappedBox } from "./floor-plan-geometry";
 import { floorPlanMessages } from "./floor-plan-messages";
 import { canRedo, canUndo, commitPlan, endTyping, finishChange, redo, selectIn, showPlan, startHistory, undo, type HistoryEntry } from "./floor-plan-history";
-import { planShortcut } from "./floor-plan-keys";
+import { isTextEntry, planShortcut } from "./floor-plan-keys";
 import { PositionFields } from "./floor-plan-position";
 import { boundsOf, editorPrefs, gridSpacing, guideFor, guideTargets, samePrefs, snapToLines, withPrefs, type EditorPrefs, type Guide, type GuideTargets } from "./floor-plan-snap";
 import { EnergyIcon } from "./icons";
@@ -86,6 +87,9 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   // The plan and the selection, with every step Undo and Redo can go to (see floor-plan-history).
   const [history, setHistory] = useState(() => startHistory(previous ? planFromReference(previous, locale) : starterPlan(boards, locale)));
   const { plan } = history.present;
+  // The history as last drawn, for a press that must first save a field still being typed in (see `latest`).
+  const historyRef = useRef(history);
+  useLayoutEffect(() => { historyRef.current = history; });
   // Several items can be selected; anything taken off the plan meanwhile (an undo, a delete) simply drops out.
   const selection = stillThere(plan, history.present.selection);
   const single = selection.length === 1 ? selection[0]! : null;
@@ -111,8 +115,20 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   // The editor's own clipboard (never the computer's): what Copy took, and how many times it was pasted.
   const [clipboard, setClipboard] = useState<{ clip: Clip; pasted: number } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
   /** Keys work while the plan has focus; clicking it gives it focus. */
   const focusCanvas = () => { const svg = svgRef.current as (SVGSVGElement & { focus?: (options?: FocusOptions) => void }) | null; svg?.focus?.({ preventScroll: true }); };
+  /**
+   * The plan and selection to start a drag from. A position or colour code field saves when it is left, so pressing
+   * the plan straight after typing (without Enter) first saves that field, at once, and the drag then starts from the
+   * plan with the typed value in it, never the one before (which would undo the typing and leave a stray undo step).
+   */
+  const latest = () => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && isTextEntry(active) && sectionRef.current?.contains(active)) flushSync(() => active.blur());
+    const present = historyRef.current.present;
+    return { plan: present.plan, selection: stillThere(present.plan, present.selection) };
+  };
   const drag = useRef<Drag | null>(null);
   const sweep = useRef<Sweep | null>(null);
   const [sweepBox, setSweepBox] = useState<{ kind: Sweep["kind"]; rect: Rect } | null>(null);
@@ -132,7 +148,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   const recolour = <T extends { colour?: string }>(item: T, hex: string | null): T => { const { colour: _old, ...rest } = item; return (hex ? { ...rest, colour: hex } : rest) as T; };
   /** One colour choice is one undo step, however long the colour picker is dragged (`target` names what is coloured). */
   const pickColour = (target: string, apply: (hex: string | null) => FloorPlan) => (hex: string | null, live?: boolean) => commit(apply(hex), live ? { merge: `colour:${target}` } : undefined);
-  const colourPicker = (target: string, value: string | undefined, autoLabel: string, apply: (hex: string | null) => FloorPlan) => <ColourPicker legend={t("panel.colour")} hint={t("panel.colourHint")} value={value} autoLabel={autoLabel} onPick={pickColour(target, apply)} onDone={() => setHistory(endTyping)} />;
+  const colourPicker = (target: string, value: string | undefined, autoLabel: string, apply: (hex: string | null) => FloorPlan) => <ColourPicker key={target} legend={t("panel.colour")} hint={t("panel.colourHint")} value={value} autoLabel={autoLabel} onPick={pickColour(target, apply)} onDone={() => setHistory(endTyping)} />;
   const meterById = new Map(meters.map(meter => [meter.id, meter]));
   const placedIds = new Set(plan.devices.map(item => item.meterId));
   const shown = (meterId: string) => meterById.has(meterId);
@@ -150,7 +166,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     const point = new DOMPoint(clientX, clientY).matrixTransform(matrix.inverse());
     return [point.x, point.y];
   };
-  const place = (meterId: string, at: Point) => {
+  const place = (meterId: string, at: Point, plan = history.present.plan) => {
     setPlacing(null);
     if (plan.devices.some(item => item.meterId === meterId && item.locked)) { setNotice(t("editor.locked")); return; }
     commit({ ...plan, devices: [...plan.devices.filter(item => item.meterId !== meterId), { meterId, position: clampPoint([snap(at[0], step), snap(at[1], step)], plan.viewBox) }] }, { selection: [{ kind: "device", key: meterId }] });
@@ -232,8 +248,9 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     const adding = event.shiftKey || event.metaKey || event.ctrlKey;
     // Shift- or Cmd/Ctrl-pressing an area not yet selected starts a selection box, so the rooms inside a block can be
     // boxed even where areas cover the whole plan; a click without dragging still adds the area itself.
-    if (mode === "move" && adding && item.kind === "area" && !isIn(selection, item)) { event.stopPropagation(); beginSweep(event, item); return; }
+    if (mode === "move" && adding && item.kind === "area" && !isIn(history.present.selection, item)) { event.stopPropagation(); beginSweep(event, item); return; }
     event.stopPropagation();
+    const { plan, selection } = latest();
     (event.currentTarget as Element).setPointerCapture?.(event.pointerId);
     focusCanvas();
     const start = toPoint(event.clientX, event.clientY);
@@ -310,9 +327,13 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   const startEdge = (event: ReactPointerEvent, edge: Edge) => {
     if (event.button !== 0) return;
     event.preventDefault(); event.stopPropagation();
-    (event.currentTarget as Element).setPointerCapture?.(event.pointerId);
+    const { plan } = latest(), before = historyRef.current.present;
+    // The press does not move focus (it is prevented): put it on the edge, so the editor's keys keep working.
+    const handle = event.currentTarget as HTMLElement;
+    handle.focus?.({ preventScroll: true });
+    handle.setPointerCapture?.(event.pointerId);
     const width = svgRef.current?.getBoundingClientRect().width ?? 0;
-    edgeDrag.current = { edge, startX: event.clientX, startY: event.clientY, scale: width > 0 ? width / vw : 1, original: plan, before: history.present, moved: false, warned: false };
+    edgeDrag.current = { edge, startX: event.clientX, startY: event.clientY, scale: width > 0 ? width / plan.viewBox[2] : 1, original: plan, before, moved: false, warned: false };
   };
   const moveEdge = (event: ReactPointerEvent) => {
     const current = edgeDrag.current;
@@ -373,15 +394,17 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   };
   /** Starts a selection box (or, with a tool chosen, the new item's box) where the pointer was pressed. */
   const beginSweep = (event: ReactPointerEvent, click?: Selection) => {
+    const { selection } = latest();
     focusCanvas();
     svgRef.current?.setPointerCapture?.(event.pointerId);
     sweep.current = { kind: tool ? "draw" : "marquee", start: toPoint(event.clientX, event.clientY), additive: event.shiftKey || event.metaKey || event.ctrlKey, base: selection, ...(click ? { click } : {}) };
   };
   // Pressing empty space starts a selection box; with a tool chosen, pressing anywhere starts the new item's box.
   const startSweep = (event: ReactPointerEvent<SVGSVGElement>) => {
+    const { plan } = latest();
     focusCanvas();
     if (event.button !== 0) return;
-    if (placing) { place(placing, toPoint(event.clientX, event.clientY)); return; }
+    if (placing) { place(placing, toPoint(event.clientX, event.clientY), plan); return; }
     const empty = event.target === event.currentTarget || !!(event.target as Element).getAttribute?.("data-grid");
     if (!tool && !empty) return;
     beginSweep(event);
@@ -487,7 +510,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   const preview = useMemo(() => { try { return referenceFromPlan(plan, projectId, previous, locale); } catch { return null; } }, [plan, projectId, previous, locale]);
   const redoKey = mac ? "⇧⌘Z" : "Ctrl+Y";
   const toolButton = (kind: Tool, label: string, hint: string, disabled = false) => <button type="button" className={styles.tool} aria-pressed={tool === kind} disabled={disabled} title={hint} onClick={() => chooseTool(kind)}>{label}</button>;
-  return <section className={`${styles.card} ${styles.editing}`} aria-label={t("editor.title")} tabIndex={-1} onKeyDown={onKeyDown}>
+  return <section ref={sectionRef} className={`${styles.card} ${styles.editing}`} aria-label={t("editor.title")} tabIndex={-1} onKeyDown={onKeyDown}>
     <header className={styles.cardHeader}>
       <div><h4>{t("editor.title")}</h4><p>{t("editor.help", { undoKey: keyName("Z"), redoKey, copyKey: keyName("C"), pasteKey: keyName("V"), duplicateKey: keyName("D") })}</p><p>{t("editor.drawingOnly")}</p></div>
       <div className={styles.actions}>
@@ -579,7 +602,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
           <label>{t("panel.board")}<select value={selectedArea.board} onChange={event => updateArea(selectedArea.key, { board: event.target.value })}><option value="">{t("panel.noBoard")}</option>{allBoards.map(board => <option key={board} value={board}>{board}</option>)}</select></label>
           {positionFields(single!, selectedArea.rect)}
           {colourPicker(`area:${selectedArea.key}`, selectedArea.colour, selectedArea.board ? t("panel.colourAuto", { board: selectedArea.board }) : t("panel.colourAutoNone"), hex => ({ ...plan, areas: plan.areas.map(item => item.key === selectedArea.key ? recolour(item, hex) : item) }))}
-          {selectedArea.board && <ColourPicker legend={t("panelColour.title")} hint={t("panelColour.hint", { board: selectedArea.board })} value={plan.colours?.[selectedArea.board]} autoLabel={t("panelColour.auto")} onPick={pickColour(`board:${selectedArea.board}`, hex => withBoardColour(plan, selectedArea.board, hex))} onDone={() => setHistory(endTyping)} />}
+          {selectedArea.board && <ColourPicker key={`board:${selectedArea.board}:${selectedArea.key}`} legend={t("panelColour.title")} hint={t("panelColour.hint", { board: selectedArea.board })} value={plan.colours?.[selectedArea.board]} autoLabel={t("panelColour.auto")} onPick={pickColour(`board:${selectedArea.board}`, hex => withBoardColour(plan, selectedArea.board, hex))} onDone={() => setHistory(endTyping)} />}
           <label>{t("panel.shownAs")}<select value={selectedArea.insideRoom ?? ""} disabled={singleLocked} onChange={event => { const room = plan.rooms.find(item => item.key === event.target.value); commit({ ...plan, areas: plan.areas.map(item => item.key !== selectedArea.key ? item : room ? asGroupIn(item, room) : asOwnArea(item)) }); }}>
             <option value="">{t("panel.ownArea")}</option>{plan.rooms.map(room => <option key={room.key} value={room.key}>{t("panel.insideRoom", { room: room.name })}</option>)}
           </select></label>

@@ -191,7 +191,7 @@ export const floorPlanMessages = defineMessages({
   "colour.pick": "Pick a custom colour",
   "colour.code": "Colour code",
   "colour.invalid": "Type a colour code like #2a78d6.",
-  "panelColour.title": "Panel colour for everyone on this panel",
+  "panelColour.title": "Colour for everything on this panel",
   "panelColour.hint": "Everything on panel {board} uses this colour, unless it has its own.",
   "panelColour.auto": "Automatic",
   "editor.edgeLeft": "Drag to make the drawing space wider or narrower on the left",

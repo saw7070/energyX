@@ -91,9 +91,14 @@ describe("grid settings", () => {
     await act(async () => checkbox(menu, "Show the grid").click());
     expect(view.canvas().querySelector("pattern#floor-plan-grid")).toBeNull();
     expect(view.canvas().querySelector("rect[data-grid]")?.getAttribute("fill")).toBe("transparent");
-    // Esc closes the menu, and leaves the selection alone.
+    // The Grid button points at its group of settings (it is not a menu of commands).
+    expect(view.button("Grid").getAttribute("aria-haspopup")).toBeNull();
+    expect(view.button("Grid").getAttribute("aria-controls")).toBe(menu.id);
+    // Esc closes the menu, puts focus back on the Grid button (never lost outside the editor), and leaves the selection alone.
+    await act(async () => { checkbox(menu, "Show the grid").focus(); });
     await view.press(checkbox(menu, "Show the grid"), "Escape");
     expect(view.button("Grid").getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(view.button("Grid"));
     expect(view.host.querySelector("aside h5")?.textContent).toBe("Room");
     const reference = await view.saved();
     expect(reference.layout.editor).toEqual({ grid: 50, snap: false, showGrid: false });
@@ -163,6 +168,9 @@ describe("line up", () => {
     await view.click(view.tile("Store"), [560, 310], { shiftKey: true });
     expect(view.host.querySelector("aside h5")?.textContent).toBe("2 items selected");
     expect(view.button("Space evenly across").disabled).toBe(true);
+    // Each button explains itself beyond its one word, on hover and to screen readers ("Centre" and "Middle" differ).
+    expect(view.button("Centre").getAttribute("aria-label")).toBe("Centre: Line up their centres on one up-and-down line");
+    expect(view.button("Middle").title).toBe("Line up their middles on one side-to-side line");
     await act(async () => view.button("Left").click());
     expect(view.rect("Store")[0]).toBe(320);
     expect(view.rect("Pantry")[0]).toBe(320);
@@ -198,6 +206,8 @@ describe("typed position and size", () => {
     const view = await render();
     await view.click(view.tile("Office"), [560, 100]);
     expect(["X", "Y", "Width", "Height"].map(label => view.input("Position and size", label).value)).toEqual(["540", "80", "200", "150"]);
+    // Screen readers hear what X means, not just "X".
+    expect(view.input("Position and size", "X").getAttribute("aria-label")).toBe("X: From the left edge of the drawing space");
     const x = view.input("Position and size", "X");
     // Nothing moves while typing; arrow keys inside the field never nudge the plan.
     await view.type(x, "600", "none");
@@ -239,14 +249,79 @@ describe("typed position and size", () => {
   });
 });
 
+describe("typing, then pressing the plan straight away", () => {
+  it("keeps a typed width when the item is dragged before Enter, with one undo step for each", async () => {
+    const view = await render();
+    await view.click(view.tile("Office"), [560, 100]);
+    await view.type(view.input("Position and size", "Width"), "300", "none");
+    await view.drag(view.tile("Office"), [560, 100], [560, 140]);
+    expect(view.rect("Office")).toEqual([540, 120, 300, 150]);
+    await act(async () => view.button("Undo").click());
+    expect(view.rect("Office")).toEqual([540, 80, 300, 150]);
+    await act(async () => view.button("Undo").click());
+    expect(view.rect("Office")).toEqual([540, 80, 200, 150]);
+    expect(view.button("Undo").disabled).toBe(true);
+    await view.unmount();
+  });
+
+  it("keeps a typed width when a resize grip is pulled before Enter", async () => {
+    const view = await render();
+    await view.click(view.tile("Office"), [560, 100]);
+    await view.type(view.input("Position and size", "Height"), "200", "none");
+    const grip = view.canvas().querySelector('rect[data-handle="e"]')!;
+    await view.drag(grip, [740, 155], [770, 155]);
+    expect(view.rect("Office")[3]).toBe(200);
+    expect(view.rect("Office")[2]).toBeGreaterThan(200);
+    await view.unmount();
+  });
+
+  it("keeps a typed colour code when the item is dragged before Enter", async () => {
+    const view = await render();
+    await view.click(view.tile("Showroom"), [60, 100]);
+    const code = view.field("Colour")!.querySelector('input:not([type="color"])') as HTMLInputElement;
+    await view.type(code, "#1b9aaa", "none");
+    await view.drag(view.tile("Showroom"), [60, 100], [60, 120]);
+    expect(view.tile("Showroom").querySelector("rect")!.getAttribute("style")).toContain("#1b9aaa");
+    expect(view.rect("Showroom").slice(0, 2)).toEqual([40, 100]);
+    await act(async () => view.button("Undo").click());
+    expect(view.rect("Showroom").slice(0, 2)).toEqual([40, 80]);
+    expect(view.tile("Showroom").querySelector("rect")!.getAttribute("style")).toContain("#1b9aaa");
+    await view.unmount();
+  });
+
+  it("keeps a typed width when an edge of the drawing space is pulled before Enter", async () => {
+    const view = await render();
+    await view.click(view.tile("Office"), [560, 100]);
+    await view.type(view.input("Position and size", "Width"), "300", "none");
+    const right = view.host.querySelector('button[aria-label="Drag to make the drawing space wider or narrower"]')!;
+    await view.down(right, [1000, 300]);
+    await act(async () => { right.dispatchEvent(pointer("pointermove", 1100, 300)); });
+    await act(async () => { right.dispatchEvent(pointer("pointerup", 1100, 300)); });
+    expect(view.rect("Office")[2]).toBe(300);
+    expect(view.canvas().getAttribute("viewBox")).not.toBe("0 0 1000 640");
+    // Focus stays in the editor, on the edge, so its keys still work.
+    expect(document.activeElement).toBe(right);
+    await act(async () => view.button("Undo").click());
+    expect(view.canvas().getAttribute("viewBox")).toBe("0 0 1000 640");
+    expect(view.rect("Office")[2]).toBe(300);
+    await view.unmount();
+  });
+});
+
 describe("custom colours", () => {
   it("take a typed #rrggbb code, refuse anything else with a plain message, and make a dragged colour picker one undo step", async () => {
     const view = await render();
     await view.click(view.tile("Showroom"), [60, 100]);
-    const code = view.field("Colour")!.querySelector('input:not([type="color"])') as HTMLInputElement;
+    let code = view.field("Colour")!.querySelector('input:not([type="color"])') as HTMLInputElement;
     await view.type(code, "#12");
     expect(view.field("Colour")!.querySelector('[role="alert"]')?.textContent).toBe("Type a colour code like #2a78d6.");
     expect(view.button("Undo").disabled).toBe(true);
+    // The message belongs to that item: choosing another one starts its colour field afresh.
+    await view.click(view.tile("Pantry"), [330, 310]);
+    expect(view.field("Colour")!.querySelector('[role="alert"]')).toBeNull();
+    await view.click(view.tile("Showroom"), [60, 100]);
+    expect(view.field("Colour")!.querySelector('[role="alert"]')).toBeNull();
+    code = view.field("Colour")!.querySelector('input:not([type="color"])') as HTMLInputElement;
     await view.type(code, "#1B9AAA");
     expect(view.tile("Showroom").querySelector("rect")!.getAttribute("style")).toContain("#1b9aaa");
     expect(view.field("Colour")!.querySelector('[role="alert"]')).toBeNull();
@@ -268,7 +343,7 @@ describe("custom colours", () => {
     const view = await render();
     await view.click(view.tile("DB2"), [900, 480]);
     expect(view.host.querySelector("aside h5")?.textContent).toBe("Area");
-    const panel = view.field("Panel colour for everyone on this panel")!;
+    const panel = view.field("Colour for everything on this panel")!;
     expect(panel.textContent).toContain("Everything on panel DB2 uses this colour");
     await act(async () => (panel.querySelector('button[aria-label="Red"]') as HTMLButtonElement).click());
     expect(view.tile("DB2").querySelector("rect")!.getAttribute("style")).toContain("#d6453d");

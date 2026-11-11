@@ -39,7 +39,8 @@ export function PositionFields({ box, origin, disabled, onCommit }: { box: Rect;
   return <fieldset className={styles.positionField} disabled={disabled}><legend>{t("position.title")}</legend>
     <div className={styles.positionGrid}>
       {FIELDS.map(field => <label key={field}><span title={t(`position.${field}Hint`)}>{t(`position.${field}`)}</span>
-        <input inputMode="decimal" autoComplete="off" value={draft?.field === field ? draft.text : String(shown[field])}
+        {/* The hint is in the input's name too: a title alone never shows on touch screens or reaches screen readers. */}
+        <input inputMode="decimal" autoComplete="off" aria-label={`${t(`position.${field}`)}: ${t(`position.${field}Hint`)}`} value={draft?.field === field ? draft.text : String(shown[field])}
           onFocus={() => { setDraft({ field, text: String(shown[field]) }); }} onChange={event => setDraft({ field, text: event.target.value })} onBlur={() => finish(field)} onKeyDown={event => keys(event, field)} />
       </label>)}
     </div>
