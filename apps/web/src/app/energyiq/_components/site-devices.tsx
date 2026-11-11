@@ -5,7 +5,7 @@ import { configApi, type EnergyMeterCategoryDto, type EnergyOperatingCalendarEnt
 import { EnergyIcon } from "./icons";
 import { MEASUREMENT_LABELS, measurementLabel } from "./site-structure-editing";
 import { chartRange, DailyProfileChart, DailyUsageChart, UsageHeatmap, niceMax } from "./device-charts";
-import { deviceStatistics, hourlyByDay, isOpenDay, openingHoursLabel, operatingMinutes, periodDates, type DeviceStatistics, type HourCell } from "./device-statistics";
+import { deviceStatistics, hourlyByDay, isOpenDay, openingHoursLabel, operatingMinutes, partialHourKwhByDay, periodDates, type DeviceStatistics, type HourCell } from "./device-statistics";
 import { dayContext, dayKindBadge, describeDay, schoolPhases, schoolPhaseLabel, specialDays, type DayContext, type DayKind } from "./day-context";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { intlLocale, translatorFor, type EnergyIqLocale, type Translate } from "./energyiq-messages";
@@ -766,9 +766,11 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
     const findings = deviceFindings({ row, stat, rate, openingHours, locale, timezone: summary.timezone });
     const profileMax = niceMax(Math.max(0, ...stat.openProfileKw.map(value => value ?? 0), ...stat.closedProfileKw.map(value => value ?? 0)));
     const byDay = hourlyByDay(loaded.cells.get(row.id) ?? [], loaded.dates);
+    // An hour only partly received shows its kW worked out from that part, but the kWh it really recorded.
+    const partByDay = partialHourKwhByDay(loaded.cells.get(row.id) ?? [], loaded.dates);
     const weekOf = (date: string) => { const weekday = (new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7; return t("weekOf", { date: dateText(new Date(Date.parse(`${date}T00:00:00Z`) - weekday * 86_400_000).toISOString().slice(0, 10)) }); };
     const tag = (date: string) => { const day = dayMap.get(date); if (!day || day.kind === "open") return ""; return ` · ${dayKindBadge(day.kind, locale) ?? t(day.kind === "weekend" ? "tag.weekend" : "tag.closed")}`; };
-    const dayRows = loaded.dates.map(date => ({ id: date, name: `${dateText(date)}${tag(date)}`, group: weekOf(date), profileKw: byDay.get(date) ?? [] }));
+    const dayRows = loaded.dates.map(date => ({ id: date, name: `${dateText(date)}${tag(date)}`, group: weekOf(date), profileKw: byDay.get(date) ?? [], partialKwh: partByDay.get(date) ?? [] }));
     return <>
       {nav}
       <div className={styles.glance}>

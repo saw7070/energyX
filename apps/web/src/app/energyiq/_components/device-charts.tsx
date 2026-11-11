@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import styles from "./site-devices.module.css";
 import { DAY_KIND_BADGES, dayKindBadge, dayKindLabel, describeDay, type DayContext, type DayKind } from "./day-context";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
@@ -109,7 +109,11 @@ export function DailyProfileChart({ profileKw, openHours, name, title, max: fixe
   </figure>;
 }
 
-export type HeatmapRow = { id: string; name: string; group: string; profileKw: Array<number | null> };
+/**
+ * `partialKwh`: the kWh actually recorded in an hour whose readings only partly arrived (its kW is then worked out from
+ * the part that did); null for every other hour.
+ */
+export type HeatmapRow = { id: string; name: string; group: string; profileKw: Array<number | null>; partialKwh?: Array<number | null> };
 /** Traffic-light usage scale, green (low) → yellow → orange → red (high); every cell also prints its percentage, so colour is never the only cue. */
 export const HEAT_STOPS: Array<[number, [number, number, number]]> = [[0, [99, 190, 123]], [0.35, [250, 215, 100]], [0.7, [240, 140, 60]], [1, [214, 60, 47]]];
 export const HEAT_GRADIENT = `linear-gradient(90deg, ${HEAT_STOPS.map(([at, [r, g, b]]) => `rgb(${r}, ${g}, ${b}) ${at * 100}%`).join(", ")})`;
@@ -143,17 +147,28 @@ const hour24 = (hour: number) => String(hour).padStart(2, "0");
 export function UsageHeatmap({ rows, openHours, openingLabel, title, scale = "row", onOpenRow, period }: { rows: HeatmapRow[]; openHours: Set<number>; openingLabel?: string | null; title?: string; scale?: "row" | "all"; onOpenRow?: (id: string) => void; period?: string | null }) {
   const t = useMessages(chartMessages);
   const [active, setActive] = useState<{ row: number; hour: number; x: number; y: number } | null>(null);
+  const heatmap = useRef<HTMLDivElement>(null);
+  // A tapped cell keeps its details until the next tap elsewhere: a touch screen has no pointer left to hover with.
+  const shown = active !== null;
+  useEffect(() => {
+    if (!shown) return;
+    const clear = (event: PointerEvent) => { if (!(event.target instanceof Node && heatmap.current?.contains(event.target))) setActive(null); };
+    document.addEventListener("pointerdown", clear);
+    return () => document.removeEventListener("pointerdown", clear);
+  }, [shown]);
   const groups = [...new Set(rows.map(row => row.group))];
   const overall = Math.max(0, ...rows.flatMap(row => row.profileKw.map(kw => kw ?? 0)));
   const busiest = (row: HeatmapRow) => scale === "all" ? overall : Math.max(0, ...row.profileKw.map(kw => kw ?? 0));
   const dayTotal = (row: HeatmapRow) => row.profileKw.reduce<number>((sum, kw) => sum + (kw ?? 0), 0);
   const current = active ? rows[active.row] : null;
   const value = current && active ? current.profileKw[active.hour] : null;
+  const partKwh = current && active ? current.partialKwh?.[active.hour] ?? null : null;
   const open = [...openHours].sort((a, b) => a - b);
   const contiguous = open.length > 0 && open[open.length - 1]! - open[0]! === open.length - 1;
   return <figure className={styles.chart}>
     <figcaption>{title ?? t("heat.title")}{period && <span className={styles.chartPeriod}>{period}</span>}</figcaption>
-    <div className={styles.heatmap} data-heatmap onPointerLeave={() => setActive(null)}>
+    {/* A finger lifting also "leaves" the heatmap, so only a mouse or pen leaving it hides the details. */}
+    <div ref={heatmap} className={styles.heatmap} data-heatmap onPointerLeave={event => { if (event.pointerType !== "touch") setActive(null); }}>
       <div className={styles.heatTimeline} aria-hidden="true">
         {contiguous && open[0]! > 0 && <span className={styles.heatClosedBar} title={t("heat.afterHoursSpan", { from: "00:00", to: `${hour24(open[0]!)}:00` })} style={{ gridColumn: `2 / ${open[0]! + 2}` }}>{t("heat.afterHours")}</span>}
         {contiguous && <span className={styles.heatOpenBar} style={{ gridColumn: `${open[0]! + 2} / ${open[open.length - 1]! + 3}` }}>{openingLabel ? t("heat.operatingHoursLabel", { hours: openingLabel }) : t("heat.operatingHours")}</span>}
@@ -177,7 +192,7 @@ export function UsageHeatmap({ rows, openHours, openingLabel, title, scale = "ro
           </div>;
         })}
       </div>)}
-      {current && active && <div className={styles.tooltip} style={{ left: active.x, top: active.y, transform: "translate(-50%, calc(-100% - 6px))" }}><strong>{value == null ? t("heat.noComplete") : t("heat.load", { load: loadPercent(value, busiest(current)) ?? 0, peak: compact(busiest(current)) })}</strong>{value != null && <span>{t(scale === "all" ? "heat.energy" : "heat.energyAverage", { kw: compact(value), kwh: compact(value) })}</span>}<span>{t(openHours.has(active.hour) ? "heat.spanOpen" : "heat.span", { name: current.name, from: `${hour24(active.hour)}:00`, to: `${hour24((active.hour + 1) % 24)}:00` })}</span>{value != null && dayTotal(current) > 0 && <span>{t("heat.dailyShare", { pct: Math.round(value / dayTotal(current) * 100) })}</span>}</div>}
+      {current && active && <div className={styles.tooltip} style={{ left: active.x, top: active.y, transform: "translate(-50%, calc(-100% - 6px))" }}><strong>{value == null ? t("heat.noComplete") : t("heat.load", { load: loadPercent(value, busiest(current)) ?? 0, peak: compact(busiest(current)) })}</strong>{value != null && <span>{t(scale === "all" ? "heat.energy" : "heat.energyAverage", { kw: compact(value), kwh: compact(partKwh ?? value) })}</span>}{value != null && partKwh != null && <span>{t("heat.partHour")}</span>}<span>{t(openHours.has(active.hour) ? "heat.spanOpen" : "heat.span", { name: current.name, from: `${hour24(active.hour)}:00`, to: `${hour24((active.hour + 1) % 24)}:00` })}</span>{value != null && dayTotal(current) > 0 && <span>{t("heat.dailyShare", { pct: Math.round(value / dayTotal(current) * 100) })}</span>}</div>}
     </div>
     <p className={styles.legend}><span className={styles.heatScaleLabel}>{t("heat.scale")}</span><span>{t("heat.low")}</span><span className={styles.heatScale} style={{ background: HEAT_GRADIENT }} /><span>{t("heat.high")}</span><span className={styles.legendNote}>{t(scale === "all" ? "heat.noteAll" : "heat.noteRow")}{onOpenRow ? t("heat.noteClick") : ""}</span></p>
   </figure>;

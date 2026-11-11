@@ -155,3 +155,14 @@ export function hourlyByDay(cells: HourCell[], dates: string[], expectedMinutesP
   }
   return byDay;
 }
+
+/** The kWh actually recorded in each hour of each day whose readings only partly arrived; null for every other hour. */
+export function partialHourKwhByDay(cells: HourCell[], dates: string[], expectedMinutesPerHour = 60): Map<string, Array<number | null>> {
+  const byDay = new Map(dates.map(date => [date, Array.from({ length: 24 }, (): number | null => null)]));
+  for (const [date, hour, kwh, validMinutes] of cells) {
+    const day = byDay.get(date);
+    if (!day || kwh === null || validMinutes <= 0 || validMinutes >= expectedMinutesPerHour) continue;
+    day[hour] = kwh;
+  }
+  return byDay;
+}
