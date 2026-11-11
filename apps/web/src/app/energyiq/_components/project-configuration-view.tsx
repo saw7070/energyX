@@ -10,7 +10,7 @@ import { ProjectSpatialPreview } from "./project-spatial-preview";
 import { OperatingCalendarEditor } from "./operating-calendar-editor";
 import { HolidayCalendar } from "./holiday-calendar";
 import { SiteDevices } from "./site-devices";
-import { FloorPlanEditor, FloorPlanView, UnsavedBar } from "./floor-plan-editor";
+import { clearPlanDraft, FloorPlanEditor, FloorPlanView, UnsavedBar } from "./floor-plan-editor";
 import { AdvisorFacts } from "./advisor-facts";
 import { readFacts, withoutFacts } from "./advisor-facts-model";
 import type { StoredSpatialReference } from "./floor-plan-model";
@@ -74,7 +74,8 @@ export function ProjectConfigurationView({ setup, notes, policies, projectId, on
   };
   const setTab = (next: string) => goTo(next);
   const openDevice = (id: string) => goTo("devices", { view: `device:${id}` });
-  const leavePlan = () => { const target = leavingPlan; setEditingPlan(false); setPlanChanged(false); setLeavingPlan(null); if (target) { setTabState(target.tab); if (target.extra) onTabChange?.(target.tab, target.extra); else onTabChange?.(target.tab); } };
+  // Leaving without saving is a choice: the editor's unsaved draft in this browser goes too.
+  const leavePlan = () => { const target = leavingPlan; if (projectId) clearPlanDraft(projectId); setEditingPlan(false); setPlanChanged(false); setLeavingPlan(null); if (target) { setTabState(target.tab); if (target.extra) onTabChange?.(target.tab, target.extra); else onTabChange?.(target.tab); } };
   const [selectedId, setSelectedId] = useState<string | null>(null);
   useEffect(() => { if (focusMeter) document.getElementById(`meter-row-${focusMeter}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, [focusMeter, selectedId]);
   const pendingKey = `${projectId ?? ""}:${setup.draft.revision}`;
