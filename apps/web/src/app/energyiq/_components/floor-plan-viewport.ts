@@ -96,8 +96,18 @@ export function usePlanViewport({ svgRef, viewBox, projectId, onGestureStart }: 
   // Space held down while the plan has focus turns a drag into moving around (like most drawing tools).
   const space = useRef(false);
   const [spaceHeld, setSpaceHeld] = useState(false);
-  const holdSpace = (held: boolean) => { space.current = held; setSpaceHeld(held); };
-  useEffect(() => { const release = () => { if (space.current) holdSpace(false); }; window.addEventListener("blur", release); return () => window.removeEventListener("blur", release); }, []);
+  const holdSpace = useCallback((held: boolean) => { space.current = held; setSpaceHeld(held); }, []);
+  useEffect(() => { const release = () => { if (space.current) holdSpace(false); }; window.addEventListener("blur", release); return () => window.removeEventListener("blur", release); }, [holdSpace]);
+  // While Space is held, letting it go anywhere (focus may have left the editor meanwhile) or hiding the page ends it,
+  // so a later press on the plan never pans by mistake.
+  useEffect(() => {
+    if (!spaceHeld) return;
+    const up = (event: KeyboardEvent) => { if (event.key === " " || event.key === "Spacebar") holdSpace(false); };
+    const hidden = () => { if (document.visibilityState === "hidden") holdSpace(false); };
+    window.addEventListener("keyup", up, true);
+    document.addEventListener("visibilitychange", hidden);
+    return () => { window.removeEventListener("keyup", up, true); document.removeEventListener("visibilitychange", hidden); };
+  }, [spaceHeld, holdSpace]);
   const keyDown = (event: ReactKeyboardEvent) => {
     if (event.key !== " " || event.metaKey || event.ctrlKey || event.altKey || isTextEntry(event.target) || isButton(event.target) || !svgRef.current?.contains(event.target as Node)) return false;
     event.preventDefault();

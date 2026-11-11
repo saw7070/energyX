@@ -2,6 +2,7 @@
 import { EnergyIcon } from "./icons";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { useOptionalDataTaskIdentity } from "../../data-tasks/data-task-identity";
 import { configApi, type EnergyProjectSetupDocumentDto, type EnergyProjectSetupDto, type EnergyOperationalPolicyConfigurationDto } from "../../../lib/config-api";
 import { projectMeterName, projectMeterSubtitle } from "./project-meter-name";
 import { addGroup, groupChoices, metersInGroup, moveMetersToGroup, removeGroup } from "./meter-groups-editing";
@@ -53,6 +54,8 @@ export function ProjectConfigurationView({ setup, notes, policies, projectId, on
   // While the layout editor has changes not saved, switching Facility tabs asks first instead of dropping them.
   const [planChanged, setPlanChanged] = useState(false);
   const [leavingPlan, setLeavingPlan] = useState<null | { tab: string; extra?: Record<string, string> }>(null);
+  // The unsaved floor layout draft in this browser belongs to whoever is signed in.
+  const planUser = useOptionalDataTaskIdentity()?.currentUser?.userId ?? "";
   // "Arrange from a spreadsheet" takes the place of the Groups list while it is open.
   const [arranging, setArranging] = useState(false);
   const [liveBusy, setLiveBusy] = useState(false);
@@ -75,7 +78,7 @@ export function ProjectConfigurationView({ setup, notes, policies, projectId, on
   const setTab = (next: string) => goTo(next);
   const openDevice = (id: string) => goTo("devices", { view: `device:${id}` });
   // Leaving without saving is a choice: the editor's unsaved draft in this browser goes too.
-  const leavePlan = () => { const target = leavingPlan; if (projectId) clearPlanDraft(projectId); setEditingPlan(false); setPlanChanged(false); setLeavingPlan(null); if (target) { setTabState(target.tab); if (target.extra) onTabChange?.(target.tab, target.extra); else onTabChange?.(target.tab); } };
+  const leavePlan = () => { const target = leavingPlan; if (projectId) clearPlanDraft(projectId, planUser); setEditingPlan(false); setPlanChanged(false); setLeavingPlan(null); if (target) { setTabState(target.tab); if (target.extra) onTabChange?.(target.tab, target.extra); else onTabChange?.(target.tab); } };
   const [selectedId, setSelectedId] = useState<string | null>(null);
   useEffect(() => { if (focusMeter) document.getElementById(`meter-row-${focusMeter}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, [focusMeter, selectedId]);
   const pendingKey = `${projectId ?? ""}:${setup.draft.revision}`;
@@ -235,7 +238,7 @@ export function ProjectConfigurationView({ setup, notes, policies, projectId, on
     {tab === "structure" && editable && !editingPlan && (setupEdit?.kind === "types"
       ? <MeterTypeReview document={doc} busy={setupBusy} error={setupError} onCancel={() => setSetupEdit(null)} onSave={choices => { const next = applyMeterTypes(doc, choices, locale); if ("error" in next) setSetupError(next.error); else void saveDraft(next, typeText("saved")); }} />
       : <MeterTypeBanner document={doc} onOpen={() => startSetupEdit({ kind: "types" })} />)}
-    {tab === "structure" && editingPlan && projectId && <FloorPlanEditor projectId={projectId} notes={notes} block={spatial?.block ?? null} previous={(spatial?.reference as StoredSpatialReference | undefined) ?? null} meters={planMeters} boards={planBoards} onDirtyChange={setPlanChanged} onCancel={() => { setEditingPlan(false); setLeavingPlan(null); }} onSaved={message => { setEditingPlan(false); setLeavingPlan(null); setPolicyMessage(message); onPolicyChange?.(); }} />}
+    {tab === "structure" && editingPlan && projectId && <FloorPlanEditor projectId={projectId} userId={planUser} notes={notes} block={spatial?.block ?? null} previous={(spatial?.reference as StoredSpatialReference | undefined) ?? null} meters={planMeters} boards={planBoards} onDirtyChange={setPlanChanged} onCancel={() => { setEditingPlan(false); setLeavingPlan(null); }} onSaved={message => { setEditingPlan(false); setLeavingPlan(null); setPolicyMessage(message); onPolicyChange?.(); }} />}
     {tab === "structure" && arranging && editable && !editingPlan && <SpreadsheetArrange doc={doc} projectId={pid} notes={notes} block={spatial?.block ?? null} previous={(spatial?.reference as StoredSpatialReference | undefined) ?? null} canEditPlan={canEditNotes} busy={setupBusy} error={setupError}
       onCancel={() => { setArranging(false); setSetupError(""); }} onPlanSaved={() => onPolicyChange?.()}
       onApply={async (next, message) => { const saved = await saveDraft(next, message, null); if (saved) setArranging(false); return saved; }} />}

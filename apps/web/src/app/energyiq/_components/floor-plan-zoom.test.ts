@@ -1,6 +1,6 @@
 /** @vitest-environment happy-dom */
 import { afterEach, describe, expect, it } from "vitest";
-import { draftKey, DRAFT_MAX_AGE, fingerprint, readDraft } from "./floor-plan-draft";
+import { clearAllPlanDrafts, draftKey, DRAFT_MAX_AGE, fingerprint, readDraft } from "./floor-plan-draft";
 import { planShortcut } from "./floor-plan-keys";
 import type { Rect } from "./floor-plan-model";
 import { actualZoom, fractionIn, maxZoom, MIN_ZOOM, panBy, planPoint, rememberedView, rememberView, revealBox, settleView, wheelZoomFactor, windowOf, zoomAround, zoomKeeping, zoomPercent } from "./floor-plan-zoom";
@@ -77,21 +77,25 @@ describe("the zoom window", () => {
 
 describe("zoom, focus and resize keys", () => {
   const key = (name: string, extra: Partial<{ metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; target: EventTarget | null }> = {}) => planShortcut({ key: name, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, target: document.body, ...extra }, 10);
-  it("zooms with Cmd/Ctrl and plus, minus or 0, goes through items with [ and ], selects with Enter and resizes with Alt+Shift+arrows", () => {
+  it("zooms with Cmd/Ctrl and plus, minus or 0, goes through items with [ and ], selects with Enter and resizes with Cmd/Ctrl+arrows", () => {
     expect([key("=", { metaKey: true }), key("+", { ctrlKey: true, shiftKey: true }), key("-", { ctrlKey: true }), key("0", { metaKey: true })]).toEqual([{ kind: "zoom", how: "in" }, { kind: "zoom", how: "in" }, { kind: "zoom", how: "out" }, { kind: "zoom", how: "fit" }]);
     expect([key("]"), key("[")]).toEqual([{ kind: "cycle", by: 1 }, { kind: "cycle", by: -1 }]);
     expect([key("Enter"), key("Enter", { shiftKey: true })]).toEqual([{ kind: "select", toggle: false }, { kind: "select", toggle: true }]);
-    expect(key("ArrowRight", { altKey: true, shiftKey: true })).toEqual({ kind: "resize", by: [10, 0] });
-    expect(key("ArrowUp", { altKey: true, shiftKey: true })).toEqual({ kind: "resize", by: [0, -10] });
-    // Shift alone still nudges five grid steps, and Alt alone nudges an area on its own.
+    expect(key("ArrowRight", { ctrlKey: true })).toEqual({ kind: "resize", by: [10, 0] });
+    expect(key("ArrowUp", { metaKey: true })).toEqual({ kind: "resize", by: [0, -10] });
+    expect(key("ArrowDown", { metaKey: true, shiftKey: true })).toEqual({ kind: "resize", by: [0, 50] });
+    // Shift alone still nudges five grid steps, Alt alone nudges an area on its own, and Alt+Shift does both (as before).
     expect(key("ArrowLeft", { shiftKey: true })).toEqual({ kind: "nudge", by: [-50, 0], alone: false });
     expect(key("ArrowLeft", { altKey: true })).toEqual({ kind: "nudge", by: [-10, 0], alone: true });
+    expect(key("ArrowRight", { altKey: true, shiftKey: true })).toEqual({ kind: "nudge", by: [50, 0], alone: true });
+    // Cmd/Ctrl+Alt+arrow is left to the browser and the computer (it switches tabs or desktops there).
+    expect(key("ArrowRight", { metaKey: true, altKey: true })).toBeNull();
   });
   it("leaves zoom and the new keys to fields, and Enter, [ and ] on a field or button to that control", () => {
     const input = document.createElement("input"), button = document.createElement("button");
-    for (const [name, extra] of [["=", { metaKey: true }], ["0", { ctrlKey: true }], ["]", {}], ["Enter", {}], ["ArrowRight", { altKey: true, shiftKey: true }]] as const) expect(key(name, { target: input, ...extra })).toBeNull();
+    for (const [name, extra] of [["=", { metaKey: true }], ["0", { ctrlKey: true }], ["]", {}], ["Enter", {}], ["ArrowRight", { ctrlKey: true }], ["ArrowRight", { altKey: true, shiftKey: true }]] as const) expect(key(name, { target: input, ...extra })).toBeNull();
     expect(key("Enter", { target: button })).toBeNull();
-    expect(key("ArrowRight", { target: button, altKey: true, shiftKey: true })).toBeNull();
+    expect(key("ArrowRight", { target: button, ctrlKey: true })).toBeNull();
   });
 });
 
@@ -112,6 +116,20 @@ describe("the unsaved draft in this browser", () => {
     for (const odd of [null, 5, "x", { version: 2, savedAt: 1_000, base: "b", reference }, { version: 1, savedAt: "1", base: "b", reference }]) { store(odd); expect(readDraft("office", 2_000)).toBeNull(); }
     localStorage.setItem(draftKey("office"), "{not json");
     expect(readDraft("office", 2_000)).toBeNull();
+  });
+  it("belongs to the person who made it, and signing out removes every draft in this browser", () => {
+    localStorage.setItem(draftKey("office", "amy"), JSON.stringify({ version: 1, savedAt: 1_000, base: "b", user: "amy", reference }));
+    expect(draftKey("office", "amy")).not.toBe(draftKey("office", "ben"));
+    expect(readDraft("office", 2_000, "amy")).not.toBeNull();
+    expect(readDraft("office", 2_000, "ben")).toBeNull();
+    expect(readDraft("office", 2_000)).toBeNull();
+    // A record copied under someone else's key is still not theirs.
+    localStorage.setItem(draftKey("office", "ben"), localStorage.getItem(draftKey("office", "amy"))!);
+    expect(readDraft("office", 2_000, "ben")).toBeNull();
+    localStorage.setItem("energyiq.floorPlanView.office", "{}");
+    clearAllPlanDrafts();
+    expect([localStorage.getItem(draftKey("office", "amy")), localStorage.getItem(draftKey("office", "ben"))]).toEqual([null, null]);
+    expect(localStorage.getItem("energyiq.floorPlanView.office")).toBe("{}");
   });
   it("tells saved layouts apart by a short fingerprint", () => {
     expect(fingerprint("abc")).toBe(fingerprint("abc"));

@@ -35,7 +35,7 @@ const office = (style?: string) => ({
 }) as unknown as StoredSpatialReference;
 const pointer = (type: string, x: number, y: number, extra: PointerEventInit = {}) => new PointerEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y, pointerId: 1, pointerType: "mouse", ...extra });
 
-async function render(options: { previous?: StoredSpatialReference; meters?: typeof meters; width?: number; projectId?: string } = {}) {
+async function render(options: { previous?: StoredSpatialReference; meters?: typeof meters; width?: number; projectId?: string; userId?: string } = {}) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); vi.stubGlobal("React", React);
   sized(options.width ?? 1000);
   const projectId = options.projectId ?? "office", previous = options.previous ?? office();
@@ -45,7 +45,7 @@ async function render(options: { previous?: StoredSpatialReference; meters?: typ
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host);
   const onCancel = vi.fn();
-  const editor = () => <EnergyIqLocaleProvider><FloorPlanEditor projectId={projectId} notes={notes} block={block} previous={previous} meters={options.meters ?? meters} boards={["DB1", "DB2"]} onCancel={onCancel} onSaved={() => undefined} /></EnergyIqLocaleProvider>;
+  const editor = () => <EnergyIqLocaleProvider><FloorPlanEditor projectId={projectId} userId={options.userId} notes={notes} block={block} previous={previous} meters={options.meters ?? meters} boards={["DB1", "DB2"]} onCancel={onCancel} onSaved={() => undefined} /></EnergyIqLocaleProvider>;
   await act(async () => root.render(editor()));
   const canvas = () => host.querySelector('svg[role="application"]') as SVGSVGElement;
   const box = () => canvas().getAttribute("viewBox")!.split(" ").map(Number) as [number, number, number, number];
@@ -80,18 +80,18 @@ describe("zoom and pan", () => {
     const view = await render({ width: 500 });
     // 1000 plan units across 500 pixels: the whole plan is 50%.
     expect(view.box()).toEqual([0, 0, 1000, 640]);
-    expect(view.host.querySelector("output")!.textContent).toBe("50%");
+    expect(view.host.querySelector("[data-zoom-level]")!.textContent).toBe("50%");
     expect(view.host.querySelectorAll('button[aria-label^="Drag to"]').length).toBe(5);
     await act(async () => view.button("Zoom in (Ctrl++)").click());
     expect(view.box()).toEqual([100, 64, 800, 512]);
-    expect(view.host.querySelector("output")!.textContent).toBe("63%");
+    expect(view.host.querySelector("[data-zoom-level]")!.textContent).toBe("63%");
     expect(view.live()).toBe("Zoom 63%");
     // The edges of the drawing space are only at the frame's edges while the whole plan shows.
     expect(view.host.querySelectorAll('button[aria-label^="Drag to"]').length).toBe(0);
     expect(view.button("Fit plan").getAttribute("aria-pressed")).toBe("false");
     await act(async () => view.button("Show the plan at actual size").click());
     expect(view.box()).toEqual([250, 160, 500, 320]);
-    expect(view.host.querySelector("output")!.textContent).toBe("100%");
+    expect(view.host.querySelector("[data-zoom-level]")!.textContent).toBe("100%");
     await act(async () => view.button("Zoom out (Ctrl+−)").click());
     expect(view.box().map(value => Math.round(value))).toEqual([188, 120, 625, 400]);
     await act(async () => view.button("Fit plan").click());
@@ -155,7 +155,8 @@ describe("zoom and pan", () => {
     expect(view.rect("room:room-2")).toEqual([350, 300, 140, 120]);
     expect(view.live()).toBe("Moved to 350, 300");
     let east = view.canvas().querySelector('rect[data-handle="e"]')!;
-    expect(Number(east.getAttribute("width"))).toBe(6.5);
+    // 12 screen pixels across at two pixels per plan unit.
+    expect(Number(east.getAttribute("width"))).toBe(6);
     await drag(view, east, view.at(490, 360), [view.at(490, 360)[0] + 40, view.at(490, 360)[1]]);
     expect(view.rect("room:room-2")).toEqual([350, 300, 160, 120]);
     expect(view.live()).toBe("Resized to 160 by 120");
@@ -173,7 +174,7 @@ describe("zoom and pan", () => {
     await drag(view, view.item("room:room-2"), view.at(330, 310), [view.at(330, 310)[0] + 20, view.at(330, 310)[1] + 10]);
     expect(view.rect("room:room-2")).toEqual([360, 320, 140, 120]);
     east = view.canvas().querySelector('rect[data-handle="e"]')!;
-    expect(Number(east.getAttribute("width"))).toBe(26);
+    expect(Number(east.getAttribute("width"))).toBe(24);
     await drag(view, east, view.at(500, 380), [view.at(500, 380)[0] - 10, view.at(500, 380)[1]]);
     expect(view.rect("room:room-2")).toEqual([360, 320, 120, 120]);
     await view.unmount();
@@ -291,7 +292,8 @@ describe("touch", () => {
     const view = await render({ width: 1200 });
     expect(view.host.querySelector("section")!.getAttribute("data-layout")).toBe("wide");
     await view.down(view.item("room:room-2"), view.at(330, 310)); await view.up(view.at(330, 310));
-    expect(Number(view.canvas().querySelector('rect[data-handle="e"]')!.getAttribute("width"))).toBe(26);
+    // 28 screen pixels across, whatever the editor's width.
+    expect(Number(view.canvas().querySelector('rect[data-handle="e"]')!.getAttribute("width")) * 1.2).toBeCloseTo(28);
     await view.unmount();
   });
 });
@@ -315,8 +317,8 @@ describe("keyboard and screen readers", () => {
     expect(view.live()).toBe("Moved to 50, 80");
     await view.press(document.activeElement!, "ArrowDown", { shiftKey: true });
     expect(view.live()).toBe("Moved to 50, 130");
-    await view.press(document.activeElement!, "ArrowRight", { altKey: true, shiftKey: true });
-    await view.press(document.activeElement!, "ArrowUp", { altKey: true, shiftKey: true });
+    await view.press(document.activeElement!, "ArrowRight", { ctrlKey: true });
+    await view.press(document.activeElement!, "ArrowUp", { ctrlKey: true });
     expect(view.rect("room:room-1")).toEqual([50, 130, 270, 190]);
     expect(view.live()).toBe("Resized to 270 by 190");
     // Undo keeps focus on the item, and says so.
@@ -358,7 +360,11 @@ describe("keyboard and screen readers", () => {
     expect(keys.textContent).toContain("press ] or [");
     expect(view.host.querySelector('[role="group"][aria-label="Zoom"]')).not.toBeNull();
     for (const label of ["Zoom in (Ctrl++)", "Zoom out (Ctrl+−)", "Show the plan at actual size"]) expect(view.button(label)).toBeTruthy();
-    expect(view.host.querySelector("output")!.getAttribute("aria-label")).toBe("Zoom 400%");
+    // The level is plain text, never a live region (the wheel and pinches would have it read out many times a second).
+    const level = view.host.querySelector("[data-zoom-level]")!;
+    expect(level.textContent).toBe("400%");
+    expect(level.closest("output, [role=status], [aria-live]:not([aria-live=off])")).toBeNull();
+    expect(view.host.querySelector("output")).toBeNull();
     await act(async () => { view.canvas().focus(); });
     for (let step = 0; step < 5; step += 1) await view.press(document.activeElement!, "]");
     expect(document.activeElement?.getAttribute("data-item")).toBe("room:room-3");
@@ -519,6 +525,7 @@ describe("a big plan", () => {
     const bigMeters = Array.from({ length: 300 }, (_, index) => ({ id: `m${index}`, name: `Meter ${index}`, board: `DB${(index % 10) + 1}`, type: "Power" }));
     const devices = bigMeters.map((meter, index) => { const room = rooms[index % 200]!; return { meterId: meter.id, position: [room.rect[0]! + 40 + Math.floor(index / 200) * 120, room.rect[1]! + 200] }; });
     const big = { schemaVersion: 1, projectId: "office", provenance: { file: "plan", status: "Edited" }, layout: { viewBox: [0, 0, 10000, 6400], zones, rooms, devices } } as unknown as StoredSpatialReference;
+    const errors = vi.spyOn(console, "error");
     const started = performance.now();
     const view = await render({ previous: big, meters: bigMeters });
     const opened = performance.now() - started;
@@ -534,6 +541,207 @@ describe("a big plan", () => {
     // Generous limits: this only catches a plan that has become far too slow (for example, redrawing everything per move).
     expect(opened).toBeLessThan(15_000);
     expect(dragged).toBeLessThan(10_000);
+    // Every side-panel control has its own key (no "two children with the same key" warning).
+    expect(errors.mock.calls.filter(call => /same key/.test(String(call[0])))).toEqual([]);
     await view.unmount();
   }, 60_000);
+});
+
+describe("fixes from review", () => {
+  const touch = (id: number): PointerEventInit => ({ pointerType: "touch", pointerId: id });
+  const placeButton = (view: View, name: string) => [...view.host.querySelectorAll("aside li")].find(row => row.textContent?.includes(name))!.querySelector("button")!;
+  const lamp = [...meters, { id: "lamp", name: "Store lamp", board: "DB2", type: "Power" }];
+  const wait = () => act(async () => { vi.advanceTimersByTime(DRAFT_DELAY + 100); });
+  const stored = (user = "") => JSON.parse(localStorage.getItem(draftKey("office", user)) ?? "null") as { savedAt: number; base: string; user?: string; reference: StoredSpatialReference } | null;
+
+  it("draws grips a fixed size on screen: big enough for a finger on a 375-pixel phone, and small on a desktop", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query === "(pointer: coarse)", addEventListener() { /* fixed */ }, removeEventListener() { /* fixed */ } }));
+    let view = await render({ width: 375 });
+    await view.down(view.item("room:room-2"), view.at(330, 310), touch(1)); await view.up(view.at(330, 310), touch(1));
+    let grip = view.canvas().querySelector('rect[data-handle="se"]')!;
+    const scale = view.canvas().getScreenCTM()!.a;
+    expect(Number(grip.getAttribute("width")) * scale).toBeGreaterThanOrEqual(24);
+    expect(Number(grip.getAttribute("width")) * scale).toBeCloseTo(28);
+    // The keyboard focus ring sits the same few pixels outside the item.
+    await act(async () => { view.canvas().focus(); });
+    await view.press(view.canvas(), "]");
+    const ring = view.canvas().querySelector("[data-focus-ring]")!;
+    const focusedX = view.rect(document.activeElement!.getAttribute("data-item")!)[0]!;
+    expect((focusedX - Number(ring.getAttribute("x"))) * scale).toBeCloseTo(6);
+    await view.unmount();
+    vi.unstubAllGlobals();
+    view = await render({ width: 375 });
+    await view.down(view.item("room:room-2"), view.at(330, 310)); await view.up(view.at(330, 310));
+    grip = view.canvas().querySelector('rect[data-handle="se"]')!;
+    expect(Number(grip.getAttribute("width")) * view.canvas().getScreenCTM()!.a).toBeCloseTo(12);
+    await view.unmount();
+  });
+
+  it("places a device from the keyboard: Enter puts it in the room with focus, or in the middle of what is shown", async () => {
+    const view = await render({ meters: lamp });
+    await act(async () => placeButton(view, "Pantry fan").click());
+    expect(view.canvas().contains(document.activeElement)).toBe(true);
+    for (const key of ["]", "]", "]", "]"]) await view.press(document.activeElement!, key);
+    expect(document.activeElement?.getAttribute("data-item")).toBe("room:room-2");
+    expect(await view.press(document.activeElement!, "Enter")).toBe(true);
+    // The middle of the Pantry (320, 300, 140 by 120).
+    const fan = view.item("device:fan").querySelector("circle")!;
+    expect([fan.getAttribute("cx"), fan.getAttribute("cy")]).toEqual(["390", "360"]);
+    expect(view.live()).toBe("Added Device Pantry fan");
+    // Nothing is being placed any more: Enter on a room selects it again.
+    await act(async () => placeButton(view, "Store lamp").click());
+    await act(async () => { view.canvas().focus(); });
+    await view.press(view.canvas(), "Enter");
+    const lampDot = view.item("device:lamp").querySelector("circle")!;
+    expect([lampDot.getAttribute("cx"), lampDot.getAttribute("cy")]).toEqual(["500", "320"]);
+    const keys = view.host.querySelector(`#${CSS.escape(view.canvas().getAttribute("aria-describedby")!)}`)!;
+    expect(keys.textContent).toContain("While placing a device, Enter puts it");
+    expect(keys.textContent).toContain("Delete removes it");
+    expect(keys.textContent).toContain("Ctrl+0 shows the whole plan");
+    // The visible help names the keys too.
+    expect(view.host.querySelector("header")!.textContent).toContain("] and [ go through the items");
+    await view.unmount();
+  });
+
+  it("places a device on a touch screen when the finger lifts, never when a pinch or a scroll starts", async () => {
+    const view = await render();
+    await act(async () => placeButton(view, "Pantry fan").click());
+    // Two fingers: a pinch zooms, and nothing is placed.
+    await view.down(view.canvas(), [400, 300], touch(61));
+    await view.down(view.canvas(), [600, 300], touch(62));
+    await view.move([800, 300], touch(62));
+    await view.up([800, 300], touch(62)); await view.up([400, 300], touch(61));
+    expect(view.box()).toEqual([200, 150, 500, 320]);
+    expect(view.item("device:fan")).toBeNull();
+    // A finger that moves on places nothing either.
+    await view.down(view.canvas(), [300, 300], touch(63));
+    await view.move([300, 360], touch(63));
+    await view.up([300, 360], touch(63));
+    expect(view.item("device:fan")).toBeNull();
+    expect(view.host.textContent).toContain("Click or tap the plan where Pantry fan is.");
+    // A tap places it where the finger was.
+    await view.down(view.canvas(), view.at(390, 360), touch(64));
+    await view.up(view.at(390, 360), touch(64));
+    expect(view.item("device:fan").querySelector("circle")!.getAttribute("cx")).toBe("390");
+    await view.unmount();
+  });
+
+  it("puts the selection back when a press on an item turns into a pinch", async () => {
+    const view = await render();
+    await view.down(view.item("room:room-1"), [50, 90]); await view.up([50, 90]);
+    const name = () => (view.host.querySelector("aside input") as HTMLInputElement | null)?.value;
+    expect(name()).toBe("Showroom");
+    await view.down(view.item("room:room-2"), [330, 310], touch(71));
+    expect(name()).toBe("Pantry");
+    await view.down(view.canvas(), [600, 310], touch(72));
+    expect(name()).toBe("Showroom");
+    await view.up([600, 310], touch(72)); await view.up([330, 310], touch(71));
+    await view.unmount();
+  });
+
+  it("lets go of Space when it is released outside the editor", async () => {
+    const view = await render();
+    await act(async () => { view.canvas().focus(); });
+    await view.press(view.canvas(), " ");
+    expect(view.canvas().getAttribute("class")).toMatch(/panReady/);
+    const outside = document.createElement("button"); document.body.append(outside);
+    await act(async () => { outside.focus(); outside.dispatchEvent(new KeyboardEvent("keyup", { key: " ", bubbles: true })); });
+    expect(view.canvas().getAttribute("class")).not.toMatch(/panReady/);
+    // A press on the plan then moves the item again, instead of moving around.
+    await drag(view, view.item("room:room-2"), [330, 310], [350, 310]);
+    expect(view.rect("room:room-2")).toEqual([340, 300, 140, 120]);
+    outside.remove();
+    await view.unmount();
+  });
+
+  it("keeps a restored draft after an Undo, and puts back the saved grid choices so the plan saves exactly as it was", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const draft = office();
+    draft.layout.rooms[1]!.rect = [330, 300, 140, 120];
+    (draft.layout as Record<string, unknown>).editor = { grid: 20, snap: false, showGrid: false };
+    localStorage.setItem(draftKey("office"), JSON.stringify({ version: 1, savedAt: Date.now(), base: "x", reference: draft }));
+    let view = await render();
+    await act(async () => view.button("Restore").click());
+    expect(view.canvas().querySelector("#floor-plan-grid")).toBeNull();
+    await act(async () => view.button("Undo").click());
+    expect(view.rect("room:room-2")).toEqual([320, 300, 140, 120]);
+    // The saved grid choices are back (the grid shows again) ...
+    expect(view.canvas().querySelector("#floor-plan-grid")).not.toBeNull();
+    await wait();
+    // ... and the draft is still there, to be offered again if the page closes now.
+    expect(stored()).not.toBeNull();
+    await view.unmount();
+    view = await render();
+    expect(view.host.querySelector('[aria-label="Unsaved changes"]')).not.toBeNull();
+    await act(async () => view.button("Restore").click());
+    await act(async () => view.button("Undo").click());
+    await act(async () => view.button("Redo").click());
+    // Redo brings the draft's grid choices back with it.
+    expect(view.canvas().querySelector("#floor-plan-grid")).toBeNull();
+    await act(async () => view.button("Undo").click());
+    expect(await view.saved()).toBe(view.notes);
+    expect(stored()).toBeNull();
+    await view.unmount();
+  });
+
+  it("keeps new work made while the restore offer is showing: the offer goes and the new work is the draft", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const old = office();
+    old.layout.rooms[1]!.rect = [330, 310, 140, 120];
+    localStorage.setItem(draftKey("office"), JSON.stringify({ version: 1, savedAt: Date.now(), base: "x", reference: old }));
+    const view = await render();
+    expect(view.host.querySelector('[aria-label="Unsaved changes"]')).not.toBeNull();
+    // Nothing changed yet: the offer and the old draft stay.
+    await wait();
+    expect(stored()!.reference.layout.rooms[1]!.rect).toEqual([330, 310, 140, 120]);
+    await view.down(view.item("room:room-1"), [50, 90]); await view.up([50, 90]);
+    await view.press(view.canvas(), "ArrowDown");
+    expect(view.host.querySelector('[aria-label="Unsaved changes"]')).toBeNull();
+    expect(view.host.textContent).toContain("Your earlier unsaved changes were replaced");
+    await wait();
+    const kept = stored()!.reference.layout.rooms;
+    expect(kept[0]!.rect).toEqual([40, 90, 260, 200]);
+    expect(kept[1]!.rect).toEqual([320, 300, 140, 120]);
+    await view.unmount();
+  });
+
+  it("offers a draft that fixes a saved layout which could not be saved as it is, and never deletes it", async () => {
+    // Written by hand or by the advisor: two rooms with the same name load, but cannot be saved like that.
+    const odd = office();
+    odd.layout.rooms[3]!.name = "Office";
+    const fixed = office();
+    fixed.layout.rooms[3]!.name = "Store room";
+    localStorage.setItem(draftKey("office"), JSON.stringify({ version: 1, savedAt: Date.now(), base: "x", reference: fixed }));
+    const view = await render({ previous: odd });
+    expect(view.host.querySelector('[aria-label="Unsaved changes"]')).not.toBeNull();
+    expect(stored()).not.toBeNull();
+    await act(async () => view.button("Restore").click());
+    expect(view.item("room:room-4")!.getAttribute("aria-label")).toBe("Room Store room");
+    await view.unmount();
+  });
+
+  it("keeps each signed-in person's draft to themselves", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    let view = await render({ userId: "amy" });
+    await view.down(view.item("room:room-2"), [330, 310]); await view.up([330, 310]);
+    await view.press(view.canvas(), "ArrowRight");
+    await wait();
+    expect(stored("amy")!.user).toBe("amy");
+    expect(stored()).toBeNull();
+    await view.unmount();
+    view = await render({ userId: "ben" });
+    expect(view.host.querySelector('[aria-label="Unsaved changes"]')).toBeNull();
+    await view.unmount();
+    view = await render({ userId: "amy" });
+    expect(view.host.querySelector('[aria-label="Unsaved changes"]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it("says Fit plan brings back the edges of the drawing space while zoomed", async () => {
+    const view = await render();
+    expect(view.button("Fit plan").title).toBe("Show the whole plan (Ctrl+0)");
+    await act(async () => view.button("Zoom in (Ctrl++)").click());
+    expect(view.button("Fit plan").title).toContain("Choose Fit plan to pull the edges of the drawing space.");
+    await view.unmount();
+  });
 });

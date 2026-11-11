@@ -30,16 +30,17 @@ export function planShortcut(event: Key, step: number): PlanShortcut | null {
   if (command && key === "z") return { kind: event.shiftKey ? "redo" : "undo" };
   if (event.ctrlKey && !event.metaKey && key === "y") return { kind: "redo" };
   if (command && !event.altKey && ZOOM_KEYS[event.key]) return { kind: "zoom", how: ZOOM_KEYS[event.key]! };
+  // Cmd/Ctrl+arrow resizes the selected item by one grid step (right and down make it bigger; Shift for five). Alt with
+  // an arrow stays "nudge an area on its own", with or without Shift.
+  const resize = (step || 1) * (event.shiftKey ? 5 : 1);
+  const sizes: Record<string, Point> = { ArrowLeft: [-resize, 0], ArrowRight: [resize, 0], ArrowUp: [0, -resize], ArrowDown: [0, resize] };
+  if (command && !event.altKey && sizes[event.key]) return { kind: "resize", by: sizes[event.key]! };
   if (command) return !event.shiftKey && !event.altKey && COMMANDS[key] ? COMMANDS[key]! : null;
   if (event.key === "Escape") return { kind: "escape" };
   if (event.key === "Delete" || event.key === "Backspace") return { kind: "delete" };
   // [ and ] go through the items on the plan one by one; Enter selects the one with focus (Shift+Enter adds it).
   if ((event.key === "[" || event.key === "]") && !event.altKey) return { kind: "cycle", by: event.key === "]" ? 1 : -1 };
   if (event.key === "Enter") return { kind: "select", toggle: event.shiftKey };
-  // Alt+Shift+arrow resizes the selected item by one grid step (right and down make it bigger).
-  const resize = step || 1;
-  const sizes: Record<string, Point> = { ArrowLeft: [-resize, 0], ArrowRight: [resize, 0], ArrowUp: [0, -resize], ArrowDown: [0, resize] };
-  if (event.altKey && event.shiftKey && sizes[event.key]) return { kind: "resize", by: sizes[event.key]! };
   const by = step * (event.shiftKey ? 5 : 1);
   const moves: Record<string, Point> = { ArrowLeft: [-by, 0], ArrowRight: [by, 0], ArrowUp: [0, -by], ArrowDown: [0, by] };
   return moves[event.key] ? { kind: "nudge", by: moves[event.key]!, alone: event.altKey } : null;
