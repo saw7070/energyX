@@ -6,6 +6,7 @@
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { spatialLabels, spatialSymbols } from "@datafoundry/contracts";
 import { holidayName, joinText } from "./analysis-messages.js";
 import { shortDate } from "./analysis-model.js";
 import { forHoursMeaning, translatorFor, type EnergyIqLocale } from "./locale.js";
@@ -161,6 +162,15 @@ function FloorPlan({ report }: { report: SiteReport }) {
       </g>;
     })}
     {hasCorridor && <><rect x={leftEdge} y={minY + 4} width={rightEdge - leftEdge} height={maxY - minY - 8} fill="#fff" /><line x1={leftEdge} y1={minY + 4} x2={leftEdge} y2={maxY - 4} stroke={C.line} /><line x1={rightEdge} y1={minY + 4} x2={rightEdge} y2={maxY - 4} stroke={C.line} /></>}
+    {/* Text labels and landmarks are drawing only: text as written (turned where it is turned), further entrances as an
+        arrow, and every other landmark as a small ring with its caption. The main entrance is drawn below as always. */}
+    {spatialLabels(reference.layout).map((item, index) => { const [px, py] = item.position, size = vw / 100 * { s: 1.3, m: 1.9, l: 2.8 }[item.size ?? "m"];
+      return <text key={`label-${index}`} className="svgt halo" x={px} y={py} textAnchor="middle" dominantBaseline="central" fontSize={size} fontWeight={item.bold ? 700 : 500} fill={item.colour ?? C.ink} {...(item.rotation ? { transform: `rotate(${item.rotation} ${px} ${py})` } : {})}>{item.text}</text>; })}
+    {spatialSymbols(reference.layout).filter(item => !item.legacy).map((item, index) => { const [px, py] = item.position, colour = item.colour ?? C.ink, turn = item.rotation ? { transform: `rotate(${item.rotation} ${px} ${py})` } : {};
+      return <g key={`symbol-${index}`} data-symbol={item.kind === "entrance" ? "entrance" : "other"}>
+        {item.kind === "entrance" ? <path d={`M${px - 12} ${py + 18} L${px} ${py} L${px + 12} ${py + 18} Z`} fill={colour} {...turn} /> : <><circle cx={px} cy={py} r={8} fill="#fff" stroke={colour} strokeWidth={2} /><circle cx={px} cy={py} r={2.5} fill={colour} /></>}
+        {item.label && <text className="svgt rsub halo" x={px} y={py + (item.kind === "entrance" ? 34 : 22)} textAnchor="middle">{item.label}</text>}
+      </g>; })}
     {entrance && <g>
       {doorOnWall && <path d={`M ${ex + 32} ${maxY} A 64 64 0 0 0 ${ex - 32} ${maxY - 64}`} fill="none" stroke={C.slate} strokeWidth={1} strokeDasharray="3,3" />}
       <text className="svgt rlabel" x={ex} y={maxY + 24} textAnchor="middle" fontWeight={600}>{entrance.label ?? t("plan.entrance")}{entrance.referenceBoard ? ` (${entrance.referenceBoard})` : ""}</text>

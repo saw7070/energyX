@@ -1,6 +1,8 @@
 import { readProjectSpatialReference, type ProjectSpatialReference } from "@datafoundry/contracts";
 import { translatorFor, type EnergyIqLocale } from "./energyiq-messages";
 import { floorPlanMessages } from "./floor-plan-messages";
+import { entranceMarked, entranceParts, entranceSymbol, firstEntrance, readLabels, readSymbols, shiftLabel, shiftSymbol, keepBoxInside, withPlaced, writeLabel, writeSymbol, type EntranceMarkParts, type MarkSkip } from "./floor-plan-mark-data";
+import { boxFrame, frameBounds, labelBounds, MARK_LIMIT, symbolBounds, symbolFrame, unionBox, type PlanLabel, type PlanSymbol } from "./floor-plan-marks";
 import { boardFilledIn, carriedOf, DEVICE_KEYS, ENTRANCE_KEYS, GROUP_KEYS, isRecord, LAYOUT_KEYS, ROLE_KEYS, ROOM_KEYS, sameNames, samePoint, sameRect, STANDALONE_ZONE_KEYS, withCarried, withoutCarried, withoutFilledBoard, ZONE_KEYS, type AreaBaseline, type Carried, type Json } from "./floor-plan-carry";
 
 /** [x, y, width, height] in plan units. */
@@ -22,9 +24,14 @@ export type PlanArea = { key: string; label: string; board: string; rect: Rect; 
  * and copied rooms get one; a room saved without one keeps working by its name.
  */
 export type PlanRoom = { key: string; name: string; rect: Rect; area?: string; colour?: string; zone?: string; zoneRect?: Rect; id?: string; locked?: true } & Carried;
-/** A device on the plan: a dot at `position`, or, with `size`, a named box centred there (e.g. a bank of LED screens). */
-export type PlanDevice = { meterId: string; position: Point; size?: Point; colour?: string; locked?: true } & Carried;
-export type PlanEntrance = { label: string; position: Point } & Carried;
+/**
+ * A device on the plan: a dot at `position`, or, with `size`, a named box centred there (e.g. a bank of LED screens).
+ * `rotation` turns a box (degrees, clockwise, around its middle); a dot is never drawn turned.
+ */
+export type PlanDevice = { meterId: string; position: Point; size?: Point; rotation?: number; colour?: string; locked?: true } & Carried;
+/** The first entrance (see floor-plan-mark-data): what `layout.entrance` holds, plus what its landmark entry holds. */
+export type PlanEntrance = { label: string; position: Point } & Carried & EntranceMarkParts;
+export type { PlanLabel, PlanSymbol };
 /**
  * An area the layout holds without a place on the drawing, kept as saved, at its place in the saved list. `rooms` is the
  * names of the rooms filed under it when the layout opened, kept when it has its own room list (see referenceFromPlan).
@@ -36,13 +43,19 @@ export type HiddenZone = { index: number; zone: Json; rooms?: string[] };
  * the editor cannot draw is kept as saved too: an entrance with no usable position (`rawEntrance`), device entries with
  * no meter or position (`devices`, at their place in the list) and a device list that is not a list (`rawDevices`).
  */
-export type CarriedLayout = { order?: string[]; zones?: HiddenZone[]; entrance?: Point | null; noDevices?: true; rawEntrance?: { value: unknown }; devices?: Array<{ index: number; device: unknown }>; rawDevices?: { value: unknown } };
+/**
+ * Text labels and landmarks are kept the same way: entries that cannot be drawn (`labels`, `symbols`, at their place in
+ * the list), a value that is not a list (`rawLabels`, `rawSymbols`), and whether the layout had a list at all
+ * (`labelList`, `symbolList`), so one is written back exactly when there was one or the plan now has something in it.
+ */
+export type CarriedLayout = { order?: string[]; zones?: HiddenZone[]; entrance?: Point | null; noDevices?: true; rawEntrance?: { value: unknown }; devices?: Array<{ index: number; device: unknown }>; rawDevices?: { value: unknown }; labels?: MarkSkip[]; symbols?: MarkSkip[]; rawLabels?: { value: unknown }; rawSymbols?: { value: unknown }; labelList?: true; symbolList?: true };
 /** `colours` holds a colour chosen for a board (board name → #rrggbb); boards without one use the automatic order. */
 /**
  * `editor` is the saved `layout.editor` block (grid and snap choices, see floor-plan-snap), kept as saved: only the editor
  * reads it, and the map, reports and the advisor ignore it.
  */
-export type FloorPlan = { viewBox: Rect; areas: PlanArea[]; rooms: PlanRoom[]; devices: PlanDevice[]; entrance: PlanEntrance | null; colours?: Record<string, string>; style?: PlanStyle; editor?: Json; extra?: Json; carried?: CarriedLayout };
+/** `labels` and `symbols` (landmarks other than the first entrance) are drawing only; missing means none. */
+export type FloorPlan = { viewBox: Rect; areas: PlanArea[]; rooms: PlanRoom[]; devices: PlanDevice[]; entrance: PlanEntrance | null; labels?: PlanLabel[]; symbols?: PlanSymbol[]; colours?: Record<string, string>; style?: PlanStyle; editor?: Json; extra?: Json; carried?: CarriedLayout };
 /**
  * How the plan is drawn for everyone at the site: an architect's building drawing (the default), a blueprint, or soft
  * colour blocks. Only the look changes; nothing the plan shows or selects does.
@@ -50,7 +63,7 @@ export type FloorPlan = { viewBox: Rect; areas: PlanArea[]; rooms: PlanRoom[]; d
 export const PLAN_STYLES = ["drawing", "blueprint", "blocks"] as const;
 export type PlanStyle = typeof PLAN_STYLES[number];
 export const planStyleOf = (layout: { style?: unknown } | undefined): PlanStyle => (PLAN_STYLES as readonly unknown[]).includes(layout?.style) ? layout!.style as PlanStyle : "drawing";
-export type Selection = { kind: "area" | "room" | "device" | "entrance"; key: string };
+export type Selection = { kind: "area" | "room" | "device" | "entrance" | "label" | "symbol"; key: string };
 
 /** The stored block: the shared contract plus the optional extras the Floor plan adds or keeps. */
 export type StoredSpatialReference = ProjectSpatialReference & {
@@ -86,6 +99,8 @@ const roomIdOf = (room: unknown): { id?: string } => { const value = (room as { 
  * for a room `id` when `roomId` holds it (a well-formed id no earlier room uses).
  */
 const owned = (raw: unknown, keys: readonly string[], roomId: { id?: string } = {}) => [...keys, ...("id" in roomId ? ["id"] : []), ...("locked" in lockedOf(raw) ? ["locked"] : [])];
+/** A turn the editor wrote (whole degrees, 1-359); anything else rides along as saved. */
+const rotationOf = (item: unknown): { rotation?: number } => { const value = (item as { rotation?: unknown } | null)?.rotation; return typeof value === "number" && Number.isInteger(value) && value > 0 && value < 360 ? { rotation: value } : {}; };
 export const isPoint = (value: unknown): value is Point => Array.isArray(value) && value.length === 2 && value.every(n => typeof n === "number" && Number.isFinite(n));
 export const isRect = (value: unknown): value is Rect => Array.isArray(value) && value.length === 4 && value.every(n => typeof n === "number" && Number.isFinite(n));
 
@@ -166,19 +181,27 @@ export function planFromReference(reference: StoredSpatialReference, locale: Ene
   const rawDevices: unknown = (layout as { devices?: unknown }).devices, skipped: Array<{ index: number; device: unknown }> = [];
   const devices = (Array.isArray(rawDevices) ? rawDevices as unknown[] : []).flatMap((item, index): PlanDevice[] => {
     if (!isRecord(item) || typeof item.meterId !== "string" || !isPoint(item.position)) { skipped.push({ index, device: item }); return []; }
-    return [{ meterId: item.meterId, position: clampPoint(item.position, layout.viewBox), ...(isSize(item.size) ? { size: [...item.size] as Point } : {}), ...colourOf(item), ...lockedOf(item), ...carriedOf(item, owned(item, DEVICE_KEYS)) }];
+    return [{ meterId: item.meterId, position: clampPoint(item.position, layout.viewBox), ...(isSize(item.size) ? { size: [...item.size] as Point } : {}), ...rotationOf(item), ...colourOf(item), ...lockedOf(item), ...carriedOf(item, [...owned(item, DEVICE_KEYS), ...("rotation" in rotationOf(item) ? ["rotation"] : [])]) }];
   });
   const rawEntrance: unknown = (layout as { entrance?: unknown }).entrance;
-  const entrance = isRecord(rawEntrance) && isPoint(rawEntrance.position) ? { label: typeof rawEntrance.label === "string" && rawEntrance.label ? rawEntrance.label : translatorFor(floorPlanMessages, locale)("name.entrance"), position: [...rawEntrance.position] as Point, ...carriedOf(rawEntrance, ENTRANCE_KEYS) } : null;
+  const legacy = isRecord(rawEntrance) && isPoint(rawEntrance.position) ? { label: typeof rawEntrance.label === "string" && rawEntrance.label ? rawEntrance.label : translatorFor(floorPlanMessages, locale)("name.entrance"), position: [...rawEntrance.position] as Point, ...carriedOf(rawEntrance, ENTRANCE_KEYS) } : null;
+  // Text labels and landmarks. The first entrance is the legacy one (taking the entrance symbol at its place, if any),
+  // else the first entrance symbol: either way it is drawn once, and `layout.entrance` is written from it.
+  const labelList = readLabels((layout as { labels?: unknown }).labels), symbolList = readSymbols((layout as { symbols?: unknown }).symbols);
+  const first = firstEntrance(symbolList.items, legacy ? legacy.position : null), firstMark = symbolList.items[first];
+  const entrance: PlanEntrance | null = firstMark ? { ...(legacy ?? { label: firstMark.item.label ?? "", position: [...firstMark.item.position] as Point }), ...entranceParts(firstMark.item, firstMark.index) } : legacy;
+  const labels = labelList.items.map(({ item }) => item), symbols = symbolList.items.filter((_, index) => index !== first).map(({ item }) => item);
   const colours = Object.fromEntries(Object.entries(isRecord(layout.boardColours) ? layout.boardColours : {}).filter(([, value]) => typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)));
   // A well-formed editor block is the editor's own (kept as saved); anything else there rides along untouched.
   const editor = isRecord(layout.editor) ? { ...layout.editor } : undefined;
   const { extra, order } = carriedOf(layout, editor ? [...LAYOUT_KEYS, "editor"] : LAYOUT_KEYS);
   const carried: CarriedLayout = {
     ...(order ? { order } : {}), ...(hidden.length ? { zones: hidden } : {}), ...(layout.zones.some(zone => "directionFromEntrance" in zone) ? { entrance: entrance ? [...entrance.position] as Point : null } : {}), ...(rawDevices === undefined ? { noDevices: true as const } : {}),
-    ...("entrance" in layout && !entrance ? { rawEntrance: { value: rawEntrance } } : {}), ...(skipped.length ? { devices: skipped } : {}), ...(rawDevices !== undefined && !Array.isArray(rawDevices) ? { rawDevices: { value: rawDevices } } : {}),
+    ...("entrance" in layout && !legacy ? { rawEntrance: { value: rawEntrance } } : {}), ...(skipped.length ? { devices: skipped } : {}), ...(rawDevices !== undefined && !Array.isArray(rawDevices) ? { rawDevices: { value: rawDevices } } : {}),
+    ...(labelList.skipped.length ? { labels: labelList.skipped } : {}), ...(symbolList.skipped.length ? { symbols: symbolList.skipped } : {}), ...(labelList.raw ? { rawLabels: labelList.raw } : {}), ...(symbolList.raw ? { rawSymbols: symbolList.raw } : {}),
+    ...(labelList.list ? { labelList: true as const } : {}), ...(symbolList.list ? { symbolList: true as const } : {}),
   };
-  return { viewBox: [...layout.viewBox] as Rect, areas, rooms, devices, entrance, ...(Object.keys(colours).length ? { colours } : {}), ...((layout as { style?: unknown }).style !== undefined ? { style: planStyleOf(layout as { style?: unknown }) } : {}), ...(editor ? { editor } : {}), ...(extra ? { extra } : {}), ...(Object.keys(carried).length ? { carried } : {}) };
+  return { viewBox: [...layout.viewBox] as Rect, areas, rooms, devices, entrance, ...(labels.length ? { labels } : {}), ...(symbols.length ? { symbols } : {}), ...(Object.keys(colours).length ? { colours } : {}), ...((layout as { style?: unknown }).style !== undefined ? { style: planStyleOf(layout as { style?: unknown }) } : {}), ...(editor ? { editor } : {}), ...(extra ? { extra } : {}), ...(Object.keys(carried).length ? { carried } : {}) };
 }
 /** Areas the layout holds that are not on the drawing: kept as saved, listed for the reader. */
 export const hiddenZones = (plan: FloorPlan): Array<{ id: string; board: string }> => (plan.carried?.zones ?? []).map(({ zone }) => ({ id: String(zone.id), board: typeof zone.referenceBoard === "string" ? zone.referenceBoard : "" }));
@@ -239,8 +262,11 @@ export function moveSelection(plan: FloorPlan, selection: Selection, dx: number,
   const [vx, vy, vw, vh] = plan.viewBox;
   const within = (rect: Rect) => { const nx = Math.min(Math.max(dx, vx - rect[0]), vx + vw - rect[0] - rect[2]); const ny = Math.min(Math.max(dy, vy - rect[1]), vy + vh - rect[1] - rect[3]); return [nx, ny] as Point; };
   const shift = (rect: Rect, [mx, my]: Point): Rect => [rect[0] + mx, rect[1] + my, rect[2], rect[3]];
-  if (selection.kind === "device") return { ...plan, devices: plan.devices.map(item => item.meterId === selection.key ? { ...item, position: clampPoint([item.position[0] + dx, item.position[1] + dy], plan.viewBox) } : item) };
+  if (selection.kind === "device") return { ...plan, devices: plan.devices.map(item => item.meterId === selection.key ? { ...item, position: devicePosition(item, [item.position[0] + dx, item.position[1] + dy], plan.viewBox) } : item) };
   if (selection.kind === "entrance") return plan.entrance ? { ...plan, entrance: { ...plan.entrance, position: clampPoint([plan.entrance.position[0] + dx, plan.entrance.position[1] + dy], plan.viewBox) } } : plan;
+  // A text label or landmark stays fully inside the plan, turned as it is.
+  if (selection.kind === "label") return { ...plan, labels: (plan.labels ?? []).map(item => item.key === selection.key ? shiftLabel(item, dx, dy, plan.viewBox) : item) };
+  if (selection.kind === "symbol") return { ...plan, symbols: (plan.symbols ?? []).map(item => item.key === selection.key ? shiftSymbol(item, dx, dy, plan.viewBox) : item) };
   const host = selection.kind === "area" ? plan.areas.find(item => item.key === selection.key) : plan.rooms.find(item => item.key === selection.key);
   if (!host) return plan;
   const delta = within(host.rect);
@@ -248,9 +274,11 @@ export function moveSelection(plan: FloorPlan, selection: Selection, dx: number,
     ...plan,
     areas: plan.areas.map(item => item.key === host.key && selection.kind === "area" || riders.areas.has(item.key) ? { ...item, rect: clampRect(shift(item.rect, delta), plan.viewBox) } : item),
     rooms: plan.rooms.map(item => item.key === host.key && selection.kind === "room" || riders.rooms.has(item.key) ? { ...item, rect: clampRect(shift(item.rect, delta), plan.viewBox) } : item),
-    devices: plan.devices.map(item => riders.devices.has(item.meterId) ? { ...item, position: clampPoint([item.position[0] + delta[0], item.position[1] + delta[1]], plan.viewBox) } : item),
+    devices: plan.devices.map(item => riders.devices.has(item.meterId) ? { ...item, position: devicePosition(item, [item.position[0] + delta[0], item.position[1] + delta[1]], plan.viewBox) } : item),
   };
 }
+/** Where a device goes when moved to `to`: a dot inside the plan; a turned box with all of it inside the plan. */
+export const devicePosition = (device: PlanDevice, to: Point, viewBox: Rect): Point => device.size && device.rotation ? keepBoxInside(to, device.size, device.rotation, viewBox) : clampPoint(to, viewBox);
 
 const words = (text: string) => ` ${text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
 /** The room a device's name points to, e.g. "Director Room Power" → "Director room"; the longest match wins. */
@@ -322,9 +350,12 @@ export function contentBounds(plan: FloorPlan): [number, number, number, number]
   const unit = plan.viewBox[2] / 100, margin = 20;
   // Areas not on the drawing still hold their place when they have one: the plan can never shrink below them.
   const hiddenRects = (plan.carried?.zones ?? []).map(({ zone }) => zone.rect).filter(isRect);
-  const boxes: Rect[] = [...plan.areas.map(item => item.rect), ...plan.rooms.map(item => item.rect), ...hiddenRects, ...plan.devices.map(item => deviceRect(item) ?? [item.position[0] - unit * 5, item.position[1], unit * 10, unit * 3] as Rect)];
-  // The entrance label sits under its arrow.
-  if (plan.entrance) boxes.push([plan.entrance.position[0] - unit * 8, plan.entrance.position[1], unit * 16, unit * 6]);
+  const boxes: Rect[] = [...plan.areas.map(item => item.rect), ...plan.rooms.map(item => item.rect), ...hiddenRects, ...plan.devices.map(item => item.size && item.rotation ? frameBounds(boxFrame(item.position, item.size, item.rotation)) : deviceRect(item) ?? [item.position[0] - unit * 5, item.position[1], unit * 10, unit * 3] as Rect)];
+  // The entrance label sits under its arrow (and a turned or bigger arrow takes the space it is drawn in).
+  if (plan.entrance) { const { position, size, rotation } = plan.entrance, label: Rect = [position[0] - unit * 8, position[1], unit * 16, unit * 6]; boxes.push(size !== undefined || rotation ? unionBox([label, frameBounds(symbolFrame({ kind: "entrance", position, ...(size !== undefined ? { size } : {}), ...(rotation ? { rotation } : {}) }, unit))]) : label); }
+  // Text labels and landmarks, turned as they are: shrinking the plan never cuts them off.
+  for (const item of plan.labels ?? []) boxes.push(labelBounds(item, unit));
+  for (const item of plan.symbols ?? []) boxes.push(symbolBounds(item, unit));
   if (!boxes.length) return null;
   return [Math.min(...boxes.map(([x]) => x - margin)), Math.min(...boxes.map(([, y]) => y - margin)), Math.max(...boxes.map(([x, , w]) => x + w + margin)), Math.max(...boxes.map(([, y, , h]) => y + h + margin))];
 }
@@ -341,16 +372,31 @@ export function resizeCanvas(plan: FloorPlan, width: number, height: number): Fl
   return { ...plan, viewBox: [vx, vy, fit(width, minWidth, vx), fit(height, minHeight, vy)] };
 }
 
+/**
+ * With no first entrance, the first entrance landmark becomes it (and so what `layout.entrance` is written from): after
+ * the first entrance is deleted, or a landmark is changed into an entrance. The same plan when nothing changes.
+ */
+export function promoteEntrance(plan: FloorPlan): FloorPlan {
+  const symbols = plan.symbols ?? [], at = plan.entrance ? -1 : symbols.findIndex(item => item.kind === "entrance");
+  if (at < 0) return plan;
+  const next = symbols[at]!, rest = symbols.filter((_, index) => index !== at);
+  const { symbols: _old, ...without } = plan;
+  return { ...without, ...(rest.length ? { symbols: rest } : {}), entrance: { label: next.label ?? "", position: [...next.position] as Point, ...entranceParts(next, at) } };
+}
 export function removeSelection(plan: FloorPlan, selection: Selection): FloorPlan {
   if (selection.kind === "device") return { ...plan, devices: plan.devices.filter(item => item.meterId !== selection.key) };
-  if (selection.kind === "entrance") return { ...plan, entrance: null };
+  // Deleting the first entrance makes the next entrance (if any) the first.
+  if (selection.kind === "entrance") return promoteEntrance({ ...plan, entrance: null });
+  if (selection.kind === "label") { const labels = (plan.labels ?? []).filter(item => item.key !== selection.key), { labels: _old, ...rest } = plan; return labels.length ? { ...rest, labels } : rest; }
+  if (selection.kind === "symbol") { const symbols = (plan.symbols ?? []).filter(item => item.key !== selection.key), { symbols: _old, ...rest } = plan; return symbols.length ? { ...rest, symbols } : rest; }
   if (selection.kind === "room") return { ...plan, rooms: plan.rooms.filter(item => item.key !== selection.key), areas: plan.areas.map(item => item.insideRoom === selection.key ? asOwnArea(item) : item) };
   return settleRooms({ ...plan, areas: plan.areas.filter(item => item.key !== selection.key) });
 }
 
 /** Whether two plans draw everything in the same place, for changes that only move or resize (a drag that came back). */
 export function sameGeometry(a: FloorPlan, b: FloorPlan): boolean {
-  const shape = (plan: FloorPlan) => JSON.stringify([plan.viewBox, plan.areas.map(item => [item.key, item.rect]), plan.rooms.map(item => [item.key, item.rect, item.area ?? null]), plan.devices.map(item => [item.meterId, item.position, item.size ?? null]), plan.entrance?.position ?? null]);
+  const shape = (plan: FloorPlan) => JSON.stringify([plan.viewBox, plan.areas.map(item => [item.key, item.rect]), plan.rooms.map(item => [item.key, item.rect, item.area ?? null]), plan.devices.map(item => [item.meterId, item.position, item.size ?? null, item.rotation ?? 0]), plan.entrance?.position ?? null, plan.entrance?.rotation ?? 0,
+    (plan.labels ?? []).map(item => [item.key, item.position, item.rotation ?? 0]), (plan.symbols ?? []).map(item => [item.key, item.position, item.rotation ?? 0])]);
   return a === b || shape(a) === shape(b);
 }
 
@@ -422,9 +468,21 @@ export function referenceFromPlan(plan: FloorPlan, projectId: string, previous: 
   const boardsHere = new Set([...boards, ...hidden.map(({ zone }) => zone.referenceBoard).filter((board): board is string => typeof board === "string" && !!board)]);
   const markerHolds = (board: string) => boardsHere.has(board) && plan.areas.every(item => item.board.trim() !== board || !item.saved || sameRect(item.saved.rect, item.rect));
   const extra = plan.extra && isRecord(plan.extra.boardMarkers) ? { ...plan.extra, boardMarkers: Object.fromEntries(Object.entries(plan.extra.boardMarkers).filter(([board]) => markerHolds(board))) } : plan.extra;
-  const entrance = plan.entrance ? withCarried({ label: plan.entrance.label.trim() || t("name.entrance"), position: plan.entrance.position.map(Math.round) as Point }, plan.entrance, (key, value) => key === "referenceBoard" && !(typeof value === "string" && boardsHere.has(value))) : null;
+  const entranceLabel = plan.entrance ? plan.entrance.label.trim() || t("name.entrance") : "";
+  const entrance = plan.entrance ? withCarried({ label: entranceLabel, position: plan.entrance.position.map(Math.round) as Point }, plan.entrance, (key, value) => key === "referenceBoard" && !(typeof value === "string" && boardsHere.has(value))) : null;
+  // Text labels and landmarks: drawing only. Each list is written when the layout had one or the plan now has something
+  // for it (the first entrance counts once it is turned, sized, coloured or locked), so an old layout saves as it was.
+  // A symbol list always holds every entrance, the first one first among them: a list written elsewhere without the
+  // main entrance gets it (once) on its first save here.
+  const labelItems = plan.labels ?? [], symbolItems = plan.symbols ?? [], carriedMarks = plan.carried;
+  if (labelItems.some(item => !item.text.trim())) throw new Error(t("check.labelText"));
+  // Only what the plan draws counts here: a saved list already longer than readers draw still saves as it was.
+  if (labelItems.length > MARK_LIMIT || symbolItems.length + (plan.entrance ? 1 : 0) > MARK_LIMIT) throw new Error(t("check.tooManyMarks", { max: MARK_LIMIT }));
+  const labelOut = carriedMarks?.labelList || labelItems.length || carriedMarks?.labels?.length ? { labels: withPlaced(labelItems.map(writeLabel), carriedMarks?.labels ?? []) } : carriedMarks?.rawLabels ? { labels: carriedMarks.rawLabels.value } : {};
+  const firstEntrance = plan.entrance && (carriedMarks?.symbolList || symbolItems.length || carriedMarks?.symbols?.length || entranceMarked(plan.entrance)) ? [{ index: plan.entrance.slot ?? 0, item: entranceSymbol(plan.entrance, entranceLabel) }] : [];
+  const symbolOut = carriedMarks?.symbolList || symbolItems.length || carriedMarks?.symbols?.length || firstEntrance.length ? { symbols: withPlaced(symbolItems.map(({ key: _key, ...item }) => writeSymbol(item)), [...firstEntrance, ...(carriedMarks?.symbols ?? [])]) } : carriedMarks?.rawSymbols ? { symbols: carriedMarks.rawSymbols.value } : {};
   // Device entries the plan could not draw go back in their place; a device "list" that was not a list stays until devices are placed.
-  const devices: unknown[] = plan.devices.map(item => withCarried({ meterId: item.meterId, position: item.position.map(Math.round) as Point, ...(item.size ? { size: item.size.map(Math.round) as Point } : {}), ...colourOf(item), ...lockedOf(item) }, item));
+  const devices: unknown[] = plan.devices.map(item => withCarried({ meterId: item.meterId, position: item.position.map(Math.round) as Point, ...(item.size ? { size: item.size.map(Math.round) as Point } : {}), ...colourOf(item), ...lockedOf(item), ...rotationOf(item) }, item));
   for (const { index, device } of [...(plan.carried?.devices ?? [])].sort((a, b) => a.index - b.index)) devices.splice(Math.min(index, devices.length), 0, device);
   const rawDevices = plan.carried?.rawDevices, rawEntrance = plan.carried?.rawEntrance;
   const layout = withCarried({
@@ -435,6 +493,8 @@ export function referenceFromPlan(plan: FloorPlan, projectId: string, previous: 
     ...(plan.carried?.noDevices && !plan.devices.length ? {} : rawDevices && !plan.devices.length ? { devices: rawDevices.value } : { devices }),
     ...(boardColours && Object.keys(boardColours).length ? { boardColours } : {}),
     ...(plan.style ? { style: plan.style } : {}),
+    ...labelOut,
+    ...symbolOut,
     ...(plan.editor ? { editor: plan.editor } : {}),
   }, { ...(extra ? { extra } : {}), ...(plan.carried?.order ? { order: plan.carried.order } : {}) }, (key, value) => key === "boardMarkers" && !isRecord(value)) as StoredSpatialReference["layout"];
   const reference: StoredSpatialReference = {

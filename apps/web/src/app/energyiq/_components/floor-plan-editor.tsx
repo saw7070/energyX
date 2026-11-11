@@ -5,19 +5,22 @@ import { configApi } from "../../../lib/config-api";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { intlLocale } from "./energyiq-messages";
 import { ArrangeActions, GridMenu, LineUpActions } from "./floor-plan-actions";
-import { areaItemName, areaName as areaNameOf, countText, itemId, movedText, parseItemId, resizedText, selectionText, useAnnouncer } from "./floor-plan-announce";
+import { areaItemName, areaName as areaNameOf, countText, itemId, movedText, parseItemId, resizedText, selectionText, symbolName, useAnnouncer } from "./floor-plan-announce";
 import { alignItems, distributeItems, placeTyped, sameSize, sizable, type Arranged, type Field } from "./floor-plan-align";
 import { resizeCanvasFrom } from "./floor-plan-canvas";
 import { ColourPicker, withBoardColour } from "./floor-plan-colour";
 import { clearPlanDraft, usePlanDraft } from "./floor-plan-draft";
-import { boxOf, copyItems, everything, fitsLimits, inBox, isIn, isLocked, lockItems, moveItems, newRoomId, pasteClip, removeItems, reorderItems, ridersOf, roomIds, stillThere, toggled, type Clip, type Riders } from "./floor-plan-arrange";
+import { boxOf, copyItems, everything, fitsLimits, fitsMarks, frameOf, inBox, isIn, isLocked, lockItems, markAt, moveItems, newMarkId, newRoomId, pasteClip, removeItems, reorderItems, ridersOf, roomIds, stillThere, toggled, turnItem, type Clip, type Riders } from "./floor-plan-arrange";
+import { LabelPanel, LandmarkPicker, RotationField, SymbolPanel, useKindName } from "./floor-plan-mark-panel";
+import { shiftLabel, shiftSymbol } from "./floor-plan-mark-data";
+import { angleFrom, frameCorners, handleSpot, MARK_LIMIT, normaliseRotation, ROTATION_STEP, type Frame, type PlanLabel, type PlanSymbol } from "./floor-plan-marks";
 import { boxBetween, centredBox, isClick, snappedBox } from "./floor-plan-geometry";
 import { floorPlanMessages } from "./floor-plan-messages";
 import { canRedo, canUndo, commitPlan, endTyping, finishChange, redo, selectIn, showPlan, startHistory, undo, type HistoryEntry } from "./floor-plan-history";
 import { isTextEntry, planShortcut } from "./floor-plan-keys";
 import { PositionFields } from "./floor-plan-position";
 import { boundsOf, editorPrefs, gridSpacing, guideFor, guideTargets, samePrefs, snapToLines, withPrefs, type EditorPrefs, type Guide, type GuideTargets } from "./floor-plan-snap";
-import { AreaShape, DeviceShape, EntranceShape, GroupShape, RoomShape, type ItemDown } from "./floor-plan-shapes";
+import { AreaShape, DeviceShape, EntranceShape, GroupShape, LabelShape, RoomShape, SymbolShape, type ItemDown } from "./floor-plan-shapes";
 import { DraftOffer, ZoomControls } from "./floor-plan-view-controls";
 import { useCoarsePointer, useElementWidth, usePlanViewport } from "./floor-plan-viewport";
 import { maxZoom, MIN_ZOOM, planPoint } from "./floor-plan-zoom";
@@ -25,7 +28,7 @@ import { EnergyIcon } from "./icons";
 import { LockBadge } from "./plan-symbols";
 import { boardColours, boardlessColours, mapDevices, pinLabel, roomHasPins, SiteFloorMap } from "./site-floor-map";
 import {
-  asGroupIn, asOwnArea, autoPlace, centre, hiddenZones, MAX_AREAS, MAX_ROOMS, NOTES_LIMIT, roomOwner, PLAN_STYLES, planStyleOf, clampPoint, clampRect, contains, NO_PASSENGERS, sameGeometry, settleRooms, defaultDeviceSize, deviceRect, resizeCanvas, notesWithReference, planFromReference, referenceFromPlan, resizeRect, snap, starterPlan,
+  asGroupIn, asOwnArea, autoPlace, centre, hiddenZones, promoteEntrance, MAX_AREAS, MAX_ROOMS, NOTES_LIMIT, roomOwner, PLAN_STYLES, planStyleOf, clampPoint, clampRect, contains, NO_PASSENGERS, sameGeometry, settleRooms, defaultDeviceSize, deviceRect, resizeCanvas, notesWithReference, planFromReference, referenceFromPlan, resizeRect, snap, starterPlan,
   type FloorPlan, type Handle, type PlanArea, type Point, type Rect, type Selection, type StoredSpatialReference,
 } from "./floor-plan-model";
 import mapStyles from "./site-floor-map.module.css";
@@ -75,15 +78,20 @@ export function FloorPlanView({ reference, meters, highlight, highlightDevices =
  * line up with (worked out once, so big plans stay smooth), `reach` how close counts in plan units, and `last` the last
  * amount shown, so a pointer move that changes nothing draws nothing.
  */
-type Drag = { mode: "move" | "resize"; selection: Selection[]; handle?: Handle; start: Point; original: FloorPlan; before: HistoryEntry; pressed?: Selection[]; riders: Riders; moved: boolean; copied: boolean; warned: boolean; narrow?: Selection; box?: Rect; targets?: GuideTargets; reach: number; last?: Point };
+/** A turn (`mode` "rotate") turns one item around `pivot`, from `turn` degrees when the pointer was at `angle`. */
+type Drag = { mode: "move" | "resize" | "rotate"; selection: Selection[]; handle?: Handle; start: Point; original: FloorPlan; before: HistoryEntry; pressed?: Selection[]; riders: Riders; moved: boolean; copied: boolean; warned: boolean; narrow?: Selection; box?: Rect; targets?: GuideTargets; reach: number; last?: Point; pivot?: Point; angle?: number; turn?: number };
 /**
  * A drag on empty space (or a Shift-drag inside an area): a selection box, or the box of a new area, room or equipment.
  * `click` is the area pressed, which a Shift-click without dragging adds to the selection.
  */
 type Sweep = { kind: "marquee" | "draw"; start: Point; additive: boolean; base: Selection[]; click?: Selection };
 /** What the next drag (or click) on the plan draws. */
-type Tool = "area" | "room" | "equipment";
-const TOOL_STATUS = { area: "editor.drawArea", room: "editor.drawRoom", equipment: "editor.drawEquipment" } as const satisfies Record<Tool, string>;
+type Tool = "area" | "room" | "equipment" | "text" | "landmark";
+const TOOL_STATUS = { area: "editor.drawArea", room: "editor.drawRoom", equipment: "editor.drawEquipment", text: "editor.drawText", landmark: "editor.drawLandmark" } as const satisfies Record<Tool, string>;
+/** Tools that put something at the point clicked, rather than in a box dragged out. */
+const pointTool = (tool: Tool | null) => tool === "text" || tool === "landmark";
+/** How far the turning handle sits above an item, in screen pixels. */
+const TURN_PX = 26;
 /** Which edge of the drawing space is being pulled: right (wider), bottom (taller) or the corner (both). */
 type Edge = "e" | "s" | "se" | "w" | "n";
 type EdgeDrag = { edge: Edge; startX: number; startY: number; scale: number; original: FloorPlan; before: HistoryEntry; moved: boolean; warned: boolean };
@@ -127,6 +135,9 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   const setSelection = (next: Selection[]) => { setHistory(current => selectIn(current, next)); setNotice(""); };
   const [placing, setPlacing] = useState<string | null>(null);
   const [tool, setTool] = useState<Tool | null>(null);
+  // The landmark the + Landmark tool puts down next.
+  const [landmark, setLandmark] = useState<string | null>(null);
+  const kindName = useKindName();
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
@@ -195,7 +206,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   const show = (next: FloorPlan) => setHistory(current => showPlan(current, next));
   // What a screen reader hears (see useAnnouncer): the selection, moves, resizes, adds, deletes, undo and redo.
   const selectionKey = selection.map(itemId).join("|");
-  const { live, speak, say } = useAnnouncer({ plan, selectionKey, trigger: history, describe: () => selectionText(t, plan, selection, meterName) });
+  const { live, speak, say } = useAnnouncer({ plan, selectionKey, trigger: history, describe: () => selectionText(t, plan, selection, meterName, kindName) });
   // Undo and Redo keep focus where it was (on the item, or the plan); if what had focus went away, the plan takes it.
   const refocus = useRef(false);
   const keepFocus = () => { const svg = svgRef.current; refocus.current = !!svg && svg.contains(document.activeElement); };
@@ -209,14 +220,14 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     setPlacing(null);
     if (plan.devices.some(item => item.meterId === meterId && item.locked)) { setNotice(t("editor.locked")); return; }
     commit({ ...plan, devices: [...plan.devices.filter(item => item.meterId !== meterId), { meterId, position: clampPoint([snap(at[0], step), snap(at[1], step)], plan.viewBox) }] }, { selection: [{ kind: "device", key: meterId }] });
-    say(next => countText(t, next, [{ kind: "device", key: meterId }], meterName, "a11y.added", "a11y.addedMany"));
+    say(next => countText(t, next, [{ kind: "device", key: meterId }], meterName, "a11y.added", "a11y.addedMany", kindName));
     focusCanvas();
   };
   /** Deletes what is selected, except locked items, which stay (and stay selected). */
   const remove = () => {
     if (!selection.length) return;
     const kept = selection.filter(item => isLocked(plan, item)), next = removeItems(plan, selection);
-    const gone = countText(t, plan, selection.filter(item => !isLocked(plan, item)), meterName, "a11y.deleted", "a11y.deletedMany");
+    const gone = countText(t, plan, selection.filter(item => !isLocked(plan, item)), meterName, "a11y.deleted", "a11y.deletedMany", kindName);
     // Focus on a deleted item would fall out of the editor (and its keys stop working): it goes back to the plan.
     if (next !== plan) { keepFocus(); say(() => gone); commit(next, { selection: kept }); }
     if (kept.length) setNotice(t("editor.locked"));
@@ -225,16 +236,20 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   const reserved = hidden.map(item => item.id);
   const copyName = (name: string) => t("name.copy", { name });
   const nextLabel = () => { for (let index = 0; index < 26; index += 1) { const label = String.fromCharCode(65 + index); if (!plan.areas.some(item => item.label === label) && !hidden.some(item => item.id === label)) return label; } return t("name.area", { id: plan.areas.length + 1 }); };
-  const chooseTool = (next: Tool) => { setPlacing(null); setNotice(""); setTool(current => current === next ? null : next); focusCanvas(); };
+  const chooseTool = (next: Tool) => { setPlacing(null); setNotice(""); setLandmark(null); setTool(current => current === next ? null : next); focusCanvas(); };
+  /** Picking a landmark from the menu: the next click on the plan puts it there. */
+  const chooseLandmark = (kind: string) => { setPlacing(null); setNotice(""); setLandmark(kind); setTool("landmark"); focusCanvas(); };
+  const stopTool = () => { setTool(null); setLandmark(null); };
   /**
    * Adds what the tool draws: in the box dragged on the plan, at its usual size where the plan was clicked (`at`), or,
    * from the keyboard (neither), at its usual place. One undo step; the new item comes back selected.
    */
   const create = (kind: Tool, at: Point | null, drawn: Rect | null) => {
+    if (kind === "text" || kind === "landmark") { addMark(kind, at ?? (drawn ? centre(drawn) : null)); return; }
     // A saved layout holds at most so many areas and rooms: say so instead of adding one that cannot be saved.
     if (!fitsLimits(plan, hidden.length, kind === "room" ? 0 : 1, kind === "room" ? 1 : 0)) { setNotice(tooMany()); return; }
     const box = drawn && !isClick(drawn) ? clampRect(drawn, plan.viewBox) : null;
-    const done = (next: FloorPlan, item: Selection) => { say(placed => countText(t, placed, [item], meterName, "a11y.added", "a11y.addedMany")); commit(next, { selection: [item] }); setTool(null); focusCanvas(); };
+    const done = (next: FloorPlan, item: Selection) => { say(placed => countText(t, placed, [item], meterName, "a11y.added", "a11y.addedMany", kindName)); commit(next, { selection: [item] }); setTool(null); focusCanvas(); };
     if (kind === "area") {
       const key = `area-${Date.now()}`, size: Point = [snap(vw * 0.35, grid), snap(vh * 0.55, grid)];
       const rect = box ?? (at ? centredBox(at, size, plan.viewBox, step) : clampRect([vx + 20, vy + 20, size[0], size[1]], plan.viewBox));
@@ -267,19 +282,46 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     const rect = box ?? clampRect([rx + 12, ry + rh - height - 12, Math.max(20, rw - 24), height], plan.viewBox);
     done({ ...plan, areas: [...plan.areas, { key, label: nextLabel(), board, insideRoom: room.key, equipment: "", rect }] }, { kind: "area", key });
   };
-  const addEntrance = () => { say(placed => countText(t, placed, [{ kind: "entrance", key: "entrance" }], meterName, "a11y.added", "a11y.addedMany")); commit({ ...plan, entrance: { label: t("name.mainEntrance"), position: [vx + vw / 2, vy + vh - 40] } }, { selection: [{ kind: "entrance", key: "entrance" }] }); focusCanvas(); };
+  /**
+   * Puts a text label or a landmark at `at` (on the grid), or from the keyboard (no point) in the middle of what is shown.
+   * An entrance becomes the first entrance when the plan has none yet. One undo step; the new item comes back selected.
+   */
+  const addMark = (kind: "text" | "landmark", at: Point | null, symbolKind = landmark ?? "entrance") => {
+    const isText = kind === "text", firstEntrance = !isText && symbolKind === "entrance" && !plan.entrance;
+    if (!firstEntrance && !fitsMarks(plan, isText ? 1 : 0, isText ? 0 : 1)) { setNotice(t("editor.tooManyMarks", { max: MARK_LIMIT })); return; }
+    const point = clampPoint(at ? [snap(at[0], step), snap(at[1], step)] : [wx + ww / 2, wy + wh / 2], plan.viewBox);
+    let next: FloorPlan, item: Selection;
+    if (isText) {
+      const key = `label-${Date.now()}`, label = shiftLabel({ key, id: newMarkId(plan, "lb"), text: t("name.text"), position: point }, 0, 0, plan.viewBox);
+      next = { ...plan, labels: [...(plan.labels ?? []), label] }; item = { kind: "label", key };
+    } else if (firstEntrance) {
+      next = { ...plan, entrance: { label: t("name.mainEntrance"), position: point } }; item = { kind: "entrance", key: "entrance" };
+    } else {
+      const key = `symbol-${Date.now()}`, count = (plan.symbols ?? []).filter(entry => entry.kind === "entrance").length + 2;
+      const symbol = shiftSymbol({ key, id: newMarkId(plan, "sy"), kind: symbolKind, position: point, ...(symbolKind === "entrance" ? { label: t("name.otherEntrance", { number: count }) } : {}) }, 0, 0, plan.viewBox);
+      next = { ...plan, symbols: [...(plan.symbols ?? []), symbol] }; item = { kind: "symbol", key };
+    }
+    say(placed => countText(t, placed, [item], meterName, "a11y.added", "a11y.addedMany", kindName));
+    commit(next, { selection: [item] }); stopTool(); focusCanvas();
+  };
+  /** + Add entrance: the main entrance at the bottom of the plan, or another entrance beside the last one. */
+  const addEntrance = () => {
+    setPlacing(null); stopTool();
+    const others = (plan.symbols ?? []).filter(entry => entry.kind === "entrance").length;
+    addMark("landmark", plan.entrance ? [plan.entrance.position[0] + unit * 8 * (others + 1), plan.entrance.position[1]] : [vx + vw / 2, vy + vh - 40], "entrance");
+  };
   const updateArea = (key: string, patch: Partial<PlanArea>, merge?: string) => commit({ ...plan, areas: plan.areas.map(item => item.key === key ? { ...item, ...patch } : item) }, merge ? { merge } : undefined);
 
   // Duplicate, copy and paste: areas and rooms come with what is inside them; devices are placed once, so never copied.
   const tooMany = () => t("editor.tooMany", { areas: MAX_AREAS, rooms: MAX_ROOMS });
-  const fits = (clip: Clip) => fitsLimits(plan, hidden.length, clip.areas.length, clip.rooms.length);
+  const fits = (clip: Clip) => fitsLimits(plan, hidden.length, clip.areas.length, clip.rooms.length) && fitsMarks(plan, clip.labels?.length ?? 0, clip.symbols?.length ?? 0);
   /** Devices and the entrance in the selection have no copy: say so, so the reader knows why they were left out. */
   const leftOut = () => selection.some(item => item.kind === "device" || item.kind === "entrance");
   /** Puts a copy on the plan; refused, with a message, when the plan could then not be saved. */
   const putCopy = (clip: Clip, offset: number) => {
-    if (!fits(clip)) { setNotice(tooMany()); return false; }
+    if (!fits(clip)) { setNotice(fitsMarks(plan, clip.labels?.length ?? 0, clip.symbols?.length ?? 0) ? tooMany() : t("editor.tooManyMarks", { max: MARK_LIMIT })); return false; }
     const result = pasteClip(plan, clip, offset, copyName, reserved);
-    say(placed => countText(t, placed, result.selection, meterName, "a11y.added", "a11y.addedMany"));
+    say(placed => countText(t, placed, result.selection, meterName, "a11y.added", "a11y.addedMany", kindName));
     commit(result.plan, { selection: result.selection }); focusCanvas(); return true;
   };
   const duplicate = () => { const clip = copyItems(plan, selection); if (clip) { if (putCopy(clip, grid) && leftOut()) setNotice(t("editor.notCopied")); } else if (selection.length) setNotice(t("editor.notCopied")); };
@@ -317,6 +359,17 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     drag.current = { mode: "move", selection: moving, start, original, before: { plan, selection: next }, pressed: selection, riders, moved: false, copied: !!copied, warned: false, ...(narrow ? { narrow } : {}), ...(hosts.length ? { box: boundsOf(hosts), targets: targetsAround(original, riding) } : {}), reach: GUIDE_REACH / pxPerUnit() };
     // On a touch screen, holding a finger still on an item adds it to the selection (or takes it out), like Shift-click.
     if (event.pointerType === "touch" && !copied) holdFor(event, item, selection);
+  };
+  /** Pressing the round handle above a label, landmark, entrance or device box: dragging turns it around its middle. */
+  const startTurn = (event: ReactPointerEvent, item: Selection) => {
+    if (placing || tool || event.button !== 0) return;
+    event.stopPropagation();
+    const { plan, selection } = latest(), frame = frameOf(plan, item);
+    if (!frame || isLocked(plan, item)) return;
+    (event.currentTarget as Element).setPointerCapture?.(event.pointerId);
+    focusCanvas();
+    const start = toPoint(event.clientX, event.clientY);
+    drag.current = { mode: "rotate", selection: [item], start, original: plan, before: { plan, selection }, riders: NO_PASSENGERS(), moved: false, copied: false, warned: false, reach: 0, pivot: frame.pivot, angle: angleFrom(frame.pivot, start), turn: frame.rotation };
   };
   const press = useRef<{ id: number; at: Point; timer: ReturnType<typeof setTimeout> } | null>(null);
   const clearPress = () => { if (press.current) { clearTimeout(press.current.timer); press.current = null; } };
@@ -358,12 +411,21 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     const tap = pendingPlace.current;
     if (tap && event.pointerId === tap.id) { if (Math.hypot(event.clientX - tap.at[0], event.clientY - tap.at[1]) > TOUCH_SLOP) pendingPlace.current = null; return; }
     const area = sweep.current;
-    if (area) { const end = toPoint(event.clientX, event.clientY); setSweepBox({ kind: area.kind, rect: area.kind === "draw" ? snappedBox(area.start, end, step) : boxBetween(area.start, end) }); return; }
+    if (area) { if (area.kind === "draw" && pointTool(tool)) return; const end = toPoint(event.clientX, event.clientY); setSweepBox({ kind: area.kind, rect: area.kind === "draw" ? snappedBox(area.start, end, step) : boxBetween(area.start, end) }); return; }
     // A finger held still for a long press does not move anything; moving it further makes it a drag.
     const held = press.current;
     if (held && event.pointerId === held.id) { if (Math.hypot(event.clientX - held.at[0], event.clientY - held.at[1]) <= TOUCH_SLOP) return; clearPress(); }
     const current = drag.current;
     if (!current) return;
+    if (current.mode === "rotate") {
+      // In 15° steps while snapping is on (hold Cmd/Ctrl to turn freely), one undo step however far it turns.
+      const raw = current.turn! + angleFrom(current.pivot!, toPoint(event.clientX, event.clientY)) - current.angle!;
+      const deg = normaliseRotation(!prefs.snap || event.metaKey || event.ctrlKey ? raw : Math.round(raw / ROTATION_STEP) * ROTATION_STEP);
+      if ((current.last ? current.last[0] : normaliseRotation(current.turn!)) === deg) return;
+      current.last = [deg, 0]; current.moved = true;
+      show(turnItem(current.original, current.selection[0]!, deg));
+      return;
+    }
     const [x, y] = toPoint(event.clientX, event.clientY);
     const { dx, dy, lines } = dragAmount(current, x - current.start[0], y - current.start[1], !prefs.snap || event.metaKey || event.ctrlKey);
     if (!dx && !dy && !current.moved) return;
@@ -473,7 +535,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     setGuides(lines => lines.length ? [] : lines);
     if (current.copied && !current.moved) { setHistory(list => showPlan(list, current.before.plan, current.before.selection)); return; }
     if (!current.moved) { if (current.narrow) setSelection([current.narrow]); return; }
-    say(next => current.mode === "resize" ? resizedText(t, boxOf(next, current.selection[0]!)) : movedText(t, next, current.selection));
+    say(next => current.mode === "resize" ? resizedText(t, boxOf(next, current.selection[0]!)) : current.mode === "rotate" ? t("a11y.rotated", { deg: current.last?.[0] ?? 0 }) : movedText(t, next, current.selection));
     setHistory(list => { const settled = settleRooms(list.present.plan); return finishChange(list, current.before, sameGeometry(settled, current.before.plan) ? current.before.plan : settled); });
     setError("");
   };
@@ -494,6 +556,9 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
       place(placing, toPoint(event.clientX, event.clientY), plan); return;
     }
     const empty = event.target === event.currentTarget || !!(event.target as Element).getAttribute?.("data-grid");
+    // A press on a turned label or landmark picks it even between its lines (the point is turned back to check it).
+    const hit = !tool && empty ? markAt(plan, toPoint(event.clientX, event.clientY)) : null;
+    if (hit) { startDrag(event, hit); return; }
     if (!tool && !empty) return;
     beginSweep(event);
   };
@@ -535,7 +600,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     // Cmd/Ctrl + plus, minus or 0 zoom the plan here, never the whole page.
     if (shortcut.kind === "zoom") { event.preventDefault(); zoomTo(shortcut.how); return; }
     if (shortcut.kind === "undo" || shortcut.kind === "redo") { event.preventDefault(); if (shortcut.kind === "undo") undoStep(); else redoStep(); return; }
-    if (shortcut.kind === "escape") { setPlacing(null); setTool(null); setNotice(""); sweep.current = null; setSweepBox(null); setSelection([]); setLeaving(false); return; }
+    if (shortcut.kind === "escape") { setPlacing(null); stopTool(); setNotice(""); sweep.current = null; setSweepBox(null); setSelection([]); setLeaving(false); return; }
     if (shortcut.kind === "cycle") { event.preventDefault(); cycle(shortcut.by); return; }
     // Enter on the item with focus selects it (Shift+Enter adds it to the selection).
     if (shortcut.kind === "select") { const item = parseItemId((event.target as Element | null)?.getAttribute?.("data-item")); if (!item) return; event.preventDefault(); setSelection(shortcut.toggle ? toggled(selection, item) : [item]); return; }
@@ -663,8 +728,8 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   const selectedPlacement = single?.kind === "device" ? plan.devices.find(item => item.meterId === single.key) : undefined;
   const singleLocked = !!single && isLocked(plan, single);
   // Corner handles for one selected item that is not locked; several selected items each get an outline.
-  const handleRect = single && !singleLocked ? selectedArea?.rect ?? selectedRoom?.rect ?? (selectedPlacement && deviceRect(selectedPlacement)) ?? undefined : undefined;
-  const setDeviceShape = (meterId: string, box: boolean) => commit({ ...plan, devices: plan.devices.map(item => { if (item.meterId !== meterId) return item; const { size: _size, ...dot } = item; return box ? { ...dot, size: item.size ?? defaultDeviceSize(plan.viewBox) } : dot; }) });
+  const handleRect = single && !singleLocked ? selectedArea?.rect ?? selectedRoom?.rect ?? (selectedPlacement && !selectedPlacement.rotation && deviceRect(selectedPlacement)) ?? undefined : undefined;
+  const setDeviceShape = (meterId: string, box: boolean) => commit({ ...plan, devices: plan.devices.map(item => { if (item.meterId !== meterId) return item; const { size: _size, rotation: _turn, ...dot } = item; return box ? { ...dot, size: item.size ?? defaultDeviceSize(plan.viewBox) } : dot; }) });
   const roomColour = (rect: Rect) => { const host = plan.areas.filter(item => !item.insideRoom && contains(item.rect, centre(rect))).sort((a, b) => a.rect[2] * a.rect[3] - b.rect[2] * b.rect[3])[0]; return host ? (host.board ? colours.get(host.board) : noBoardColours.get(host.key)) : undefined; };
   const waiting = meters.filter(meter => !placedIds.has(meter.id));
   const placingName = placing ? meterById.get(placing)?.name : null;
@@ -672,7 +737,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   const positions = plan.devices.map(item => item.position);
 
   // The actions shared by whatever is selected: duplicate, lock, and drawing order within its kind.
-  const lockable = selection.filter(item => item.kind !== "entrance");
+  const lockable = selection;
   const allLocked = lockable.length > 0 && lockable.every(item => isLocked(plan, item));
   const fronted = reorderItems(plan, selection, "front"), backed = reorderItems(plan, selection, "back");
   const actions = lockable.length > 0 ? <ArrangeActions onDuplicate={copyItems(plan, selection) ? duplicate : undefined} duplicateKey={keyName("D")} locked={allLocked} many={lockable.length > 1} onLock={() => commit(lockItems(plan, lockable, !allLocked))} order onFront={fronted !== plan ? () => commit(fronted) : undefined} onBack={backed !== plan ? () => commit(backed) : undefined} /> : null;
@@ -680,7 +745,29 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   /** Line-up results: one undo step, and a short note when locked items were left where they are. */
   const arrange = (result: Arranged) => { if (result.plan !== plan) commit(settleRooms(result.plan)); if (result.skipped) setNotice(t("align.lockedSkipped")); };
   /** Typed X, Y, W or H for one item: one undo step; says whether the value had to change to fit. */
-  const positionFields = (item: Selection, box: Rect) => <PositionFields key={`position:${item.kind}:${item.key}`} box={box} origin={[vx, vy]} disabled={singleLocked} onCommit={(field: Field, value: number) => { const result = placeTyped(plan, item, field, value); if (result.plan !== plan) commit(result.plan); return result.adjusted; }} />;
+  const positionFields = (item: Selection, box: Rect, fields?: Field[]) => <PositionFields key={`position:${item.kind}:${item.key}`} box={box} origin={[vx, vy]} disabled={singleLocked} {...(fields ? { fields } : {})} onCommit={(field: Field, value: number) => { const result = placeTyped(plan, item, field, value); if (result.plan !== plan) commit(result.plan); return result.adjusted; }} />;
+  // Text labels and landmarks: their own fields, kept fully inside the plan as each change is made.
+  const selectedLabel = single?.kind === "label" ? plan.labels?.find(item => item.key === single.key) : undefined;
+  const selectedSymbol = single?.kind === "symbol" ? plan.symbols?.find(item => item.key === single.key) : undefined;
+  const without = <T extends object>(item: T, key: string, value: unknown): T => { const { [key]: _old, ...rest } = item as Record<string, unknown>; return (value === undefined ? rest : { ...rest, [key]: value }) as T; };
+  const updateLabel = (key: string, change: (item: PlanLabel) => PlanLabel, merge?: string) => commit({ ...plan, labels: (plan.labels ?? []).map(item => item.key === key ? shiftLabel(change(item), 0, 0, plan.viewBox) : item) }, merge ? { merge } : undefined);
+  const updateSymbol = (key: string, change: (item: PlanSymbol) => PlanSymbol, merge?: string) => commit({ ...plan, symbols: (plan.symbols ?? []).map(item => item.key === key ? shiftSymbol(change(item), 0, 0, plan.viewBox) : item) }, merge ? { merge } : undefined);
+  /** A landmark changed into an entrance becomes the first entrance when the plan has none (and stays selected as that). */
+  const changeKind = (key: string, kind: string) => {
+    const changed = { ...plan, symbols: (plan.symbols ?? []).map(item => item.key === key ? { ...item, kind } : item) }, next = promoteEntrance(changed);
+    commit(next, next !== changed ? { selection: [{ kind: "entrance", key: "entrance" }] } : undefined);
+  };
+  const turn = (item: Selection, deg: number) => { const next = turnItem(plan, item, deg); if (next === plan) return; say(() => t("a11y.rotated", { deg })); commit(next); };
+  const markColour = (target: string, value: string | undefined, apply: (hex: string | null) => FloorPlan) => <ColourPicker key={`colour:${target}`} legend={t("panel.colour")} hint={t("panel.markColourHint")} value={value} autoLabel={t("panel.colourAutoInk")} onPick={pickColour(target, apply)} onDone={() => setHistory(endTyping)} />;
+  // The turning handle and the turned outline, for the items that can turn.
+  const turnable = (item: Selection) => item.kind === "label" || item.kind === "symbol" || item.kind === "entrance" || (item.kind === "device" && !!plan.devices.find(entry => entry.meterId === item.key)?.size);
+  const turnFrame = single && !singleLocked && turnable(single) && (single.kind !== "device" || shown(single.key)) ? frameOf(plan, single) : null;
+  const outlined = (item: Selection): Frame | null => {
+    if (item.kind === "label" || item.kind === "symbol") return frameOf(plan, item);
+    if (item.kind === "entrance") return plan.entrance && (plan.entrance.size !== undefined || plan.entrance.rotation) ? frameOf(plan, item) : null;
+    if (item.kind === "device") { const device = plan.devices.find(entry => entry.meterId === item.key); return device?.size && device.rotation && shown(device.meterId) ? frameOf(plan, item) : null; }
+    return null;
+  };
   const gridCell = gridSpacing(grid, ww);
   const focusShown = focused && stillThere(plan, [focused]).length ? focused : null;
   const focusBox = focusShown ? boxOf(plan, focusShown) : null;
@@ -732,7 +819,9 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
       {toolButton("area", t("editor.addArea"), t("editor.hintArea"))}
       {toolButton("room", t("editor.addRoom"), t("editor.hintRoom"))}
       {toolButton("equipment", t("editor.addEquipment"), plan.rooms.length ? t("editor.hintEquipment") : t("editor.addRoomFirst"), !plan.rooms.length)}
-      {!plan.entrance && <button type="button" className={styles.tool} title={t("editor.hintEntrance")} onClick={addEntrance}>{t("editor.addEntrance")}</button>}
+      {toolButton("text", t("editor.addText"), t("editor.hintText"))}
+      <LandmarkPicker chosen={tool === "landmark" ? landmark : null} hint={t("editor.hintLandmark")} onPick={chooseLandmark} />
+      <button type="button" className={styles.tool} title={t("editor.hintEntrance")} onClick={addEntrance}>{t("editor.addEntrance")}</button>
       <GridMenu prefs={prefs} onChange={setPrefs} commandKey={mac ? "⌘" : "Ctrl"} />
       <ZoomControls percent={viewport.percent} edgesHidden={!!viewport.view} whole={!viewport.view} canIn={viewport.zoom < maxZoom(viewport.fitPx) - 1e-6} canOut={viewport.zoom > MIN_ZOOM + 1e-6} commandKey={mac ? "⌘" : "Ctrl"} keyFor={keyName} onIn={() => zoomTo("in")} onOut={() => zoomTo("out")} onFit={() => zoomTo("fit")} onActual={() => zoomTo("actual")} />
       <span className={styles.toolGap} />
@@ -744,7 +833,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     {draft.offer && <DraftOffer savedAt={draft.offer.savedAt} stale={draft.offer.stale} onRestore={restoreDraft} onDiscard={() => { draft.discard(); focusCanvas(); }} />}
     <p id={keysId} className={styles.srOnly}>{t("a11y.keys", { commandKey: mac ? "⌘" : "Ctrl" })}</p>
     {placingName && <p className={styles.placing} role="status">{placingBefore}<strong>{placingName}</strong>{placingAfter} <button type="button" onClick={() => setPlacing(null)}>{t("editor.cancel")}</button></p>}
-    {tool && <p className={styles.placing} role="status">{t(TOOL_STATUS[tool])} <button type="button" onClick={() => { setTool(null); setNotice(""); }}>{t("editor.cancel")}</button></p>}
+    {tool && <p className={styles.placing} role="status">{t(TOOL_STATUS[tool], { name: kindName(landmark ?? "entrance") })} <button type="button" onClick={() => { stopTool(); setNotice(""); }}>{t("editor.cancel")}</button></p>}
     {notice && <p className={styles.notice} role="status">{notice}</p>}
     {error && <p role="alert" className={styles.error}>{error}</p>}
 
@@ -762,11 +851,13 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
           {own.map(item => <AreaShape key={item.key} item={item} colour={areaColour(item)} name={areaName(item.label)} unit={unit} label={areaItemName(t, item)} onDown={itemDown} />)}
           {plan.rooms.map(room => <RoomShape key={room.key} room={room} colour={room.colour ?? roomColour(room.rect)} pinned={roomHasPins(room.rect, positions)} unit={unit} label={t("a11y.room", { name: room.name })} onDown={itemDown} />)}
           {groups.map(item => <GroupShape key={item.key} item={item} colour={areaColour(item)} pinned={roomHasPins(item.rect, positions)} fallback={t("panel.groupFallback")} unit={unit} label={areaItemName(t, item)} onDown={itemDown} />)}
+          {(plan.labels ?? []).map(item => <LabelShape key={item.key} item={item} unit={unit} label={t("a11y.label", { name: item.text })} onDown={itemDown} />)}
+          {(plan.symbols ?? []).map(item => <SymbolShape key={item.key} item={item} unit={unit} label={symbolName(t, item, kindName)} fallback={t("name.entrance")} onDown={itemDown} />)}
           {plan.entrance && <EntranceShape entrance={plan.entrance} selected={isIn(selection, { kind: "entrance", key: "entrance" })} unit={unit} label={t("a11y.entrance", { name: plan.entrance.label })} onDown={itemDown} />}
           {plan.devices.map(item => { const meter = meterById.get(item.meterId); if (!meter) return null; return <DeviceShape key={item.meterId} item={item} name={meter.name} board={meter.board} colour={item.colour ?? colours.get(meter.board) ?? "var(--zone-6)"} pin={item.size ? "" : pinLabel(meter.name, item.position, plan.rooms, groups)} selected={isIn(selection, { kind: "device", key: item.meterId })} unit={unit} label={t("a11y.device", { name: meter.name })} onDown={itemDown} />; })}
           {/* A padlock on each locked item, so it is clear why it does not move. */}
           {everything(plan, shown).filter(item => isLocked(plan, item)).map(item => { const [x, y, w] = boxOf(plan, item)!, size = unit * 1.9; return <LockBadge key={`lock:${item.kind}:${item.key}`} x={w ? x + w - size - unit * 0.4 : x + unit * 1} y={w ? y + unit * 0.4 : y - unit * 2.9} size={size} className={styles.lockBadge} label={t("editor.lockedBadge")} />; })}
-          {selection.map(item => { const at = boxOf(plan, item); if (!at || !at[2] || (item.kind === "device" && !shown(item.key))) return null; const [x, y, w, h] = at; return <rect key={`selected:${item.kind}:${item.key}`} x={x} y={y} width={w} height={h} className={styles.selectBox} />; })}
+          {selection.map(item => { const frame = outlined(item); if (frame) return <polygon key={`selected:${item.kind}:${item.key}`} data-turned="1" points={frameCorners(frame).map(point => point.join(",")).join(" ")} className={styles.turnBox} />; const at = boxOf(plan, item); if (!at || !at[2] || (item.kind === "device" && !shown(item.key))) return null; const [x, y, w, h] = at; return <rect key={`selected:${item.kind}:${item.key}`} x={x} y={y} width={w} height={h} className={styles.selectBox} />; })}
           {focusBox && focusShown && (focusBox[2] ? <rect data-focus-ring="1" x={focusBox[0] - perPx * RING_PX} y={focusBox[1] - perPx * RING_PX} width={focusBox[2] + perPx * RING_PX * 2} height={focusBox[3] + perPx * RING_PX * 2} rx={perPx * RING_PX} className={styles.focusRing} />
             : <circle data-focus-ring="1" cx={focusBox[0]} cy={focusShown.kind === "entrance" ? focusBox[1] + unit * 1.2 : focusBox[1]} r={Math.max(focusShown.kind === "entrance" ? unit * 3.2 : unit * 2.2, perPx * RING_PX * 2.5)} className={styles.focusRing} />)}
           {handleRect && (() => { const [x, y, w, h] = handleRect; const size = perPx * (coarse ? TOUCH_GRIP_PX : GRIP_PX); const spot: Record<Handle, Point> = { nw: [x, y], n: [x + w / 2, y], ne: [x + w, y], e: [x + w, y + h / 2], se: [x + w, y + h], s: [x + w / 2, y + h], sw: [x, y + h], w: [x, y + h / 2] };
@@ -775,6 +866,8 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
             return <g>
             {handles.map(handle => <rect key={handle} data-handle={handle} x={spot[handle][0] - size / 2} y={spot[handle][1] - size / 2} width={size} height={size} rx={size * 0.2} className={`${styles.handle} ${styles[handle]}`} onPointerDown={event => startDrag(event, single!, "resize", handle)} />)}
           </g>; })()}
+          {turnFrame && (() => { const { from, to } = handleSpot(turnFrame, perPx * TURN_PX), r = perPx * (coarse ? TOUCH_GRIP_PX : GRIP_PX) / 2;
+            return <g><line x1={from[0]} y1={from[1]} x2={to[0]} y2={to[1]} className={styles.turnLine} /><circle data-turn="1" cx={to[0]} cy={to[1]} r={r} className={styles.turnHandle} onPointerDown={event => startTurn(event, single!)}><title>{t("rotate.handle")}</title></circle></g>; })()}
           {guides.map(guide => { const pad = screen; return guide.axis === "x" ? <line key={`x${guide.at}`} data-guide="x" x1={guide.at} x2={guide.at} y1={guide.from - pad} y2={guide.to + pad} className={styles.guide} /> : <line key={`y${guide.at}`} data-guide="y" x1={guide.from - pad} x2={guide.to + pad} y1={guide.at} y2={guide.at} className={styles.guide} />; })}
           {sweepBox && <rect x={sweepBox.rect[0]} y={sweepBox.rect[1]} width={sweepBox.rect[2]} height={sweepBox.rect[3]} className={sweepBox.kind === "draw" ? styles.drawBox : styles.marquee} />}
         </svg>
@@ -820,15 +913,19 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
             <option value="dot">{t("panel.showDot")}</option><option value="box">{t("panel.showBox")}</option>
           </select></label>
           {selectedPlacement?.size && positionFields(single!, deviceRect(selectedPlacement)!)}
+          {selectedPlacement?.size && <RotationField key={`turn:${selectedPlacement.meterId}`} value={selectedPlacement.rotation ?? 0} disabled={singleLocked} commandKey={mac ? "⌘" : "Ctrl"} onCommit={deg => turn(single!, deg)} />}
+          {selectedPlacement?.rotation && selectedPlacement.size ? <p className={styles.hint}>{t("rotate.boxNote")}</p> : null}
           {colourPicker(`device:${selectedDevice.id}`, selectedPlacement?.colour, t("panel.colourAuto", { board: selectedDevice.board }), hex => ({ ...plan, devices: plan.devices.map(item => item.meterId === selectedDevice.id ? recolour(item, hex) : item) }))}
           {actions}
           <button type="button" className={styles.danger} disabled={singleLocked} onClick={remove}>{t("panel.takeOff")}</button>
         </div>}
-        {single?.kind === "entrance" && plan.entrance && <div className={styles.panel}>
-          <h5>{t("panel.entrance")}</h5>
-          <label>{t("panel.label")}<input value={plan.entrance.label} maxLength={40} {...typing} onChange={event => commit({ ...plan, entrance: { ...plan.entrance!, label: event.target.value } }, { merge: "entrance:label" })} /></label>
-          <button type="button" className={styles.danger} onClick={remove}>{t("panel.removeEntrance")}</button>
-        </div>}
+        {single?.kind === "entrance" && plan.entrance && <SymbolPanel symbol={{ key: "entrance", kind: "entrance", label: plan.entrance.label, ...(plan.entrance.size !== undefined ? { size: plan.entrance.size } : {}), ...(plan.entrance.rotation ? { rotation: plan.entrance.rotation } : {}) }} entrance
+          onCaption={text => commit({ ...plan, entrance: { ...plan.entrance!, label: text } }, { merge: "entrance:label" })} onSize={size => commit({ ...plan, entrance: { ...plan.entrance!, size } })}
+          colour={markColour("entrance", plan.entrance.colour, hex => ({ ...plan, entrance: recolour(plan.entrance!, hex) }))} actions={actions} locked={singleLocked} typing={typing} commandKey={mac ? "⌘" : "Ctrl"} unit={unit} onRotate={deg => turn(single, deg)} onDelete={remove} />}
+        {selectedLabel && <LabelPanel label={selectedLabel} onText={text => updateLabel(selectedLabel.key, item => ({ ...item, text }), `text:${selectedLabel.key}`)} onSize={size => updateLabel(selectedLabel.key, item => without(item, "size", size === "m" ? undefined : size))} onBold={bold => updateLabel(selectedLabel.key, item => without(item, "bold", bold || undefined))}
+          colour={markColour(`label:${selectedLabel.key}`, selectedLabel.colour, hex => ({ ...plan, labels: (plan.labels ?? []).map(item => item.key === selectedLabel.key ? recolour(item, hex) : item) }))} position={positionFields(single!, boxOf(plan, single!)!, ["x", "y"])} actions={actions} locked={singleLocked} typing={typing} commandKey={mac ? "⌘" : "Ctrl"} unit={unit} onRotate={deg => turn(single!, deg)} onDelete={remove} />}
+        {selectedSymbol && <SymbolPanel symbol={selectedSymbol} onKind={kind => changeKind(selectedSymbol.key, kind)} onCaption={text => updateSymbol(selectedSymbol.key, item => without(item, "label", text || undefined), `caption:${selectedSymbol.key}`)} onSize={size => updateSymbol(selectedSymbol.key, item => ({ ...item, size }))}
+          colour={markColour(`symbol:${selectedSymbol.key}`, selectedSymbol.colour, hex => ({ ...plan, symbols: (plan.symbols ?? []).map(item => item.key === selectedSymbol.key ? recolour(item, hex) : item) }))} position={positionFields(single!, boxOf(plan, single!)!, ["x", "y"])} actions={actions} locked={singleLocked} typing={typing} commandKey={mac ? "⌘" : "Ctrl"} unit={unit} onRotate={deg => turn(single!, deg)} onDelete={remove} />}
 
         {hidden.length > 0 && <div className={styles.panel}>
           <h5>{t("hidden.title")}</h5>

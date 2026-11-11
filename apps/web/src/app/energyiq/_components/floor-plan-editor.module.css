@@ -261,3 +261,23 @@
 :global(:where(html[data-energyiq-theme="dark"])) .draft { background:#1b2430; color:#a9c8ea; }
 :global(:where(html[data-energyiq-theme="dark"])) .draft button { background:#1d2022; border-color:#32363b; color:#8bc3b9; }
 :global(:where(html[data-energyiq-theme="dark"])) .draft .leave { border-color:#5a2f2d; color:#f3908b; }
+
+/* Text labels and landmarks: the landmark menu, the turn field and the turning handle on the plan. */
+.landmarkMenu { width:320px; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:4px; }
+.landmarkMenu .hint { grid-column:1 / -1; margin-top:4px; }
+.landmarkChoice { display:flex; align-items:center; gap:8px; min-height:34px; padding:4px 8px; border:1px solid transparent; border-radius:7px; background:transparent; color:#1f2d25; font-size:13px; text-align:left; }
+.landmarkChoice svg { flex-shrink:0; width:20px; height:20px; color:#1d513a; }
+.landmarkChoice:hover, .landmarkChoice:focus-visible { background:#eef3ed; border-color:#d0dbd2; }
+.landmarkChoice[aria-pressed="true"] { border-color:#1d513a; background:#e4efe7; }
+.rotateField { display:inline-flex !important; grid-auto-flow:column; align-items:center; gap:4px !important; }
+.rotateField input { width:64px; font-variant-numeric:tabular-nums; }
+.turnLine { stroke:#1d513a; stroke-width:1.5; vector-effect:non-scaling-stroke; pointer-events:none; }
+.turnHandle { fill:white; stroke:#1d513a; stroke-width:2; vector-effect:non-scaling-stroke; cursor:grab; }
+.turnHandle:active { cursor:grabbing; }
+.turnBox { fill:none; stroke:#1d513a; stroke-width:2; stroke-dasharray:6 4; pointer-events:none; vector-effect:non-scaling-stroke; }
+:global(:where(html[data-energyiq-theme="dark"])) .landmarkChoice { color:#e6ede9; }
+:global(:where(html[data-energyiq-theme="dark"])) .landmarkChoice svg { color:#8bc3b9; }
+:global(:where(html[data-energyiq-theme="dark"])) .landmarkChoice:hover, :global(:where(html[data-energyiq-theme="dark"])) .landmarkChoice:focus-visible { background:#232826; border-color:#32363b; }
+:global(:where(html[data-energyiq-theme="dark"])) .landmarkChoice[aria-pressed="true"] { border-color:#8bc3b9; background:#1c2a22; }
+:global(:where(html[data-energyiq-theme="dark"])) .turnLine, :global(:where(html[data-energyiq-theme="dark"])) .turnBox { stroke:#8bc3b9; }
+:global(:where(html[data-energyiq-theme="dark"])) .turnHandle { fill:#191919; stroke:#8bc3b9; }

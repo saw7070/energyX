@@ -94,3 +94,14 @@
 .lookBlocks .planZone { fill:color-mix(in srgb, var(--area) 8%, var(--plan-floor)); stroke:color-mix(in srgb, var(--area) 60%, transparent); }
 .lookBlocks .planZoneActive { fill:color-mix(in srgb, var(--area) 14%, var(--plan-floor)); stroke:var(--area); }
 .lookBlocks .planRoom { stroke:color-mix(in srgb, var(--area, var(--plan-partition)) 45%, transparent); }
+
+/* Text labels and landmarks (plan-symbols.tsx): ink is currentColor, so a colour chosen for one item simply sets `color`.
+   A halo in the room colour keeps thin lines and small text clear of walls and grid lines in every style and theme. */
+.mark { color:#24352b; }
+.markHalo { stroke:#ffffff; }
+.markText { fill:currentColor; paint-order:stroke; stroke:#ffffff; stroke-linejoin:round; }
+:global(:where(html[data-energyiq-theme="dark"])) .mark { color:#e6ede9; }
+:global(:where(html[data-energyiq-theme="dark"])) .markHalo, :global(:where(html[data-energyiq-theme="dark"])) .markText { stroke:#161718; }
+.planMark { color:var(--plan-ink); }
+.planMarkHalo { stroke:var(--plan-room); }
+.planMarkText { fill:currentColor; paint-order:stroke; stroke:var(--plan-room); stroke-linejoin:round; letter-spacing:.01em; }

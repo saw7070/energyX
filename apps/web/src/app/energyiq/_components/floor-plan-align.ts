@@ -5,6 +5,7 @@
  * that does nothing leaves no undo step.
  */
 import { boxOf, isLocked, moveItems } from "./floor-plan-arrange";
+import { keepBoxInside } from "./floor-plan-mark-data";
 import { MIN_SIZE, clampRect, settleRooms, type FloorPlan, type Point, type Rect, type Selection } from "./floor-plan-model";
 
 export type AlignHow = "left" | "centre" | "right" | "top" | "middle" | "bottom";
@@ -66,7 +67,8 @@ export function setRect(plan: FloorPlan, item: Selection, rect: Rect): FloorPlan
   const [x, y, w, h] = clampRect(rect, plan.viewBox);
   if (item.kind === "area") return { ...plan, areas: plan.areas.map(entry => entry.key === item.key ? { ...entry, rect: [x, y, w, h] } : entry) };
   if (item.kind === "room") return { ...plan, rooms: plan.rooms.map(entry => entry.key === item.key ? { ...entry, rect: [x, y, w, h] } : entry) };
-  if (item.kind === "device") return { ...plan, devices: plan.devices.map(entry => entry.meterId === item.key && entry.size ? { ...entry, position: [x + w / 2, y + h / 2], size: [w, h] } : entry) };
+  // A turned device box keeps all of itself inside the plan as turned.
+  if (item.kind === "device") return { ...plan, devices: plan.devices.map(entry => entry.meterId === item.key && entry.size ? { ...entry, position: entry.rotation ? keepBoxInside([x + w / 2, y + h / 2], [w, h], entry.rotation, plan.viewBox) : [x + w / 2, y + h / 2], size: [w, h] } : entry) };
   return plan;
 }
 
