@@ -67,6 +67,17 @@ it("round trips a valid structure/meter/virtual draft through the existing store
   expect(metadata.energyIq.getProject("project").data_snapshot_id).toBe(before.data_snapshot_id);
   expect(await executeTool("project_setup_save_draft", { expectedRevision: initial.revision, document })).toEqual({ ok: false, code: "ENERGYIQ_SETUP_REVISION_CONFLICT" });
 });
+it("lets the advisor keep a meter's always-on mark and number of lights when it saves the draft back", async () => {
+  const { executeTool } = fixture();
+  const initial = await executeTool("project_setup_read", {}) as any;
+  const document = buildTuyaOfficeSetup();
+  document.meter_mapping!.rows[0]!.presentation = { ...document.meter_mapping!.rows[0]!.presentation, always_on: "true", light_count: "12" };
+  const saved = await executeTool("project_setup_save_draft", { expectedRevision: initial.revision, document }) as any;
+  expect(saved).toMatchObject({ ok: true, status: "saved" });
+  expect((await executeTool("project_setup_read", {}) as any).document.meter_mapping.rows[0].presentation).toMatchObject({ always_on: "true", light_count: "12" });
+  document.meter_mapping!.rows[0]!.presentation = { ...document.meter_mapping!.rows[0]!.presentation, light_count: "0" };
+  expect(await executeTool("project_setup_save_draft", { expectedRevision: saved.revision, document })).toMatchObject({ ok: false, code: "PROJECT_CONFIGURATION_ARGUMENTS_INVALID" });
+});
 it("rejects invalid drafts and unknown fields without advancing draft revision", async () => {
   const { executeTool } = fixture(); const initial = await executeTool("project_setup_read", {}) as any;
   const document = buildTuyaOfficeSetup(); document.nodes[0]!.parent_id = "missing-scope";

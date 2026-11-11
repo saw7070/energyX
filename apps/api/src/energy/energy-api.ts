@@ -5398,12 +5398,22 @@ const parseTemplatePresentation = (
   };
 };
 
+/** Most light points one meter can feed; matches the meter form. */
+const MAX_METER_LIGHT_COUNT = 9999;
+
 const parseMeterPresentation = (value: unknown) => {
   const presentation = requireRecord(value, "ENERGYIQ_METER_PRESENTATION_INVALID");
-  return Object.fromEntries(["device_name", "circuit_name", "group", "not_in_use", "off_with_lights", "short_name", "panel"].flatMap(key => {
+  return Object.fromEntries(["device_name", "circuit_name", "group", "not_in_use", "off_with_lights", "short_name", "panel", "always_on", "light_count"].flatMap(key => {
     if (presentation[key] === undefined) return [];
     if (typeof presentation[key] !== "string") throw new Error(`ENERGYIQ_METER_PRESENTATION_INVALID:${key}`);
     const label = presentation[key].trim().slice(0, 160);
+    // Always on is a yes/no: "true" keeps it, anything else (an unticked box) leaves it out.
+    if (key === "always_on") return label === "true" ? [[key, label]] : [];
+    if (key === "light_count" && label) {
+      const count = /^\d+$/u.test(label) ? Number(label) : Number.NaN;
+      if (!(count >= 1 && count <= MAX_METER_LIGHT_COUNT)) throw new Error(`ENERGYIQ_METER_PRESENTATION_INVALID:${key}`);
+      return [[key, String(count)]];
+    }
     return label ? [[key, label]] : [];
   }));
 };

@@ -35,6 +35,38 @@ it("preserves optional presentation through the setup HTTP boundary", async () =
   } finally {metadata.close();rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:100});}
 });
 
+it("keeps a meter's always-on mark and number of lights through the setup HTTP boundary, and refuses a count that is not one", async () => {
+  const root = mkdtempSync(join(tmpdir(), "energy-presentation-"));
+  const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+  const put = async (body: unknown) => {
+    const stream = new PassThrough();
+    Object.assign(stream,{method:"PUT",headers:{}});
+    stream.end(JSON.stringify(body));
+    return handleEnergyApiRequest(stream as unknown as IncomingMessage,["projects","ngee-ann-polytechnic","setup","draft"],{
+      metadataStore:metadata,dataGateway:new LocalDataGateway(metadata),userId:"dev-user",workspaceId:NGEE_ANN_WORKSPACE_ID,
+    } as unknown as Required<ConfigApiContext>);
+  };
+  try {
+    ensureEnergyIqBootstrap(metadata);
+    const draft = metadata.energyIq.projectSetup.getDraft({ project_id: "ngee-ann-polytechnic", user_id: "dev-user" });
+    const document = structuredClone(draft.document);
+    document.meter_mapping!.rows[0]!.presentation = { device_name: "Lobby emergency lights", always_on: "true", light_count: " 12 " };
+    // An unticked box sent as anything but "true" is simply left out.
+    document.meter_mapping!.rows[1]!.presentation = { device_name: "Corridor lights", always_on: "false", light_count: "" };
+    expect((await put({ expectedRevision: draft.revision, document })).status).toBe(200);
+    const saved = metadata.energyIq.projectSetup.getDraft({ project_id: "ngee-ann-polytechnic", user_id: "dev-user" });
+    expect(saved.document.meter_mapping!.rows[0]!.presentation).toEqual({ device_name: "Lobby emergency lights", always_on: "true", light_count: "12" });
+    expect(saved.document.meter_mapping!.rows[1]!.presentation).toEqual({ device_name: "Corridor lights" });
+
+    for (const light_count of ["0", "2.5", "10000", "a dozen"]) {
+      const invalid = structuredClone(saved.document);
+      invalid.meter_mapping!.rows[0]!.presentation = { device_name: "Lobby emergency lights", light_count };
+      expect(await put({ expectedRevision: saved.revision, document: invalid })).toMatchObject({ status: 400, body: { error: { message: "ENERGYIQ_METER_PRESENTATION_INVALID:light_count" } } });
+    }
+    expect(metadata.energyIq.projectSetup.getDraft({ project_id: "ngee-ann-polytechnic", user_id: "dev-user" }).revision).toBe(saved.revision);
+  } finally {metadata.close();rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:100});}
+});
+
 it("groups all Tuya meters and keeps DB2 Other strictly within the Power boundary", () => {
   const mapping = buildTuyaOfficeSetup().meter_mapping!;
   expect(mapping.rows).toHaveLength(20);

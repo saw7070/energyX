@@ -37,9 +37,13 @@ export function applyLocationEdit(document: EnergyProjectSetupDocumentDto, proje
   return { nodeId: created.nodeId, document: { ...created.document, nodes: created.document.nodes.map(node => node.id !== created.nodeId ? node : withOptional({ ...node, name }, area, occupants)) } };
 }
 
+/** The most light points one meter can be said to feed. */
+export const MAX_LIGHT_COUNT = 9999;
+
 /**
  * Rename-only edits keep the confirmed totals; moving or re-counting a meter must be checked again. `offWithLights`
- * (left out: unchanged) says the meter is powered with the lights it measures, which changes no totals.
+ * (left out: unchanged) says the meter is powered with the lights it measures, `alwaysOn` that it is meant to run
+ * day and night (emergency lighting) and `lightCount` how many light points it feeds; none of these changes totals.
  */
 export function applyMeterEdit(document: EnergyProjectSetupDocumentDto, meter: EnergyMeterMappingRowDto, draft: MeterDraft, locale: EnergyIqLocale = "en"): EnergyProjectSetupDocumentDto | { error: string } {
   const t = translatorFor(structureMessages, locale);
@@ -48,12 +52,15 @@ export function applyMeterEdit(document: EnergyProjectSetupDocumentDto, meter: E
   const name = draft.name.trim().replace(/\s+/g, " ");
   if (!name) return { error: t("error.meterName") };
   if (!document.nodes.some(node => node.id === draft.scopeId)) return { error: t("error.meterLocation") };
-  const { off_with_lights: wasOffWithLights, short_name: wasShortName, panel: wasPanel, ...presentation } = meter.presentation ?? {};
+  const { off_with_lights: wasOffWithLights, short_name: wasShortName, panel: wasPanel, always_on: wasAlwaysOn, light_count: wasLightCount, ...presentation } = meter.presentation ?? {};
   const offWithLights = draft.offWithLights === undefined ? wasOffWithLights : draft.offWithLights ? "yes" : undefined;
+  const alwaysOn = draft.alwaysOn === undefined ? wasAlwaysOn : draft.alwaysOn ? "true" : undefined;
   // Left out: unchanged. Emptied: removed, so the full name shows again.
   const shortName = draft.shortName === undefined ? wasShortName : draft.shortName.trim().replace(/\s+/g, " ") || undefined;
   const panel = draft.panel === undefined ? wasPanel : draft.panel.trim().replace(/\s+/g, " ") || undefined;
-  const renamed = { ...meter, presentation: { ...presentation, device_name: name, ...(shortName ? { short_name: shortName } : {}), ...(panel ? { panel } : {}), ...(offWithLights ? { off_with_lights: offWithLights } : {}) } };
+  const lightCount = draft.lightCount === undefined ? wasLightCount : parseLightCount(draft.lightCount);
+  if (lightCount === null) return { error: t("error.lightCount", { max: MAX_LIGHT_COUNT }) };
+  const renamed = { ...meter, presentation: { ...presentation, device_name: name, ...(shortName ? { short_name: shortName } : {}), ...(panel ? { panel } : {}), ...(offWithLights ? { off_with_lights: offWithLights } : {}), ...(alwaysOn ? { always_on: alwaysOn } : {}), ...(lightCount ? { light_count: lightCount } : {}) } };
   const aggregation = draft.counted ? "official" as const : "excluded" as const;
   const changesTotals = draft.scopeId !== meter.scope_id || draft.category !== meter.category || aggregation !== meter.aggregation_usage;
   return { ...document, meter_mapping: changesTotals
@@ -118,19 +125,20 @@ export function LocationForm({ initial, title, busy, error, onSave, onCancel }: 
   </form>;
 }
 
-/** `shortName` and `panel` left out keep what the meter has; an empty one clears it. */
-export type MeterDraft = { name: string; scopeId: string; category: EnergyMeterCategoryDto; counted: boolean; offWithLights?: boolean; shortName?: string; panel?: string };
+/** `shortName`, `panel` and `lightCount` left out keep what the meter has; an empty one clears it. */
+export type MeterDraft = { name: string; scopeId: string; category: EnergyMeterCategoryDto; counted: boolean; offWithLights?: boolean; alwaysOn?: boolean; shortName?: string; panel?: string; lightCount?: string };
 
 export function MeterForm({ meter, document, busy, error, onSave, onCancel }: { meter: EnergyMeterMappingRowDto; document: EnergyProjectSetupDocumentDto; busy: boolean; error: string; onSave: (draft: MeterDraft) => void; onCancel: () => void }) {
   const t = useMessages(structureMessages);
   const { locale } = useEnergyIqLocale();
-  const [draft, setDraft] = useState({ name: meter.presentation?.device_name?.trim() || meter.presentation?.circuit_name?.trim() || meter.display_name, shortName: meter.presentation?.short_name ?? "", panel: meter.presentation?.panel ?? "", scopeId: meter.scope_id, category: meter.category, counted: meter.aggregation_usage === "official", offWithLights: Boolean(meter.presentation?.off_with_lights) });
+  const [draft, setDraft] = useState({ name: meter.presentation?.device_name?.trim() || meter.presentation?.circuit_name?.trim() || meter.display_name, shortName: meter.presentation?.short_name ?? "", panel: meter.presentation?.panel ?? "", scopeId: meter.scope_id, category: meter.category, counted: meter.aggregation_usage === "official", offWithLights: Boolean(meter.presentation?.off_with_lights), alwaysOn: meter.presentation?.always_on === "true", lightCount: meter.presentation?.light_count ?? "" });
   const locations = document.nodes.map(node => ({ id: node.id, label: nodePathLabel(document, node.id) })).sort((a, b) => a.label.localeCompare(b.label));
   return <form className={styles.inlineForm} aria-label={draft.name ? t("meter.editNamed", { name: draft.name }) : t("meter.edit")} onSubmit={event => { event.preventDefault(); onSave(draft); }}>
     <div className={styles.formGrid}>
       <label>{t("meter.name")}<input value={draft.name} onChange={event => setDraft({ ...draft, name: event.target.value })} autoFocus /></label>
       <label>{t("meter.shortName")}<input value={draft.shortName} placeholder={t("meter.shortNamePlaceholder")} maxLength={60} onChange={event => setDraft({ ...draft, shortName: event.target.value })} /></label>
       <label>{t("meter.panel")}<input value={draft.panel} placeholder={t("optional")} maxLength={80} onChange={event => setDraft({ ...draft, panel: event.target.value })} /></label>
+      <label>{t("meter.lightCount")}<input inputMode="numeric" value={draft.lightCount} placeholder={t("optional")} onChange={event => setDraft({ ...draft, lightCount: event.target.value })} /></label>
       <label>{t("meter.location")}<select value={document.nodes.some(node => node.id === draft.scopeId) ? draft.scopeId : ""} onChange={event => setDraft({ ...draft, scopeId: event.target.value })}>
         {!document.nodes.some(node => node.id === draft.scopeId) && <option value="">{t("meter.chooseLocation")}</option>}
         {locations.map(location => <option key={location.id} value={location.id}>{location.label}</option>)}
@@ -143,6 +151,8 @@ export function MeterForm({ meter, document, busy, error, onSave, onCancel }: { 
     <label className={styles.checkboxField}><input type="checkbox" checked={draft.counted} onChange={event => setDraft({ ...draft, counted: event.target.checked })} />{t("meter.counted")}</label>
     <label className={styles.checkboxField}><input type="checkbox" checked={draft.offWithLights} onChange={event => setDraft({ ...draft, offWithLights: event.target.checked })} />{t("meter.offWithLights")}</label>
     <p className={styles.formHint}>{t("meter.offWithLightsHint")}</p>
+    <label className={styles.checkboxField}><input type="checkbox" checked={draft.alwaysOn} onChange={event => setDraft({ ...draft, alwaysOn: event.target.checked })} />{t("meter.alwaysOn")}</label>
+    <p className={styles.formHint}>{t("meter.alwaysOnHint")}</p>
     {meter.source_label && <p className={styles.formHint}>{t("meter.sourceHint", { source: meter.source_label })}</p>}
     <FormActions busy={busy} error={error} onCancel={onCancel} />
   </form>;
@@ -191,6 +201,15 @@ function FormActions({ busy, error, onCancel }: { busy: boolean; error: string; 
     </div>
   </>;
 }
+
+/** A whole number of lights, 1 to MAX_LIGHT_COUNT, as stored; undefined when left empty and null when it is not one. */
+const parseLightCount = (value: string): string | undefined | null => {
+  const text = value.trim();
+  if (!text) return undefined;
+  if (!/^\d+$/.test(text)) return null;
+  const count = Number(text);
+  return count >= 1 && count <= MAX_LIGHT_COUNT ? String(count) : null;
+};
 
 const parseOptionalNumber = (value: string): number | undefined | null => {
   if (!value.trim()) return undefined;

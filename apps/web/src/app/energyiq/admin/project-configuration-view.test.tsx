@@ -140,6 +140,45 @@ it("lets editors rename a meter and add a group on the page, saving to the setup
   } finally { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); }
 });
 
+it("saves a meter as always on by design with its number of lights, and shows them again when reopened", async () => {
+  vi.stubGlobal("React", React); globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
+  const row = { id: "m1", source_label: "Block A EM", display_name: "Block A EM", presentation: { device_name: "Lobby emergency lights" }, scope_id: "a", resource: "electricity", category: "light", coverage: "partial", meter_role: "component", aggregation_usage: "official" };
+  const setupWith = (presentation: Record<string, string>) => ({ project: { id: "estate", has_unpublished_changes: false, root_scope_id: "root" }, draft: { revision: 2, document: { project: { name: "Estate", timezone: "Asia/Singapore" }, tier_structure_locked: true,
+    tiers: [{ id: "block", ordinal: 1, alias: "Block" }], nodes: [{ id: "a", tier_definition_id: "block", name: "Block A", sort_order: 10, metadata_status: "confirmed" }],
+    meter_mapping: { schema_version: 2, source_kind: "tuya", confirmed: true, rows: [{ ...row, presentation }], virtual_meters: [] } } } }) as unknown as EnergyProjectSetupDto;
+  const save = vi.spyOn(configApi, "saveEnergyProjectSetupDraft").mockResolvedValue({} as Awaited<ReturnType<typeof configApi.saveEnergyProjectSetupDraft>>);
+  vi.spyOn(configApi, "applyEnergyProjectChanges").mockResolvedValue({ hierarchy_revision_id: "h", template_revision_id: "t" });
+  const labelled = (text: string) => Array.from(host.querySelectorAll("label")).find(label => label.textContent?.startsWith(text))!.querySelector("input")!;
+  const type = async (input: HTMLInputElement, value: string) => { await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }); };
+  try {
+    await act(async () => root.render(<ProjectConfigurationView setup={setupWith({ device_name: "Lobby emergency lights" })} notes="" policies={null} projectId="estate" canEditSetup />));
+    await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Edit Lobby emergency lights"]')!.click());
+    expect(host.textContent).toContain("such as emergency lighting");
+    expect(labelled("Always on by design").checked).toBe(false);
+    await act(async () => labelled("Always on by design").click());
+    await type(labelled("Number of lights"), "12");
+    await act(async () => host.querySelector<HTMLFormElement>('form[aria-label^="Edit"]')!.requestSubmit());
+    expect(save).toHaveBeenLastCalledWith("estate", { expectedRevision: 2, document: expect.objectContaining({
+      meter_mapping: expect.objectContaining({ confirmed: true, rows: [expect.objectContaining({ id: "m1", presentation: { device_name: "Lobby emergency lights", always_on: "true", light_count: "12" } })] }),
+    }) });
+
+    // A number that is not a whole count of lights is refused in plain words, and nothing is saved.
+    save.mockClear();
+    await act(async () => root.render(<ProjectConfigurationView setup={setupWith({ device_name: "Lobby emergency lights", always_on: "true", light_count: "12" })} notes="" policies={null} projectId="estate" canEditSetup />));
+    await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Edit Lobby emergency lights"]')!.click());
+    expect(labelled("Always on by design").checked).toBe(true);
+    expect(labelled("Number of lights").value).toBe("12");
+    await type(labelled("Number of lights"), "1.5");
+    await act(async () => host.querySelector<HTMLFormElement>('form[aria-label^="Edit"]')!.requestSubmit());
+    expect(save).not.toHaveBeenCalled();
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe("Number of lights must be a whole number from 1 to 9999, or left empty.");
+  } finally { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); }
+});
+
 it("asks in the app's own words before removing a location, and removes nothing until confirmed", async () => {
   vi.stubGlobal("React", React); globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);

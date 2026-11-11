@@ -269,7 +269,11 @@ export type EnergyMeterRoleDto = "total" | "component" | "standalone";
 export type EnergyAggregationUsageDto = "official" | "excluded";
 
 export type EnergyMeterMappingRowDto = {
-  presentation?: { device_name?: string; circuit_name?: string; group?: string; not_in_use?: string; off_with_lights?: string; short_name?: string; panel?: string };
+  /**
+   * `always_on` is "true" for a meter meant to run day and night (emergency lighting), absent otherwise.
+   * `light_count` is how many light points the meter feeds, a whole number from 1 to 9999 kept as text.
+   */
+  presentation?: { device_name?: string; circuit_name?: string; group?: string; not_in_use?: string; off_with_lights?: string; short_name?: string; panel?: string; always_on?: string; light_count?: string };
   id: string;
   source_label: string;
   scope_id: string;
