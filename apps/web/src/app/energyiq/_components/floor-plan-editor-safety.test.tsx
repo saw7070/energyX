@@ -37,7 +37,9 @@ async function render(props: Partial<React.ComponentProps<typeof FloorPlanEditor
   const canvas = () => host.querySelector('svg[role="application"]') as SVGSVGElement;
   const press = async (target: EventTarget, key: string, extra: KeyboardEventInit = {}) => { await act(async () => { target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...extra })); }); };
   const roomRect = () => canvas().querySelectorAll("g")[1]!.querySelector("rect")!.getAttribute("x");
-  return { host, button, canvas, press, roomRect, onCancel, onSaved, unmount: async () => { await act(async () => root.unmount()); host.remove(); } };
+  /** Chooses a drawing tool, then clicks the plan once: the item is added there at its usual size. */
+  const draw = async (label: string, x = 700, y = 300) => { await act(async () => button(label).click()); await act(async () => { canvas().dispatchEvent(pointer("pointerdown", x, y)); canvas().dispatchEvent(pointer("pointerup", x, y)); }); };
+  return { host, button, canvas, press, roomRect, draw, onCancel, onSaved, unmount: async () => { await act(async () => root.unmount()); host.remove(); } };
 }
 const pointer = (type: string, x: number, y: number) => new PointerEvent(type, { bubbles: true, button: 0, clientX: x, clientY: y, pointerId: 1 });
 
@@ -45,7 +47,7 @@ it("redoes what was undone, from the toolbar and with the keyboard, while the pl
   const view = await render();
   const rooms = () => view.canvas().querySelectorAll(".roomLabel, text").length;
   const before = rooms();
-  await act(async () => view.button("+ Add room").click());
+  await view.draw("+ Add room", 200, 300);
   const added = rooms();
   expect(added).toBeGreaterThan(before);
   expect(view.button("Redo").disabled).toBe(true);
@@ -102,9 +104,9 @@ it("undoes and cancels with the keyboard while a button of the editor has focus,
   const rooms = () => view.canvas().querySelectorAll("text").length;
   const before = rooms();
   const add = view.button("+ Add room");
-  await act(async () => add.click());
+  await view.draw("+ Add room", 200, 300);
   expect(rooms()).toBeGreaterThan(before);
-  // The button just clicked still has focus: Ctrl+Z undoes, Delete does nothing.
+  // On a button of the editor: Ctrl+Z undoes, Delete does nothing.
   await view.press(add, "z", { ctrlKey: true });
   expect(rooms()).toBe(before);
   await view.press(add, "z", { ctrlKey: true, shiftKey: true });
@@ -185,7 +187,7 @@ it("asks before leaving with changes not saved, inside the page and when closing
   await act(async () => view.button("Cancel").click());
   expect(view.onCancel).toHaveBeenCalledTimes(1);
 
-  await act(async () => view.button("+ Add room").click());
+  await view.draw("+ Add room", 200, 300);
   expect(leave()).toBe(true);
   await act(async () => view.button("Cancel").click());
   expect(view.onCancel).toHaveBeenCalledTimes(1);
