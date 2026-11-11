@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { configApi, type EnergyProjectSetupDocumentDto, type EnergyProjectSetupDto, type EnergyOperationalPolicyConfigurationDto } from "../../../lib/config-api";
 import { projectMeterName, projectMeterSubtitle } from "./project-meter-name";
-import { addGroup, groupChoices, metersInGroup, moveMetersToGroup, removeGroup } from "./meter-groups-editing";
+import { addGroup, canMoveGroup, groupChoices, metersInGroup, moveGroup, moveMetersToGroup, removeGroup } from "./meter-groups-editing";
 import { ReportMarkdown } from "./report-file-preview";
 import { ProjectSpatialPreview } from "./project-spatial-preview";
 import { OperatingCalendarEditor } from "./operating-calendar-editor";
@@ -60,6 +60,9 @@ export function ProjectConfigurationView({ setup, notes, policies, projectId, on
   // some browsers hide until the drop.
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  // The group just moved up or down, and the order it was moved from, so its button keeps the keyboard focus once the
+  // list redraws in the new order.
+  const [movedGroup, setMovedGroup] = useState<{ id: string; direction: "up" | "down"; from: string } | null>(null);
   const [editingRate, setEditingRate] = useState<null | "edit" | "next">(null);
   const [policyBusy, setPolicyBusy] = useState(false);
   const [policyMessage, setPolicyMessage] = useState("");
@@ -80,6 +83,15 @@ export function ProjectConfigurationView({ setup, notes, policies, projectId, on
   const doc = setup.draft.document;
   const nodes = doc.nodes ?? [], meters = doc.meter_mapping?.rows ?? [], virtual = doc.meter_mapping?.virtual_meters ?? [];
   const names = new Map(nodes.map(node => [node.id, node.name]));
+  const groupOrder = nodes.map(node => `${node.id}:${node.parent_id ?? ""}:${node.sort_order}`).join("|");
+  useEffect(() => {
+    if (!movedGroup || movedGroup.from === groupOrder) return;
+    const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-group-move]"));
+    const find = (direction: "up" | "down") => buttons.find(button => button.dataset.groupMove === `${movedGroup.id}:${direction}` && !button.disabled);
+    // At the top or bottom the pressed button is switched off, so the other one takes the focus.
+    (find(movedGroup.direction) ?? find(movedGroup.direction === "up" ? "down" : "up"))?.focus();
+    setMovedGroup(null);
+  }, [groupOrder, movedGroup]);
   const parents = new Map(nodes.flatMap(node => node.parent_id ? [[node.id, node.parent_id] as const] : []));
   const meterNames = new Map(meters.map(meter => [meter.id, projectMeterName(meter)]));
   const tiers = new Map(doc.tiers.map(tier => [tier.id, tier.alias]));
@@ -164,6 +176,13 @@ export function ProjectConfigurationView({ setup, notes, policies, projectId, on
     onDragLeave: () => setDropTarget(current => current === groupId ? null : current),
     onDrop: (event: React.DragEvent) => { event.preventDefault(); const id = dragging ?? event.dataTransfer?.getData("text/plain"); setDragging(null); setDropTarget(null); if (id) moveMeter(id, groupId); },
   } : {};
+  /** Moves a group one place among the groups beside it; it stays selected, so its actions stay in reach. */
+  const reorderGroup = async (node: { id: string; name: string }, direction: "up" | "down") => {
+    const result = moveGroup(doc, node.id, direction, locale);
+    if ("error" in result) { setPolicyMessage(""); setSetupError(result.error); return; }
+    setMovedGroup({ id: node.id, direction, from: groupOrder });
+    if (!await saveDraft(result.document, t(direction === "up" ? "groupMovedUp" : "groupMovedDown", { name: node.name }))) setMovedGroup(null);
+  };
   const choices = groupChoices(doc);
   const removeLocation = (node: { id: string; name: string }) => {
     const result = removeGroup(doc, node.id, locale);
@@ -183,6 +202,7 @@ export function ProjectConfigurationView({ setup, notes, policies, projectId, on
       <button type="button" className={styles.edit} onClick={() => startSetupEdit({ kind: "location", nodeId: node.id })}>{t("rename")}</button>
       <button type="button" className={styles.edit} onClick={() => startSetupEdit({ kind: "new", parentId: node.id })}>{t("groupInside")}</button>
       <button type="button" className={styles.edit} onClick={() => startSetupEdit({ kind: "move", nodeId: node.id })}>{t("moveMetersHere")}</button>
+      {(canMoveGroup(doc, node.id, "up") || canMoveGroup(doc, node.id, "down")) && (["up", "down"] as const).map(direction => <button key={direction} type="button" className={styles.edit} data-group-move={`${node.id}:${direction}`} aria-label={t(direction === "up" ? "moveUpAria" : "moveDownAria", { name: node.name })} disabled={!canMoveGroup(doc, node.id, direction)} onClick={() => void reorderGroup(node, direction)}>{t(direction === "up" ? "moveUp" : "moveDown")}</button>)}
       <button type="button" className={`${styles.edit} ${styles.removeAction}`} disabled={setupBusy} onClick={() => removeLocation(node)}>{t("remove")}</button>
     </div>}{depth < 12 && <ul>{structure(node.id,depth+1)}</ul>}</li>;
   });

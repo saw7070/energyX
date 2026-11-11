@@ -141,7 +141,7 @@ it("lets editors rename a meter and add a group on the page, saving to the setup
 });
 
 it("saves a meter as always on by design with its number of lights, and shows them again when reopened", async () => {
-  vi.stubGlobal("React", React); globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  vi.stubGlobal("React", React); (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
   const row = { id: "m1", source_label: "Block A EM", display_name: "Block A EM", presentation: { device_name: "Lobby emergency lights" }, scope_id: "a", resource: "electricity", category: "light", coverage: "partial", meter_role: "component", aggregation_usage: "official" };
   const setupWith = (presentation: Record<string, string>) => ({ project: { id: "estate", has_unpublished_changes: false, root_scope_id: "root" }, draft: { revision: 2, document: { project: { name: "Estate", timezone: "Asia/Singapore" }, tier_structure_locked: true,
@@ -176,6 +176,41 @@ it("saves a meter as always on by design with its number of lights, and shows th
     await act(async () => host.querySelector<HTMLFormElement>('form[aria-label^="Edit"]')!.requestSubmit());
     expect(save).not.toHaveBeenCalled();
     expect(host.querySelector('[role="alert"]')?.textContent).toBe("Number of lights must be a whole number from 1 to 9999, or left empty.");
+  } finally { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); }
+});
+
+it("lets editors move a group up or down among the groups beside it, from the keyboard, and keeps the focus on it", async () => {
+  vi.stubGlobal("React", React); (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
+  const node = (id: string, name: string, sort_order: number, parent_id?: string) => ({ id, name, sort_order, tier_definition_id: parent_id ? "inside" : "top", metadata_status: "confirmed", ...(parent_id ? { parent_id } : {}) });
+  const setupWith = (nodes: unknown[], revision: number) => ({ project: { id: "estate", has_unpublished_changes: false, root_scope_id: "root" }, draft: { revision, document: { project: { name: "Estate", timezone: "Asia/Singapore" }, tier_structure_locked: true,
+    tiers: [{ id: "top", ordinal: 2, alias: "Group" }, { id: "inside", ordinal: 1, alias: "Group 2" }], nodes,
+    meter_mapping: { schema_version: 2, source_kind: "tuya", confirmed: true, rows: [{ id: "m1", source_label: "Lobby", display_name: "Lobby", presentation: { device_name: "Lobby lights" }, scope_id: "ground", resource: "electricity", category: "light", coverage: "partial", meter_role: "component", aggregation_usage: "official" }], virtual_meters: [] } } } }) as unknown as EnergyProjectSetupDto;
+  const before = [node("a", "Block A", 10), node("b", "Block B", 20), node("common", "Common area", 30), node("ground", "Ground floor", 10, "a")];
+  const save = vi.spyOn(configApi, "saveEnergyProjectSetupDraft").mockResolvedValue({} as Awaited<ReturnType<typeof configApi.saveEnergyProjectSetupDraft>>);
+  vi.spyOn(configApi, "applyEnergyProjectChanges").mockResolvedValue({ hierarchy_revision_id: "h", template_revision_id: "t" });
+  const topLevel = () => Array.from(host.querySelectorAll<HTMLElement>("ul > li > button strong")).map(item => item.textContent).filter(name => name !== "Ground floor");
+  const moveButton = (label: string) => host.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+  try {
+    await act(async () => root.render(<ProjectConfigurationView setup={setupWith(before, 4)} notes="" policies={null} projectId="estate" canEditSetup />));
+    await act(async () => Array.from(host.querySelectorAll("button")).find(button => button.textContent?.includes("Common area"))!.click());
+    // The last group can only go up; a group with nothing beside it shows no move buttons at all.
+    expect(moveButton("Move Common area down")!.disabled).toBe(true);
+    moveButton("Move Common area up")!.focus();
+    await act(async () => moveButton("Move Common area up")!.click());
+    expect(save).toHaveBeenLastCalledWith("estate", { expectedRevision: 4, document: expect.objectContaining({
+      nodes: expect.arrayContaining([expect.objectContaining({ id: "b", sort_order: 30 }), expect.objectContaining({ id: "common", sort_order: 20 }), expect.objectContaining({ id: "a", sort_order: 10 }), expect.objectContaining({ id: "ground", sort_order: 10 })]),
+    }) });
+    expect(host.textContent).toContain("Moved Common area up.");
+
+    // Once the page has the saved order, the group stays selected and its button still has the focus.
+    const saved = (save.mock.lastCall![1] as { document: { nodes: unknown[] } }).document.nodes;
+    await act(async () => root.render(<ProjectConfigurationView setup={setupWith(saved, 5)} notes="" policies={null} projectId="estate" canEditSetup />));
+    expect(topLevel()).toEqual(["Block A", "Common area", "Block B"]);
+    expect(document.activeElement).toBe(moveButton("Move Common area up"));
+
+    await act(async () => Array.from(host.querySelectorAll("button")).find(button => button.textContent?.includes("Ground floor"))!.click());
+    expect(moveButton("Move Ground floor up")).toBeNull();
   } finally { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); }
 });
 
