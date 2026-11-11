@@ -162,6 +162,38 @@ describe("automatic reports: daily reports", () => {
   });
 });
 
+describe("automatic reports: the note on the Overview", () => {
+  beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-09-23T08:00:00Z")); });
+  afterEach(() => { vi.useRealTimers(); });
+  const note = (frequency: string, overview: boolean) => <ReportScheduleNote projectId="p1" schedule={{ frequency, localHour: 6, timezone: "Asia/Singapore" }} overview={overview} />;
+
+  it("counts down to the weekly or monthly report the Overview shows, and says daily ones are kept in Reports", async () => {
+    // Wednesday 23 September 2026, 16:00 in Singapore. Tomorrow's daily report goes to Reports; Monday's weekly one is next here.
+    await render(note("daily-weekly-monthly", true));
+    expect(container.textContent).toBe("A new report is created automatically every week and every month, around 06:00. A daily report is kept in Reports too. Next one: 28 Sep 2026, around 06:00.");
+    await act(async () => root.render(<EnergyIqLocaleProvider>{note("daily", true)}</EnergyIqLocaleProvider>));
+    expect(container.textContent).toBe("A daily report is created automatically around 06:00 and kept in Reports.");
+    // Weekly and monthly alone read as before, and Reports itself still counts down to tomorrow's daily report.
+    await act(async () => root.render(<EnergyIqLocaleProvider>{note("weekly-monthly", true)}</EnergyIqLocaleProvider>));
+    expect(container.textContent).toBe("A new report is created automatically every week and every month, around 06:00. Next one: 28 Sep 2026, around 06:00.");
+    await act(async () => root.render(<EnergyIqLocaleProvider>{note("daily-weekly-monthly", false)}</EnergyIqLocaleProvider>));
+    expect(container.textContent).toContain("Next one: 24 Sep 2026, around 06:00.");
+  });
+
+  it("says so in Chinese and Malay", async () => {
+    const expected = { "zh-Hans": ["每天的报告也会保存在“报告”中。", "每天约 06:00 会自动生成一份报告，保存在“报告”中。"],
+      ms: ["Laporan harian juga disimpan di Laporan.", "Laporan harian dijana secara automatik sekitar 06:00 dan disimpan di Laporan."] };
+    for (const locale of ["zh-Hans", "ms"] as const) {
+      await act(async () => root.unmount());
+      root = createRoot(container);
+      await render(note("daily-weekly-monthly", true), locale);
+      expect(container.textContent).toContain(expected[locale][0]);
+      await act(async () => root.render(<EnergyIqLocaleProvider>{note("daily", true)}</EnergyIqLocaleProvider>));
+      expect(container.textContent).toContain(expected[locale][1]);
+    }
+  });
+});
+
 describe("automatic reports: site report style", () => {
   it("defaults to the full report and saves the management review when chosen", async () => {
     await render(<ReportAgentPanel projectId="p1" settingsMode="automation" />);
