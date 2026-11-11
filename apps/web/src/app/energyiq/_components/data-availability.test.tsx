@@ -114,6 +114,7 @@ it("shows a meter that is online but using nothing in neutral words, never as st
     expect(row("Pavilion fan")).toContain("Still online. Its reading has not changed, so no new readings come in until it next uses energy.");
     // Days of no use stay a quiet note beside the meter, not something that needs a look.
     expect(row("Pavilion fan")).toContain("No use for 96 hours from");
+    expect(Array.from(host.querySelectorAll("tbody small")).find(item => item.textContent!.startsWith("No use for 96 hours"))!.className).toBe("");
     expect(host.querySelector('[role="note"]')).toBeNull();
     expect(row("Spare lobby circuit")).toContain("No use in this period");
     // An editor can still mark either not in use by hand; nothing on the page suggests it.

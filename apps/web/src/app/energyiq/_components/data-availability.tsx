@@ -155,7 +155,7 @@ export function DataAvailability({ projectId, siteName, document, canEdit, busy,
             <tbody>{meters.flatMap(meter => {
               const low = meter.status !== "not_in_use" && meter.availabilityPct < target;
               const row = <tr key={meter.meterPointId}>
-                <td><span className={styles.name}><b>{meter.name}</b>{meter.location && <small>{meter.location}</small>}{meter.checks.map(check => <small key={check.from} className={styles.flag}>{checkText(meter, check, true)}</small>)}</span></td>
+                <td><span className={styles.name}><b>{meter.name}</b>{meter.location && <small>{meter.location}</small>}{meter.checks.map(check => <small key={check.from} className={check.kind === "flat_zero" ? undefined : styles.flag}>{checkText(meter, check, true)}</small>)}</span></td>
                 <td><span className={styles.received}>
                   <span className={`${styles.bar} ${low ? styles.barLow : ""}`} aria-hidden="true"><span style={{ width: `${Math.min(100, meter.availabilityPct)}%` }} /><i className={styles.target} style={{ left: `${target}%` }} /></span>
                   <b>{number(meter.availabilityPct)}%</b>
