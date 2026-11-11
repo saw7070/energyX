@@ -88,3 +88,38 @@ it("shows each meter against the target, the outages and stuck readings, and let
     expect(load).toHaveBeenLastCalledWith("tuya-office", { from: `${month}-01`, to: expect.stringMatching(new RegExp(`^${month}-(28|29|30|31)$`)) });
   } finally { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); }
 });
+
+it("shows a meter that is online but using nothing in neutral words, never as stopped or something to mark not in use", async () => {
+  vi.stubGlobal("React", React); vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
+  // A rarely used pavilion fan: used on the first days, then nothing since 25 September; a lobby circuit that never ran.
+  const idle: EnergyDataAvailabilityDto = {
+    from: "2026-09-03", to: "2026-10-02", timezone: "Asia/Singapore", targetPct: 95,
+    site: { availabilityPct: 70, metersCounted: 2, metersBelowTarget: 2, outageCount: 1, estimatedKwh: 0, checkCount: 1 },
+    meters: [
+      { meterPointId: "fan", name: "Pavilion fan", status: "idle", availabilityPct: 73.3, realHours: 528, estimatedHours: 0, estimatedKwh: 0, missingHours: 192, longestOutageHours: 192, lastReadingAt: "2026-09-25T01:00:00.000Z",
+        checks: [{ kind: "flat_zero", from: "2026-09-10T00:00:00.000Z", to: "2026-09-14T00:00:00.000Z", hours: 96, kwhPerHour: 0 }] },
+      { meterPointId: "spare", name: "Spare lobby circuit", status: "idle", availabilityPct: 0, realHours: 0, estimatedHours: 0, estimatedKwh: 0, missingHours: 720, longestOutageHours: 720, lastReadingAt: "2026-08-01T01:00:00.000Z", checks: [] },
+    ],
+    outages: [{ meterPointId: "fan", name: "Pavilion fan", from: "2026-09-25T01:00:00.000Z", to: "2026-10-02T16:00:00.000Z", hours: 183, kind: "missing", estimatedKwh: 0, ongoing: true, idle: true }],
+  };
+  vi.spyOn(configApi, "getEnergyDataAvailability").mockResolvedValue(idle);
+  try {
+    await act(async () => root.render(<EnergyIqLocaleProvider><DataAvailability projectId="estate" siteName="Estate" document={document_} canEdit busy={false} error="" onSave={vi.fn()} /></EnergyIqLocaleProvider>));
+    await act(async () => undefined);
+    const text = host.textContent ?? "";
+    expect(text).not.toMatch(/Stopped sending|Still offline|mark it not in use|Check it is not stuck/);
+    const row = (name: string) => Array.from(host.querySelectorAll("tbody tr")).find(item => item.textContent!.startsWith(name))!.textContent!;
+    expect(row("Pavilion fan")).toContain("No use since 25 Sept, 09:00 am");
+    expect(row("Pavilion fan")).toContain("Still online. Its reading has not changed, so no new readings come in until it next uses energy.");
+    // Days of no use stay a quiet note beside the meter, not something that needs a look.
+    expect(row("Pavilion fan")).toContain("No use for 96 hours from");
+    expect(host.querySelector('[role="note"]')).toBeNull();
+    expect(row("Spare lobby circuit")).toContain("No use in this period");
+    // An editor can still mark either not in use by hand; nothing on the page suggests it.
+    expect(Array.from(host.querySelectorAll("tbody tr button")).map(button => button.textContent)).toEqual(["Mark not in use", "Mark not in use"]);
+    const outage = Array.from(host.querySelectorAll("tbody tr")).at(-1)!.textContent!;
+    expect(outage).toContain("Still using nothing");
+    expect(outage).toContain("Online, but its reading has not changed, so no new readings came in.");
+  } finally { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); }
+});

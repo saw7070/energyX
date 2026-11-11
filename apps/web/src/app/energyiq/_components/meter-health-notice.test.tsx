@@ -1,10 +1,10 @@
 /** @vitest-environment happy-dom */
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
-import { expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { configApi, type EnergyMeterHealthDto } from "../../../lib/config-api";
 import { EnergyIqLocaleProvider } from "./energyiq-locale";
-import { MeterHealthNotice, PendingDayNote, resetMeterHealthRequests, StoppedMetersNote, stoppedMeters } from "./meter-health-notice";
+import { idleMeters, MeterHealthNotice, PendingDayNote, resetMeterHealthRequests, StoppedMetersNote, stoppedMeters } from "./meter-health-notice";
 
 const health = (meters: EnergyMeterHealthDto["meters"]): EnergyMeterHealthDto => ({
   meters,
@@ -140,4 +140,34 @@ it("does not promise a pending day will arrive once a meter has stopped", async 
   // The old wording sent the reader away to wait for an update that never fixes it.
   expect(text).not.toContain("next update");
   await close();
+});
+
+describe("a meter that is quiet because it uses nothing", () => {
+  // A rarely used pavilion fan: its total has not moved since 20 September, but the live check still finds it online.
+  const meters: EnergyMeterHealthDto["meters"] = [
+    { meterPointId: "a", name: "Lobby lights", sourceLabel: "Block A lobby", status: "usable", lastReadingAt: "2026-09-24T00:45:00.000Z" },
+    { meterPointId: "fan", name: "Pavilion fan", sourceLabel: "Pavilion", status: "usable", lastReadingAt: "2026-09-20T08:45:00.000Z", onlineNow: true },
+  ];
+
+  it("is idle, not stopped; with no live answer the same silence is still stopped", () => {
+    expect(stoppedMeters(meters)).toEqual([]);
+    expect(idleMeters(meters).map(meter => meter.name)).toEqual(["Pavilion fan"]);
+    const unknown = meters.map(({ onlineNow: _online, ...meter }) => meter);
+    expect(stoppedMeters(unknown).map(meter => meter.name)).toEqual(["Pavilion fan"]);
+    expect(idleMeters(unknown)).toEqual([]);
+  });
+
+  it("is not named on the Overview as a meter that stopped sending", async () => {
+    const { host, close } = await renderNode(health(meters), <StoppedMetersNote projectId="estate" />);
+    expect(host.textContent).toBe("");
+    await close();
+  });
+
+  it("explains a newest day that waits for it in neutral words, not as a meter that stopped", async () => {
+    const { host, close } = await renderNode({ ...health(meters), dataThrough: "2026-09-24T00:45:00.000Z" }, <PendingDayNote projectId="estate" lastLocalDay="2026-09-20" timezone="Asia/Singapore" />);
+    const text = host.textContent ?? "";
+    expect(text).toBe("21 September isn't counted yet: Pavilion fan has used nothing since its last reading, so it has not sent a new one. The day is added once it does.");
+    expect(text).not.toContain("stopped");
+    await close();
+  });
 });

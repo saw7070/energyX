@@ -63,7 +63,7 @@ export type AvailabilityCsvLabels = {
   meterColumns: [string, string, string, string, string, string, string, string, string, string, string];
   outageTitle: string;
   outageColumns: [string, string, string, string, string, string];
-  status: (status: EnergyDataAvailabilityDto["meters"][number]["status"]) => string;
+  status: (status: EnergyDataAvailabilityDto["meters"][number]["status"], meter: EnergyDataAvailabilityDto["meters"][number]) => string;
   outageKind: (outage: EnergyDataAvailabilityDto["outages"][number]) => string;
   check: (check: EnergyDataAvailabilityDto["meters"][number]["checks"][number]) => string;
 };
@@ -75,7 +75,7 @@ export function availabilityCsv(data: EnergyDataAvailabilityDto, siteName: strin
     labels.meterColumns.map(cell).join(","),
     ...data.meters.map(meter => [
       meter.name, meter.location ?? "", meter.availabilityPct, data.targetPct, meter.realHours, meter.estimatedHours, meter.estimatedKwh,
-      meter.longestOutageHours, meter.lastReadingAt ? siteDateTime(meter.lastReadingAt, data.timezone) : "", labels.status(meter.status),
+      meter.longestOutageHours, meter.lastReadingAt ? siteDateTime(meter.lastReadingAt, data.timezone) : "", labels.status(meter.status, meter),
       [meter.notInUse ?? "", ...meter.checks.map(labels.check)].filter(Boolean).join("; "),
     ].map(cell).join(",")),
     "",

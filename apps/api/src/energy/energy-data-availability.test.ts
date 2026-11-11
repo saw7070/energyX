@@ -90,6 +90,35 @@ describe("data availability", () => {
     expect(summary.site).toMatchObject({ availabilityPct: 100, metersCounted: 1, metersBelowTarget: 0, outageCount: 0 });
   });
 
+  it("calls a quiet meter the live check still finds online idle, not stopped, and its quiet stretch no outage", () => {
+    // A rarely used pavilion fan: real readings for two days, then its total stops moving and no new readings come.
+    const to = from + days(3);
+    const input = {
+      fromMs: from, toMs: to,
+      meters: [{ meterPointId: "fan", name: "Pavilion fan" }, { meterPointId: "tv", name: "Showroom TV" }],
+      intervals: [...quarterHours("fan", from, 48), ...quarterHours("tv", from, 48)],
+      lastReadingAt: new Map([["fan", new Date(from + days(2)).toISOString()], ["tv", new Date(from + days(2)).toISOString()]]),
+    };
+    const summary = summariseDataAvailability({ ...input, onlineNow: new Set(["fan"]) });
+    expect(summary.meters.map(meter => [meter.name, meter.status])).toEqual([["Pavilion fan", "idle"], ["Showroom TV", "stopped"]]);
+    // Readings that did not arrive still do not count as received: the figure stays what the readings show.
+    expect(summary.meters[0]!.availabilityPct).toBeCloseTo(66.7, 1);
+    expect(summary.outages.map(outage => [outage.name, outage.ongoing, outage.idle ?? false])).toEqual([["Pavilion fan", true, true], ["Showroom TV", true, false]]);
+    // Without a live answer, the same silence is still a meter that stopped.
+    expect(summariseDataAvailability(input).meters.map(meter => meter.status)).toEqual(["stopped", "stopped"]);
+  });
+
+  it("calls an online meter with nothing at all in the period idle, but one that has never sent a reading no readings", () => {
+    const summary = summariseDataAvailability({
+      fromMs: from, toMs: from + days(1),
+      meters: [{ meterPointId: "fan", name: "Pavilion fan" }, { meterPointId: "new", name: "New meter" }],
+      intervals: [],
+      lastReadingAt: new Map([["fan", new Date(from - days(5)).toISOString()]]),
+      onlineNow: new Set(["fan", "new"]),
+    });
+    expect(summary.meters.map(meter => meter.status)).toEqual(["idle", "no_readings"]);
+  });
+
   it("calls a meter with nothing in the period no readings, not stopped", () => {
     const summary = summariseDataAvailability({
       fromMs: from, toMs: from + days(1),
