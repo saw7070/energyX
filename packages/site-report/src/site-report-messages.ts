@@ -74,6 +74,11 @@ export const siteReportMessages = defineMessages({
   "lights.doc.noPattern": "Not enough complete days in this period to draw the hour-by-hour pattern.",
   "lights.doc.col.openBase": "Usual use in lights-on hours (kWh per hour)",
   "lights.doc.col.closedBase": "Usual use in the daytime (kWh per hour)",
+  // A report on a single day (a daily report).
+  "day.doc.col.recorded": "Measured on the day (kWh)",
+  "day.doc.noPattern": "The hour-by-hour pattern needs several complete weekdays, so a one-day report leaves it out.",
+  "day.lights.doc.section.pattern": "This day, hour by hour",
+  "day.lights.doc.noPattern": "Some readings for this day are missing, so the hour-by-hour pattern is not drawn.",
 
   "plan.aria": "Simplified floor plan of {name}",
   "plan.estimate": "about {kwh} kWh per 30 days",
@@ -199,6 +204,10 @@ export const siteReportMessages = defineMessages({
     "lights.doc.noPattern": "这段时间内读数完整的日子不够，无法绘制逐小时规律。",
     "lights.doc.col.openBase": "亮灯时间的平常用电（每小时 kWh）",
     "lights.doc.col.closedBase": "白天的平常用电（每小时 kWh）",
+    "day.doc.col.recorded": "当天实测（kWh）",
+    "day.doc.noPattern": "逐小时规律需要几个读数完整的工作日，所以一天的报告不绘制。",
+    "day.lights.doc.section.pattern": "当天的逐小时用电",
+    "day.lights.doc.noPattern": "当天有部分读数缺失，所以不绘制逐小时规律。",
 
     "plan.aria": "{name} 的简化楼层图",
     "plan.estimate": "约 {kwh} kWh / 30 天",
@@ -324,6 +333,10 @@ export const siteReportMessages = defineMessages({
     "lights.doc.noPattern": "Tidak cukup hari yang lengkap dalam tempoh ini untuk melukis corak mengikut jam.",
     "lights.doc.col.openBase": "Penggunaan biasa dalam waktu lampu menyala (kWh sejam)",
     "lights.doc.col.closedBase": "Penggunaan biasa pada waktu siang (kWh sejam)",
+    "day.doc.col.recorded": "Diukur pada hari itu (kWh)",
+    "day.doc.noPattern": "Corak mengikut jam memerlukan beberapa hari bekerja yang lengkap, jadi laporan satu hari tidak menunjukkannya.",
+    "day.lights.doc.section.pattern": "Hari itu, jam demi jam",
+    "day.lights.doc.noPattern": "Sebahagian bacaan hari itu tidak diterima, jadi corak mengikut jam tidak dilukis.",
 
     "plan.aria": "Pelan lantai ringkas {name}",
     "plan.estimate": "kira-kira {kwh} kWh setiap 30 hari",

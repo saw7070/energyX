@@ -8,7 +8,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { holidayName, joinText } from "./analysis-messages.js";
 import { shortDate } from "./analysis-model.js";
-import { forHoursMeaning, translatorFor, type EnergyIqLocale } from "./locale.js";
+import { forHoursMeaning, forOneDay, translatorFor, type EnergyIqLocale } from "./locale.js";
 import { rich, Rich } from "./rich.js";
 import { clock, hourRange, kwhText, moneyText, pctText, REPORT_COLOURS as C, type ProfileNote, type ReportDay, type ReportZone, type SiteReport } from "./site-report-model.js";
 import { siteReportMessages } from "./site-report-messages.js";
@@ -21,8 +21,12 @@ const num = (value: number | null, digits = 1) => value == null ? "—" : value.
 const whole = (value: number) => Math.round(value).toLocaleString("en-SG");
 /** The document's wording follows the language its sentences were written in, so a downloaded copy never mixes languages. */
 const reportText = (locale: EnergyIqLocale) => translatorFor(siteReportMessages, locale);
-/** The report's wording; a lights-on site's hours sections say "lights-on hours" and "daytime" instead of open and closed. */
-const reportHoursText = (report: Pick<SiteReport, "locale" | "hoursMeaning">) => forHoursMeaning(reportText(report.locale), siteReportMessages, report.hoursMeaning);
+/**
+ * The report's wording; a lights-on site's hours sections say "lights-on hours" and "daytime" instead of open and closed,
+ * and a report on a single day says "on the day" instead of "over 1 days".
+ */
+const reportHoursText = (report: Pick<SiteReport, "locale" | "hoursMeaning"> & { dayCount?: number | undefined }) =>
+  forHoursMeaning(forOneDay(reportText(report.locale), siteReportMessages, report.dayCount === 1), siteReportMessages, report.hoursMeaning);
 
 /** Axis ticks at a round step (1, 2, 2.5 or 5 × 10ⁿ) from zero to just above the maximum. */
 export function niceTicks(max: number, target = 5) {
@@ -380,6 +384,12 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
   const { estimate, benchmark, pattern, screening, locale } = report;
   const t = reportHoursText(report);
   const rate = report.rate;
+  // A month is estimated only from meters with a full day of readings; with none, the estimate is left blank.
+  const estimated = report.circuits.some(circuit => circuit.weekdayPerDay != null || circuit.weekendPerDay != null);
+  const monthOf = (circuit: SiteReport["circuits"][number]) => circuit.weekdayPerDay == null && circuit.weekendPerDay == null ? "—" : whole(circuit.monthKwh);
+  const sumOf = (values: Array<number | null>) => values.some(value => value != null) ? num(values.reduce<number>((sum, value) => sum + (value ?? 0), 0)) : "—";
+  // A daily report on a day with no readings at all says so in its headline, and has no figures to show below it.
+  const empty = report.dayCount === 1 && report.circuits.every(circuit => circuit.hours === 0 && circuit.periodKwh === 0);
   return <article className="eiq-report" aria-label={t("doc.aria", { name: report.projectName })}>
     <div className="page">
       <header className="masthead">
@@ -389,9 +399,10 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
         </div>
         <h1>{report.title.before}<span>{report.title.emphasis}</span></h1>
         <p className="lede"><Rich text={report.lede} /></p>
-        <div className="keyfigs">{report.keyFigures.map(figure => <div key={figure.label}><b>{figure.value}</b><small>{figure.label}</small></div>)}</div>
+        {!empty && <div className="keyfigs">{report.keyFigures.map(figure => <div key={figure.label}><b>{figure.value}</b><small>{figure.label}</small></div>)}</div>}
       </header>
 
+      {!empty && <>
       <section id="site-profile">
         <div className="sec-head"><span className="num">1</span><h2>{t("doc.section.profile")}</h2></div>
         <p><Rich text={report.profile.intro} /></p>
@@ -410,19 +421,19 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
           <tbody>
             {report.circuits.map((circuit, index) => <tr key={circuit.key}>
               <td>{circuit.label}<small className="code">{circuit.code}</small></td><td className="r">{num(circuit.weekdayPerDay)}</td><td className="r">{num(circuit.weekendPerDay)}</td><td className="r">{whole(circuit.periodKwh)}</td>
-              <td className={`r${index === 0 ? " hot" : ""}`}>{whole(circuit.monthKwh)}</td>{rate != null && <td className={`r${index === 0 ? " hot" : ""}`}>{circuit.monthCost == null ? "—" : moneyText(circuit.monthCost, report.currency)}</td>}
+              <td className={`r${index === 0 ? " hot" : ""}`}>{monthOf(circuit)}</td>{rate != null && <td className={`r${index === 0 ? " hot" : ""}`}>{circuit.monthCost == null ? "—" : moneyText(circuit.monthCost, report.currency)}</td>}
             </tr>)}
-            <tr className="total"><td>{t(report.siteWord === "office" ? "doc.total.office" : "doc.total.site")}</td><td className="r">{num(report.circuits.reduce((sum, circuit) => sum + (circuit.weekdayPerDay ?? 0), 0))}</td><td className="r">{num(report.circuits.reduce((sum, circuit) => sum + (circuit.weekendPerDay ?? 0), 0))}</td>
-              <td className="r">{whole(report.circuits.reduce((sum, circuit) => sum + circuit.periodKwh, 0))}</td><td className="r">{whole(estimate.monthKwh)}</td>{rate != null && <td className="r">{estimate.monthCost == null ? "—" : moneyText(estimate.monthCost, report.currency)}</td>}</tr>
+            <tr className="total"><td>{t(report.siteWord === "office" ? "doc.total.office" : "doc.total.site")}</td><td className="r">{sumOf(report.circuits.map(circuit => circuit.weekdayPerDay))}</td><td className="r">{sumOf(report.circuits.map(circuit => circuit.weekendPerDay))}</td>
+              <td className="r">{whole(report.circuits.reduce((sum, circuit) => sum + circuit.periodKwh, 0))}</td><td className="r">{estimated ? whole(estimate.monthKwh) : "—"}</td>{rate != null && <td className="r">{!estimated || estimate.monthCost == null ? "—" : moneyText(estimate.monthCost, report.currency)}</td>}</tr>
           </tbody>
         </table></div>
         {estimate.comparison && <p><Rich text={estimate.comparison} /></p>}
-        <div className="pies">
+        {estimated && <div className="pies">
           {report.groups
             ? <Donut title={t("donut.byGroup")} report={report} caption={estimate.spaceCaption} slices={report.groups.top.map(group => ({ key: group.key, label: group.name, value: group.monthKwh, colour: group.colour }))} />
             : <Donut title={t("donut.bySpace")} report={report} caption={estimate.spaceCaption} slices={report.zones.map(zone => ({ key: zone.key, label: zone.area && zone.area !== zone.label ? `${zone.label} · ${zone.area}` : zone.label, value: zone.monthKwh, colour: zone.colour }))} />}
           <Donut title={t("donut.byLoad")} report={report} caption={estimate.loadCaption} slices={report.circuits.map(circuit => ({ key: circuit.key, label: circuit.label, value: circuit.monthKwh, colour: circuit.colour }))} />
-        </div>
+        </div>}
         <p className="note">{estimate.note}</p>
       </section>
 
@@ -430,7 +441,8 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
         <div className="sec-head"><span className="num">3</span><h2>{t("doc.section.benchmark")}</h2></div>
         <p><Rich text={benchmark.intro} /></p>
         {benchmark.days.length > 0 && <BenchChart benchmark={benchmark} locale={locale} standalone={standalone} />}
-        {report.standout && benchmark.days.length > 0 && <StandoutBlock standout={report.standout} />}
+        {/* Days stand out against other days; a one-day report has none to compare with. */}
+        {report.standout && benchmark.days.length > 1 && <StandoutBlock standout={report.standout} />}
         {benchmark.rows.length > 0 && <div className="table-wrap"><table>
           <thead><tr><th>{t("doc.col.benchmark")}</th><th className="r">{t("doc.col.rate")}</th><th className="r">{t("doc.col.perDay")}</th><th className="r">{t("doc.col.perMonth")}</th><th className="r">{rate != null ? t("doc.col.benchCostAt", { rate: moneyText(rate, report.currency, 4) }) : t("doc.col.benchCost")}</th></tr></thead>
           <tbody>{benchmark.rows.map(row => <tr key={row.label}><td>{row.label}</td>{[row.rate, row.perDay, row.perMonth, row.cost].map((value, index) => <td key={index} className={`r${row.hot ? " hot" : ""}`}>{value}</td>)}</tr>)}</tbody>
@@ -457,6 +469,7 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
         <div className="callout"><strong>{t("doc.readingScreen")}</strong> <Rich text={screening.callout} /></div>
         <p className="note">{screening.note}</p>
       </section>
+      </>}
 
       <footer><span>{report.footer.left}</span><span>{report.footer.right}</span></footer>
     </div>

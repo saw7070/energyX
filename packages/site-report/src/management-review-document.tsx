@@ -188,7 +188,7 @@ export function ManagementReviewDocument({ review, standalone }: { review: Manag
         </table></div> : <p>{t("sum.none")}</p>}
       </Section>
 
-      <Section id="total" number={numberOf("total")} title={t("sec.total")}>
+      {has("total") && <Section id="total" number={numberOf("total")} title={t("sec.total")}>
         {total.intro && <p><Rich text={total.intro} /></p>}
         {total.days.length > 0 && <DailyChart review={review} />}
         {total.standout && <div className="standout">
@@ -201,7 +201,7 @@ export function ManagementReviewDocument({ review, standalone }: { review: Manag
           <thead><tr><th>{t("total.col.projection")}</th><th className="r">{t("total.col.energy")}</th>{review.rate != null && <th className="r">{t("total.col.cost")}</th>}</tr></thead>
           <tbody>{total.rows.map(row => <tr key={row.label}><td>{row.label}</td><td className="r">{kwhText(row.kwh)}</td>{review.rate != null && <td className="r">{row.cost == null ? "—" : moneyText(row.cost, review.currency, row.kwh < 100 ? 2 : 0)}</td>}</tr>)}</tbody>
         </table></div>}
-      </Section>
+      </Section>}
 
       {has("groups") && review.groups && <Section id="groups" number={numberOf("groups")} title={review.groups.heading}>
         <p>{review.groups.intro}</p>
@@ -223,7 +223,7 @@ export function ManagementReviewDocument({ review, standalone }: { review: Manag
         <ProfileChart pattern={{ hours: review.profile.hours, openFrom: review.profile.openFrom, openTo: review.profile.openTo, notes: [], caption: review.profile.caption }} report={review} standalone={standalone} />
       </Section>}
 
-      <Section id="savings" number={numberOf("savings")} title={t("sec.savings")}>
+      {has("savings") && <Section id="savings" number={numberOf("savings")} title={t("sec.savings")}>
         <p><Rich text={savings.intro} /></p>
         {savings.rows.length > 0 && <div className="table-wrap"><table>
           <thead><tr><th>{t("sav.col.measure")}</th><th>{t("sav.col.basis")}</th><th className="r">{t("sav.col.kwh")}</th>{review.rate != null && <th className="r">{t("sav.col.cost")}</th>}</tr></thead>
@@ -234,7 +234,7 @@ export function ManagementReviewDocument({ review, standalone }: { review: Manag
         </table></div>}
         {savings.checks.length > 0 && <div className="callout"><strong>{t("sav.checks")}:</strong> {savings.checks.join(review.locale === "zh-Hans" ? "；" : "; ")}</div>}
         {savings.note && <p className="note">{savings.note}</p>}
-      </Section>
+      </Section>}
 
       <Section id="method" number={numberOf("method")} title={t("sec.method")}>
         <p>{method.intro}</p>

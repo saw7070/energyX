@@ -17,7 +17,7 @@ import {
   savingsPlan, scopeDays, shortDate, timeBuckets, type AnalysisDay, type HoursMeaning,
 } from "./analysis-model.js";
 import type { AnalysisData, ScopeData, ScopeMeter } from "./analysis-types.js";
-import { forHoursMeaning, translatorFor, type EnergyIqLocale, type Translate } from "./locale.js";
+import { forHoursMeaning, forOneDay, translatorFor, type EnergyIqLocale, type Translate } from "./locale.js";
 import { managementReviewMessages, type ManagementReviewKey } from "./management-review-messages.js";
 import { analysisGroupTree, type MeterGroupNode, type MeterGroupTree } from "./meter-groups.js";
 import { notInUseIds, withMetersInUse, type NotInUseMeter } from "./meters-in-use.js";
@@ -26,7 +26,9 @@ import type { StandoutReport } from "./standout-report.js";
 import { buildSiteReport, clock, DAYTIME_NOTABLE_SHARE, hourRange, inWindow, kwhText, kwText, moneyText, openingWindow, pctText, REPORT_COLOURS, weekdayOf } from "./site-report-model.js";
 
 type T = Translate<ManagementReviewKey>;
-const reviewText = (locale: EnergyIqLocale, meaning: HoursMeaning): T => forHoursMeaning(translatorFor(managementReviewMessages, locale), managementReviewMessages, meaning);
+/** The review's wording: "lights." variants for lights-on hours, "day." variants for a review of a single day. */
+const reviewText = (locale: EnergyIqLocale, meaning: HoursMeaning, oneDay = false): T =>
+  forHoursMeaning(forOneDay(translatorFor(managementReviewMessages, locale), managementReviewMessages, oneDay), managementReviewMessages, meaning);
 
 /** The sections a review can hold, in reading order. */
 export const REVIEW_SECTIONS = ["summary", "total", "groups", "comparison", "profile", "savings", "method"] as const;
@@ -127,7 +129,9 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
   const base = buildSiteReport(data, reference, generatedAt, locale);
   const meaning: HoursMeaning = data.hoursMeaning ?? "opening";
   const lighting = meaning === "lights_on";
-  const t = reviewText(locale, meaning);
+  // A daily report reviews one day: "on this day", and nothing projected from part of a day.
+  const oneDay = data.current.project.dates.length === 1;
+  const t = reviewText(locale, meaning, oneDay);
   const list = (items: string[]) => listText(items, locale);
   const paragraph = (parts: string[]) => sentences(parts, locale);
   const notInUse = notInUseIds(data);
@@ -148,7 +152,9 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
   const perDayOf = (kwh: number) => kwh / Math.max(readDays.length, 1);
   const totalKwh = project.usageKwh ?? totalCells.reduce((sum, cell) => sum + (cell[2] ?? 0), 0);
   const complete = days.filter(day => day.complete);
-  const typicalKwh = median(complete.map(day => day.totalKwh)) ?? mean(readDays.map(day => day.totalKwh));
+  const typicalKwh = median(complete.map(day => day.totalKwh)) ?? (oneDay ? null : mean(readDays.map(day => day.totalKwh)));
+  const noReadings = oneDay && !readDays.length && !totalCells.some(cell => cell[2] != null);
+  const partDay = oneDay && !noReadings && !complete.length;
 
   // ---------- meters ----------
   const meters = siteMeters(data);
@@ -171,6 +177,7 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
     const gapDays = meter.series ? dates.filter(date => readDates.has(date) && (minutesOn.get(date) ?? 0) < expected).length : 0;
     const note = off ? off.reason ? t("met.note.notInUse", { reason: reasonText(off.reason) }) : t("met.note.notInUsePlain")
       : stopped ? last ? t("met.note.stopped", { since: at(last.date, last.hour) }) : t("met.note.none")
+      : meter.series && !received.length ? t("met.note.none")
       : gapDays ? t(gapDays === 1 ? "met.note.gaps.one" : "met.note.gaps.other", { count: gapDays }) : "";
     return { id: meter.id, name: meter.name, group: topGroupOf.get(meter.id) ?? place, perDay: meter.series ? perDayOf(kwh) : null, note, stopped: !!stopped, last };
   });
@@ -184,7 +191,8 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
   const missing = readDays.filter(day => !day.complete).length;
   const typicalCost = typicalKwh == null ? null : cost(typicalKwh);
   const total = {
-    days: reviewDays, typicalKwh, meterCount, standout: reviewDays.length ? base.standout : null,
+    // Days stand out against other days; a one-day review has none to compare with.
+    days: reviewDays, typicalKwh, meterCount, standout: reviewDays.length > 1 ? base.standout : null,
     intro: !shownDays.length ? "" : paragraph([
       shownDays.length > 1 && kwhText(low) === kwhText(high) ? t("total.introSteady", { kwh: kwhText(low), cost: typicalCost != null ? t("total.introCost", { cost: money(typicalCost, 2)! }) : "" })
         : shownDays.length === 1 ? t("total.introOne", { kwh: kwhText(shownDays[0]!.totalKwh), cost: rate != null ? t("total.introCost", { cost: money(cost(shownDays[0]!.totalKwh), 2)! }) : "" })
@@ -267,7 +275,8 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
   const firstStopped = stopped[0];
   const standoutDates = base.standout.items.map(item => shortDate(item.date, locale));
   const standoutFinding = standoutDates.length ? t(standoutDates.length === 1 ? "find.standout.one" : "find.standout.other", { count: standoutDates.length, dates: list(standoutDates) }) : "";
-  const findings = [
+  const findings = noReadings ? [t("day.find.none")] : [
+    partDay ? project.coverage != null && project.coverage < 100 ? t("day.find.missing", { pct: pctText(project.coverage / 100) }) : t("day.find.missingPlain") : "",
     readDays.length ? t("find.total", { kwh: kwhText(totalKwh), days: readDays.length, perDay: kwhText(perDayOf(totalKwh)), cost: rate != null ? t("find.totalCost", { cost: money(cost(perDayOf(totalKwh)), 2)! }) : "" }) : "",
     closedShare == null ? ""
       : lighting ? t(closedShare >= DAYTIME_NOTABLE_SHARE ? "find.closed" : "lights.find.night", { pct: pctText(closedShare) })
@@ -282,7 +291,12 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
     notInUseList.length === 1 ? t("find.notInUse.one", { name: notInUseList[0]!.name }) : notInUseList.length > 1 ? t("find.notInUse.other", { count: notInUseList.length }) : "",
   ].filter(Boolean).slice(0, MAX_FINDINGS);
   const worth = (row: { kwhYear: number; costYear: number | null }) => row.costYear != null ? money(row.costYear) : kwhText(row.kwhYear);
-  const decisions: ReviewDecision[] = [
+  // No readings at all on a daily report's day: the one thing to decide is getting the meters reporting again.
+  const silentMeters = meterRows.filter(row => !notInUseList.some(item => item.id === row.id));
+  const decisions: ReviewDecision[] = noReadings ? silentMeters.length === 1
+    ? [{ title: t("dec.fixMeter.one", { name: silentMeters[0]!.name }), why: t("dec.fixMeterWhy.one", { since: periodText }), worth: null }]
+    : silentMeters.length > 1 ? [{ title: t("dec.fixMeter.other", { count: silentMeters.length }), why: t("dec.fixMeterWhy.other", { names: list(silentMeters.map(row => row.name)) }), worth: null }] : []
+    : [
     ...rows.slice(0, 2).map(row => ({ title: row.title, why: row.why, worth: worth(row) })),
     ...(stopped.length === 1 && firstStopped ? [{ title: t("dec.fixMeter.one", { name: firstStopped.name }), why: t("dec.fixMeterWhy.one", { since: firstStopped.last ? at(firstStopped.last.date, firstStopped.last.hour) : periodText }), worth: null }]
       : stopped.length > 1 ? [{ title: t("dec.fixMeter.other", { count: stopped.length }), why: t("dec.fixMeterWhy.other", { names: list(stopped.map(row => row.name)) }), worth: null }] : []),
@@ -316,13 +330,15 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
 
   // ---------- masthead and key figures ----------
   const keyFigures = [
+    partDay ? { value: kwhText(totalKwh), label: t("day.kf.measured") } : null,
     typicalKwh != null ? { value: kwhText(typicalKwh), label: t("kf.typicalDay") } : null,
     typicalKwh != null ? { value: kwhText(typicalKwh * 30), label: t("kf.month") } : null,
     typicalKwh != null && rate != null ? { value: money(typicalKwh * 30 * rate)!, label: t("kf.monthCost") } : null,
     savingKwh > 0 ? { value: savingCost != null ? money(savingCost)! : kwhText(savingKwh), label: t("kf.saving") } : null,
     closedShare != null ? { value: pctText(closedShare), label: t("kf.closed") } : null,
   ].filter((figure): figure is { value: string; label: string } => !!figure).slice(0, 4);
-  const sections: ReviewSectionId[] = ["summary", "total", ...(groups ? ["groups" as const] : []), ...(comparison ? ["comparison" as const] : []), ...(profile ? ["profile" as const] : []), "savings", "method"];
+  // A day with no readings at all has nothing to chart: the summary says so and the method lists every meter.
+  const sections: ReviewSectionId[] = noReadings ? ["summary", "method"] : ["summary", "total", ...(groups ? ["groups" as const] : []), ...(comparison ? ["comparison" as const] : []), ...(profile ? ["profile" as const] : []), "savings", "method"];
   const generatedDay = generatedAt.slice(0, 10);
   return {
     style: "management", locale, hoursMeaning: meaning, projectName: data.projectName, timezone: data.timezone, tzLabel: base.tzLabel,
