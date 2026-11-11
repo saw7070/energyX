@@ -61,9 +61,10 @@ type LibraryReport = { id: string; source?: "site" | "advisor"; cadence?: SiteRe
 async function loadSavedSiteReport(projectId: string): Promise<Readings | null> {
   const library = await configApi.reportLibraryRequest<{ reports?: LibraryReport[]; overviewCadence?: SiteReportCadence }>(projectId);
   const reports = library.reports ?? [];
-  // The list is newest first. The project's own cadence wins; any saved site report still beats building one here.
+  // The list is newest first. The project's own cadence wins; any automatic site report still beats building one here.
+  // A custom site report (somebody's own dates) has no cadence and is never the Overview's.
   const chosen = reports.find(item => item.source === "site" && item.cadence === (library.overviewCadence === "weekly" ? "weekly" : "monthly"))
-    ?? reports.find(item => item.source === "site");
+    ?? reports.find(item => item.source === "site" && item.cadence);
   if (!chosen) return null;
   const [saved, dates] = await Promise.all([
     configApi.reportLibraryRequest<{ snapshot: unknown }>(projectId, `snapshot/${encodeURIComponent(chosen.id)}`),
@@ -72,6 +73,7 @@ async function loadSavedSiteReport(projectId: string): Promise<Readings | null> 
       .then(result => result.periodOptions?.availablePeriod?.toExclusive ?? null).catch(() => null),
   ]);
   const snapshot = parseSiteReportSnapshot(saved.snapshot);
+  if (snapshot.cadence === "custom") return null;
   return { data: snapshot.data, reference: snapshot.reference, generatedAt: snapshot.generatedAt, dataToExclusive: dates,
     saved: { reportId: chosen.id, cadence: snapshot.cadence, period: snapshot.period, generatedAt: snapshot.generatedAt, coverage: snapshot.data.current.project.coverage } };
 }

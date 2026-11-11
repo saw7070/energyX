@@ -33,7 +33,8 @@ const sameText = (left: string, right: string): boolean => {
  * when known: the headline may be in Chinese or Malay, so the English wording test is only a fallback.
  */
 export function analysisHref(projectId: string, period: { from: string; toExclusive: string } | null, headline: string, topic?: string): string {
-  const alwaysOn = topic ? topic === "always-on" : /around the clock|always[- ]on|stays? on|left on|after working hours|nobody|never (really )?switch/i.test(headline);
+  // Daytime use at a lights-on site, like an always-on load, is explained in "What stays on".
+  const alwaysOn = topic ? topic === "always-on" || topic === "daytime" : /around the clock|always[- ]on|stays? on|left on|after working hours|nobody|never (really )?switch/i.test(headline);
   const section = alwaysOn ? "story-on" : "story-title";
   return `/energyiq/analysis?${new URLSearchParams({ projectId, ...(period ? { from: period.from, to: shiftDate(period.toExclusive, -1) } : {}), section })}`;
 }
@@ -116,6 +117,8 @@ export function KeyPoints({projectId}:{projectId:string}) {
         <h2>{report ? <>{report.title.before}<span>{report.title.emphasis}</span></> : site.state && publication?.selection.summary ? plain(publication.selection.summary) : t("fallbackHeadline")}</h2>
         {/* The sentence under the headline only when it adds something: often it is the headline again. */}
         {report?.headline && sameText(report.headline, `${report.title.before}${report.title.emphasis}`) === false ? <p>{report.headline}</p> : null}
+        {/* Where the energy goes, one short line by top-level group, from the same report as the headline. */}
+        {report?.groups && <p className={styles.heroGroups}>{t("byGroup", { summary: report.groups.summary })}</p>}
         <ForecastLine projectId={projectId} className={styles.heroForecast} />
         <p className={styles.heroLinks}><Link href={analysisHref(projectId, shownPeriod, report?.headline ?? "", report?.headlineTopic)}>{t("seeWhy")}</Link></p></section>
       {/* What the site is drawing right now, for a site with a live connection. */}

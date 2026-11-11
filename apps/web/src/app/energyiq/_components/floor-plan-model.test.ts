@@ -140,3 +140,33 @@ describe("pinLabel inside an equipment box", () => {
     expect(pinLabel("LED Display 1", [50, 50], [{ name: "Showroom", rect: [0, 0, 200, 200] }], [{ rect: [20, 20, 100, 60], equipment: "Three large LED panels" }])).toBe("Display 1");
   });
 });
+
+describe("a drawing only", () => {
+  it("saves an area that names no electrical panel, and reads it back with no panel", () => {
+    const plan = planFromReference(stored);
+    const noPanel: FloorPlan = { ...plan, areas: plan.areas.map(area => area.key === "A" ? { ...area, board: "" } : area) };
+    const reference = referenceFromPlan(noPanel, "office", stored);
+    expect(reference.layout.zones.find(zone => zone.id === "A")!.referenceBoard).toBe("");
+    const read = readProjectSpatialReference(notesWithReference("", null, reference), "office")!;
+    expect(read.reference.layout.zones.find(zone => zone.id === "A")!.referenceBoard).toBe("");
+    expect(planFromReference(read.reference as StoredSpatialReference).areas.find(area => area.key === "A")!.board).toBe("");
+    // A block written by hand without any panel at all is read the same way.
+    const bare: Partial<StoredSpatialReference["layout"]["zones"][number]> = { ...stored.layout.zones[0]! };
+    delete bare.referenceBoard;
+    const handWritten = { ...stored, layout: { ...stored.layout, zones: [bare, ...stored.layout.zones.slice(1)] } };
+    expect(readProjectSpatialReference("```json\n" + JSON.stringify(handWritten) + "\n```", "office")!.reference.layout.zones[0]!.referenceBoard).toBe("");
+    // A new plan for a site with no panels starts with one area that names none.
+    expect(starterPlan([]).areas.map(area => area.board)).toEqual([""]);
+  });
+
+  it("keeps the meter locations a zone already had through every edit and save", () => {
+    const filed: StoredSpatialReference = { ...stored, layout: { ...stored.layout, zones: stored.layout.zones.map(zone => ({ ...zone, meterLocations: [`${zone.referenceBoard} Area`] })) } };
+    const plan = planFromReference(filed);
+    // Renaming an area's label, and turning the equipment group into its own area, keep what it already had.
+    const edited = removeSelection({ ...plan, areas: plan.areas.map(area => area.key === "A" ? { ...area, label: "North wing" } : area) }, { kind: "room", key: "room-2" });
+    const zones = referenceFromPlan({ ...edited, rooms: [...edited.rooms, { key: "room-9", name: "Store", rect: [60, 300, 100, 80] }] }, "office", filed).layout.zones;
+    expect(zones.map(zone => [zone.id, zone.meterLocations])).toEqual([["North wing", ["DB1 Area"]], ["B", ["DB2 Area"]], ["C", ["DB3 Area"]]]);
+    const read = readProjectSpatialReference(notesWithReference("", null, referenceFromPlan(plan, "office", filed)), "office")!;
+    expect(read.reference.layout.zones.map(zone => zone.meterLocations)).toEqual([["DB1 Area"], ["DB2 Area"], ["DB3 Area"]]);
+  });
+});

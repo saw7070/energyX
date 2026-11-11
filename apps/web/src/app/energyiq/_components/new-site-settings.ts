@@ -1,4 +1,5 @@
 import type {
+  EnergyHoursMeaningDto,
   EnergyOperatingCalendarEntryInputDto,
   EnergyOperatingDayDto,
   EnergyTariffFixedChargeDto,
@@ -22,8 +23,11 @@ export type SiteSettings = {
     peak: null | { rate: string; days: EnergyOperatingDayDto[]; from: string; to: string; holidaysOffPeak: boolean };
     fixedCharges: EnergyTariffFixedChargeDto[];
   };
-  /** null when opening hours are left for later; public holidays then wait too. */
-  hours: null | { days: EnergyOperatingDayDto[]; from: string; to: string };
+  /**
+   * null when opening hours are left for later; public holidays then wait too. A `to` earlier than `from` runs past
+   * midnight (19:00 → 07:00 next day). `meaning` is "opening" when left out; "lights_on" for lighting that runs at night.
+   */
+  hours: null | { days: EnergyOperatingDayDto[]; from: string; to: string; meaning?: EnergyHoursMeaningDto };
   holidays: null | Array<PublicHoliday & { chosen: boolean }>;
 };
 
@@ -55,7 +59,8 @@ export function chooseState(settings: SiteSettings, state: string): SiteSettings
   return {
     ...settings,
     state,
-    ...(settings.hours ? { hours: { ...settings.hours, days: usualOpeningDays(settings.country, state || undefined) } } : {}),
+    // Lights run every night whatever the state's working week, so only opening hours follow it.
+    ...(settings.hours && settings.hours.meaning !== "lights_on" ? { hours: { ...settings.hours, days: usualOpeningDays(settings.country, state || undefined) } } : {}),
     ...(settings.holidays ? { holidays: holidayChoices(settings.country, state) } : {}),
   };
 }
@@ -90,6 +95,17 @@ export function choosePlan(settings: SiteSettings, planId: TariffPlanId): SiteSe
   };
 }
 
+/** Opening hours start as the country's working week, 9 am to 6 pm; lights-on hours as every night, 7 pm to 7 am. */
+export function chooseHoursMeaning(settings: SiteSettings, meaning: EnergyHoursMeaningDto): SiteSettings {
+  if (!settings.hours || (settings.hours.meaning ?? "opening") === meaning) return settings;
+  return {
+    ...settings,
+    hours: meaning === "lights_on"
+      ? { days: [...DAYS], from: "19:00", to: "07:00", meaning }
+      : { days: usualOpeningDays(settings.country, settings.state || undefined), from: "09:00", to: "18:00" },
+  };
+}
+
 export type SettingsProblem = "stateRequired" | "priceInvalid" | "peakInvalid" | "peakHoursInvalid" | "taxInvalid" | "hoursInvalid";
 
 const positive = (value: string) => {
@@ -109,7 +125,8 @@ export function settingsProblem(settings: SiteSettings): SettingsProblem | null 
       if (!peak.days.length || peak.to <= peak.from) return "peakHoursInvalid";
     }
   }
-  if (settings.hours && (!settings.hours.days.length || settings.hours.to <= settings.hours.from)) return "hoursInvalid";
+  // An end earlier than the start runs into the next morning; the same time twice is no hours at all.
+  if (settings.hours && (!settings.hours.days.length || !settings.hours.from || !settings.hours.to || settings.hours.to === settings.hours.from)) return "hoursInvalid";
   return null;
 }
 
@@ -145,6 +162,7 @@ export function calendarEntryForSave(settings: SiteSettings): EnergyOperatingCal
   return {
     owner: { kind: "project" },
     effectiveFrom: SETTINGS_START,
+    ...(hours.meaning === "lights_on" ? { hoursMeaning: "lights_on" as const } : {}),
     weekly,
     ...(holidays.length ? {
       exceptions: holidays.map(holiday => ({ date: holiday.date, operating: [], label: holiday.name, classification: "public_holiday" as const })),

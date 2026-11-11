@@ -261,8 +261,8 @@ const readProjectMeterHealth = async (metadataStore: MetadataStore, projectId: s
       meterPoints,
     });
     const revision = metadataStore.energyIq.projectSetup.listHierarchyRevisions(projectId).find((candidate) => candidate.id === hierarchyRevisionId);
-    const rows = revision ? (JSON.parse(revision.snapshot_json) as { meter_mapping?: { rows?: Array<{ id: string; display_name?: string; presentation?: { device_name?: string } }> } }).meter_mapping?.rows ?? [] : [];
-    const names = new Map(rows.map((row) => [row.id, row.presentation?.device_name || row.display_name || row.id]));
+    const rows = revision ? (JSON.parse(revision.snapshot_json) as { meter_mapping?: { rows?: Array<{ id: string; display_name?: string; presentation?: { device_name?: string; short_name?: string } }> } }).meter_mapping?.rows ?? [] : [];
+    const names = new Map(rows.map((row) => [row.id, row.presentation?.short_name?.trim() || row.presentation?.device_name || row.display_name || row.id]));
     return health.map((meter) => ({
       meterPointId: meter.meterPointId,
       name: names.get(meter.meterPointId) ?? meter.sourceLabel,

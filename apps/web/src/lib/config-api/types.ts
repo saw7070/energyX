@@ -269,7 +269,7 @@ export type EnergyMeterRoleDto = "total" | "component" | "standalone";
 export type EnergyAggregationUsageDto = "official" | "excluded";
 
 export type EnergyMeterMappingRowDto = {
-  presentation?: { device_name?: string; circuit_name?: string; group?: string; not_in_use?: string; off_with_lights?: string };
+  presentation?: { device_name?: string; circuit_name?: string; group?: string; not_in_use?: string; off_with_lights?: string; short_name?: string; panel?: string };
   id: string;
   source_label: string;
   scope_id: string;
@@ -295,7 +295,7 @@ export type EnergyVirtualMeterTermDto = {
 };
 
 export type EnergyVirtualMeterDto = {
-  presentation?: { device_name?: string; circuit_name?: string; group?: string };
+  presentation?: { device_name?: string; circuit_name?: string; group?: string; short_name?: string; panel?: string };
   id: string;
   display_name: string;
   scope_id: string;
@@ -579,7 +579,12 @@ export type EnergyPortfolioSiteDto = {
   status: "ok" | "unavailable";
   reason?: string;
   usageKwh: number;
+  /** kWh on an average day, over the days with readings (from the site's first reading); 0 with less than a day of them. */
   averageDailyKwh: number;
+  /** Days of readings behind averageDailyKwh. Absent from an older server. */
+  readingDays?: number;
+  /** Each local date's kWh from period.from to period.to; null on a day with no readings. Absent from an older server. */
+  dailyKwh?: Array<number | null>;
   peakKw: number;
   peakAt?: string;
   previousUsageKwh: number;
@@ -607,6 +612,8 @@ export type EnergyPortfolioDto = {
   totals: {
     usageKwh: number;
     previousUsageKwh: number;
+    /** All sites together on an average day: each site's average a day, added up. Absent from an older server. */
+    averageDailyKwh?: number;
     carbonKg: number;
     costByCurrency: Record<string, number>;
     sitesWithData: number;
@@ -1429,6 +1436,8 @@ export type EnergyScopeAnalysisDto = {
     id: string; name: string; scopeId: string; kind: "physical" | "virtual";
     role: string; coverage: string; category: string; includedInOfficialTotal: boolean; formula?: string;
     displayGroup?: string; circuitName?: string;
+    /** Set when a short name replaces the installer's full label; `name` is then the short name. */
+    fullName?: string; panel?: string;
   }>;
   topCircuits: EnergyScopeAnalysisDto["circuits"];
   designatedTotals?: EnergyCircuitAnalysisDto[];
@@ -1601,6 +1610,10 @@ export type EnergyTariffScheduleRevisionDto = {
   published_at: string;
 };
 
+/** What a site's hours mean: when the building is in use (the default), or when lighting should be on (usually at night). */
+export type EnergyHoursMeaningDto = "opening" | "lights_on";
+
+/** A range whose `to` is earlier than its `from` runs past midnight (19:00–07:00) and belongs to the day it starts on. */
 export type EnergyOperatingCalendarEntryDto = {
   id: string;
   owner: EnergyOperationalPolicyOwnerDto;
@@ -1613,6 +1626,8 @@ export type EnergyOperatingCalendarEntryDto = {
     label?: string;
     classification?: EnergyCalendarExceptionClassificationDto;
   }>;
+  /** Present only for lights-on hours; absent means opening hours. */
+  hours_meaning?: EnergyHoursMeaningDto;
 };
 
 export type EnergyOperatingCalendarRevisionDto = {
@@ -1660,6 +1675,8 @@ export type EnergyOperatingCalendarEntryInputDto = {
   owner: EnergyOperationalPolicyOwnerInputDto;
   effectiveFrom: string;
   effectiveTo?: string;
+  /** Leave out for opening hours. */
+  hoursMeaning?: EnergyHoursMeaningDto;
   weekly: Record<EnergyOperatingDayDto, EnergyOperatingTimeRangeDto[]>;
   exceptions?: Array<{
     date: string;

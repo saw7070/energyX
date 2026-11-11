@@ -24,7 +24,7 @@ import {
   readEnergyMeterDataHealth,
   readEnergyMeterIntervalCoverage,
 } from "@datafoundry/data-gateway";
-import { localDayStarts, resolveDataAvailabilityPeriod, summariseDataAvailability } from "./energy-data-availability.js";
+import { localDayStarts, resolveDataAvailabilityPeriod, startAtFirstReading, summariseDataAvailability } from "./energy-data-availability.js";
 import { readOfflineMeters } from "./energy-live-status.js";
 import { normalizeProjectRegion, type EnergyIqProjectRegion, type MetadataStore } from "@datafoundry/metadata";
 import type {
@@ -104,10 +104,12 @@ import {
 import { markSiteAlertRead, readSiteAlerts } from "./energy-site-alerts.js";
 import { readLiveSiteReadings } from "./energy-live-readings.js";
 import {
+  addLiveConnectionMeters,
   buildLiveConnectionStarter,
   checkLiveConnection,
   disconnectLiveConnection,
   listLiveConnectionDevices,
+  listLiveConnectionNewDevices,
   readLiveConnection,
   requireSyncable,
   resolveLiveConnectionDeviceList,
@@ -1531,6 +1533,37 @@ export const handleEnergyApiRequest = async (
         const body = requireRecord(await readJsonBody(request));
         return respond(await resolveLiveConnectionDeviceList(live, { projectId, rows: body.rows }));
       }
+      // Add meters to a site that already has them: devices in the Tuya project no meter here reads yet, then add some.
+      if (segments.length === 4 && action === "new-devices" && request.method === "GET") {
+        requireProjectArea(context, user, projectId, ["facility"], "write");
+        return respond(await listLiveConnectionNewDevices(live, { projectId, userId: user.id }));
+      }
+      if (segments.length === 4 && action === "new-meters" && request.method === "POST") {
+        requireProjectArea(context, user, projectId, ["facility"], "write");
+        // Adding meters makes the setup live, which only an administrator may do; check before anything changes.
+        requireEnergyAdminProject(context, user, projectId);
+        const body = requireRecord(await readJsonBody(request));
+        const project = context.metadataStore.energyIq.getProject(projectId);
+        return respond(await addLiveConnectionMeters(live, {
+          projectId,
+          user,
+          meters: body.meters,
+          pipeline: {
+            blockingReasons: async (document) => (await createProjectDataReadiness(context, projectId, document)).blockingReasons,
+            registerReadings: async (file) => (await createReadingsImportBatch(context, project, user, {
+              ...file,
+              mimeType: "application/json",
+              kind: "tuya",
+            })).batch,
+            materialize: async (batchId, sourceSha256) => {
+              await materializeAgentProjectSource(context, projectId, batchId, dependencies, sourceSha256);
+            },
+            applyChanges: async () => {
+              await applyProjectChangesNow(context, projectId, dependencies);
+            },
+          },
+        }), 201);
+      }
       if (segments.length === 4 && action === "sync" && request.method === "POST") {
         requireSyncable(live, projectId);
         if (!scheduler) throw new Error("ENERGYIQ_LIVE_SYNC_UNAVAILABLE");
@@ -1824,10 +1857,16 @@ export const handleEnergyApiRequest = async (
             toMs: period.toMs,
           }),
         ]) : [[], []];
+        // A site connected part-way through the period is counted from its first reading, not from before it existed.
+        const firstReadingMs = Math.min(...health.flatMap((meterPoint) => {
+          const first = meterPoint.coverageFrom ?? meterPoint.readingFrom;
+          return first ? [Date.parse(first)] : [];
+        }));
+        const counted = startAtFirstReading(period, Number.isFinite(firstReadingMs) ? firstReadingMs : undefined, project.timezone);
         const summary = summariseDataAvailability({
-          fromMs: period.fromMs,
-          toMs: period.toMs,
-          dayStartsMs: localDayStarts(period.from, period.to, project.timezone),
+          fromMs: counted.fromMs,
+          toMs: counted.toMs,
+          dayStartsMs: localDayStarts(counted.from, counted.to, project.timezone),
           meters: meterPoints.map((meterPoint) => {
             const detail = details.get(meterPoint.meterPointId);
             return {
@@ -1852,7 +1891,7 @@ export const handleEnergyApiRequest = async (
         return {
           status: 200,
           headers: { "Cache-Control": "private, no-store" },
-          body: createSuccessResult({ from: period.from, to: period.to, timezone: project.timezone, ...summary, meters }),
+          body: createSuccessResult({ from: counted.from, to: counted.to, timezone: project.timezone, ...summary, meters }),
         };
       });
     }
@@ -3357,13 +3396,13 @@ const readPublishedMeterDetails = (metadataStore: Required<ConfigApiContext>["me
   if (!revision) return new Map();
   const document = JSON.parse(revision.snapshot_json) as {
     nodes?: Array<{ id: string; name: string }>;
-    meter_mapping?: { rows?: Array<{ id: string; display_name?: string; source_label?: string; scope_id?: string; navigation_scope_id?: string; presentation?: { device_name?: string; not_in_use?: string; off_with_lights?: string } }> };
+    meter_mapping?: { rows?: Array<{ id: string; display_name?: string; source_label?: string; scope_id?: string; navigation_scope_id?: string; presentation?: { device_name?: string; short_name?: string; not_in_use?: string; off_with_lights?: string } }> };
   };
   const nodeNames = new Map((document.nodes ?? []).map((node) => [node.id, node.name]));
   return new Map((document.meter_mapping?.rows ?? []).map((row) => {
     const location = nodeNames.get(row.navigation_scope_id ?? row.scope_id ?? "");
     return [row.id, {
-      name: row.presentation?.device_name || row.display_name || row.source_label || row.id,
+      name: row.presentation?.short_name?.trim() || row.presentation?.device_name || row.display_name || row.source_label || row.id,
       ...(location ? { location } : {}),
       ...(row.presentation?.not_in_use ? { notInUse: row.presentation.not_in_use } : {}),
       ...(row.presentation?.off_with_lights ? { offWithLights: true as const } : {}),
@@ -5106,6 +5145,9 @@ const parseOperatingCalendarEntries = (value: unknown): EnergyIqOperatingCalenda
     const exceptions = entry.exceptions === undefined
       ? undefined
       : parseOperatingExceptions(entry.exceptions, index);
+    if (entry.hoursMeaning !== undefined && entry.hoursMeaning !== "opening" && entry.hoursMeaning !== "lights_on") {
+      throw new Error(`ENERGYIQ_OPERATING_HOURS_MEANING_INVALID:${index}`);
+    }
     return {
       id: `calendar-entry-${randomUUID()}`,
       owner: parsePolicyOwner(entry.owner, `ENERGYIQ_OPERATING_OWNER_INVALID:${index}`),
@@ -5116,6 +5158,7 @@ const parseOperatingCalendarEntries = (value: unknown): EnergyIqOperatingCalenda
       ...(effectiveTo ? { effective_to: effectiveTo } : {}),
       weekly: parsedWeekly,
       ...(exceptions ? { exceptions } : {}),
+      ...(entry.hoursMeaning === "lights_on" ? { hours_meaning: "lights_on" as const } : {}),
     };
   });
 };
@@ -5357,7 +5400,7 @@ const parseTemplatePresentation = (
 
 const parseMeterPresentation = (value: unknown) => {
   const presentation = requireRecord(value, "ENERGYIQ_METER_PRESENTATION_INVALID");
-  return Object.fromEntries(["device_name", "circuit_name", "group", "not_in_use", "off_with_lights"].flatMap(key => {
+  return Object.fromEntries(["device_name", "circuit_name", "group", "not_in_use", "off_with_lights", "short_name", "panel"].flatMap(key => {
     if (presentation[key] === undefined) return [];
     if (typeof presentation[key] !== "string") throw new Error(`ENERGYIQ_METER_PRESENTATION_INVALID:${key}`);
     const label = presentation[key].trim().slice(0, 160);

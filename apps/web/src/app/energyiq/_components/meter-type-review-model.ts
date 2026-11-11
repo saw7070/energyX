@@ -1,6 +1,6 @@
 import type { EnergyMeterCategoryDto, EnergyMeterMappingRowDto, EnergyProjectSetupDocumentDto } from "../../../lib/config-api";
 import { suggestMeterCategory } from "../admin/meter-category-suggestion";
-import { projectMeterName } from "./project-meter-name";
+import { projectMeterFullName, projectMeterName } from "./project-meter-name";
 import { applyMeterEdit } from "./site-structure-editing";
 import type { EnergyIqLocale } from "./energyiq-messages";
 
@@ -36,7 +36,7 @@ export function applyMeterTypes(document: EnergyProjectSetupDocumentDto, choices
   for (const [id, category] of Object.entries(choices)) {
     const meter = next.meter_mapping?.rows.find(row => row.id === id);
     if (!meter || meter.category === category) continue;
-    const edited = applyMeterEdit(next, meter, { name: projectMeterName(meter), scopeId: meter.scope_id, category, counted: meter.aggregation_usage === "official" }, locale);
+    const edited = applyMeterEdit(next, meter, { name: projectMeterFullName(meter), scopeId: meter.scope_id, category, counted: meter.aggregation_usage === "official" }, locale);
     if ("error" in edited) return edited;
     next = edited;
   }

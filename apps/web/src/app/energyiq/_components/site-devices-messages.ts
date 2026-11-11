@@ -316,6 +316,7 @@ export const deviceMessages = defineMessages({
   "picker.noMatch": "No device matches “{query}”.",
   "boardTotalShort": "board total",
   "circuit": "Circuit {circuit}",
+  "panel": "Panel {panel}",
 
   "loadFailed": "Device readings could not be loaded.",
   "tryAgain": "Try again",
@@ -390,7 +391,6 @@ export const deviceMessages = defineMessages({
   "profile.closedTitle": "Typical closed day, {label} ({count} days)",
   "profile.openTitleDevice": "Typical open day ({count} days)",
   "profile.closedTitleDevice": "Typical closed day ({count} days)",
-  "byBoard": "Energy by distribution board",
   "byType": "Energy by type",
   "everyDay": "Every day, hour by hour",
   "weekOf": "Week of {date}",
@@ -399,6 +399,7 @@ export const deviceMessages = defineMessages({
 
   "breakdown.title": "Where the energy goes",
   "breakdown.note": "Each device's share of the {scope} total. Energy on board circuits without their own meter is shown as a separate line, so the list adds up to {kwh}.",
+  "breakdown.groupNote": "Each group's total and its share of the group above it, down to each device. A device counts only in the group it is in. Energy no sub-meter explains is its own line, so the {scope} adds up to {kwh}.",
   "scope.site": "site",
   "column.device": "Device",
   "column.used": "Used",
@@ -435,7 +436,7 @@ export const deviceMessages = defineMessages({
   "device.noReadings": "No readings arrived from {name} in {period}. Check that it is powered and connected.",
 
   "description.device": "{details}. Latest {days} of data: {period}.",
-  "description.board": "Distribution board with {count} devices. Everything below covers this board only. Latest {days} of data: {period}.",
+  "description.board": "Group with {count} devices. Everything below covers this group only. Latest {days} of data: {period}.",
   "description.site": "What every device on site uses, what it costs and when it runs. Latest {days} of data: {period}.",
   "crumbs": "Where you are",
   "wholeSite": "Whole site",
@@ -443,7 +444,7 @@ export const deviceMessages = defineMessages({
   "exitFullScreen": "Exit full screen",
   "refresh": "Refresh",
   "show": "Show",
-  "showGroup": "Show the whole site or one board",
+  "showGroup": "Show the whole site or one group",
   "boardFailed": "{board} could not be loaded.",
 
   "method.title": "How these figures are worked out",
@@ -524,6 +525,7 @@ export const deviceMessages = defineMessages({
     "picker.noMatch": "没有与“{query}”匹配的设备。",
     "boardTotalShort": "配电箱总表",
     "circuit": "回路 {circuit}",
+    "panel": "配电箱 {panel}",
 
     "loadFailed": "无法加载设备读数。",
     "tryAgain": "重试",
@@ -598,7 +600,6 @@ export const deviceMessages = defineMessages({
     "profile.closedTitle": "典型休息日（{label}，{count} 天）",
     "profile.openTitleDevice": "典型开放日（{count} 天）",
     "profile.closedTitleDevice": "典型休息日（{count} 天）",
-    "byBoard": "各配电箱的用电量",
     "byType": "按类型划分的用电量",
     "everyDay": "每一天，逐小时",
     "weekOf": "{date} 起的一周",
@@ -607,6 +608,7 @@ export const deviceMessages = defineMessages({
 
     "breakdown.title": "用电去向",
     "breakdown.note": "每台设备在{scope}总用电中所占的份额。配电箱上没有单独电表的回路，其用电另列一行，因此列表合计为 {kwh}。",
+    "breakdown.groupNote": "每个分组的总量，以及它占上一级分组的比例，一直细分到每台设备。每台设备只计入它所在的分组。没有分表计量的用电另列一行，因此{scope}合计为 {kwh}。",
     "scope.site": "场地",
     "column.device": "设备",
     "column.used": "用量",
@@ -643,7 +645,7 @@ export const deviceMessages = defineMessages({
     "device.noReadings": "{period}期间没有收到 {name} 的任何读数。请检查它是否已通电并已连接。",
 
     "description.device": "{details}。最近 {days}的数据：{period}。",
-    "description.board": "这个配电箱有 {count} 台设备。以下内容只涵盖此配电箱。最近 {days}的数据：{period}。",
+    "description.board": "这个分组有 {count} 台设备。以下内容只涵盖此分组。最近 {days}的数据：{period}。",
     "description.site": "场地内每台设备的用电量、费用和运行时间。最近 {days}的数据：{period}。",
     "crumbs": "当前位置",
     "wholeSite": "整个场地",
@@ -651,7 +653,7 @@ export const deviceMessages = defineMessages({
     "exitFullScreen": "退出全屏",
     "refresh": "刷新",
     "show": "显示",
-    "showGroup": "显示整个场地或单个配电箱",
+    "showGroup": "显示整个场地或单个分组",
     "boardFailed": "无法加载 {board}。",
 
     "method.title": "这些数据是怎么算出来的",
@@ -732,6 +734,7 @@ export const deviceMessages = defineMessages({
     "picker.noMatch": "Tiada peranti sepadan dengan “{query}”.",
     "boardTotalShort": "jumlah papan agihan",
     "circuit": "Litar {circuit}",
+    "panel": "Panel {panel}",
 
     "loadFailed": "Bacaan peranti tidak dapat dimuatkan.",
     "tryAgain": "Cuba lagi",
@@ -806,7 +809,6 @@ export const deviceMessages = defineMessages({
     "profile.closedTitle": "Hari tutup biasa, {label} ({count} hari)",
     "profile.openTitleDevice": "Hari buka biasa ({count} hari)",
     "profile.closedTitleDevice": "Hari tutup biasa ({count} hari)",
-    "byBoard": "Tenaga mengikut papan agihan",
     "byType": "Tenaga mengikut jenis",
     "everyDay": "Setiap hari, jam demi jam",
     "weekOf": "Minggu bermula {date}",
@@ -815,6 +817,7 @@ export const deviceMessages = defineMessages({
 
     "breakdown.title": "Ke mana tenaga digunakan",
     "breakdown.note": "Bahagian setiap peranti daripada jumlah {scope}. Tenaga pada litar papan agihan yang tiada meter sendiri ditunjukkan sebagai baris berasingan, jadi senarai ini berjumlah {kwh}.",
+    "breakdown.groupNote": "Jumlah setiap kumpulan dan bahagiannya daripada kumpulan di atasnya, hingga ke setiap peranti. Setiap peranti dikira dalam kumpulannya sahaja. Tenaga yang tidak diukur oleh sub-meter ditunjukkan sebagai baris sendiri, jadi {scope} berjumlah {kwh}.",
     "scope.site": "premis",
     "column.device": "Peranti",
     "column.used": "Digunakan",
@@ -851,7 +854,7 @@ export const deviceMessages = defineMessages({
     "device.noReadings": "Tiada bacaan diterima daripada {name} dalam tempoh {period}. Pastikan ia dihidupkan dan disambungkan.",
 
     "description.device": "{details}. Data {days} terkini: {period}.",
-    "description.board": "Papan agihan dengan {count} peranti. Semua maklumat di bawah meliputi papan agihan ini sahaja. Data {days} terkini: {period}.",
+    "description.board": "Kumpulan dengan {count} peranti. Semua maklumat di bawah meliputi kumpulan ini sahaja. Data {days} terkini: {period}.",
     "description.site": "Penggunaan, kos dan waktu beroperasi setiap peranti di premis. Data {days} terkini: {period}.",
     "crumbs": "Lokasi anda",
     "wholeSite": "Seluruh premis",
@@ -859,7 +862,7 @@ export const deviceMessages = defineMessages({
     "exitFullScreen": "Keluar skrin penuh",
     "refresh": "Muat semula",
     "show": "Tunjuk",
-    "showGroup": "Tunjuk seluruh premis atau satu papan agihan",
+    "showGroup": "Tunjuk seluruh premis atau satu kumpulan",
     "boardFailed": "{board} tidak dapat dimuatkan.",
 
     "method.title": "Cara angka ini dikira",

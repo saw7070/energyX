@@ -5,8 +5,12 @@ import { floorPlanMessages } from "./floor-plan-messages";
 /** [x, y, width, height] in plan units. */
 export type Rect = [number, number, number, number];
 export type Point = [number, number];
-/** An area served by one distribution board. `insideRoom` makes it an equipment group drawn inside that room. */
-export type PlanArea = { key: string; label: string; board: string; rect: Rect; insideRoom?: string; equipment?: string; colour?: string };
+/**
+ * An area on the drawing. `board` is the electrical panel that supplies it, or "" when none is named: the plan is a
+ * drawing only, so a panel is optional. `insideRoom` makes it an equipment group drawn inside that room.
+ * `meterLocations` is carried over from the saved layout unchanged, so editing the drawing never loses it.
+ */
+export type PlanArea = { key: string; label: string; board: string; rect: Rect; insideRoom?: string; equipment?: string; colour?: string; meterLocations?: string[] };
 /** `area` is the key of the area the room belongs to; it moves only with that area, even where areas overlap. */
 export type PlanRoom = { key: string; name: string; rect: Rect; area?: string; colour?: string };
 /** A device on the plan: a dot at `position`, or, with `size`, a named box centred there (e.g. a bank of LED screens). */
@@ -25,6 +29,10 @@ export const MIN_SIZE = 20;
 export const DEFAULT_VIEWBOX: Rect = [0, 0, 1000, 640];
 /** A colour chosen for one item (#rrggbb); items without one use their panel's colour. */
 const colourOf = (item: unknown) => { const value = (item as { colour?: unknown } | null)?.colour; return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? { colour: value } : {}; };
+/** Where the meters of a zone are filed, kept as saved (only a valid, non-empty list). */
+const locationsOf = (zone: { meterLocations?: unknown }) => Array.isArray(zone.meterLocations) && zone.meterLocations.length > 0 && zone.meterLocations.every(item => typeof item === "string" && item.length > 0) ? { meterLocations: [...zone.meterLocations as string[]] } : {};
+/** The same area drawn on its own rather than inside a room; everything else about it (colour, meter locations) stays. */
+export const asOwnArea = (item: PlanArea): PlanArea => { const own = { ...item }; delete own.insideRoom; delete own.equipment; return own; };
 const isPoint = (value: unknown): value is Point => Array.isArray(value) && value.length === 2 && value.every(n => typeof n === "number" && Number.isFinite(n));
 
 export const snap = (value: number, step: number) => step > 0 ? Math.round(value / step) * step : value;
@@ -70,9 +78,9 @@ export function planFromReference(reference: StoredSpatialReference, locale: Ene
     if (zone.independentSpace === false) {
       const room = rooms.find(item => item.name === zone.physicalParentRoom);
       const rect = zone.rect ? [...zone.rect] as Rect : room ? groupRect(room.rect, layout.viewBox) : null;
-      return rect ? [{ key: zone.id, label: zone.id, board: zone.referenceBoard, rect, ...(room ? { insideRoom: room.key } : {}), ...(zone.equipment ? { equipment: zone.equipment } : {}), ...colourOf(zone) }] : [];
+      return rect ? [{ key: zone.id, label: zone.id, board: zone.referenceBoard ?? "", rect, ...(room ? { insideRoom: room.key } : {}), ...(zone.equipment ? { equipment: zone.equipment } : {}), ...colourOf(zone), ...locationsOf(zone) }] : [];
     }
-    return zone.rect ? [{ key: zone.id, label: zone.id, board: zone.referenceBoard, rect: [...zone.rect] as Rect, ...colourOf(zone) }] : [];
+    return zone.rect ? [{ key: zone.id, label: zone.id, board: zone.referenceBoard ?? "", rect: [...zone.rect] as Rect, ...colourOf(zone), ...locationsOf(zone) }] : [];
   });
   const devices = (layout.devices ?? []).filter(item => typeof item?.meterId === "string" && isPoint(item.position)).map(item => ({ meterId: item.meterId, position: clampPoint(item.position, layout.viewBox), ...(isSize(item.size) ? { size: [...item.size] as Point } : {}), ...colourOf(item) }));
   const entrance = layout.entrance && isPoint(layout.entrance.position) ? { label: layout.entrance.label || translatorFor(floorPlanMessages, locale)("name.entrance"), position: layout.entrance.position } : null;
@@ -80,10 +88,10 @@ export function planFromReference(reference: StoredSpatialReference, locale: Ene
   return { viewBox: [...layout.viewBox] as Rect, areas, rooms, devices, entrance, ...(Object.keys(colours).length ? { colours } : {}) };
 }
 
-/** A first draft to start from: one area per board side by side, each with one room. */
+/** A first draft to start from: one area per board side by side, each with one room; one area with no panel when there are none. */
 export function starterPlan(boards: string[], locale: EnergyIqLocale = "en"): FloorPlan {
   const t = translatorFor(floorPlanMessages, locale);
-  const [vx, vy, vw] = DEFAULT_VIEWBOX, gap = 30, margin = 20, list = boards.length ? boards : ["Main board"];
+  const [vx, vy, vw] = DEFAULT_VIEWBOX, gap = 30, margin = 20, list = boards.length ? boards : [""];
   const width = Math.floor((vw - margin * 2 - gap * (list.length - 1)) / list.length);
   const areas = list.map((board, index): PlanArea => ({ key: `area-${index + 1}`, label: String.fromCharCode(65 + index), board, rect: [vx + margin + index * (width + gap), vy + margin, width, 540] }));
   const rooms = areas.map((item, index): PlanRoom => ({ key: `room-${index + 1}`, name: t("name.room", { number: index + 1 }), rect: [item.rect[0] + 20, item.rect[1] + 60, Math.max(MIN_SIZE, item.rect[2] - 40), 180], area: item.key }));
@@ -226,13 +234,16 @@ export function resizeCanvas(plan: FloorPlan, width: number, height: number): Fl
 export function removeSelection(plan: FloorPlan, selection: Selection): FloorPlan {
   if (selection.kind === "device") return { ...plan, devices: plan.devices.filter(item => item.meterId !== selection.key) };
   if (selection.kind === "entrance") return { ...plan, entrance: null };
-  if (selection.kind === "room") return { ...plan, rooms: plan.rooms.filter(item => item.key !== selection.key), areas: plan.areas.map(item => item.insideRoom === selection.key ? { key: item.key, label: item.label, board: item.board, rect: item.rect, ...colourOf(item) } : item) };
+  if (selection.kind === "room") return { ...plan, rooms: plan.rooms.filter(item => item.key !== selection.key), areas: plan.areas.map(item => item.insideRoom === selection.key ? asOwnArea(item) : item) };
   return settleRooms({ ...plan, areas: plan.areas.filter(item => item.key !== selection.key) });
 }
 
 const rounded = (rect: Rect): Rect => rect.map(Math.round) as Rect;
 
-/** Checks the plan in plain words and turns it into the stored block. */
+/**
+ * Checks the plan in plain words and turns it into the stored block. The plan is a drawing only: an area may have no
+ * panel (stored as an empty `referenceBoard`), and the meter locations a zone already had are kept.
+ */
 export function referenceFromPlan(plan: FloorPlan, projectId: string, previous: StoredSpatialReference | null, locale: EnergyIqLocale = "en"): StoredSpatialReference {
   const t = translatorFor(floorPlanMessages, locale);
   const own = plan.areas.filter(item => !item.insideRoom);
@@ -242,14 +253,13 @@ export function referenceFromPlan(plan: FloorPlan, projectId: string, previous: 
   if (labels.some(label => !label)) throw new Error(t("check.areaLabel"));
   const duplicateLabel = labels.find((label, index) => labels.indexOf(label) !== index);
   if (duplicateLabel) throw new Error(t("check.duplicateLabel", { label: duplicateLabel }));
-  if (plan.areas.some(item => !item.board.trim())) throw new Error(t("check.areaBoard"));
   const names = plan.rooms.map(room => room.name.trim());
   if (names.some(name => !name)) throw new Error(t("check.roomName"));
   const duplicateName = names.find((name, index) => names.indexOf(name) !== index);
   if (duplicateName) throw new Error(t("check.duplicateRoom", { name: duplicateName }));
   const roomName = new Map(plan.rooms.map(room => [room.key, room.name.trim()]));
   // Only colours for boards still on the plan are kept.
-  const boards = new Set(plan.areas.map(item => item.board.trim()));
+  const boards = new Set(plan.areas.map(item => item.board.trim()).filter(Boolean));
   const boardColours = plan.colours ? Object.fromEntries(Object.entries(plan.colours).filter(([board]) => boards.has(board))) : undefined;
   const rooms = plan.rooms.map(room => {
     const host = roomOwner(plan, room);
@@ -257,8 +267,8 @@ export function referenceFromPlan(plan: FloorPlan, projectId: string, previous: 
     return { name: room.name.trim(), zone: host.label.trim(), rect: rounded(room.rect), ...colourOf(room) };
   });
   const zones = plan.areas.map(item => item.insideRoom && roomName.has(item.insideRoom)
-    ? { id: item.label.trim(), referenceBoard: item.board.trim(), rect: rounded(item.rect), independentSpace: false, physicalParentRoom: roomName.get(item.insideRoom)!, ...(item.equipment?.trim() ? { equipment: item.equipment.trim() } : {}), ...colourOf(item) }
-    : { id: item.label.trim(), referenceBoard: item.board.trim(), rect: rounded(item.rect), ...colourOf(item) });
+    ? { id: item.label.trim(), referenceBoard: item.board.trim(), ...locationsOf(item), rect: rounded(item.rect), independentSpace: false, physicalParentRoom: roomName.get(item.insideRoom)!, ...(item.equipment?.trim() ? { equipment: item.equipment.trim() } : {}), ...colourOf(item) }
+    : { id: item.label.trim(), referenceBoard: item.board.trim(), ...locationsOf(item), rect: rounded(item.rect), ...colourOf(item) });
   const reference: StoredSpatialReference = {
     ...(previous ?? {}),
     schemaVersion: 1,

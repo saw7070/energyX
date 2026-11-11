@@ -45,6 +45,17 @@ it("leads with the report headline and links to the explanation in Analysis inst
  } finally {await act(async()=>root.unmount());host.remove();request.mockRestore();vi.unstubAllGlobals();}
 });
 
+it("adds one short line by top-level group under the headline when the report has groups", async () => {
+ vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);vi.stubGlobal("React",React);
+ const report = site.report as typeof site.report & { groups?: { summary: string } };
+ report.groups = { summary: "Block 264F 40% · Block 264E 38% · Common area 22% — biggest single group: Entrance" };
+ const request=vi.spyOn(configApi,"reportActionRequest").mockResolvedValue({ publication:{reportId:"r",selection:{active:[],featuredActionIds:[]}}, metrics:{projectName:"SKTC",period:{from:"2026-09-01",toExclusive:"2026-09-02"},energyKwh:0,peakKw:0,coverage:1,cost:null,outsideHoursPercent:null} });
+ const host=document.createElement("div");document.body.append(host);const root=createRoot(host);
+ try {await act(async()=>root.render(<KeyPoints projectId="p"/>));
+ expect(host.textContent).toContain("By group: Block 264F 40% · Block 264E 38% · Common area 22% — biggest single group: Entrance");
+ } finally {delete report.groups;await act(async()=>root.unmount());host.remove();request.mockRestore();vi.unstubAllGlobals();}
+});
+
 // The heading and the document below it are one saved report, so the page names that report and nothing else.
 it("names the saved report the heading comes from, links to it in Reports and warns when newer readings exist", async () => {
  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);vi.stubGlobal("React",React);

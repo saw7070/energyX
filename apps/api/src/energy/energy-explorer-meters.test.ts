@@ -99,3 +99,18 @@ it("uses published navigation attachments, preserves missing meters and separate
     includedInOfficialTotal: false,
   });
 });
+
+it("names a meter by its short name, keeping the installer's full label and the panel as details", () => {
+  const document = {
+    project: { name: "SKTC", timezone: "Asia/Singapore" }, tier_structure_locked: true, tiers: [], nodes: [],
+    meter_mapping: { schema_version: 2, source_kind: "tuya", confirmed: true, rows: [
+      { id: "sign", source_label: "sign", aggregation_usage: "official", display_name: "sign", presentation: { device_name: "264F Compassvale Bow signboard", short_name: "Entrance", panel: "264F" }, scope_id: "entrance", resource: "electricity", meter_role: "component", coverage: "partial", category: "light" },
+      { id: "lobby", source_label: "lobby", aggregation_usage: "official", display_name: "lobby", presentation: { device_name: "264F GF Lobby Lighting" }, scope_id: "entrance", resource: "electricity", meter_role: "component", coverage: "partial", category: "light" },
+    ] },
+  } as unknown as EnergyIqProjectSetupDocument;
+  const meters = projectExplorerMeters({ document, scopeIds: new Set(["entrance"]), resource: "electricity", officialMeterIds: new Set() });
+  expect(meters.find(meter => meter.id === "sign")).toEqual(expect.objectContaining({ name: "Entrance", fullName: "264F Compassvale Bow signboard", panel: "264F" }));
+  // Without a short name the installer's label stays the name, and nothing is repeated underneath.
+  expect(meters.find(meter => meter.id === "lobby")).toEqual(expect.objectContaining({ name: "264F GF Lobby Lighting" }));
+  expect(meters.find(meter => meter.id === "lobby")).not.toHaveProperty("fullName");
+});

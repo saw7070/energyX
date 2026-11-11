@@ -451,12 +451,12 @@ describe("validateProjectSetupDocument sibling names", () => {
         project_id: "project-route",
         expected_revision: initial.revision,
         user_id: "dev-user",
-        document: { ...duplicate, meter_mapping: { ...duplicate.meter_mapping!, rows: duplicate.meter_mapping!.rows.map(row => ({...row, presentation: {device_name: " Office TV ", circuit_name: " L1P17 ", group: " AV / TV ", not_in_use: " Nobody uses it ", off_with_lights: "yes"}})) } },
+        document: { ...duplicate, meter_mapping: { ...duplicate.meter_mapping!, rows: duplicate.meter_mapping!.rows.map(row => ({...row, presentation: {device_name: " Office TV ", circuit_name: " L1P17 ", group: " AV / TV ", not_in_use: " Nobody uses it ", off_with_lights: "yes", short_name: " TV ", panel: " DB1 "}})) } },
       });
 
       expect(saved.document.meter_mapping?.official_aggregation_routes?.[0]?.meter_point_ids)
         .toEqual(["m1", "m1"]);
-      expect(saved.document.meter_mapping?.rows[0]?.presentation).toEqual({device_name:"Office TV",circuit_name:"L1P17",group:"AV / TV",not_in_use:"Nobody uses it",off_with_lights:"yes"});
+      expect(saved.document.meter_mapping?.rows[0]?.presentation).toEqual({device_name:"Office TV",circuit_name:"L1P17",group:"AV / TV",not_in_use:"Nobody uses it",off_with_lights:"yes",short_name:"TV",panel:"DB1"});
       expect(metadata.energyIq.projectSetup.validateDraft("project-route").issues)
         .toContainEqual(expect.objectContaining({ code: "OFFICIAL_ROUTE_METER_DUPLICATE" }));
       expect(() => metadata.energyIq.projectSetup.publishDraft({

@@ -13,6 +13,21 @@ const PHASES = new Set<string>(["teaching", "term_break", "study_exam", "vacatio
 /** School phase names in the reader's language; an unknown phase from the server is shown as sent. */
 const phaseName = (phase: Phase, locale: EnergyIqLocale) => PHASES.has(phase) ? translatorFor(operatingHoursMessages, locale)(`phase.${phase}`) : phase;
 const minutes = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
+type Range = { from: string; to: string };
+/** A range whose end is earlier than its start runs past midnight into the next morning. */
+const overnight = (range: Range) => minutes(range.to) <= minutes(range.from);
+/** Minutes a range lasts, counting the next morning for one that runs overnight. */
+export const rangeMinutes = (range: Range) => minutes(range.to) - minutes(range.from) + (overnight(range) ? 1440 : 0);
+/** "08:00 – 18:00", or "19:00 → 07:00 next day". */
+export const rangeText = (range: Range, locale: EnergyIqLocale = "en") => overnight(range) ? translatorFor(operatingHoursMessages, locale)("range.overnight", range) : `${range.from} – ${range.to}`;
+/** The bars on one day's row: its own hours up to midnight, and the morning part of the night before. */
+export function dayBars(weekly: EnergyOperatingCalendarEntryDto["weekly"], key: EnergyOperatingDayDto): Array<{ from: number; to: number }> {
+  const before = WEEK[(WEEK.indexOf(key) + 6) % 7]!;
+  return [
+    ...(weekly[before] ?? []).filter(overnight).map(range => ({ from: 0, to: minutes(range.to) })),
+    ...(weekly[key] ?? []).map(range => ({ from: minutes(range.from), to: overnight(range) ? 1440 : minutes(range.to) })),
+  ].filter(bar => bar.to > bar.from);
+}
 const hoursText = (value: number, locale: EnergyIqLocale = "en") => translatorFor(operatingHoursMessages, locale)("hours", { hours: Number.isInteger(value) ? value : value.toFixed(1) });
 
 /** Dates in the calendar are local calendar days; end dates are exclusive. */
@@ -36,7 +51,7 @@ export function weeklySummary(weekly: EnergyOperatingCalendarEntryDto["weekly"],
   const t = translatorFor(operatingHoursMessages, locale), weekday = translatorFor(weekdayMessages, locale);
   const short = (key: EnergyOperatingDayDto) => weekday(`${key}.short`);
   const open = WEEK.filter(key => (weekly[key] ?? []).length);
-  const hours = open.reduce((sum, key) => sum + (weekly[key] ?? []).reduce((total, range) => total + (minutes(range.to) - minutes(range.from)) / 60, 0), 0);
+  const hours = open.reduce((sum, key) => sum + (weekly[key] ?? []).reduce((total, range) => total + rangeMinutes(range) / 60, 0), 0);
   const runs: EnergyOperatingDayDto[][] = [];
   for (const key of WEEK) {
     if (!(weekly[key] ?? []).length) continue;
@@ -85,7 +100,9 @@ export function OperatingHoursView({ revision, status, action, ownerName, onView
 
     {revision.entries.map(entry => {
       const summary = weeklySummary(entry.weekly, locale);
+      const lights = entry.hours_meaning === "lights_on";
       return <section key={entry.id} className={styles.entry} aria-label={t("entryLabel", { owner: ownerName(entry.owner) })}>
+        {lights && <p className={styles.hint}>{t("lights.note")}</p>}
         <div className={styles.tiles}>
           <div className={styles.tile}><span>{t("openDays")}</span><strong>{summary.days}</strong><small>{t(summary.openDays === 1 ? "openDaysCount.one" : "openDaysCount.other", { count: summary.openDays, owner: ownerName(entry.owner) })}</small></div>
           <div className={styles.tile}><span>{t("hoursPerWeek")}</span><strong>{hoursText(summary.hours, locale)}</strong><small>{summary.openDays ? t("perOpenDay", { hours: hoursText(summary.hours / summary.openDays, locale) }) : t("closedAllWeek")}</small></div>
@@ -96,11 +113,11 @@ export function OperatingHoursView({ revision, status, action, ownerName, onView
           <div className={styles.axis} role="presentation" aria-hidden="true"><span /><span className={styles.axisTrack}>{[0, 6, 12, 18, 24].map(hour => <span key={hour} style={{ left: `${hour / 24 * 100}%` }}>{String(hour).padStart(2, "0")}:00</span>)}</span><span /></div>
           {WEEK.map(key => {
             const ranges = entry.weekly[key] ?? [];
-            const length = ranges.reduce((total, range) => total + (minutes(range.to) - minutes(range.from)) / 60, 0);
+            const length = ranges.reduce((total, range) => total + rangeMinutes(range) / 60, 0);
             return <div key={key} role="row" className={`${styles.day} ${ranges.length ? "" : styles.closed}`}>
               <span role="rowheader" className={styles.dayName}>{weekday(`${key}.long`)}</span>
-              <span role="cell" className={styles.track} aria-hidden="true">{ranges.map(range => <span key={`${range.from}-${range.to}`} className={styles.open} style={{ left: `${minutes(range.from) / 1440 * 100}%`, width: `${(minutes(range.to) - minutes(range.from)) / 1440 * 100}%` }} />)}</span>
-              <span role="cell" className={styles.times}>{ranges.length ? <><strong>{ranges.map(range => `${range.from} – ${range.to}`).join(", ")}</strong><small>{hoursText(length, locale)}</small></> : <strong className={styles.closedText}>{t("closed")}</strong>}</span>
+              <span role="cell" className={styles.track} aria-hidden="true">{dayBars(entry.weekly, key).map(bar => <span key={`${bar.from}-${bar.to}`} className={styles.open} style={{ left: `${bar.from / 1440 * 100}%`, width: `${(bar.to - bar.from) / 1440 * 100}%` }} />)}</span>
+              <span role="cell" className={styles.times}>{ranges.length ? <><strong>{ranges.map(range => rangeText(range, locale)).join(", ")}</strong><small>{hoursText(length, locale)}</small></> : <strong className={styles.closedText}>{lights ? t("lights.off") : t("closed")}</strong>}</span>
             </div>;
           })}
         </div>

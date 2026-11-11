@@ -12,6 +12,10 @@ export type EnergyExplorerMeter = {
   formula?: string;
   displayGroup?: string;
   circuitName?: string;
+  /** The installer's full label, set only when a short name is shown as `name` instead. */
+  fullName?: string;
+  /** The electrical panel the meter is wired from, when someone recorded it. */
+  panel?: string;
 };
 
 /** Project only the already-authorized published mapping, including meters without facts. */
@@ -23,9 +27,11 @@ export function projectExplorerMeters(input: {
 }): EnergyExplorerMeter[] {
   const mapping = input.document.meter_mapping;
   if (!mapping || mapping.schema_version !== 2 || !mapping.confirmed) return [];
-  const labels = (meter: { presentation?: { group?: string; circuit_name?: string } }) => ({
+  const labels = (meter: { display_name: string; presentation?: { group?: string; circuit_name?: string; device_name?: string; short_name?: string; panel?: string } }) => ({
     ...(meter.presentation?.group ? { displayGroup: meter.presentation.group } : {}),
     ...(meter.presentation?.circuit_name ? { circuitName: meter.presentation.circuit_name } : {}),
+    ...(meter.presentation?.short_name?.trim() ? { fullName: projectMeterFullName(meter) } : {}),
+    ...(meter.presentation?.panel?.trim() ? { panel: meter.presentation.panel.trim() } : {}),
   });
   const names = new Map(mapping.rows.map((row) => [row.id, projectMeterDisplayName(row)]));
   return [
@@ -72,7 +78,13 @@ export function projectExplorerMeters(input: {
   ];
 }
 
-export function projectMeterDisplayName(meter: { display_name: string; presentation?: { device_name?: string; circuit_name?: string } }): string {
+/** The name readers see first: the short name when someone set one, else the installer's full label. */
+export function projectMeterDisplayName(meter: { display_name: string; presentation?: { device_name?: string; circuit_name?: string; short_name?: string } }): string {
+  return meter.presentation?.short_name?.trim() || projectMeterFullName(meter);
+}
+
+/** The installer's full label, shown under a short name (or alone when there is none). */
+export function projectMeterFullName(meter: { display_name: string; presentation?: { device_name?: string; circuit_name?: string } }): string {
   return meter.presentation?.device_name?.trim() || meter.presentation?.circuit_name?.trim() || meter.display_name?.trim() || "Unnamed meter";
 }
 

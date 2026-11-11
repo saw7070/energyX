@@ -64,7 +64,7 @@ function Configuration({ projectId, readOnly, canEditFacility, canEditHours, can
       </div>
     </header>
     {uploading && <FacilityDialog id="upload-data" title={t("uploadTitle")} intro={t("uploadIntro")} onClose={() => setUploading(false)}><SmartImportPanel projectId={projectId} onChanged={() => setRefresh(value => value + 1)} /></FacilityDialog>}
-    {connecting && <FacilityDialog id="live-connection" title={t("liveTitle")} intro={t("liveIntro")} onClose={() => setConnecting(false)}><LiveConnectionPanel projectId={projectId} onChanged={() => setRefresh(value => value + 1)} /></FacilityDialog>}
+    {connecting && <FacilityDialog id="live-connection" title={t("liveTitle")} intro={t("liveIntro")} onClose={() => setConnecting(false)}><LiveConnectionPanel projectId={projectId} canAddMeters={canEditFacility && isAdmin} onChanged={() => setRefresh(value => value + 1)} /></FacilityDialog>}
     {failed ? <p role="alert">{t("loadFailed")}</p> : !data ? <p role="status">{t("loading")}</p> : <>
       <ProjectConfigurationView initialTab={initialTab} onTabChange={(tab, extra) => router.replace(`/energyiq/project-configuration?${new URLSearchParams({ projectId, tab, ...extra })}`, { scroll: false })} onPolicyChange={() => setRefresh(value => value + 1)} projectId={projectId} canEditPolicies={canEditHours} canEditSetup={canEditFacility} canEditNotes={canEditNotes} advisorEdit={isAdmin} readOnly={readOnly} setup={data.setup} notes={data.notes} policies={data.policies} />
     </>}

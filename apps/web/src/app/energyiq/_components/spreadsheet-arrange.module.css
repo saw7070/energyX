@@ -1,0 +1,45 @@
+/* Colours come from the shared tokens only, so "Arrange from a spreadsheet" follows light and dark themes on its own. */
+.panel { color:var(--color-foreground); }
+.header { display:flex; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:12px; }
+.header > div { display:grid; gap:4px; max-width:70ch; }
+.note { color:var(--color-muted); font-size:13px; line-height:1.45; }
+.fileRow { display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
+.fileButton { display:inline-flex; align-items:center; cursor:pointer; }
+.fileButton:focus-within { outline:2px solid var(--color-primary); outline-offset:2px; }
+.step { display:grid; gap:10px; padding-top:14px; border-top:1px solid var(--color-border); }
+.step h5 { font-size:14px; font-weight:650; }
+.counts { font-size:14px; font-weight:600; }
+.columns { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:10px; }
+.column { display:grid; gap:6px; padding:10px; border:1px solid var(--color-border); border-radius:8px; background:var(--color-surface); min-width:0; }
+.columnName { display:grid; gap:2px; min-width:0; }
+.columnName strong { font-size:13px; font-weight:600; overflow-wrap:anywhere; }
+.columnName small { color:var(--color-muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.column select, .matchCell select { min-height:34px; padding:5px 8px; border:1px solid var(--color-border); border-radius:6px; background:var(--color-surface); color:var(--color-foreground); font-size:13px; width:100%; min-width:0; }
+.column select:focus-visible, .matchCell select:focus-visible { outline:2px solid var(--color-primary); outline-offset:1px; }
+.tableWrap { overflow-x:auto; border:1px solid var(--color-border); border-radius:8px; background:var(--color-surface); }
+.table { width:100%; border-collapse:collapse; font-size:13px; }
+.table th { padding:8px 10px; text-align:left; color:var(--color-muted); font-size:12px; font-weight:600; border-bottom:1px solid var(--color-border); }
+.table td { padding:8px 10px; vertical-align:top; border-bottom:1px solid var(--color-border); }
+.table tr:last-child td { border-bottom:0; }
+.table td small { display:block; color:var(--color-muted); font-size:12px; margin-top:2px; }
+.table tr[data-confidence="none"] td, .table tr[data-confidence="guess"] td { background:color-mix(in srgb, var(--color-step-warning) 7%, transparent); }
+.rowNumber { color:var(--color-muted); font-variant-numeric:tabular-nums; width:48px; }
+.fileName { overflow-wrap:anywhere; }
+.muted { color:var(--color-muted); }
+.matchCell { display:flex; align-items:center; gap:8px; min-width:240px; }
+.badge { flex:none; padding:2px 8px; border-radius:999px; font-size:11.5px; font-weight:600; white-space:nowrap; color:var(--color-foreground); background:var(--color-surface-subtle); }
+.badge[data-confidence="exact"] { background:color-mix(in srgb, var(--color-step-success) 18%, transparent); }
+.badge[data-confidence="close"] { background:color-mix(in srgb, var(--color-step-success) 10%, transparent); }
+.badge[data-confidence="guess"] { background:color-mix(in srgb, var(--color-step-warning) 22%, transparent); }
+.badge[data-confidence="picked"] { background:color-mix(in srgb, var(--color-primary) 14%, transparent); }
+.badge[data-confidence="none"] { background:color-mix(in srgb, var(--color-step-error) 14%, transparent); }
+.tree, .tree ul { display:grid; gap:4px; margin:0; padding:0; list-style:none; }
+.tree ul { margin:4px 0 6px 12px; padding-left:12px; border-left:1px solid var(--color-border); }
+.groupLine { display:flex; flex-wrap:wrap; align-items:center; gap:8px; font-size:14px; }
+.groupLine strong { font-weight:650; }
+.newBadge { padding:1px 7px; border-radius:999px; font-size:11px; font-weight:650; background:color-mix(in srgb, var(--color-primary) 14%, transparent); color:var(--color-foreground); }
+.meter { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; font-size:13px; padding:2px 6px; border-radius:6px; }
+.meter small { color:var(--color-muted); font-size:12px; }
+.changed { background:color-mix(in srgb, var(--color-primary) 7%, transparent); }
+.option { display:grid; gap:6px; padding:10px 12px; border:1px solid var(--color-border); border-radius:8px; background:var(--color-surface); font-size:13px; }
+@media(max-width:640px) { .matchCell { min-width:0; flex-wrap:wrap; } .columns { grid-template-columns:1fr; } }

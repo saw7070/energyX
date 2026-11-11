@@ -22,7 +22,7 @@ describe("in-page site structure edits", () => {
     const renamed = applyLocationEdit(document, "office", { node: document.nodes[1]! }, { name: "  Pantry   board ", area: "", occupants: "6" });
     expect("error" in renamed ? renamed.error : renamed.document.nodes.find(node => node.id === "db1")).toEqual(expect.objectContaining({ name: "Pantry board", occupant_count: 6 }));
     expect("error" in renamed ? undefined : renamed.document.nodes.find(node => node.id === "db1")).not.toHaveProperty("area_sqm");
-    expect(applyLocationEdit(document, "office", { node: document.nodes[1]! }, { name: "db2", area: "", occupants: "" })).toEqual({ error: "Another location here is already called db2." });
+    expect(applyLocationEdit(document, "office", { node: document.nodes[1]! }, { name: "db2", area: "", occupants: "" })).toEqual({ error: "Another group here is already called db2." });
     expect(applyLocationEdit(document, "office", { node: document.nodes[1]! }, { name: "DB1", area: "-3", occupants: "" })).toHaveProperty("error");
     expect(applyLocationEdit(document, "office", { node: document.nodes[1]! }, { name: "DB1", area: "", occupants: "2.5" })).toHaveProperty("error");
   });
@@ -77,7 +77,7 @@ describe("in-page site structure edits", () => {
   });
 
   it("only removes a location once no meter is attached anywhere in its branch", () => {
-    expect(locationRemoval(document, "space-1")).toEqual({ error: "Move its 2 meters to another location first." });
+    expect(locationRemoval(document, "space-1")).toEqual({ error: "Move its 2 meters to another group first." });
     const removed = locationRemoval(document, "db2");
     expect("error" in removed ? [] : removed.document.nodes.map(node => node.id)).toEqual(["space-1", "db1", "space-2"]);
   });
@@ -103,7 +103,7 @@ describe("going live without a separate confirmation", () => {
 
   it("leaves a meter with no location unconfirmed", () => {
     const orphaned = { ...document, nodes: document.nodes.filter(node => node.id !== "db1") } as typeof document;
-    expect(meterTotalProblems(orphaned).some(problem => /location/i.test(problem))).toBe(true);
+    expect(meterTotalProblems(orphaned).some(problem => /group/i.test(problem))).toBe(true);
     expect(withConfirmedTotals({ ...orphaned, meter_mapping: { ...orphaned.meter_mapping!, confirmed: false } }).meter_mapping!.confirmed).toBe(false);
   });
 });

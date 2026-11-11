@@ -87,7 +87,7 @@ const XML_ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot:
  * read-excel-file (9.3) hands over the sheet's text as written in the file's XML, so "Pavilion DL & Fan" arrives as
  * "Pavilion DL &amp; Fan". Decode in one pass, so a cell that really says "&amp;" (stored as "&amp;amp;") stays so.
  */
-const decodeXmlText = (value: string): string =>
+export const decodeXmlText = (value: string): string =>
   value.replace(/&(?:(amp|lt|gt|quot|apos)|#(\d{1,7})|#x([\da-f]{1,6}));/giu, (match, name?: string, decimal?: string, hex?: string) => {
     if (name) return XML_ENTITIES[name.toLowerCase()] ?? match;
     const code = decimal ? Number(decimal) : Number.parseInt(hex!, 16);

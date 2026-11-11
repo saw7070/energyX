@@ -75,10 +75,12 @@ export async function handleReportLibraryApi(request: IncomingMessage, segments:
       while(previous && !seen.has(previous) && seen.size < 1000){seen.add(previous);const parent=byId.get(previous);if(!parent || parent.actorUserId !== run.actorUserId || parent.kind === "skill")break;if(parent.status === "succeeded" && hasReportArtifact(parent)){previousReportId=parent.id;break;}previous=parent.retryOfRunId ?? parent.parentRunId;}
       const period = run.reportingPeriod ?? { from: run.period.from, toExclusive: run.period.toExclusive };
       return { ...lineage, canDiscuss: canChat && run.actorUserId === context.userId && !run.siteReport, ...(previousReportId ? {previousReportId} : {}),
-        title: reportTitle(lineage.category, period, run.siteReport?.cadence), id: run.id, kind: "report" as const, period, createdAt: run.createdAt,
+        title: reportTitle(lineage.category, period, run.siteReport), id: run.id, kind: "report" as const, period, createdAt: run.createdAt,
         // Site reports are written by the server from the site's own meter readings; advisor reports are written for it.
         source: run.siteReport ? "site" as const : "advisor" as const,
-        ...(run.siteReport ? { cadence: run.siteReport.cadence } : {}),
+        ...(run.siteReport?.cadence ? { cadence: run.siteReport.cadence } : {}),
+        // Only the management review is marked; a site report without a style is the full report.
+        ...(run.siteReport?.style === "management" ? { style: "management" as const } : {}),
         ...(run.finishedAt ? { finishedAt: run.finishedAt } : {}), ...(run.parentRunId ? { parentRunId: run.parentRunId } : {}) };
     });
     const artifacts = canChat ? runs.filter(run => !run.actionFeedback && run.actorUserId === context.userId).flatMap(run =>
@@ -111,10 +113,12 @@ function overviewCadence(metadata: MetadataStore, projectId: string): "monthly" 
   } catch { return "monthly"; }
 }
 
-function reportTitle(category: "scheduled" | "custom", period: { from: string; toExclusive: string }, cadence?: "weekly" | "monthly"): string {
+function reportTitle(category: "scheduled" | "custom", period: { from: string; toExclusive: string }, siteReport?: { cadence?: "weekly" | "monthly"; style?: "management" }): string {
   const format = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
   const start = format.format(new Date(period.from));
   const end = format.format(new Date(Date.parse(period.toExclusive) - 86400000));
-  const kind = cadence ? `${cadence === "weekly" ? "Weekly" : "Monthly"} Site Report` : `${category === "scheduled" ? "Scheduled" : "Custom"} Energy Report`;
+  const what = siteReport?.style === "management" ? "Management Review" : "Site Report";
+  const kind = siteReport?.cadence ? `${siteReport.cadence === "weekly" ? "Weekly" : "Monthly"} ${what}`
+    : siteReport ? `Custom ${what}` : `${category === "scheduled" ? "Scheduled" : "Custom"} Energy Report`;
   return `${kind} — ${start === end ? start : `${start} to ${end}`}`;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EnergyMeterIntervalCoverage } from "@datafoundry/data-gateway";
-import { localDayStarts, resolveDataAvailabilityPeriod, summariseDataAvailability } from "./energy-data-availability.js";
+import { localDayStarts, resolveDataAvailabilityPeriod, startAtFirstReading, summariseDataAvailability } from "./energy-data-availability.js";
 
 const HOUR = 3_600_000, QUARTER = 900_000;
 const from = Date.parse("2026-09-01T00:00:00.000Z");
@@ -108,6 +108,37 @@ describe("data availability period", () => {
     expect(period).toMatchObject({ from: "2026-09-03", to: "2026-10-02" });
     expect(new Date(period.fromMs).toISOString()).toBe("2026-09-02T16:00:00.000Z");
     expect(new Date(period.toMs).toISOString()).toBe("2026-10-02T16:00:00.000Z");
+  });
+
+  it("counts a site connected part-way through the period from its first reading", () => {
+    // Asked on 11 Nov for the last 30 days; the site's first reading came on 3 Nov at 10:15 in Singapore.
+    const period = resolveDataAvailabilityPeriod({ nowMs: Date.parse("2026-11-11T04:00:00.000Z"), timezone: "Asia/Singapore" });
+    expect(period).toMatchObject({ from: "2026-10-12", to: "2026-11-10" });
+    const first = Date.parse("2026-11-03T02:15:00.000Z");
+    const counted = startAtFirstReading(period, first, "Asia/Singapore");
+    expect(counted).toEqual({ from: "2026-11-03", to: "2026-11-10", fromMs: first, toMs: period.toMs });
+
+    const meters = [{ meterPointId: "a", name: "Corridor lights" }];
+    const intervals = quarterHours("a", first, (period.toMs - first) / HOUR);
+    const lastReadingAt = new Map([["a", new Date(period.toMs).toISOString()]]);
+    const summary = summariseDataAvailability({
+      fromMs: counted.fromMs, toMs: counted.toMs, dayStartsMs: localDayStarts(counted.from, counted.to, "Asia/Singapore"), meters, intervals, lastReadingAt,
+    });
+    // The first day counts from the first reading, so every day it was connected is whole.
+    expect(summary.meters[0]).toMatchObject({ status: "ok", availabilityPct: 100, missingHours: 0, longestOutageHours: 0 });
+    expect(summary.meters[0]!.days).toEqual(Array(8).fill("all"));
+    expect(summary.outages).toEqual([]);
+    // Counted from 12 Oct instead, the three weeks before it was connected would read as missing.
+    const whole = summariseDataAvailability({ fromMs: period.fromMs, toMs: period.toMs, meters, intervals, lastReadingAt });
+    expect(whole.meters[0]!.availabilityPct).toBeLessThan(30);
+  });
+
+  it("keeps the period asked for when the readings started before it, after it, or not at all", () => {
+    const period = resolveDataAvailabilityPeriod({ from: "2026-11-01", to: "2026-11-10", nowMs: 0, timezone: "Asia/Singapore" });
+    expect(startAtFirstReading(period, Date.parse("2026-09-01T00:00:00.000Z"), "Asia/Singapore")).toBe(period);
+    expect(startAtFirstReading(period, period.fromMs, "Asia/Singapore")).toBe(period);
+    expect(startAtFirstReading(period, Date.parse("2026-11-20T00:00:00.000Z"), "Asia/Singapore")).toBe(period);
+    expect(startAtFirstReading(period, undefined, "Asia/Singapore")).toBe(period);
   });
 
   it("takes the dates asked for and refuses ones that make no sense", () => {

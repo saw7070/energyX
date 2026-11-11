@@ -30,6 +30,8 @@ it("shows the floor plan and its editor in English by default", async () => {
     {editor}
   </>);
   expect(host.querySelector('section[aria-label="Floor plan"] button')?.textContent).toBe("Draw the layout");
+  // The plan is a drawing only; the reader is told where totals come from instead.
+  expect(host.querySelector('section[aria-label="Floor plan"]')?.textContent).toContain("The plan is a drawing only. Totals and shares come from Groups, in the list beside it.");
   expect(host.querySelector('[role="toolbar"]')?.getAttribute("aria-label")).toBe("Floor plan tools");
   expect(host.querySelector("svg text")?.textContent).toBe("DB1Area A");
   expect(host.textContent).toContain("0 of 1 placed");

@@ -1,0 +1,25 @@
+/* "Create a report" on the Reports page. Theme colours come from the app's tokens only, so dark mode follows them. */
+.dialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); margin: auto; padding: 0; border: 1px solid var(--color-border); border-radius: 18px; background: var(--color-surface); color: var(--color-foreground); overflow: auto; }
+.dialog::backdrop { background: color-mix(in srgb, var(--color-foreground) 35%, transparent); }
+.bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--color-border); font-weight: 600; }
+.bar button { padding: 6px 10px; border-radius: 8px; }
+.body { display: grid; gap: 14px; padding: 18px 20px 20px; }
+.option { display: grid; gap: 12px; padding: 16px 18px; border: 1px solid var(--color-border); border-radius: 14px; }
+.option h3 { font-size: 15px; font-weight: 600; }
+.option p { font-size: 13px; line-height: 1.55; color: var(--color-muted); }
+.dates { display: flex; flex-wrap: wrap; gap: 12px; }
+.dates label { display: grid; gap: 4px; font-size: 13px; color: var(--color-muted); }
+.dates input { min-height: 38px; padding: 6px 10px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface); color: var(--color-foreground); font-size: 14px; }
+.styles { display: grid; gap: 8px; border: 0; padding: 0; margin: 0; }
+.styles legend { font-size: 13px; color: var(--color-muted); margin-bottom: 4px; }
+.style { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: start; padding: 10px 12px; border: 1px solid var(--color-border); border-radius: 10px; cursor: pointer; }
+.style:has(input:checked) { border-color: var(--color-foreground); }
+.style input { margin-top: 4px; }
+.style strong { font-size: 14px; font-weight: 600; }
+.style span { grid-column: 2; font-size: 13px; line-height: 1.5; color: var(--color-muted); }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.primary { min-height: 40px; padding: 8px 18px; border-radius: 8px; border: 1px solid transparent; background: var(--color-foreground); color: var(--color-surface); font-size: 14px; font-weight: 600; }
+.primary:disabled { opacity: .5; cursor: not-allowed; }
+.secondary { min-height: 40px; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-foreground); font-size: 14px; font-weight: 500; }
+.status { font-size: 13px; color: var(--color-muted); }
+.error { font-size: 13px; color: var(--color-step-error); }
