@@ -111,9 +111,9 @@ export function summariseDevices(analysis: EnergyScopeAnalysisDto): DeviceSummar
 }
 
 /**
- * Meters the analysis calls stopped that the live check still finds online. A meter sends its total only when it
- * moves, so one that uses nothing goes as quiet as one that lost power; these are idle, not stopped. They keep the
- * status their readings earned, and say since when they have used nothing.
+ * Meters the analysis calls stopped that are only using nothing (online, and able to: see idleWhenQuiet in meter
+ * health). A meter sends its total only when it moves, so one that uses nothing goes as quiet as one that lost power;
+ * these are idle, not stopped. They keep the status their readings earned, and say since when they have used nothing.
  */
 export function withIdleDevices(summary: DeviceSummary, online: ReadonlySet<string>): DeviceSummary {
   if (!summary.rows.some(row => row.status === "stopped" && row.stoppedAt && online.has(row.id))) return summary;
@@ -546,7 +546,7 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
       .catch(reason => describeProblem(reason, projectId, locale).then(problem => { if (!cancelled) setError(problem); }));
     return () => { cancelled = true; };
   }, [projectId, refresh, locale]);
-  // Which meters the live check finds online, so one that is only using nothing is not called stopped.
+  // Which quiet meters are only using nothing (online, and able to), so they are not called stopped.
   const health = useMeterHealth(projectId);
 
   if (error) return <section className={styles.panel}><div role="alert" className={styles.problem}>
@@ -556,7 +556,7 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
   </div></section>;
   if (!loaded) return <section className={styles.panel}><p role="status" className={styles.muted}>{t("loading")}</p></section>;
   const { stats } = loaded;
-  const summary = withIdleDevices(loaded.summary, new Set((health?.meters ?? []).filter(meter => meter.onlineNow).map(meter => meter.meterPointId)));
+  const summary = withIdleDevices(loaded.summary, new Set((health?.meters ?? []).filter(meter => meter.idleWhenQuiet).map(meter => meter.meterPointId)));
   if (!summary.rows.length) return <section className={styles.panel}><h3>{t("title")}</h3><p className={styles.muted}>{t("empty")}</p></section>;
   const openingHours = openingHoursLabel(loaded.calendar, locale);
 

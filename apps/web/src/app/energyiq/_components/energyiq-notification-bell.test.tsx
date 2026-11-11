@@ -120,7 +120,7 @@ describe("Notification bell", () => {
   });
 
   it("does not call a meter stopped when the live check finds it online and it is simply using nothing", async () => {
-    api.getEnergyProjectMeterHealth.mockResolvedValue({ ...health, meters: health.meters.map((meter) => meter.meterPointId === "m5" ? { ...meter, name: "Pavilion fan", onlineNow: true } : meter) });
+    api.getEnergyProjectMeterHealth.mockResolvedValue({ ...health, meters: health.meters.map((meter) => meter.meterPointId === "m5" ? { ...meter, name: "Pavilion fan", idleWhenQuiet: true } : meter) });
     await openBell();
     const rows = [...container.querySelectorAll("li")].map((row) => row.textContent ?? "");
     expect(rows.find((row) => row.includes("stopped sending"))).toContain("Meter 06 stopped sending readings");

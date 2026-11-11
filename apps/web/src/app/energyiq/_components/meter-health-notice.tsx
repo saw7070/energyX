@@ -39,16 +39,16 @@ function quietMeters(meters: ReadonlyArray<Quiet>): Quiet[] {
 
 /**
  * The meters that were sending and went quiet, furthest behind first. A meter sends its total only when it moves, so
- * one that uses nothing goes as quiet as one that lost power; one the live check still finds online is idle (see
- * idleMeters), not stopped.
+ * one that uses nothing goes as quiet as one that lost power; one the server calls idle when quiet (online, and able
+ * to rightly use nothing) is idle (see idleMeters), not stopped.
  */
 export function stoppedMeters(meters: ReadonlyArray<Quiet>): Quiet[] {
-  return quietMeters(meters).filter(meter => !meter.onlineNow);
+  return quietMeters(meters).filter(meter => !meter.idleWhenQuiet);
 }
 
-/** Quiet meters the live check still finds online: using nothing, so their total has not moved and nothing is sent. */
+/** Quiet meters that are only using nothing, so their total has not moved and nothing is sent. */
 export function idleMeters(meters: ReadonlyArray<Quiet>): Quiet[] {
-  return quietMeters(meters).filter(meter => meter.onlineNow);
+  return quietMeters(meters).filter(meter => meter.idleWhenQuiet);
 }
 
 /**

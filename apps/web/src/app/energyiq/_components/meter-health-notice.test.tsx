@@ -146,13 +146,13 @@ describe("a meter that is quiet because it uses nothing", () => {
   // A rarely used pavilion fan: its total has not moved since 20 September, but the live check still finds it online.
   const meters: EnergyMeterHealthDto["meters"] = [
     { meterPointId: "a", name: "Lobby lights", sourceLabel: "Block A lobby", status: "usable", lastReadingAt: "2026-09-24T00:45:00.000Z" },
-    { meterPointId: "fan", name: "Pavilion fan", sourceLabel: "Pavilion", status: "usable", lastReadingAt: "2026-09-20T08:45:00.000Z", onlineNow: true },
+    { meterPointId: "fan", name: "Pavilion fan", sourceLabel: "Pavilion", status: "usable", lastReadingAt: "2026-09-20T08:45:00.000Z", idleWhenQuiet: true },
   ];
 
-  it("is idle, not stopped; with no live answer the same silence is still stopped", () => {
+  it("is idle, not stopped; when the server does not call it idle the same silence is still stopped", () => {
     expect(stoppedMeters(meters)).toEqual([]);
     expect(idleMeters(meters).map(meter => meter.name)).toEqual(["Pavilion fan"]);
-    const unknown = meters.map(({ onlineNow: _online, ...meter }) => meter);
+    const unknown = meters.map(({ idleWhenQuiet: _idle, ...meter }) => meter);
     expect(stoppedMeters(unknown).map(meter => meter.name)).toEqual(["Pavilion fan"]);
     expect(idleMeters(unknown)).toEqual([]);
   });

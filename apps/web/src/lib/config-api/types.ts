@@ -673,7 +673,7 @@ export type EnergyDataAvailabilityDto = {
     notInUse?: string;
     /**
      * "idle": no new readings because the meter's total has not moved (it is using nothing), not because it stopped:
-     * the live check still finds it online.
+     * the live check still finds it online, and it can rightly use nothing (see `idleWhenQuiet` in meter health).
      */
     status: "ok" | "below_target" | "stopped" | "idle" | "no_readings" | "not_in_use";
     availabilityPct: number;
@@ -703,10 +703,11 @@ export type EnergyMeterHealthDto = {
     /** Someone confirmed the meter is not in use, so its silence is expected. */
     notInUse?: string;
     /**
-     * The 15-minute live check found the meter online. A meter sends its total only when it moves, so one that is
-     * quiet but online is using nothing, not stopped.
+     * The 15-minute live check found the meter online, and it is a meter that can rightly use nothing (not lighting on
+     * a lights-on-hours site, nor one always on by design). A meter sends its total only when it moves, so such a
+     * meter that is quiet is using nothing, not stopped.
      */
-    onlineNow?: boolean;
+    idleWhenQuiet?: boolean;
   }>;
   summary: { total: number; usable: number; insufficientHistory: number; noReadings: number };
   dataThrough?: string;

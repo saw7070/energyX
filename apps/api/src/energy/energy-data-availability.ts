@@ -150,8 +150,11 @@ export function summariseDataAvailability(input: {
   lastReadingAt: Map<string, string>;
   /** Start of each site-local day in the period (see localDayStarts), for the day-by-day strip. */
   dayStartsMs?: number[];
-  /** Meters the live check finds online now (see readOnlineMeters); left out, every quiet meter counts as stopped. */
-  onlineNow?: ReadonlySet<string>;
+  /**
+   * Meters whose quiet spell means they are using nothing: online now and able to rightly use nothing (see
+   * readIdleWhenQuietMeters). Left out, every quiet meter counts as stopped.
+   */
+  idleWhenQuiet?: ReadonlySet<string>;
 }): DataAvailabilitySummary {
   const periodMs = Math.max(1, input.toMs - input.fromMs);
   const byMeter = new Map<string, EnergyMeterIntervalCoverage[]>();
@@ -163,9 +166,9 @@ export function summariseDataAvailability(input: {
     const realMs = total("real"), estimatedMs = total("estimated"), missingMs = total("missing");
     const estimatedKwh = segments.filter(segment => segment.kind === "estimated").reduce((sum, segment) => sum + segment.kwh, 0);
     const lastReadingAt = input.lastReadingAt.get(meter.meterPointId);
-    // Quiet since before the period's end: a meter that has sent readings before and is online now is using nothing.
+    // Quiet since before the period's end: a meter that has sent readings before and can be idle now is using nothing.
     const quiet = !lastReadingAt || Date.parse(lastReadingAt) < input.toMs - STOPPED_AFTER_MS;
-    const idle = quiet && !!lastReadingAt && !!input.onlineNow?.has(meter.meterPointId);
+    const idle = quiet && !!lastReadingAt && !!input.idleWhenQuiet?.has(meter.meterPointId);
     // Neighbouring estimated and missing stretches are one outage.
     let longest = 0;
     let open: Segment[] = [];

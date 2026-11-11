@@ -25,7 +25,8 @@ import {
   readEnergyMeterIntervalCoverage,
 } from "@datafoundry/data-gateway";
 import { localDayStarts, resolveDataAvailabilityPeriod, startAtFirstReading, summariseDataAvailability } from "./energy-data-availability.js";
-import { readOfflineMeters, readOnlineMeters } from "./energy-live-status.js";
+import { readOfflineMeters } from "./energy-live-status.js";
+import { readIdleWhenQuietMeters } from "./energy-idle-meters.js";
 import { normalizeProjectRegion, type EnergyIqProjectRegion, type MetadataStore } from "@datafoundry/metadata";
 import type {
   EnergyIqPermissionArea,
@@ -1864,7 +1865,7 @@ export const handleEnergyApiRequest = async (
         }));
         const counted = startAtFirstReading(period, Number.isFinite(firstReadingMs) ? firstReadingMs : undefined, project.timezone);
         const summary = summariseDataAvailability({
-          onlineNow: readOnlineMeters({ db: context.metadataStore.db, projectId }),
+          idleWhenQuiet: readIdleWhenQuietMeters({ metadataStore: context.metadataStore, projectId }),
           fromMs: counted.fromMs,
           toMs: counted.toMs,
           dayStartsMs: localDayStarts(counted.from, counted.to, project.timezone),
@@ -1925,8 +1926,9 @@ export const handleEnergyApiRequest = async (
           meterPoints,
         });
         const details = readPublishedMeterDetails(context.metadataStore, projectId, hierarchyRevisionId);
-        // Online at the latest live check: a meter quiet for hours is then idle (its total has not moved), not stopped.
-        const online = readOnlineMeters({ db: context.metadataStore.db, projectId });
+        // Online at the latest live check and able to rightly use nothing: a meter quiet for hours is then idle (its
+        // total has not moved), not stopped. Never lighting on a lights-on-hours site, nor a meter always on by design.
+        const idle = readIdleWhenQuietMeters({ metadataStore: context.metadataStore, projectId });
         const meters = health.map((meterPoint) => ({
           meterPointId: meterPoint.meterPointId,
           name: details.get(meterPoint.meterPointId)?.name ?? meterPoint.sourceLabel,
@@ -1934,7 +1936,7 @@ export const handleEnergyApiRequest = async (
           status: meterPoint.status,
           ...(details.get(meterPoint.meterPointId)?.notInUse ? { notInUse: details.get(meterPoint.meterPointId)!.notInUse } : {}),
           ...(meterPoint.coverageTo ?? meterPoint.readingTo ? { lastReadingAt: meterPoint.coverageTo ?? meterPoint.readingTo } : {}),
-          ...(online.has(meterPoint.meterPointId) ? { onlineNow: true } : {}),
+          ...(idle.has(meterPoint.meterPointId) ? { idleWhenQuiet: true } : {}),
         }));
         const summary = meters.reduce((total, meterPoint) => {
           if (meterPoint.status === "usable") total.usable += 1;

@@ -95,15 +95,15 @@ describe("data availability", () => {
     const to = from + days(3);
     const input = {
       fromMs: from, toMs: to,
-      meters: [{ meterPointId: "fan", name: "Pavilion fan" }, { meterPointId: "tv", name: "Showroom TV" }],
+      meters: [{ meterPointId: "fan", name: "Pavilion fan" }, { meterPointId: "tv", name: "Lobby TV" }],
       intervals: [...quarterHours("fan", from, 48), ...quarterHours("tv", from, 48)],
       lastReadingAt: new Map([["fan", new Date(from + days(2)).toISOString()], ["tv", new Date(from + days(2)).toISOString()]]),
     };
-    const summary = summariseDataAvailability({ ...input, onlineNow: new Set(["fan"]) });
-    expect(summary.meters.map(meter => [meter.name, meter.status])).toEqual([["Pavilion fan", "idle"], ["Showroom TV", "stopped"]]);
+    const summary = summariseDataAvailability({ ...input, idleWhenQuiet: new Set(["fan"]) });
+    expect(summary.meters.map(meter => [meter.name, meter.status])).toEqual([["Pavilion fan", "idle"], ["Lobby TV", "stopped"]]);
     // Readings that did not arrive still do not count as received: the figure stays what the readings show.
     expect(summary.meters[0]!.availabilityPct).toBeCloseTo(66.7, 1);
-    expect(summary.outages.map(outage => [outage.name, outage.ongoing, outage.idle ?? false])).toEqual([["Pavilion fan", true, true], ["Showroom TV", true, false]]);
+    expect(summary.outages.map(outage => [outage.name, outage.ongoing, outage.idle ?? false])).toEqual([["Pavilion fan", true, true], ["Lobby TV", true, false]]);
     // Without a live answer, the same silence is still a meter that stopped.
     expect(summariseDataAvailability(input).meters.map(meter => meter.status)).toEqual(["stopped", "stopped"]);
   });
@@ -114,7 +114,7 @@ describe("data availability", () => {
       meters: [{ meterPointId: "fan", name: "Pavilion fan" }, { meterPointId: "new", name: "New meter" }],
       intervals: [],
       lastReadingAt: new Map([["fan", new Date(from - days(5)).toISOString()]]),
-      onlineNow: new Set(["fan", "new"]),
+      idleWhenQuiet: new Set(["fan", "new"]),
     });
     expect(summary.meters.map(meter => meter.status)).toEqual(["idle", "no_readings"]);
   });
