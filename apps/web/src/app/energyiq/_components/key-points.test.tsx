@@ -58,6 +58,44 @@ it("adds one short line by top-level group under the headline, worded as each gr
  } finally {delete report.groups;await act(async()=>root.unmount());host.remove();request.mockRestore();vi.unstubAllGlobals();}
 });
 
+it("leads with the average day, then where it goes by group, each top-level group opening onto its groups", async () => {
+ vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);vi.stubGlobal("React",React);
+ type Row = { key: string; name: string; kind: "group" | "meter" | "unmetered"; kwh: number; share: number; pct: number; perDay: number | null; rows: Row[] };
+ const row = (key: string, name: string, share: number, rows: Row[] = []): Row => ({ key, name, kind: "group", kwh: share * 100, share, pct: Math.round(share * 100), perDay: share * 47, rows });
+ const report = site.report as typeof site.report & { averageDay?: { kwh: number; cost: number | null; text: string }; groups?: { summary: string; breakdown: Row[] } };
+ report.averageDay = { kwh: 47, cost: 13, text: "Uses about 47 kWh a day (about S$13)" };
+ report.groups = { summary: "Block A 40% · Block B 40% · Common area 20%", breakdown: [
+  row("a", "Block A", 0.4, [row("a-gf", "Ground floor", 0.1), row("a-bl", "Block lighting", 0.3)]),
+  row("b", "Block B", 0.4),
+  row("c", "Common area", 0.2, [row("drive", "Driveway", 0.08), row("play", "Playground", 0.05), row("pav", "Pavilion", 0.03), row("gate", "Entrance", 0.04)]),
+ ] };
+ const request=vi.spyOn(configApi,"reportActionRequest").mockResolvedValue({ publication:{reportId:"r",selection:{active:[],featuredActionIds:[]}}, metrics:{projectName:"Estate",period:{from:"2026-09-01",toExclusive:"2026-09-02"},energyKwh:0,peakKw:0,coverage:1,cost:null,outsideHoursPercent:null} });
+ const host=document.createElement("div");document.body.append(host);const root=createRoot(host);
+ try {await act(async()=>root.render(<KeyPoints projectId="p"/>));
+ expect(host.querySelector("h2")?.textContent).toBe("Uses about 47 kWh a day (about S$13)");
+ // The finding follows the average day and the split.
+ expect(host.textContent).toContain("Three-quarters of the office load never switches off");
+ expect(host.textContent).not.toContain("Share of all use:");
+ const split=host.querySelector('section[aria-labelledby]')!;
+ expect(split.querySelector("h3")?.textContent).toBe("Where it goes");
+ const buttons=[...split.querySelectorAll("button")];
+ // Saved order, each with its kWh a day and share of the whole site; a group with nothing inside it is not a button.
+ expect(buttons.map(button=>button.textContent)).toEqual(["Block A18.8 kWh a day · 40%", "Common area9.4 kWh a day · 20%"]);
+ expect(split.textContent).toContain("Block B18.8 kWh a day · 40%");
+ const common=buttons[1]!;
+ const inside=host.querySelector(`#${CSS.escape(common.getAttribute("aria-controls")!)}`) as HTMLElement;
+ expect(common.getAttribute("aria-expanded")).toBe("false");
+ expect(inside.hidden).toBe(true);
+ expect(inside.getAttribute("aria-label")).toBe("Inside Common area");
+ await act(async()=>common.click());
+ expect(common.getAttribute("aria-expanded")).toBe("true");
+ expect(inside.hidden).toBe(false);
+ expect([...inside.querySelectorAll("li")].map(item=>item.textContent)).toEqual(["Driveway3.8 kWh a day · 8%", "Playground2.4 kWh a day · 5%", "Pavilion1.4 kWh a day · 3%", "Entrance1.9 kWh a day · 4%"]);
+ await act(async()=>common.click());
+ expect(inside.hidden).toBe(true);
+ } finally {delete report.groups;delete report.averageDay;await act(async()=>root.unmount());host.remove();request.mockRestore();vi.unstubAllGlobals();}
+});
+
 it("lists the lights that were on in the daytime under a daytime warning, and nothing extra when the lights ran as planned", async () => {
  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);vi.stubGlobal("React",React);
  const report = site.report as typeof site.report & { headlineTopic?: string; daytime?: { heading: string; items: string[]; more: string | null; none: string | null; alwaysOn: string | null; rule: string } };

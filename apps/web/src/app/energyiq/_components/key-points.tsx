@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import Link from "next/link";
 import { configApi } from "../../../lib/config-api";
 import styles from "./key-points.module.css";
@@ -15,6 +15,7 @@ import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { intlLocale, type EnergyIqLocale } from "./energyiq-messages";
 import { keyPointsMessages } from "./key-points-messages";
 import { useEnergyIqAccess } from "./energyiq-access";
+import { kwhText, type BreakdownRow } from "@datafoundry/site-report";
 
 /** Two sentences that say nearly the same thing ("used after working hours" / "used outside working hours"). */
 const sameText = (left: string, right: string): boolean => {
@@ -82,6 +83,42 @@ function withBold(sentence: string, placeholder: string, value: string) {
   const [before, after = ""] = sentence.split(placeholder);
   return <>{before}<strong>{value}</strong>{after}</>;
 }
+/**
+ * Where the energy goes, in the Overview's first view: the top-level groups in their saved order, each with its kWh on
+ * an average day and its share of the whole site. A group opens onto the groups inside it, each with its own kWh and
+ * share of the whole site, so they add up to the group's share. Each group is a button that says whether it is open.
+ */
+function GroupSplit({ rows }: { rows: BreakdownRow[] }) {
+  const t = useMessages(keyPointsMessages);
+  const id = useId();
+  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
+  const toggle = (key: string) => setOpen(current => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; });
+  // One scale for every bar, so the groups inside a group visibly add up to it.
+  const scale = Math.max(0.001, ...rows.map(row => row.share));
+  // Whole percentages that add up: the top-level groups to 100%, the groups inside one to its own share.
+  const value = (row: BreakdownRow) => row.perDay == null ? `${row.pct}%` : t("splitValue", { kwh: kwhText(row.perDay), pct: `${row.pct}%` });
+  const parts = (row: BreakdownRow) => <>
+    <span className={styles.splitName}>{row.name}</span>
+    <span className={styles.splitBar} aria-hidden="true"><i style={{ width: `${Math.min(1, row.share / scale) * 100}%` }} /></span>
+    <span className={styles.splitValue}>{value(row)}</span>
+  </>;
+  return <section className={styles.split} aria-labelledby={`${id}-title`}>
+    <h3 id={`${id}-title`}>{t("splitTitle")}</h3>
+    <ul>{rows.map((row, index) => {
+      const listId = `${id}-group-${index}`;
+      const expanded = open.has(row.key);
+      return <li key={row.key}>
+        {row.rows.length ? <button type="button" className={styles.splitRow} aria-expanded={expanded} aria-controls={listId} onClick={() => toggle(row.key)}>
+          {parts(row)}<span className={styles.splitChevron} aria-hidden="true" />
+        </button> : <div className={styles.splitRow}>{parts(row)}<span aria-hidden="true" /></div>}
+        {row.rows.length > 0 && <ul id={listId} className={styles.splitInner} hidden={!expanded} aria-label={t("splitInside", { name: row.name })}>
+          {row.rows.map(child => <li key={child.key}><div className={styles.splitRow}>{parts(child)}<span aria-hidden="true" /></div></li>)}
+        </ul>}
+      </li>;
+    })}</ul>
+    {rows.some(row => row.rows.length > 0) && <p className={styles.splitHint}>{t("splitHint")}</p>}
+  </section>;
+}
 const reportDate = (value: string, locale: EnergyIqLocale = "en") => new Date(value).toLocaleDateString(locale === "en" ? "en-GB" : intlLocale(locale),{timeZone:"Asia/Singapore",day:"numeric",month:"short",year:"numeric"}).replace("Sept","Sep");
 export function KeyPoints({projectId}:{projectId:string}) {
   const { activeProject } = useEnergyIqAccess();
@@ -106,6 +143,8 @@ export function KeyPoints({projectId}:{projectId:string}) {
   const saved=site.saved;
   const shownPeriod=saved?.period ?? source?.period ?? null;
   const names=plainNames(report);
+  const averageDay=report?.averageDay ?? null;
+  const split=report?.groups?.breakdown?.length ? report.groups.breakdown : null;
   // Everyday names and times if the published summary is shown: "office area lights" instead of "DB1 L1 Light", "8 pm" instead of "20:00".
   const plain=(text:string)=>plainTimes(names(plainCard(text)), locale);
   return <main className={styles.page}>
@@ -114,7 +153,10 @@ export function KeyPoints({projectId}:{projectId:string}) {
       :!result?<p role="status">{t("loading")}</p>
       :<>
       <section className={styles.hero}><p className={styles.heroEyebrow}>{metrics?.projectName ?? activeProject?.name ?? t("yourProject")}</p>
-        <h2>{report ? <>{report.title.before}<span>{report.title.emphasis}</span></> : site.state && publication?.selection.summary ? plain(publication.selection.summary) : t("fallbackHeadline")}</h2>
+        {/* The first view leads with the site's average day, then where it goes by group; the finding follows. */}
+        <h2>{averageDay ? averageDay.text : report ? <>{report.title.before}<span>{report.title.emphasis}</span></> : site.state && publication?.selection.summary ? plain(publication.selection.summary) : t("fallbackHeadline")}</h2>
+        {split && <GroupSplit rows={split} />}
+        {averageDay && report && <p className={styles.heroFinding}>{report.title.before}<span>{report.title.emphasis}</span></p>}
         {/* The sentence under the headline only when it adds something: often it is the headline again. */}
         {report?.headline && sameText(report.headline, `${report.title.before}${report.title.emphasis}`) === false ? <p>{report.headline}</p> : null}
         {/* Lights-on sites warned about daytime use: which lights were on in the daytime, and when, largest first. */}
@@ -123,8 +165,8 @@ export function KeyPoints({projectId}:{projectId:string}) {
           <ul>{report.daytime.items.map(item => <li key={item}>{item}</li>)}{report.daytime.more && <li>{report.daytime.more}</li>}</ul>
           {report.daytime.alwaysOn && <p>{report.daytime.alwaysOn}</p>}
         </div>}
-        {/* Where the energy goes, one short line by top-level group: each group's share of all use, not of the line above. */}
-        {report?.groups && <p className={styles.heroGroups}>{t("byGroup", { summary: report.groups.summary })}</p>}
+        {/* Without a breakdown, one short line by top-level group: each group's share of all use, not of the line above. */}
+        {report?.groups && !split && <p className={styles.heroGroups}>{t("byGroup", { summary: report.groups.summary })}</p>}
         <ForecastLine projectId={projectId} className={styles.heroForecast} />
         <p className={styles.heroLinks}><Link href={analysisHref(projectId, shownPeriod, report?.headline ?? "", report?.headlineTopic)}>{t("seeWhy")}</Link></p></section>
       {/* What the site is drawing right now, for a site with a live connection. */}
