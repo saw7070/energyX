@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   behindSentence, behindTheDay, buildSiteReport, daySentence, dayKindOf, explainDays, findAnomalies, meterGroupPlaces, scopeDays, sharedMeterNames, standoutDays, standoutMeters, standoutReport, standoutRule,
-  usualDayBaselines, type AnalysisDay,
+  usualDayBaselines, type AnalysisData, type AnalysisDay,
 } from "@datafoundry/site-report";
 import { DAILY, DATA, DATES, GAP_DAY, IDS, meter, series, site, THURSDAY } from "./standout-days.test-fixture";
 
@@ -135,6 +135,26 @@ describe("why a day was different", () => {
     expect(text).toBe("On 6 Nov Lift lobby lights (Block 1A) used 19.5 kWh; they usually use 18 kWh. Lift lobby lights (Block 1B) used 19.5 kWh; they usually use 18.1 kWh.");
     expect(standoutReport({ ...DATA, current: { project: lobbies, spaces: [] } }, "zh-Hans").items.find(item => item.date === friday)!.text)
       .toBe("11月6日，Block 1A用电 19.5 kWh，平时约 18 kWh。Block 1B用电 19.5 kWh，平时约 18.1 kWh。");
+  });
+
+  it("adds a group up from the meters that sent readings, so a silent meter never hides what its group did", () => {
+    // On Friday the Pavilion lights & fan use 2 kWh more and the estate entrance 0.3 kWh more. The Pavilion group also
+    // holds a walkway light that is marked not in use and sends nothing.
+    const friday = "2026-11-06";
+    const extra: Record<string, number> = { pavilion: 2, bow: 0.3 };
+    const project = { ...site, total: series("__scope__", date => IDS.reduce((sum, id) => sum + DAILY[id]!(date) + (date === friday ? extra[id] ?? 0 : 0), 0)),
+      meters: site.meters.map(item => extra[item.id] ? { ...item, series: series(item.id, date => DAILY[item.id]!(date) + (date === friday ? extra[item.id]! : 0)) } : item) };
+    const groups = { ...DATA.groups!, meters: [...DATA.groups!.meters, { id: "walkway", name: "Walkway light", groupId: "pavilion-area", kwh: 0 }] };
+    const data: AnalysisData = { ...DATA, groups, notInUse: [{ id: "walkway", name: "Walkway light", reason: "Not wired up yet" }], current: { project, spaces: [] } };
+    const text = (input: AnalysisData) => standoutReport(input).items.find(item => item.date === friday)!.text;
+    // The Pavilion is behind the day, as the same readings without groups say too; the estate entrance is too small to name.
+    expect(text(data)).toBe("On 6 Nov Pavilion lights & fan used 6 kWh; it usually uses 4 kWh.");
+    expect(text({ ...data, groups: undefined })).toBe("On 6 Nov Pavilion lights & fan used 6 kWh; it usually uses 4 kWh.");
+    // With two meters sending in the group, the group is named from those two; the silent one adds nothing.
+    const fan = { ...site.meters.find(item => item.id === "pavilion")!, id: "pavilion-2", name: "Pavilion fan", series: series("pavilion-2", date => 1 + (date === friday ? 1 : 0)) };
+    const both = { ...data, groups: { ...groups, meters: [...groups.meters, { id: "pavilion-2", name: "Pavilion fan", groupId: "pavilion-area", kwh: 14 }] },
+      current: { project: { ...project, meters: [...project.meters, fan], total: series("__scope__", date => IDS.reduce((sum, id) => sum + DAILY[id]!(date) + (date === friday ? extra[id] ?? 0 : 0), 0) + 1 + (date === friday ? 1 : 0)) }, spaces: [] } };
+    expect(text(both)).toBe("On 6 Nov the pavilion used 8 kWh; it usually uses 5 kWh.");
   });
 
   it("says other meters moved too when what is named explains less than half of the day", () => {

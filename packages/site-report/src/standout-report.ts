@@ -36,8 +36,10 @@ export type DayBehind = { kind: "group" | "meter"; id: string; name: string; kwh
  * whose meters together moved most the same way as the whole site, or, within it, the one meter that explains most of
  * its change; a meter filed directly in a group that has groups inside it, or in no group, counts on its own. Without
  * groups, the meter that moved most. Named only when it explains a real part of the difference (the rule that names
- * meters); a group counts only when every meter in it has complete readings that day. A second one is named too when
- * it moved nearly as much (both blocks' lobbies), so one is never blamed for what two did. Empty when nothing stands out.
+ * meters). A group is added up from its meters that have complete readings that day and a usual day of their own; one
+ * that sent nothing that day (offline, or marked not in use) counts as no change, as it does for the whole day, so a
+ * silent meter never hides the rest of its group. A second one is named too when it moved nearly as much (both blocks'
+ * lobbies), so one is never blamed for what two did. Empty when nothing stands out.
  */
 export function behindTheDay(item: DayExplanation, groups: AnalysisGroups | undefined): DayBehind[] {
   if (item.status !== "standout" || item.deltaKwh == null || !item.moves?.length) return [];
@@ -54,14 +56,14 @@ export function behindTheDay(item: DayExplanation, groups: AnalysisGroups | unde
   type Candidate = { deltaKwh: number; pick: () => DayBehind };
   const candidates: Candidate[] = [
     ...[...members].flatMap(([id, ids]): Candidate[] => {
-      const own = ids.map(member => moves.get(member));
-      if (own.some(move => !move)) return [];
-      const list = own as StandoutContributor[];
+      const list = ids.flatMap(member => moves.get(member) ?? []);
+      if (!list.length) return [];
       const deltaKwh = list.reduce((sum, move) => sum + move.deltaKwh, 0);
       return [{ deltaKwh, pick: () => {
-        // One meter that explains most of its group's change is named itself: the circuit behind it.
+        // One meter that explains most of its group's change is named itself: the circuit behind it. A group of one
+        // meter is named by the group.
         const lead = [...list].sort((a, b) => toward(b.deltaKwh) - toward(a.deltaKwh))[0]!;
-        return list.length > 1 && toward(lead.deltaKwh) >= ONE_METER_SHARE * toward(deltaKwh) ? meter(lead)
+        return ids.length > 1 && toward(lead.deltaKwh) >= ONE_METER_SHARE * toward(deltaKwh) ? meter(lead)
           : { kind: "group", id, name: known.get(id)!.name, kwh: list.reduce((sum, move) => sum + move.kwh, 0), usualKwh: list.reduce((sum, move) => sum + move.usualKwh, 0) };
       } }];
     }),
