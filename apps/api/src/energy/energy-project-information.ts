@@ -4,6 +4,13 @@ import { resolveEnergyPublishedHierarchyNodes } from "./energy-query-context.js"
 
 /** presentation.always_on === "true": the meter is meant to run day and night. Read loosely until the setup document types the field. */
 const alwaysOn = (presentation: object | undefined) => (presentation as { always_on?: unknown } | undefined)?.always_on === "true";
+/** presentation.light_count: how many light points the meter feeds, a positive whole number kept as text. Anything else: not recorded. */
+const lightCount = (presentation: object | undefined): number | null => {
+  const value = (presentation as { light_count?: unknown } | undefined)?.light_count;
+  const text = typeof value === "string" ? value.trim() : "";
+  const count = /^\d+$/.test(text) ? Number(text) : NaN;
+  return Number.isSafeInteger(count) && count > 0 ? count : null;
+};
 
 /** Published customer information only; do not return setup documents or policy catalogs. */
 export function readEnergyProjectInformation(metadata: MetadataStore, userId: string, workspaceId: string, projectId: string) {
@@ -34,7 +41,8 @@ export function readEnergyProjectInformation(metadata: MetadataStore, userId: st
   const ownerName = (owner: { kind: "project" } | { kind: "scope"; scope_id: string }) => owner.kind === "project" ? document.project.name : names.get(owner.scope_id) ?? "Location";
   return {
     projectId, name: document.project.name, timezone: document.project.timezone, basis: "published" as const,
-    locations: nodes.filter(node => node.node_type !== "circuit").map(node => ({ id: node.id, name: node.name, parentId: node.parent_id ?? null })),
+    // `sortOrder`: the order someone saved among the groups beside it, so reports list groups the same way.
+    locations: nodes.filter(node => node.node_type !== "circuit").map(node => ({ id: node.id, name: node.name, parentId: node.parent_id ?? null, sortOrder: node.sort_order })),
     meters: rows.map(meter => ({ id: meter.id, name: meter.presentation?.short_name?.trim() || meter.presentation?.device_name?.trim() || meter.presentation?.circuit_name?.trim() || meter.display_name || meter.source_label,
       ...(meter.presentation?.short_name?.trim() ? { fullName: meter.presentation?.device_name?.trim() || meter.presentation?.circuit_name?.trim() || meter.display_name || meter.source_label } : {}),
       ...(meter.presentation?.panel?.trim() ? { panel: meter.presentation.panel.trim() } : {}),
@@ -42,6 +50,8 @@ export function readEnergyProjectInformation(metadata: MetadataStore, userId: st
       ...(meter.presentation?.not_in_use?.trim() ? { notInUse: meter.presentation.not_in_use.trim() } : {}),
       // Meant to run day and night (emergency lighting): reports keep it in totals but never call its daytime use a finding.
       ...(alwaysOn(meter.presentation) ? { alwaysOn: true as const } : {}),
+      // How many light points it feeds, when someone recorded it: reports show energy per light for these meters only.
+      ...(lightCount(meter.presentation) ? { lightCount: lightCount(meter.presentation)! } : {}),
       locationId: locationId(meter.navigation_scope_id ?? meter.scope_id), location: names.get(locationId(meter.navigation_scope_id ?? meter.scope_id)) ?? "Project", officialAggregation: meter.aggregation_usage === "official" })),
     calendar: calendar ? { version: calendar.version_id, entries: calendar.entries.map(entry => ({
       location: ownerName(entry.owner), from: entry.effective_from, toExclusive: entry.effective_to ?? null,

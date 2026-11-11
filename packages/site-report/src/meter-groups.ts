@@ -11,8 +11,11 @@
  * compute the same figures from the same inputs.
  */
 
-/** One group as the Locations tree holds it. `parentId` null: a top-level group. */
-export type MeterGroup = { id: string; name: string; parentId: string | null };
+/**
+ * One group as the Locations tree holds it. `parentId` null: a top-level group. `order` is the place someone saved for
+ * it among the groups beside it (the setup's sort order); groups without one follow in the order they are listed.
+ */
+export type MeterGroup = { id: string; name: string; parentId: string | null; order?: number | undefined };
 
 /** One meter's energy, filed in a group. A `groupId` that is null or names no group: not in any group. */
 export type GroupedMeter = {
@@ -44,11 +47,26 @@ export type MeterGroupNode = {
   /** Groups inside this one, largest first. */
   children: MeterGroupNode[];
   depth: number;
+  /** Where the group comes in its saved order (see inSavedOrder); the whole site is 0. */
+  position: number;
 };
 
 export type MeterGroupTree = MeterGroupNode & { unmeteredKwh: number };
 
 export const SITE_GROUP_ID = "__site__";
+
+/**
+ * Each group's place in the order someone saved: by its saved sort order, then the order the list gives. Groups
+ * compared by this number read as they do on the Facility page, wherever their size puts them.
+ */
+function savedPositions(groups: readonly MeterGroup[]): Map<string, number> {
+  const ranked = groups.map((group, index) => ({ group, index }))
+    .sort((a, b) => (a.group.order ?? Number.POSITIVE_INFINITY) - (b.group.order ?? Number.POSITIVE_INFINITY) || a.index - b.index);
+  return new Map(ranked.map((item, position) => [item.group.id, position + 1]));
+}
+
+/** Groups in the order someone saved for them, rather than largest first. */
+export const inSavedOrder = <T extends { position: number }>(groups: readonly T[]): T[] => [...groups].sort((a, b) => a.position - b.position);
 export const UNMETERED_GROUP_METER_ID = "__unmetered__";
 
 /** Readings never line up to the last watt-hour; only a real share of the site is worth a line of its own. */
@@ -72,6 +90,7 @@ export function buildMeterGroupTree(input: {
   keepEmpty?: boolean | undefined;
 }): MeterGroupTree {
   const known = new Map(input.groups.map(group => [group.id, group]));
+  const positions = savedPositions(input.groups);
   const childrenOf = new Map<string | null, MeterGroup[]>();
   for (const group of input.groups) {
     const parent = group.parentId && known.has(group.parentId) && group.parentId !== group.id ? group.parentId : null;
@@ -92,7 +111,7 @@ export function buildMeterGroupTree(input: {
     const meterCount = own.filter(meter => !meter.unmetered).length + children.reduce((sum, child) => sum + child.meterCount, 0);
     const shareOf = (value: number) => kwh > 0 ? value / kwh : 0;
     return {
-      id: id ?? SITE_GROUP_ID, name: group?.name ?? input.name, kwh, share: 1, meterCount, singleMeter: meterCount === 1, depth,
+      id: id ?? SITE_GROUP_ID, name: group?.name ?? input.name, kwh, share: 1, meterCount, singleMeter: meterCount === 1, depth, position: id ? positions.get(id) ?? 0 : 0,
       meters: own.map(meter => ({ ...meter, share: shareOf(meter.kwh) })).sort(byKwhThenName),
       children: children.map(child => ({ ...child, share: shareOf(child.kwh) })).sort(byKwhThenName),
     };
@@ -145,9 +164,10 @@ export function analysisGroupTree(data: { projectName: string; groups?: { list: 
  * is the whole site rather than a group, so its direct children become the top-level groups and a meter filed on the
  * project itself is in no group.
  */
-export function groupsFromLocations(locations: ReadonlyArray<{ id: string; name: string; parentId?: string | null | undefined }>): MeterGroup[] {
+export function groupsFromLocations(locations: ReadonlyArray<{ id: string; name: string; parentId?: string | null | undefined; sortOrder?: number | undefined }>): MeterGroup[] {
   const roots = new Set(locations.filter(location => !location.parentId).map(location => location.id));
   return locations.filter(location => !roots.has(location.id)).map(location => ({
     id: location.id, name: location.name, parentId: location.parentId && !roots.has(location.parentId) ? location.parentId : null,
+    ...(typeof location.sortOrder === "number" && Number.isFinite(location.sortOrder) ? { order: location.sortOrder } : {}),
   }));
 }

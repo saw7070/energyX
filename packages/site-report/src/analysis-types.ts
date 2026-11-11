@@ -44,4 +44,11 @@ export type AnalysisData = {
    * readings saved before this was kept, and when there are none.
    */
   alwaysOnByDesign?: AlwaysOnMeter[] | undefined;
+  /**
+   * How many light points a meter feeds, for the meters someone recorded it on (presentation.light_count). The report
+   * shows energy per light for these only. Absent on readings saved before this was kept, and when there are none.
+   */
+  lightCounts?: LightCountMeter[] | undefined;
 };
+/** A meter and how many light points it feeds; `name` as readers know it. */
+export type LightCountMeter = { id: string; name: string; count: number };

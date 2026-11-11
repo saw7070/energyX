@@ -14,10 +14,13 @@ export { categoryOf, toScope } from "@datafoundry/site-report";
 
 export type AnalysisRange = { kind: "latest-28" } | { kind: "all" } | { kind: "custom"; from: string; to: string };
 type ProjectInformation = {
-  /** `alwaysOn`: meant to run day and night (emergency lighting), kept in totals but never a daytime finding. */
-  name: string; meters?: Array<{ id: string; name?: string; location: string; locationId?: string; notInUse?: string; alwaysOn?: boolean }>;
-  /** The Locations tree the groups come from; the project itself has no parent. */
-  locations?: Array<{ id: string; name: string; parentId: string | null }>;
+  /**
+   * `alwaysOn`: meant to run day and night (emergency lighting), kept in totals but never a daytime finding.
+   * `lightCount`: how many light points the meter feeds, when recorded; the report shows energy per light for these.
+   */
+  name: string; meters?: Array<{ id: string; name?: string; location: string; locationId?: string; notInUse?: string; alwaysOn?: boolean; lightCount?: number }>;
+  /** The Locations tree the groups come from; the project itself has no parent. `sortOrder`: the saved order among siblings. */
+  locations?: Array<{ id: string; name: string; parentId: string | null; sortOrder?: number }>;
   calendar: null | { entries: Array<{ location: string; from: string; toExclusive: string | null; weekly: HoursByDay; hoursMeaning?: string; exceptions: Array<{ date: string; label: string; classification?: string }> }> };
 };
 

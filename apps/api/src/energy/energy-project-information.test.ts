@@ -58,3 +58,23 @@ it("says which meters are meant to run day and night, and nothing for the rest",
   expect(marked.find(meter => meter.id === first!.id)).toMatchObject({ alwaysOn: true });
   expect(marked.filter(meter => "alwaysOn" in meter).map(meter => meter.id)).toEqual([first!.id]);
 });
+it("says how many light points a meter feeds when someone recorded a whole number, and nothing otherwise", () => {
+  expect(read().meters.some(meter => "lightCount" in meter)).toBe(false);
+  const project = metadata.energyIq.getProject("ngee-ann-polytechnic");
+  const revision = metadata.energyIq.projectSetup.listHierarchyRevisions("ngee-ann-polytechnic").find(item => item.id === (metadata.energyIq.templates.getLatestProjectRevision("ngee-ann-polytechnic")?.hierarchy_revision_id ?? project.hierarchy_revision_id))!;
+  const document = JSON.parse(revision.snapshot_json) as { meter_mapping: { rows: Array<{ id: string; presentation?: Record<string, string> }> } };
+  const [first, second, third, fourth] = document.meter_mapping.rows;
+  first!.presentation = { ...first!.presentation, light_count: "12" };
+  second!.presentation = { ...second!.presentation, light_count: "0" };
+  third!.presentation = { ...third!.presentation, light_count: "2.5" };
+  fourth!.presentation = { ...fourth!.presentation, light_count: "many" };
+  metadata.db.prepare("UPDATE energyiq_hierarchy_revisions SET snapshot_json = ? WHERE id = ?").run(JSON.stringify(document), revision.id);
+  const meters = read().meters;
+  expect(meters.find(meter => meter.id === first!.id)).toMatchObject({ lightCount: 12 });
+  expect(meters.filter(meter => "lightCount" in meter).map(meter => meter.id)).toEqual([first!.id]);
+});
+it("gives each location the order it was saved in", () => {
+  const locations = read().locations;
+  expect(locations.length).toBeGreaterThan(1);
+  expect(locations.every(location => typeof location.sortOrder === "number")).toBe(true);
+});
