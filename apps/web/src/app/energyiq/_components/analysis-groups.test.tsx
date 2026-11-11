@@ -71,20 +71,23 @@ async function render(node: ReactNode) {
 }
 
 describe("where the energy goes, by group", () => {
-  it("splits the bill by group in the story, with each group's total and its share of the group above it", () => {
+  it("splits the story by group as the Overview does: each group's kWh on an average day and its share of all use", () => {
     const markup = story(data);
     const words = text(markup);
     expect(words).toContain("By group");
     expect(words).not.toContain("By area");
-    // Block A 300 of 516 kWh; Common area 216, of which Entrance 150 (69%) and Pavilion 66 (31%).
+    // An average day is 516 / 7 = 73.7 kWh. Block A 300 of 516 kWh is 58% (42.9 kWh a day); Common area 216 is 42%,
+    // of which Entrance 150 (29% of all use) and Pavilion 66 (13%), adding up to Common area's 42%.
     expect(words).toContain("Block A accounts for 58% of the bill");
-    expect(markup).toContain('aria-label="Block A: S$90, 58% of Estate"');
-    expect(markup).toContain('aria-label="Entrance: S$45, 69% of Common area"');
-    expect(markup).toContain('aria-label="Pavilion: S$20, 31% of Common area"');
-    // Entrance has one meter, so nothing below it can split it further.
-    expect(words).toContain("1 meter, no sub-meter below it");
-    // The short name shows first, with the installer's full label underneath.
-    expect(markup).toMatch(/Entrance sign<\/span><small>264F Compassvale Bow signboard<\/small>/);
+    expect(words).toContain("Block A 43 kWh a day · 58%");
+    expect(words).toContain("Common area 31 kWh a day · 42%");
+    expect(words).toContain("Entrance 21 kWh a day · 29%");
+    expect(words).toContain("Pavilion 9.4 kWh a day · 13%");
+    expect(markup).toContain('aria-label="Inside Common area"');
+    // Every group is a button that opens the groups inside it.
+    expect(markup).toMatch(/<button type="button"[^>]*aria-expanded="false" aria-controls="[^"]+"><span[^>]*>Common area<\/span>/);
+    // Only one type of use (lighting): a split by type would say nothing beside it.
+    expect(words).not.toContain("By type of use");
   });
 
   it("keeps the split by area for readings saved before groups existed", () => {
