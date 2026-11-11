@@ -4,12 +4,12 @@ import { configApi } from "../../../lib/config-api";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { intlLocale } from "./energyiq-messages";
 import { floorPlanMessages } from "./floor-plan-messages";
-import { canRedo, canUndo, commitPlan, finishChange, redo, selectIn, showPlan, startHistory, undo, type HistoryEntry } from "./floor-plan-history";
+import { canRedo, canUndo, commitPlan, endTyping, finishChange, redo, selectIn, showPlan, startHistory, undo, type HistoryEntry } from "./floor-plan-history";
 import { planShortcut } from "./floor-plan-keys";
 import { EnergyIcon } from "./icons";
 import { boardColours, boardlessColours, DeviceBox, mapDevices, PANEL_COLOURS, pinLabel, roomHasPins, SiteFloorMap, wrapLabel } from "./site-floor-map";
 import {
-  asGroupIn, asOwnArea, autoPlace, centre, hiddenZones, NOTES_LIMIT, PLAN_STYLES, planStyleOf, clampPoint, clampRect, contains, NO_PASSENGERS, settleRooms, defaultDeviceSize, deviceRect, moveSelection, resizeCanvas, notesWithReference, passengers, planFromReference, referenceFromPlan, removeSelection, resizeRect, snap, starterPlan,
+  asGroupIn, asOwnArea, autoPlace, centre, hiddenZones, NOTES_LIMIT, PLAN_STYLES, planStyleOf, clampPoint, clampRect, contains, NO_PASSENGERS, sameGeometry, settleRooms, defaultDeviceSize, deviceRect, moveSelection, resizeCanvas, notesWithReference, passengers, planFromReference, referenceFromPlan, removeSelection, resizeRect, snap, starterPlan,
   type FloorPlan, type Handle, type PlanArea, type Point, type Rect, type Selection, type StoredSpatialReference,
 } from "./floor-plan-model";
 import mapStyles from "./site-floor-map.module.css";
@@ -46,8 +46,15 @@ type Edge = "e" | "s" | "se";
 type EdgeDrag = { edge: Edge; startX: number; startY: number; scale: number; original: FloorPlan; before: HistoryEntry; moved: boolean };
 const isMac = () => typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
 
+/** "You have changes that are not saved yet": shown by the editor's Cancel, and by the Facility tabs while it is open. */
+export function UnsavedBar({ onKeep, onLeave }: { onKeep: () => void; onLeave: () => void }) {
+  const t = useMessages(floorPlanMessages);
+  return <div className={styles.unsaved} role="alert"><span>{t("editor.unsaved")}</span><button type="button" onClick={onKeep}>{t("editor.keepEditing")}</button><button type="button" className={styles.leave} onClick={onLeave}>{t("editor.discard")}</button></div>;
+}
+
 /** Full-width editor: design areas and rooms, place devices, then save to the layout block in Project notes. */
-export function FloorPlanEditor({ projectId, notes, block, previous, meters, boards, onCancel, onSaved }: { projectId: string; notes: string; block: string | null; previous: StoredSpatialReference | null; meters: PlanMeter[]; boards: string[]; onCancel: () => void; onSaved: (message: string) => void }) {
+/** `onDirtyChange` says whether there are changes not saved yet, so the page can ask before leaving the editor. */
+export function FloorPlanEditor({ projectId, notes, block, previous, meters, boards, onCancel, onSaved, onDirtyChange }: { projectId: string; notes: string; block: string | null; previous: StoredSpatialReference | null; meters: PlanMeter[]; boards: string[]; onCancel: () => void; onSaved: (message: string) => void; onDirtyChange?: (changed: boolean) => void }) {
   const t = useMessages(floorPlanMessages);
   const { locale } = useEnergyIqLocale();
   // The plan and the selection, with every step Undo and Redo can go to (see floor-plan-history).
@@ -55,6 +62,10 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   const { plan, selection } = history.present;
   const opened = useRef(plan).current;
   const changed = plan !== opened;
+  const dirtyListener = useRef(onDirtyChange);
+  useEffect(() => { dirtyListener.current = onDirtyChange; });
+  useEffect(() => { dirtyListener.current?.(changed); }, [changed]);
+  useEffect(() => () => dirtyListener.current?.(false), []);
   const setSelection = (next: Selection | null) => setHistory(current => selectIn(current, next));
   const [placing, setPlacing] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -91,6 +102,8 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   const commit = (next: FloorPlan, options?: { selection?: Selection | null; merge?: string }) => { setHistory(current => commitPlan(current, next, options)); setError(""); };
   const show = (next: FloorPlan) => setHistory(current => showPlan(current, next));
   const undoStep = () => { setHistory(undo); setError(""); };
+  /** Leaving a field, or pressing Enter in it, ends that bit of typing: typing there again is a new undo step. */
+  const typing = { onBlur: () => setHistory(endTyping), onKeyDown: (event: React.KeyboardEvent) => { if (event.key === "Enter") setHistory(endTyping); } };
   const redoStep = () => { setHistory(redo); setError(""); };
   const toPoint = (clientX: number, clientY: number): Point => {
     const svg = svgRef.current, matrix = svg?.getScreenCTM();
@@ -179,7 +192,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   const endEdge = () => {
     const current = edgeDrag.current;
     edgeDrag.current = null; setStretch(null);
-    if (current?.moved) { setHistory(list => finishChange(list, current.before)); setError(""); }
+    if (current?.moved) { setHistory(list => finishChange(list, current.before, sameGeometry(list.present.plan, current.before.plan) ? current.before.plan : list.present.plan)); setError(""); }
   };
   const nudgeEdge = (event: React.KeyboardEvent, edge: Edge) => {
     const step = event.shiftKey ? GRID * 10 : GRID * 5;
@@ -194,9 +207,13 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
 
   // Once dropped, a room belongs to the area it now sits in (it keeps its area where areas overlap).
   // A drag is one undo step, however far it went; once dropped, a room belongs to the area it now sits in.
-  const endDrag = () => { const current = drag.current; drag.current = null; if (current?.moved) { setHistory(list => finishChange(list, current.before, settleRooms(list.present.plan))); setError(""); } };
+  // A drag that ends where it began changes nothing: no undo step, and nothing to save.
+  const endDrag = () => { const current = drag.current; drag.current = null; if (current?.moved) { setHistory(list => { const settled = settleRooms(list.present.plan); return finishChange(list, current.before, sameGeometry(settled, current.before.plan) ? current.before.plan : settled); }); setError(""); } };
+  /** Arrow presses in a row are separate steps, but holding an arrow down is one step however far it goes. */
+  const nudgeRun = useRef(0);
 
-  // Shortcuts only while focus is inside the editor, and never while typing in a field or on a button (see floor-plan-keys).
+  // Shortcuts only while focus is inside the editor, never while typing in a field, and on a button only Undo, Redo and
+  // Escape (see floor-plan-keys).
   const onKeyDown = (event: React.KeyboardEvent) => {
     const shortcut = planShortcut(event, GRID);
     if (!shortcut) return;
@@ -205,7 +222,8 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     if (!selection) return;
     event.preventDefault();
     if (shortcut.kind === "delete") { remove(); return; }
-    commit(settleRooms(moveSelection(plan, selection, shortcut.by[0], shortcut.by[1], shortcut.alone ? NO_PASSENGERS() : passengers(plan, selection))));
+    if (!event.repeat) nudgeRun.current += 1;
+    commit(settleRooms(moveSelection(plan, selection, shortcut.by[0], shortcut.by[1], shortcut.alone ? NO_PASSENGERS() : passengers(plan, selection))), { merge: `nudge:${selection.kind}:${selection.key}:${nudgeRun.current}` });
   };
 
   // Leaving the page with changes not saved asks first; so does Cancel, inside the page.
@@ -273,7 +291,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
       <button type="button" className={styles.tool} disabled={!canRedo(history)} title={t("editor.hintRedo", { redoKey })} onClick={redoStep}>{t("editor.redo")}</button>
       <button type="button" className={styles.tool} disabled={!selection} title={t("editor.hintDelete")} onClick={remove}>{t("editor.delete")}</button>
     </div>
-    {leaving && <div className={styles.unsaved} role="alert"><span>{t("editor.unsaved")}</span><button type="button" onClick={() => setLeaving(false)}>{t("editor.keepEditing")}</button><button type="button" className={styles.leave} onClick={onCancel}>{t("editor.discard")}</button></div>}
+    {leaving && <UnsavedBar onKeep={() => setLeaving(false)} onLeave={onCancel} />}
     {placingName && <p className={styles.placing} role="status">{placingBefore}<strong>{placingName}</strong>{placingAfter} <button type="button" onClick={() => setPlacing(null)}>{t("editor.cancel")}</button></p>}
     {error && <p role="alert" className={styles.error}>{error}</p>}
 
@@ -325,18 +343,18 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
       <aside className={styles.side}>
         {selectedArea && <div className={styles.panel}>
           <h5>{selectedArea.insideRoom ? t("panel.group") : t("panel.area")}</h5>
-          <label>{t("panel.label")}<input value={selectedArea.label} maxLength={40} onChange={event => updateArea(selectedArea.key, { label: event.target.value }, `label:${selectedArea.key}`)} /></label>
+          <label>{t("panel.label")}<input value={selectedArea.label} maxLength={40} {...typing} onChange={event => updateArea(selectedArea.key, { label: event.target.value }, `label:${selectedArea.key}`)} /></label>
           <label>{t("panel.board")}<select value={selectedArea.board} onChange={event => updateArea(selectedArea.key, { board: event.target.value })}><option value="">{t("panel.noBoard")}</option>{allBoards.map(board => <option key={board} value={board}>{board}</option>)}</select></label>
           {colourPicker(selectedArea.colour, selectedArea.board ? t("panel.colourAuto", { board: selectedArea.board }) : t("panel.colourAutoNone"), hex => commit({ ...plan, areas: plan.areas.map(item => item.key === selectedArea.key ? recolour(item, hex) : item) }))}
           <label>{t("panel.shownAs")}<select value={selectedArea.insideRoom ?? ""} onChange={event => { const room = plan.rooms.find(item => item.key === event.target.value); commit({ ...plan, areas: plan.areas.map(item => item.key !== selectedArea.key ? item : room ? asGroupIn(item, room) : asOwnArea(item)) }); }}>
             <option value="">{t("panel.ownArea")}</option>{plan.rooms.map(room => <option key={room.key} value={room.key}>{t("panel.insideRoom", { room: room.name })}</option>)}
           </select></label>
-          {selectedArea.insideRoom && <label>{t("panel.supplies")}<input value={selectedArea.equipment ?? ""} maxLength={80} placeholder={t("panel.suppliesExample")} onChange={event => updateArea(selectedArea.key, { equipment: event.target.value }, `equipment:${selectedArea.key}`)} /></label>}
+          {selectedArea.insideRoom && <label>{t("panel.supplies")}<input value={selectedArea.equipment ?? ""} maxLength={80} {...typing} placeholder={t("panel.suppliesExample")} onChange={event => updateArea(selectedArea.key, { equipment: event.target.value }, `equipment:${selectedArea.key}`)} /></label>}
           <button type="button" className={styles.danger} onClick={remove}>{selectedArea.insideRoom ? t("panel.deleteGroup") : t("panel.deleteArea")}</button>
         </div>}
         {selectedRoom && <div className={styles.panel}>
           <h5>{t("panel.room")}</h5>
-          <label>{t("panel.name")}<input value={selectedRoom.name} maxLength={60} onChange={event => commit({ ...plan, rooms: plan.rooms.map(item => item.key === selectedRoom.key ? { ...item, name: event.target.value } : item) }, { merge: `name:${selectedRoom.key}` })} /></label>
+          <label>{t("panel.name")}<input value={selectedRoom.name} maxLength={60} {...typing} onChange={event => commit({ ...plan, rooms: plan.rooms.map(item => item.key === selectedRoom.key ? { ...item, name: event.target.value } : item) }, { merge: `name:${selectedRoom.key}` })} /></label>
           {colourPicker(selectedRoom.colour, t("panel.colourAutoRoom"), hex => commit({ ...plan, rooms: plan.rooms.map(item => item.key === selectedRoom.key ? recolour(item, hex) : item) }))}
           <button type="button" className={styles.danger} onClick={remove}>{t("panel.deleteRoom")}</button>
         </div>}
@@ -351,7 +369,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
         </div>}
         {selection?.kind === "entrance" && plan.entrance && <div className={styles.panel}>
           <h5>{t("panel.entrance")}</h5>
-          <label>{t("panel.label")}<input value={plan.entrance.label} maxLength={40} onChange={event => commit({ ...plan, entrance: { ...plan.entrance!, label: event.target.value } }, { merge: "entrance:label" })} /></label>
+          <label>{t("panel.label")}<input value={plan.entrance.label} maxLength={40} {...typing} onChange={event => commit({ ...plan, entrance: { ...plan.entrance!, label: event.target.value } }, { merge: "entrance:label" })} /></label>
           <button type="button" className={styles.danger} onClick={remove}>{t("panel.removeEntrance")}</button>
         </div>}
 
@@ -378,7 +396,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
             <ul>{meters.filter(meter => meter.board === board).map(meter => { const onPlan = placedIds.has(meter.id); return <li key={meter.id} draggable onDragStart={event => { event.dataTransfer.setData("text/plain", meter.id); event.dataTransfer.effectAllowed = "move"; }} className={onPlan ? styles.onPlan : undefined}>
               <span className={styles.grip} aria-hidden="true">⋮⋮</span>
               <span className={styles.deviceName}><strong>{meter.name}</strong><small>{meter.type}</small></span>
-              {onPlan ? <button type="button" onClick={() => setSelection({ kind: "device", key: meter.id })}>{t("panel.onPlan")}</button> : <button type="button" aria-pressed={placing === meter.id} onClick={() => setPlacing(placing === meter.id ? null : meter.id)}>{t("panel.place")}</button>}
+              {onPlan ? <button type="button" onClick={() => setSelection({ kind: "device", key: meter.id })}>{t("panel.onPlan")}</button> : <button type="button" aria-pressed={placing === meter.id} onClick={() => { setPlacing(placing === meter.id ? null : meter.id); focusCanvas(); }}>{t("panel.place")}</button>}
             </li>; })}</ul>
           </div>)}
         </div>

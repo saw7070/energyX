@@ -327,3 +327,44 @@ it("lets a plan area stand for a whole block: offered as its panel, lit while a 
     expect([...panelChoices!.options].map(option => option.value)).toEqual(expect.arrayContaining(["Block A", "Ground floor", "Upper floors"]));
   } finally { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); }
 });
+
+it("asks before switching Facility tabs while the floor layout has changes not saved", async () => {
+  vi.stubGlobal("React", React); vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
+  const doc = { project: { name: "Office", timezone: "Asia/Singapore" }, tiers: [{ id: "board", ordinal: 1, alias: "Board" }], nodes: [{ id: "db1", tier_definition_id: "board", name: "DB1", sort_order: 1, metadata_status: "confirmed" }], meter_mapping: { rows: [], virtual_meters: [] } };
+  const setup = { project: { id: "office", has_unpublished_changes: false, root_scope_id: "root" }, draft: { revision: 1, document: doc } } as unknown as EnergyProjectSetupDto;
+  const plan = { schemaVersion: 1, projectId: "office", provenance: { file: "plan", status: "drawn" }, layout: { viewBox: [0, 0, 500, 300], zones: [{ id: "A", referenceBoard: "DB1", rect: [10, 10, 400, 260] }], rooms: [{ name: "Lobby", zone: "A", rect: [20, 40, 180, 160] }] } };
+  const onTabChange = vi.fn();
+  const button = (text: string) => Array.from(host.querySelectorAll("button")).find(item => item.textContent?.startsWith(text))!;
+  const click = async (text: string) => { await act(async () => button(text).click()); };
+  const editor = () => host.querySelector('section[aria-label="Edit floor plan"]');
+  try {
+    await act(async () => root.render(<ProjectConfigurationView setup={setup} notes={"```json\n" + JSON.stringify(plan) + "\n```"} policies={null} projectId="office" canEditSetup canEditNotes onTabChange={onTabChange} />));
+    // Nothing changed yet: the tab switches straight away.
+    await click("Edit layout");
+    expect(editor()).not.toBeNull();
+    await click("Project notes");
+    expect(editor()).toBeNull();
+    expect(onTabChange).toHaveBeenLastCalledWith("context");
+    await click("Floor layout");
+    expect(editor()).not.toBeNull();
+    onTabChange.mockClear();
+    // With a change, it asks first.
+    await click("+ Add room");
+    await click("Project notes");
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("You have changes that are not saved yet.");
+    expect(editor()).not.toBeNull();
+    expect(onTabChange).not.toHaveBeenCalled();
+    await click("Keep editing");
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(editor()!.querySelectorAll("svg text").length).toBeGreaterThan(1);
+    await click("Project notes");
+    await click("Leave without saving");
+    expect(editor()).toBeNull();
+    expect(onTabChange).toHaveBeenLastCalledWith("context");
+    expect(button("Project notes").getAttribute("aria-pressed")).toBe("true");
+    // Back on the floor layout, the plan is shown again, not the editor.
+    await click("Floor layout");
+    expect(editor()).toBeNull();
+  } finally { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); }
+});

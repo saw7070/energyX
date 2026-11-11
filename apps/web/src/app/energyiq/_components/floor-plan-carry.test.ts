@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readProjectSpatialReference } from "@datafoundry/contracts";
 import { freshCopy, withoutCarried } from "./floor-plan-carry";
-import { asGroupIn, asOwnArea, hiddenZones, moveSelection, notesWithReference, planFromReference, referenceFromPlan, removeSelection, type FloorPlan, type StoredSpatialReference } from "./floor-plan-model";
+import { asGroupIn, asOwnArea, contentExtent, hiddenZones, moveSelection, notesWithReference, planFromReference, referenceFromPlan, removeSelection, resizeCanvas, sameGeometry, settleRooms, type FloorPlan, type StoredSpatialReference } from "./floor-plan-model";
 import { floorPlanWithGroupAreas } from "./spreadsheet-arrange-model";
 
 type Rect = [number, number, number, number];
@@ -192,17 +192,132 @@ describe("areas that are not on the drawing", () => {
     expect(saved.layout.zones[1]).toEqual({ id: "Roof", referenceBoard: "DB-R", meterLocations: ["Roof PV"], note: "no drawing yet" });
     expect(saved.layout.zones.map(item => item.id)).toEqual(["264E", "Roof", "264F", "Carpark", "Playground", "LED"]);
   });
-  it("keep their rooms filed under them, wherever the room is drawn", () => {
+  it("keep their rooms filed under them until a room is moved into an area on the drawing", () => {
     expect(plan.rooms.find(item => item.name === "Roof deck")!.zone).toBe("Roof");
-    const dragged = { ...plan, rooms: plan.rooms.map(item => item.name === "Roof deck" ? { ...item, rect: [60, 300, 100, 60] as Rect } : item) };
-    expect(save(dragged, reference).layout.rooms.find(item => item.name === "Roof deck")!.zone).toBe("Roof");
     expect(JSON.stringify(save(plan, reference))).toBe(JSON.stringify(reference).replace(/"status":"[^"]*"/, '"status":"Edited in Facility → Floor layout"'));
+    const deck = plan.rooms.find(item => item.name === "Roof deck")!;
+    // Moved somewhere no drawn area holds: still filed under the area that is not on the drawing.
+    const loose = settleRooms({ ...plan, rooms: plan.rooms.map(item => item.key === deck.key ? { ...item, rect: [20, 780, 100, 60] as Rect } : item) });
+    expect(save(loose, reference).layout.rooms.find(item => item.name === "Roof deck")!.zone).toBe("Roof");
+    // Dragged into area 264E: it now belongs to 264E, as drawn, and moves with it.
+    const dragged = settleRooms(moveSelection(plan, { kind: "room", key: deck.key }, -1140, -500));
+    expect(dragged.rooms.find(item => item.key === deck.key)!.area).toBe("264E");
+    expect(save(dragged, reference).layout.rooms.find(item => item.name === "Roof deck")!.zone).toBe("264E");
   });
   it("still count when checking labels, here and when areas are added from a spreadsheet", () => {
-    expect(() => save({ ...plan, areas: plan.areas.map(item => item.key === "Carpark" ? { ...item, label: "Roof" } : item) }, reference)).toThrow('Two areas are labelled "Roof".');
+    expect(() => save({ ...plan, areas: plan.areas.map(item => item.key === "Carpark" ? { ...item, label: "Roof" } : item) }, reference)).toThrow('The label "Roof" is already used by an area under "Not on the drawing". Give this area another label.');
     const added = floorPlanWithGroupAreas(reference, ["Roof", "Hall"])!;
     expect(added.added).toEqual(["Hall"]);
     const saved = save(added.plan, reference);
     expect(saved.layout.zones.find(item => item.id === "Roof")).toEqual({ id: "Roof", referenceBoard: "DB-R", meterLocations: ["Roof PV"], note: "no drawing yet" });
+  });
+});
+
+describe("areas that are not on the drawing, when the saved layout is odd", () => {
+  const base = sktcLike();
+  it("never fail a save because two of them share a label, which the reader could not fix", () => {
+    const reference = read({ ...base, layout: { ...base.layout, zones: [...base.layout.zones, { id: "Roof", referenceBoard: "DB-R" }, { id: "Roof", referenceBoard: "DB-S" }] } });
+    const plan = planFromReference(reference);
+    expect(hiddenZones(plan)).toEqual([{ id: "Roof", board: "DB-R" }, { id: "Roof", board: "DB-S" }]);
+    expect(save(plan, reference).layout.zones.slice(-2)).toEqual([{ id: "Roof", referenceBoard: "DB-R" }, { id: "Roof", referenceBoard: "DB-S" }]);
+    expect(() => save({ ...plan, areas: plan.areas.map(item => item.key === "264E" ? { ...item, label: "Roof" } : item) }, reference)).toThrow(/already used by an area under "Not on the drawing"/);
+  });
+
+  it("hold their place on the plan, so the drawing space can never shrink below them", () => {
+    // Equipment whose room is gone, with a place of its own near the bottom-right corner.
+    const reference = read({ ...base, layout: { ...base.layout, zones: [...base.layout.zones, { id: "G", referenceBoard: "DB-G", rect: [1500, 820, 80, 60], independentSpace: false, physicalParentRoom: "Gone" }] } });
+    const plan = planFromReference(reference);
+    expect(hiddenZones(plan)).toEqual([{ id: "G", board: "DB-G" }]);
+    const [width, height] = contentExtent(plan);
+    expect(width).toBeGreaterThanOrEqual(1580); expect(height).toBeGreaterThanOrEqual(880);
+    const smallest = resizeCanvas(plan, 300, 300);
+    expect(smallest.viewBox[2]).toBeGreaterThanOrEqual(1580); expect(smallest.viewBox[3]).toBeGreaterThanOrEqual(880);
+    expect(zone(save(smallest, reference), "G")).toEqual({ id: "G", referenceBoard: "DB-G", rect: [1500, 820, 80, 60], independentSpace: false, physicalParentRoom: "Gone" });
+    // Untrusted rectangles are ignored rather than trusted.
+    expect(contentExtent({ ...plan, carried: { zones: [{ index: 0, zone: { id: "X", rect: ["9000", 0, 1, 1] } }] } })).toEqual(contentExtent({ ...plan, carried: {} }));
+  });
+
+  it("lose their room list and their direction from the entrance once these no longer hold, like drawn areas", () => {
+    const reference = read({ ...base, layout: { ...base.layout, zones: [...base.layout.zones, { id: "Roof", referenceBoard: "DB-R", rooms: ["Roof deck"], directionFromEntrance: "up", note: "kept" } as never], rooms: [...base.layout.rooms, { name: " Roof deck ", zone: "Roof", rect: [1200, 800, 100, 60] }] } });
+    const plan = planFromReference(reference);
+    const roof = (saved: StoredSpatialReference) => saved.layout.zones.find(item => item.id === "Roof");
+    // Nothing changed: kept as saved, even though the room's name has spaces around it.
+    expect(roof(save(plan, reference))).toEqual({ id: "Roof", referenceBoard: "DB-R", rooms: ["Roof deck"], directionFromEntrance: "up", note: "kept" });
+    const renamed = save({ ...plan, rooms: plan.rooms.map(item => item.name.trim() === "Roof deck" ? { ...item, name: "Sky deck" } : item) }, reference);
+    expect(roof(renamed)).toEqual({ id: "Roof", referenceBoard: "DB-R", directionFromEntrance: "up", note: "kept" });
+    const removed = save(removeSelection(plan, { kind: "room", key: plan.rooms.find(item => item.name.trim() === "Roof deck")!.key }), reference);
+    expect(roof(removed)).not.toHaveProperty("rooms");
+    const entranceMoved = save(moveSelection(plan, { kind: "entrance", key: "entrance" }, 40, 0), reference);
+    expect(roof(entranceMoved)).toEqual({ id: "Roof", referenceBoard: "DB-R", rooms: ["Roof deck"], note: "kept" });
+    expect(roof(save(removeSelection(plan, { kind: "entrance", key: "entrance" }), reference))).not.toHaveProperty("directionFromEntrance");
+  });
+});
+
+describe("what the plan cannot draw is kept as saved", () => {
+  const base = sktcLike();
+  const resave = (reference: StoredSpatialReference) => JSON.stringify(save(planFromReference(reference), reference));
+  const asSaved = (reference: StoredSpatialReference) => JSON.stringify(reference).replace(/"status":"[^"]*"/, '"status":"Edited in Facility → Floor layout"');
+
+  it("an entrance with no usable position, until the reader adds one of their own", () => {
+    for (const entrance of [{ label: "Gate", referenceBoard: "DB-E", note: "north side" }, { label: "Gate", position: ["a", 2] }, null, "front"]) {
+      const reference = read({ ...base, layout: { ...base.layout, entrance } as never });
+      expect(planFromReference(reference).entrance).toBeNull();
+      expect(resave(reference)).toBe(asSaved(reference));
+    }
+    const reference = read({ ...base, layout: { ...base.layout, entrance: { label: "Gate" } } as never });
+    const plan = planFromReference(reference);
+    expect(save({ ...plan, entrance: { label: "Front door", position: [100, 880] } }, reference).layout.entrance).toEqual({ label: "Front door", position: [100, 880] });
+  });
+
+  it("device entries with no meter or position, in their place, and a device list that is not a list", () => {
+    const devices = [base.layout.devices![0], { meterId: "lost" }, base.layout.devices![1], { position: [1, 2] }, 7, null];
+    const reference = read({ ...base, layout: { ...base.layout, devices } as never });
+    const plan = planFromReference(reference);
+    expect(plan.devices.map(item => item.meterId)).toEqual(["m1", "m2"]);
+    expect(resave(reference)).toBe(asSaved(reference));
+    const removed = save(removeSelection(plan, { kind: "device", key: "m1" }), reference);
+    expect(removed.layout.devices).toEqual([base.layout.devices![1], { meterId: "lost" }, { position: [1, 2] }, 7, null]);
+    const odd = read({ ...base, layout: { ...base.layout, devices: { m1: [1, 2] } } as never });
+    expect(planFromReference(odd).devices).toEqual([]);
+    expect(resave(odd)).toBe(asSaved(odd));
+    expect(save({ ...planFromReference(odd), devices: [{ meterId: "m1", position: [100, 100] }] }, odd).layout.devices).toEqual([{ meterId: "m1", position: [100, 100] }]);
+  });
+
+  it("stand-alone areas saved with equipment keys or no panel at all, byte for byte", () => {
+    const zones = [
+      { id: "264E", referenceBoard: "DB-E", rect: [20, 20, 500, 700], independentSpace: true },
+      { id: "264F", rect: [560, 20, 500, 700], physicalParentRoom: "264E Lobby", equipment: "Lift lobby LED" },
+      { id: "Carpark", rect: [1100, 20, 480, 400] },
+      ...base.layout.zones.slice(3),
+      { id: "Roof" },
+    ];
+    const raw = { ...base, layout: { ...base.layout, zones } } as unknown as StoredSpatialReference;
+    const notes = notesWithReference("Site notes.", null, raw);
+    const found = readProjectSpatialReference(notes, "sktc")!;
+    const reference = found.reference as StoredSpatialReference;
+    const plan = planFromReference(reference);
+    expect(notesWithReference(notes, found.block, save(plan, reference)).replace(/"status": "[^"]*"/, "")).toBe(notes.replace(/"status": "[^"]*"/, ""));
+    // Choosing a panel for an area that had none writes it; going back to none is still read the same.
+    const named = save({ ...plan, areas: plan.areas.map(item => item.key === "Carpark" ? { ...item, board: "DB-C" } : item) }, reference);
+    expect(zone(named, "Carpark")).toEqual({ id: "Carpark", referenceBoard: "DB-C", rect: [1100, 20, 480, 400] });
+    // Turned into equipment, what the stand-alone area said about equipment gives way to the new room.
+    const lobby = plan.rooms.find(item => item.name === "264E Store")!;
+    const area = plan.areas.find(item => item.key === "264F")!;
+    expect(area.extra).toEqual({ physicalParentRoom: "264E Lobby", equipment: "Lift lobby LED" });
+    const asGroup = { ...plan, areas: plan.areas.map(item => item.key === "264F" ? asGroupIn(item, lobby) : item), rooms: plan.rooms.filter(item => !item.name.startsWith("264F")) };
+    expect(asGroup.areas.find(item => item.key === "264F")).not.toHaveProperty("extra");
+    const group = zone(save(asGroup, reference), "264F");
+    expect(group).toMatchObject({ independentSpace: false, physicalParentRoom: "264E Store" });
+    expect(group).not.toHaveProperty("equipment");
+  });
+});
+
+describe("a drag that comes back to where it started", () => {
+  it("draws nothing different", () => {
+    const plan = planFromReference(read(sktcLike()));
+    const there = moveArea(plan, "264E", 40, 0), back = moveSelection(there, { kind: "area", key: "264E" }, -40, 0);
+    expect(back).not.toBe(plan);
+    expect(sameGeometry(settleRooms(back), plan)).toBe(true);
+    expect(sameGeometry(there, plan)).toBe(false);
   });
 });

@@ -1,6 +1,6 @@
 /** @vitest-environment happy-dom */
 import { describe, expect, it } from "vitest";
-import { canRedo, canUndo, commitPlan, finishChange, HISTORY_LIMIT, redo, selectIn, showPlan, startHistory, undo } from "./floor-plan-history";
+import { canRedo, canUndo, commitPlan, endTyping, finishChange, HISTORY_LIMIT, redo, selectIn, showPlan, startHistory, undo } from "./floor-plan-history";
 import { planShortcut } from "./floor-plan-keys";
 import { starterPlan, type FloorPlan } from "./floor-plan-model";
 
@@ -51,6 +51,14 @@ describe("undo and redo", () => {
     expect(history.past).toHaveLength(2);
     expect(undo(undo(history)).present.plan).toBe(start);
   });
+  it("starts a new step when the reader leaves the field and comes back to type again", () => {
+    let history = commitPlan(startHistory(start), { ...start, rooms: [{ ...start.rooms[0]!, name: "Pan" }] }, { merge: "name:room-1" });
+    history = selectIn(endTyping(selectIn(history, null)), { kind: "room", key: "room-1" });
+    history = commitPlan(history, { ...start, rooms: [{ ...start.rooms[0]!, name: "Pantry" }] }, { merge: "name:room-1" });
+    expect(history.past).toHaveLength(2);
+    expect(undo(history).present.plan.rooms[0]!.name).toBe("Pan");
+    expect(endTyping(startHistory(start))).toEqual(startHistory(start));
+  });
 });
 
 describe("keyboard shortcuts", () => {
@@ -66,14 +74,23 @@ describe("keyboard shortcuts", () => {
     // Copy and paste are left alone.
     expect(key("c", { metaKey: true })).toBeNull();
   });
-  it("leaves keys to text boxes, lists, editable text and buttons", () => {
-    const input = document.createElement("input"), select = document.createElement("select"), area = document.createElement("textarea"), button = document.createElement("button");
+  it("leaves every key to text boxes, lists and editable text", () => {
+    const input = document.createElement("input"), select = document.createElement("select"), area = document.createElement("textarea"), combo = document.createElement("div");
+    combo.setAttribute("role", "combobox");
     const editable = document.createElement("div"); editable.setAttribute("contenteditable", "true");
     const inside = document.createElement("span"); editable.append(inside);
-    for (const target of [input, select, area, button, editable, inside]) {
-      expect(key("Delete", { target })).toBeNull();
-      expect(key("ArrowUp", { target })).toBeNull();
-      expect(key("z", { metaKey: true, target })).toBeNull();
+    for (const target of [input, select, area, combo, editable, inside]) {
+      for (const [name, extra] of [["Delete", {}], ["ArrowUp", {}], ["z", { metaKey: true }], ["y", { ctrlKey: true }], ["Escape", {}]] as const) expect(key(name, { target, ...extra })).toBeNull();
+    }
+  });
+  it("on a button, still undoes, redoes and cancels, but leaves Delete, Space, Enter and the arrows to the button", () => {
+    const button = document.createElement("button"), label = document.createElement("span"); button.append(label);
+    for (const target of [button, label]) {
+      expect(key("z", { ctrlKey: true, target })).toEqual({ kind: "undo" });
+      expect(key("z", { metaKey: true, shiftKey: true, target })).toEqual({ kind: "redo" });
+      expect(key("y", { ctrlKey: true, target })).toEqual({ kind: "redo" });
+      expect(key("Escape", { target })).toEqual({ kind: "escape" });
+      for (const name of ["Delete", "Backspace", "ArrowLeft", "ArrowDown", " ", "Enter"]) expect(key(name, { target })).toBeNull();
     }
   });
 });

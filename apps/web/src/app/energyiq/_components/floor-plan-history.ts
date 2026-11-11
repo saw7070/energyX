@@ -23,6 +23,8 @@ export function commitPlan(history: PlanHistory, plan: FloorPlan, options: { sel
   const merging = options.merge !== undefined && options.merge === history.merge && history.past.length > 0;
   return { past: merging ? history.past : push(history.past, history.present), present: { plan, selection }, future: [], ...(options.merge !== undefined ? { merge: options.merge } : {}) };
 }
+/** Leaving a field (or pressing Enter in it) ends the typing: what is typed next, even in the same field, is a new step. */
+export const endTyping = (history: PlanHistory): PlanHistory => { if (history.merge === undefined) return history; const { merge: _merge, ...rest } = history; return rest; };
 /** A change still under way, such as a drag: shown at once, but not an undo step until it is finished. */
 export const showPlan = (history: PlanHistory, plan: FloorPlan): PlanHistory => plan === history.present.plan ? history : { ...history, present: { ...history.present, plan } };
 /** Finishes a change that began at `before`: exactly one undo step back to it, whatever was shown along the way. */

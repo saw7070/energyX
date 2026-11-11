@@ -97,6 +97,58 @@ it("keeps keys for the field being typed in, and ignores them outside the editor
   await view.unmount();
 });
 
+it("undoes and cancels with the keyboard while a button of the editor has focus, but never deletes from there", async () => {
+  const view = await render({ meters: [...meters, { id: "fan", name: "Pantry fan", board: "DB1", type: "Power" }] });
+  const rooms = () => view.canvas().querySelectorAll("text").length;
+  const before = rooms();
+  const add = view.button("+ Add room");
+  await act(async () => add.click());
+  expect(rooms()).toBeGreaterThan(before);
+  // The button just clicked still has focus: Ctrl+Z undoes, Delete does nothing.
+  await view.press(add, "z", { ctrlKey: true });
+  expect(rooms()).toBe(before);
+  await view.press(add, "z", { ctrlKey: true, shiftKey: true });
+  expect(rooms()).toBeGreaterThan(before);
+  await view.press(view.button("Undo"), "Delete");
+  expect(rooms()).toBeGreaterThan(before);
+  // Escape on the Place button stops placing a device.
+  const placeButton = view.button("Place");
+  await act(async () => placeButton.click());
+  expect(view.host.querySelector('[role="status"]')?.textContent).toContain("Pantry fan");
+  await view.press(placeButton, "Escape");
+  expect(view.host.querySelector('[role="status"]')).toBeNull();
+  await view.unmount();
+});
+
+it("makes holding an arrow key one undo step, while separate presses stay separate", async () => {
+  const view = await render();
+  await act(async () => { view.canvas().querySelectorAll("g")[1]!.dispatchEvent(pointer("pointerdown", 50, 90)); view.canvas().dispatchEvent(pointer("pointerup", 50, 90)); });
+  await view.press(view.canvas(), "ArrowRight");
+  for (let step = 0; step < 5; step += 1) await view.press(view.canvas(), "ArrowRight", { repeat: true });
+  expect(view.roomRect()).toBe("100");
+  await act(async () => view.button("Undo").click());
+  expect(view.roomRect()).toBe("40");
+  expect(view.button("Undo").disabled).toBe(true);
+  await view.press(view.canvas(), "ArrowRight");
+  await view.press(view.canvas(), "ArrowRight");
+  await act(async () => view.button("Undo").click());
+  expect(view.roomRect()).toBe("50");
+  await view.unmount();
+});
+
+it("leaves no undo step and nothing to save after a drag that comes back to where it began", async () => {
+  const view = await render();
+  const leave = () => { const event = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(event); return event.defaultPrevented; };
+  const area = view.canvas().querySelector("g")!;
+  await act(async () => { area.dispatchEvent(pointer("pointerdown", 100, 100)); });
+  for (const step of [40, 0]) await act(async () => { view.canvas().dispatchEvent(pointer("pointermove", 100 + step, 100)); });
+  await act(async () => { view.canvas().dispatchEvent(pointer("pointerup", 100, 100)); });
+  expect(view.canvas().querySelector("g rect")!.getAttribute("x")).toBe("20");
+  expect(view.button("Undo").disabled).toBe(true);
+  expect(leave()).toBe(false);
+  await view.unmount();
+});
+
 it("says plainly when the plan would not fit in Project notes, without trying to save", async () => {
   const request = vi.spyOn(configApi, "reportAgentRequest").mockResolvedValue({} as never);
   const big = "x".repeat(99_800) + "\n\n";

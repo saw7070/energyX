@@ -17,6 +17,9 @@ export type AreaBaseline = { rect: Rect; rooms: string[]; derived?: true };
 
 export const LAYOUT_KEYS = ["viewBox", "zones", "rooms", "entrance", "devices", "boardColours", "style"] as const;
 export const ZONE_KEYS = ["id", "referenceBoard", "meterLocations", "rect", "independentSpace", "physicalParentRoom", "equipment", "colour"] as const;
+/** Keys that describe equipment inside a room: owned for equipment, carried as saved on a stand-alone area. */
+export const GROUP_KEYS = ["independentSpace", "physicalParentRoom", "equipment"];
+export const STANDALONE_ZONE_KEYS = ZONE_KEYS.filter(key => !GROUP_KEYS.includes(key));
 export const ROOM_KEYS = ["name", "zone", "rect", "colour"] as const;
 export const DEVICE_KEYS = ["meterId", "position", "size", "colour"] as const;
 export const ENTRANCE_KEYS = ["label", "position"] as const;
@@ -24,6 +27,13 @@ export const ENTRANCE_KEYS = ["label", "position"] as const;
 export const ROLE_KEYS = ["kind", "rooms", "directionFromEntrance"];
 
 export const isRecord = (value: unknown): value is Json => !!value && typeof value === "object" && !Array.isArray(value);
+/**
+ * Whether the stored-layout reader filled in this zone's empty panel (it appends `referenceBoard: ""` to a zone that
+ * named none). Such a zone is written back without one, which reads the same, so its saved form does not change.
+ */
+export const boardFilledIn = (zone: unknown) => { if (!isRecord(zone)) return false; const keys = Object.keys(zone); return keys[keys.length - 1] === "referenceBoard" && zone.referenceBoard === ""; };
+/** The zone as it was saved, before the reader filled in an empty panel. */
+export const withoutFilledBoard = (zone: Json): Json => { if (!boardFilledIn(zone)) return zone; const { referenceBoard: _board, ...rest } = zone; return rest; };
 
 /** The keys of a saved item the editor does not own, in their saved order, and that order when it is not the usual one. */
 export function carriedOf(raw: unknown, owned: readonly string[]): Carried {
