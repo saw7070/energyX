@@ -40,7 +40,15 @@ it("shows each meter against the target, the outages and stuck readings, and let
     expect(text).toContain("Meets target");
     expect(text).toContain("No readings");
     expect(text).toContain("Router — The same reading, 1.25 kWh, every hour for 30 hours");
-    expect(text).toContain("3 kWh arrived when it came back");
+    // Energy used while a meter was offline is said in plain words wherever it shows.
+    expect(text).toContain("Used while offline: 3 kWh, sent when it came back");
+    const tile = Array.from(host.querySelectorAll("span")).find(item => item.textContent === "Used while offline")!.parentElement!;
+    expect(tile.textContent).toContain("Meters kept count while offline and sent it when they came back. Only when it was used is estimated.");
+    const router = Array.from(host.querySelectorAll("tbody tr")).find(row => row.textContent!.startsWith("Router"))!;
+    const cell = router.querySelector("[title]")!;
+    expect(cell.getAttribute("title")).toBe("Used while it was offline: 3 kWh. The meter kept count and sent it when it came back; only when it was used is estimated.");
+    expect(cell.querySelector(".sr-only")!.textContent).toBe(cell.getAttribute("title"));
+    expect(Array.from(host.querySelectorAll("th")).map(cell => cell.textContent)).toContain("Used while offline");
     expect(text).toContain("Switched off on purpose");
     expect(text).not.toContain("reason:switched_off");
 

@@ -159,7 +159,7 @@ export function DataAvailability({ projectId, siteName, document, canEdit, busy,
                   {meter.days.map((kind, index) => <i key={index} data-day={kind} title={t("day.title", { date: shortDay(shiftDay(data.from, index)), status: t(`day.${kind}`) })} />)}
                 </span>}</td>}
                 <td className={styles.number}>{meter.longestOutageHours >= 1 ? t("hours", { hours: number(meter.longestOutageHours) }) : <span className={styles.quiet}>{t("none")}</span>}</td>
-                <td className={styles.number}>{meter.estimatedKwh > 0 ? t("kwh", { kwh: number(meter.estimatedKwh, 2) }) : <span className={styles.quiet}>—</span>}</td>
+                <td className={styles.number}>{meter.estimatedKwh > 0 ? <span title={t("estimated.cell", { kwh: number(meter.estimatedKwh, 2) })}><span aria-hidden="true">{t("kwh", { kwh: number(meter.estimatedKwh, 2) })}</span><span className="sr-only">{t("estimated.cell", { kwh: number(meter.estimatedKwh, 2) })}</span></span> : <span className={styles.quiet}>—</span>}</td>
                 <td>{meter.lastReadingAt ? when(meter.lastReadingAt) : <span className={styles.quiet}>—</span>}</td>
                 <td>{meter.offlineSince
                   ? <><span className={`${styles.badge} ${styles.badgeBad}`}><i aria-hidden="true" />{t("status.offline_now")}</span><small className={styles.note}>{t("offlineSince", { when: when(meter.offlineSince) })}</small></>
