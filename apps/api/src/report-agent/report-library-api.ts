@@ -58,6 +58,12 @@ export async function handleReportLibraryApi(request: IncomingMessage, segments:
     }
     if (segments.length !== 1) return missing();
     const allRuns = service.store.list(projectId).filter(run=>run.workspaceId===context.workspaceId);
+    // The list holds the newest runs only, and daily reports fill it fast. The newest weekly and monthly site reports
+    // are always listed, so the Overview can still find the report it shows.
+    for (const cadence of ["weekly", "monthly"] as const) {
+      const latest = service.store.latestSiteReport(projectId, cadence);
+      if (latest && latest.workspaceId === context.workspaceId && !allRuns.some(run => run.id === latest.id)) allRuns.push(latest);
+    }
     const requestedId = new URL(request.url ?? "/", "http://localhost").searchParams.get("reportId");
     if (requestedId) {
       let requested; try { requested = service.store.get(projectId, requestedId); } catch { return missing(); }
@@ -113,12 +119,12 @@ function overviewCadence(metadata: MetadataStore, projectId: string): "monthly" 
   } catch { return "monthly"; }
 }
 
-function reportTitle(category: "scheduled" | "custom", period: { from: string; toExclusive: string }, siteReport?: { cadence?: "weekly" | "monthly"; style?: "management" }): string {
+function reportTitle(category: "scheduled" | "custom", period: { from: string; toExclusive: string }, siteReport?: { cadence?: "daily" | "weekly" | "monthly"; style?: "management" }): string {
   const format = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
   const start = format.format(new Date(period.from));
   const end = format.format(new Date(Date.parse(period.toExclusive) - 86400000));
   const what = siteReport?.style === "management" ? "Management Review" : "Site Report";
-  const kind = siteReport?.cadence ? `${siteReport.cadence === "weekly" ? "Weekly" : "Monthly"} ${what}`
+  const kind = siteReport?.cadence ? `${siteReport.cadence === "daily" ? "Daily" : siteReport.cadence === "weekly" ? "Weekly" : "Monthly"} ${what}`
     : siteReport ? `Custom ${what}` : `${category === "scheduled" ? "Scheduled" : "Custom"} Energy Report`;
   return `${kind} — ${start === end ? start : `${start} to ${end}`}`;
 }

@@ -11,6 +11,7 @@ import { handleReportLibraryApi } from "./report-library-api.js";
 import { ReportService, registerReportService } from "./report-service.js";
 import type { ReportSettings } from "./report-store.js";
 import { publishSiteReport, siteReportScheduleKey } from "./site-report-generation.js";
+import { readSiteAlerts } from "../energy/energy-site-alerts.js";
 import type { loadSiteReportData } from "./site-report-data.js";
 
 const cleanup: Array<() => void> = [];
@@ -205,4 +206,112 @@ it("does not offer a snapshot for the advisor's reports, or for a report in anot
   expect((await call(["project", "snapshot", advisor.id])).status).toBe(404);
   expect((await call(["project", "snapshot", "00000000-0000-4000-8000-000000000000"])).status).toBe(404);
   expect((await call(["project", "snapshot", run.id])).status).toBe(200);
+});
+
+// One day of a lit estate: corridor and lobby lights run at night, the emergency lights day and night. Readings stop at
+// `until` o'clock, as when the gateway goes quiet part-way through the day.
+const LIGHTS_ON = Object.fromEntries(["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].map(day => [day, [{ from: "19:00", to: "07:00" }]]));
+const dayData = (date: string, until = 24): AnalysisData => {
+  const night = (hour: number) => hour >= 19 || hour < 7;
+  const lights: Record<string, { name: string; kwh: (hour: number) => number }> = {
+    corridor: { name: "Corridor lights", kwh: hour => night(hour) ? 2 : 0.1 },
+    lobby: { name: "Lobby lights", kwh: hour => night(hour) ? 1.2 : 0.05 },
+    emergency: { name: "Emergency lights", kwh: () => 0.3 },
+  };
+  const daySeries = (id: string, kwh: (hour: number) => number): TrendSeries => ({ id, expectedMinutesPerHour: 60,
+    cells: Array.from({ length: 24 }, (_, hour) => (hour < until ? [date, hour, kwh(hour), 60, 0] : [date, hour, null, 0, 0]) as TrendSeries["cells"][number]) });
+  const total = daySeries("__scope__", hour => Object.values(lights).reduce((sum, light) => sum + light.kwh(hour), 0));
+  const usage = total.cells.reduce((sum, cell) => sum + (cell[2] ?? 0), 0);
+  const project: ScopeData = { id: "project", name: "Harbour Estate", dates: [date], timezone: "Asia/Singapore", total, types: {},
+    meters: Object.entries(lights).map(([id, light]) => ({ id, name: light.name, location: "DB1", category: "light", official: true, series: daySeries(id, light.kwh) })),
+    usageKwh: usage, peakKw: null, peakAt: null, cost: { amount: usage * 0.3, currency: "SGD", note: "0.3 SGD/kWh before tax" }, typeTotals: {}, coverage: until / 24 * 100 };
+  return { projectId: "project", projectName: "Harbour Estate", timezone: "Asia/Singapore", snapshotId: "snapshot-1", current: { project, spaces: [] },
+    previous: null, history: null, circuits: [], holidays: new Map(), openingHours: LIGHTS_ON, hoursMeaning: "lights_on", actions: [] };
+};
+const text = (html: string) => html.replace(/<style[\s\S]*?<\/style>/g, "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ");
+
+it("publishes yesterday's site report every day at the chosen hour, in the site's report style, and rings the bell", async () => {
+  const asked: Array<{ from: string; toExclusive: string }> = [];
+  const { service, settings, call, metadata } = setup({ loadSiteReportData: async input => { asked.push(input.period); return { data: dayData(input.period.from), dataSnapshotId: "snapshot-1" }; } });
+  service.start();
+  await service.tick();
+  // The clock itself moves, because the service also wakes itself up after each report it runs.
+  // Monday 17 August 2026, 05:59 in Singapore: the chosen hour has not come yet.
+  vi.setSystemTime(new Date("2026-08-16T21:59:00Z"));
+  service.store.saveSettings({ ...settings, frequency: "daily", localHour: 6, siteReportStyle: "management" });
+  await service.tick();
+  await service.settleSiteReports();
+  expect(asked).toEqual([]);
+  // 06:00: Sunday the 16th is a full day in the site's time zone. A later tick the same morning adds nothing.
+  vi.setSystemTime(new Date("2026-08-16T22:00:00Z"));
+  await service.tick();
+  vi.setSystemTime(new Date("2026-08-16T23:30:00Z"));
+  await service.tick();
+  await service.settleSiteReports();
+  await service.stop();
+  expect(asked).toEqual([{ from: "2026-08-16", toExclusive: "2026-08-17" }]);
+
+  const reports = ((await call()).body as { data: { reports: Array<Record<string, unknown>> } }).data.reports.filter(item => item.source === "site");
+  expect(reports).toHaveLength(1);
+  expect(reports[0]).toMatchObject({ cadence: "daily", category: "scheduled", style: "management", period: { from: "2026-08-16", toExclusive: "2026-08-17" },
+    title: "Daily Management Review — 16 August 2026" });
+  const id = String(reports[0]!.id);
+  const snapshot = parseSiteReportSnapshot(((await call(["project", "snapshot", id])).body as { data: { snapshot: unknown } }).data.snapshot);
+  expect(snapshot).toMatchObject({ cadence: "daily", style: "management", period: { from: "2026-08-16", toExclusive: "2026-08-17" } });
+  const page = text(((await call(["project", "output", id])).body as { data: { content: string } }).data.content);
+  expect(page).toContain("What this day shows");
+  expect(page).toContain("1 day, SGT");
+  expect(page).not.toContain("1 days");
+  // Readers hear about it the same way as the weekly and monthly reports.
+  const alerts = readSiteAlerts({ metadataStore: metadata, projectId: "project", userId: "reader", includeReports: true, includeSync: false, reportRuns: service.store.list("project") });
+  expect(alerts.reports).toEqual([expect.objectContaining({ reportId: id, cadence: "daily", from: "2026-08-16", toExclusive: "2026-08-17" })]);
+});
+
+it("still writes the site's own daily report when AI is switched off for the organisation", async () => {
+  const { service, settings, metadata } = setup({ loadSiteReportData: async input => ({ data: dayData(input.period.from), dataSnapshotId: "snapshot-1" }) });
+  metadata.energyIq.ai.setSettings("workspace", { enabled: false }, "admin");
+  service.store.saveSettings({ ...settings, frequency: "daily" });
+  // Sunday 16 August, 09:00 in Singapore: past 03:00, so Saturday the 15th is due.
+  service.start();
+  await service.tick();
+  await service.settleSiteReports();
+  await service.stop();
+  const runs = service.store.list("project");
+  // No advisor report, which needs AI; the site report needs none.
+  expect(runs.filter(run => !run.siteReport)).toHaveLength(0);
+  expect(runs.map(run => [run.siteReport?.cadence, run.reportingPeriod])).toEqual([["daily", { from: "2026-08-15", toExclusive: "2026-08-16" }]]);
+  expect(service.store.settings("project")?.frequency).toBe("daily");
+});
+
+it("says plainly when a daily report's day has incomplete readings, and estimates nothing from part of a day", async () => {
+  const { publish, root } = setup();
+  const day = { from: "2026-08-16", toExclusive: "2026-08-17" };
+  const { run } = await publish({ cadence: "daily", period: day, loadData: async () => ({ data: dayData("2026-08-16", 18), dataSnapshotId: "snapshot-1" }) });
+  expect(run.siteReport).toEqual({ cadence: "daily" });
+  expect(run.prompt).toBe("Daily site energy report for 2026-08-16 to 2026-08-17 (the end date is not included). Written by the server from the site's own meter readings.");
+  const page = text(readFileSync(join(root, run.id, "accepted-output.txt"), "utf8"));
+  expect(page).toContain("Some readings for this day are missing");
+  expect(page).toContain("Only 75% of the expected readings arrived, so the figures below count only the readings received and may be lower than the real use.");
+  expect(page).toContain("No meter has a full day of readings on this day, so a 30-day month is not estimated.");
+  expect(page).toContain("Some readings for this day are missing, so the hour-by-hour pattern is not drawn.");
+  expect(page).not.toContain("1 days");
+  expect(page).not.toMatch(/S\$0 a month|0\.0 kWh\b/);
+  // A single day has no other day to stand out from.
+  expect(page).not.toContain("Days that stood out");
+});
+
+it("keeps the newest weekly and monthly site reports listed however many daily reports follow them", async () => {
+  const { service, settings, call } = setup();
+  const insert = (cadence: "daily" | "weekly" | "monthly", from: string, toExclusive: string) => service.store.insertCompleted({
+    settings, period: { from, toExclusive }, reportingPeriod: { from, toExclusive }, prompt: "Site energy report", actorUserId: "admin",
+    scheduleKey: siteReportScheduleKey("project", cadence, { from, toExclusive }), siteReport: { cadence },
+  }).run;
+  const shift = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+  const monthly = insert("monthly", "2026-06-01", "2026-07-01");
+  const weekly = insert("weekly", "2026-06-29", "2026-07-06");
+  for (let day = 0; day < 105; day += 1) insert("daily", shift("2026-07-06", day), shift("2026-07-06", day + 1));
+  const reports = ((await call()).body as { data: { reports: Array<{ id: string; cadence?: string }> } }).data.reports;
+  expect(reports.filter(report => report.cadence === "daily")).toHaveLength(100);
+  expect(reports.find(report => report.cadence === "weekly")?.id).toBe(weekly.id);
+  expect(reports.find(report => report.cadence === "monthly")?.id).toBe(monthly.id);
 });

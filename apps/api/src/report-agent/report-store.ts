@@ -40,7 +40,7 @@ export type ReportRun = {
    * Present when the server wrote this report itself from the site's own readings, instead of the advisor writing it.
    * `cadence` is absent for a custom report somebody asked for on chosen dates; `style` is absent for the full report.
    */
-  siteReport?: { cadence?: "weekly" | "monthly"; style?: "management" };
+  siteReport?: { cadence?: "daily" | "weekly" | "monthly"; style?: "management" };
   scheduleKey?: string;
   id: string;
   sessionId?: string;
@@ -252,7 +252,7 @@ export class ReportStore {
   }
 
   /** The newest saved site report for a site, optionally for one cadence. */
-  latestSiteReport(projectId: string, cadence?: "weekly" | "monthly"): ReportRun | undefined {
+  latestSiteReport(projectId: string, cadence?: "daily" | "weekly" | "monthly"): ReportRun | undefined {
     const row = this.db.prepare(`SELECT document FROM energyiq_report_runs
       WHERE project_id = ? AND status = 'succeeded' AND json_extract(document, '$.siteReport') IS NOT NULL
       AND (? IS NULL OR json_extract(document, '$.siteReport.cadence') = ?)
