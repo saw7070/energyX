@@ -16,13 +16,20 @@ export type PlanRoom = { key: string; name: string; rect: Rect; area?: string; c
 /** A device on the plan: a dot at `position`, or, with `size`, a named box centred there (e.g. a bank of LED screens). */
 export type PlanDevice = { meterId: string; position: Point; size?: Point; colour?: string };
 /** `colours` holds a colour chosen for a board (board name → #rrggbb); boards without one use the automatic order. */
-export type FloorPlan = { viewBox: Rect; areas: PlanArea[]; rooms: PlanRoom[]; devices: PlanDevice[]; entrance: { label: string; position: Point } | null; colours?: Record<string, string> };
+export type FloorPlan = { viewBox: Rect; areas: PlanArea[]; rooms: PlanRoom[]; devices: PlanDevice[]; entrance: { label: string; position: Point } | null; colours?: Record<string, string>; style?: PlanStyle };
+/**
+ * How the plan is drawn for everyone at the site: an architect's building drawing (the default), a blueprint, or soft
+ * colour blocks. Only the look changes; nothing the plan shows or selects does.
+ */
+export const PLAN_STYLES = ["drawing", "blueprint", "blocks"] as const;
+export type PlanStyle = typeof PLAN_STYLES[number];
+export const planStyleOf = (layout: { style?: unknown } | undefined): PlanStyle => (PLAN_STYLES as readonly unknown[]).includes(layout?.style) ? layout!.style as PlanStyle : "drawing";
 export type Selection = { kind: "area" | "room" | "device" | "entrance"; key: string };
 
 /** The stored block: the shared contract plus the optional extras the Floor plan adds or keeps. */
 export type StoredSpatialReference = ProjectSpatialReference & {
   property?: Record<string, unknown>;
-  layout: ProjectSpatialReference["layout"] & { entrance?: { label?: string; position?: Point }; devices?: Array<{ meterId: string; position: Point; size?: Point }>; boardColours?: Record<string, string> };
+  layout: ProjectSpatialReference["layout"] & { entrance?: { label?: string; position?: Point }; devices?: Array<{ meterId: string; position: Point; size?: Point }>; boardColours?: Record<string, string>; style?: PlanStyle };
 };
 
 export const MIN_SIZE = 20;
@@ -85,7 +92,7 @@ export function planFromReference(reference: StoredSpatialReference, locale: Ene
   const devices = (layout.devices ?? []).filter(item => typeof item?.meterId === "string" && isPoint(item.position)).map(item => ({ meterId: item.meterId, position: clampPoint(item.position, layout.viewBox), ...(isSize(item.size) ? { size: [...item.size] as Point } : {}), ...colourOf(item) }));
   const entrance = layout.entrance && isPoint(layout.entrance.position) ? { label: layout.entrance.label || translatorFor(floorPlanMessages, locale)("name.entrance"), position: layout.entrance.position } : null;
   const colours = Object.fromEntries(Object.entries(layout.boardColours ?? {}).filter(([, value]) => typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)));
-  return { viewBox: [...layout.viewBox] as Rect, areas, rooms, devices, entrance, ...(Object.keys(colours).length ? { colours } : {}) };
+  return { viewBox: [...layout.viewBox] as Rect, areas, rooms, devices, entrance, ...(Object.keys(colours).length ? { colours } : {}), ...((layout as { style?: unknown }).style !== undefined ? { style: planStyleOf(layout as { style?: unknown }) } : {}) };
 }
 
 /** A first draft to start from: one area per board side by side, each with one room; one area with no panel when there are none. */
@@ -281,6 +288,7 @@ export function referenceFromPlan(plan: FloorPlan, projectId: string, previous: 
       ...(plan.entrance ? { entrance: { label: plan.entrance.label.trim() || t("name.entrance"), position: plan.entrance.position.map(Math.round) as Point } } : {}),
       devices: plan.devices.map(item => ({ meterId: item.meterId, position: item.position.map(Math.round) as Point, ...(item.size ? { size: item.size.map(Math.round) as Point } : {}), ...colourOf(item) })),
       ...(boardColours && Object.keys(boardColours).length ? { boardColours } : {}),
+      ...(plan.style ? { style: plan.style } : {}),
     },
   };
   if (!readProjectSpatialReference(notesWithReference("", null, reference), projectId)) throw new Error(t("check.insidePlan"));

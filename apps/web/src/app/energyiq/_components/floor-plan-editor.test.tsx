@@ -52,7 +52,8 @@ it("shows the floor plan and its editor in Chinese and Malay, leaving the site's
   expect(editing.querySelector('[role="toolbar"]')?.getAttribute("aria-label")).toBe("平面图工具");
   expect([...editing.querySelectorAll("header button")].map(button => button.textContent)).toEqual(["取消", "保存布局"]);
   // A new plan starts with one area and one room per board, named in the reader's language; the board keeps its name.
-  expect([...editing.querySelectorAll("svg text")].map(text => text.textContent)).toEqual(["DB1区域 A", "房间 1"]);
+  // The drawing canvas (the live preview of the look sits further down the side panel).
+  expect([...editing.querySelector("svg")!.querySelectorAll("text")].map(text => text.textContent)).toEqual(["DB1区域 A", "房间 1"]);
   expect(editing.textContent).toContain("已放置 0/1");
   expect(editing.textContent).toContain("Showroom TV");
   await chinese.unmount();

@@ -125,3 +125,25 @@
 :global(:where(html[data-energyiq-theme="dark"])) .swatchButton[aria-pressed="true"] { box-shadow:0 0 0 2px #e6ede9; }
 :global(:where(html[data-energyiq-theme="dark"])) .autoColour { background:#1d2022; border-color:#32363b; color:#8bc3b9; }
 :global(:where(html[data-energyiq-theme="dark"])) .autoColour[aria-pressed="true"] { border-color:#8bc3b9; }
+
+
+/* Plan style: three looks to choose from, each with a small swatch of itself, and a live preview below. */
+.styleChoices { display:grid; gap:6px; }
+.styleChoice { display:flex; gap:10px; align-items:flex-start; width:100%; padding:8px 10px; border:1px solid #d0dbd2; border-radius:9px; background:white; text-align:left; }
+.styleChoice:hover { background:#f4f8f4; }
+.styleChoice:focus-visible { outline:2px solid #1d513a; outline-offset:2px; }
+.styleChosen { border-color:#1d513a; box-shadow:0 0 0 1px #1d513a; background:#eef5ef; }
+.styleChoice strong { display:block; font-size:13px; font-weight:650; color:#1f2d25; }
+.styleChoice small { display:block; margin-top:1px; font-size:12px; color:#6a786f; }
+.styleSwatch { flex-shrink:0; width:34px; height:26px; border-radius:5px; border:1px solid #c9d3cc; }
+.swatch_drawing { background:linear-gradient(#e3e8e2 1px, transparent 1px) 0 0/6px 6px, linear-gradient(90deg, #e3e8e2 1px, transparent 1px) 0 0/6px 6px, #fbfbf8; box-shadow:inset 0 0 0 3px #fbfbf8, inset 0 0 0 5px #2f3b35; }
+.swatch_blueprint { background:linear-gradient(#2a5f93 1px, transparent 1px) 0 0/6px 6px, linear-gradient(90deg, #2a5f93 1px, transparent 1px) 0 0/6px 6px, #0f3a63; box-shadow:inset 0 0 0 3px #0f3a63, inset 0 0 0 4px #f1f6fb; }
+.swatch_blocks { background:linear-gradient(90deg, #dbe8f8 0 48%, transparent 48% 52%, #fde4d6 52%); }
+.previewTitle { margin-top:12px; font-size:12px; font-weight:600; color:#58645d; }
+.previewFrame { margin-top:6px; padding:6px; border:1px solid #e1e7e1; border-radius:9px; background:#fbfcfb; }
+:global(:where(html[data-energyiq-theme="dark"])) .styleChoice { background:#1d2022; border-color:#32363b; }
+:global(:where(html[data-energyiq-theme="dark"])) .styleChoice:hover { background:#24282b; }
+:global(:where(html[data-energyiq-theme="dark"])) .styleChosen { border-color:#7fc8a0; box-shadow:0 0 0 1px #7fc8a0; background:#1f2a24; }
+:global(:where(html[data-energyiq-theme="dark"])) .styleChoice strong { color:#e6ede9; }
+:global(:where(html[data-energyiq-theme="dark"])) .styleChoice small, :global(:where(html[data-energyiq-theme="dark"])) .previewTitle { color:#9aa8a0; }
+:global(:where(html[data-energyiq-theme="dark"])) .previewFrame { background:#161819; border-color:#32363b; }

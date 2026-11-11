@@ -1,10 +1,11 @@
 "use client";
-import type { KeyboardEvent } from "react";
+import { useId, type CSSProperties, type KeyboardEvent } from "react";
 import type { ProjectSpatialReference } from "@datafoundry/contracts";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { translatorFor, type EnergyIqLocale } from "./energyiq-messages";
 import { floorMapMessages } from "./site-floor-map-messages";
 import styles from "./site-floor-map.module.css";
+import { planStyleOf } from "./floor-plan-model";
 
 const mapText = (locale: EnergyIqLocale) => translatorFor(floorMapMessages, locale);
 
@@ -91,6 +92,28 @@ export function pinLabel(name: string, position: [number, number], rooms: Array<
 /** Rooms holding device pins show their name at the top, leaving the space below for the pins. */
 export const roomHasPins = (rect: number[], positions: Array<[number, number]>) => positions.some(position => inside(rect, position));
 
+/** The space a centred label takes, roughly: lines of text whose first baseline is at `y`. */
+export const labelBox = (lines: string[], cx: number, y: number, size: number): Rect => {
+  const width = Math.max(...lines.map(line => line.length)) * size * 0.6;
+  return [cx - width / 2, y - size, width, size * (lines.length * 1.2 + 0.2)];
+};
+const overlaps = (a: Rect, b: Rect) => a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3];
+/**
+ * A door for a room, as drawn on floor plans: in the first corner (bottom left, bottom right, top left, top right)
+ * where it and its swing stay clear of the room's labels and meters, or none when the room is small or crowded.
+ * `along` is the way the opening runs along the wall, `inward` the way the door swings into the room.
+ */
+export function roomDoor([rx, ry, rw, rh]: Rect, unit: number, obstacles: Rect[]): { x: number; y: number; size: number; along: 1 | -1; inward: 1 | -1 } | null {
+  if (rw <= unit * 9 || rh <= unit * 7) return null;
+  const size = Math.min(unit * 2.6, rw * 0.18), inset = unit * 1.3;
+  const spots = [{ x: rx + inset, y: ry + rh, along: 1, inward: -1 }, { x: rx + rw - inset, y: ry + rh, along: -1, inward: -1 }, { x: rx + inset, y: ry, along: 1, inward: 1 }, { x: rx + rw - inset, y: ry, along: -1, inward: 1 }] as const;
+  const spot = spots.find(item => {
+    const box: Rect = [Math.min(item.x, item.x + item.along * size), Math.min(item.y, item.y + item.inward * size), size, size];
+    return !obstacles.some(obstacle => overlaps(box, obstacle));
+  });
+  return spot ? { ...spot, size } : null;
+}
+
 /**
  * `highlight` names the boards to emphasise (others fade); `highlightDevices` says exactly which pins those are, for
  * when different groups share a name; `onSelectBoard` makes each area clickable, saying which pin it holds if any;
@@ -98,6 +121,8 @@ export const roomHasPins = (rect: number[], positions: Array<[number, number]>) 
  */
 export function SiteFloorMap({ reference, large = false, devices = [], onOpenDevice, highlight = null, highlightDevices = null, onSelectBoard, focusDevice = null }: { reference: ProjectSpatialReference; large?: boolean; devices?: MapDevice[]; onOpenDevice?: (id: string) => void; highlight?: string[] | null; highlightDevices?: string[] | null; onSelectBoard?: (board: string, deviceId?: string) => void; focusDevice?: string | null }) {
   const t = useMessages(floorMapMessages);
+  // Pattern ids must be unique per map on the page (the plan and its enlarged copy) and safe inside url(#…).
+  const gridId = useId().replace(/[^a-zA-Z0-9]/g, "");
   const { locale } = useEnergyIqLocale();
   const [x, y, w, h] = reference.layout.viewBox;
   const unit = w / 100;
@@ -133,54 +158,91 @@ export function SiteFloorMap({ reference, large = false, devices = [], onOpenDev
     const select = () => onSelectBoard(board, pinsIn(board, rect)[0]?.id);
     return { role: "button", tabIndex: 0, "aria-label": label, "aria-pressed": selectedArea(board, rect), className: `${styles.areaLink} ${faded(board, rect) ? styles.faded : ""}`, onClick: select, onKeyDown: (event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); select(); } } };
   };
-  return <svg viewBox={`${x} ${y} ${w} ${h + unit * 4}`} className={`${styles.map} ${large ? styles.large : ""}`} role={interactive ? "group" : "img"} aria-label={devices.length ? t("ariaDevices", { count: devices.length }) : t("aria")}>
-    {areas.map(zone => { const [zx, zy, zw, zh] = zone.rect as Rect; const colour = colours.get(zone.id)!; return <g key={zone.id} {...clickable(zone.referenceBoard, zone.referenceBoard ? t("selectArea", { board: zone.referenceBoard, area: areaLabel(zone.id, locale) }) : areaLabel(zone.id, locale), zone.rect as Rect)}>
-      <rect x={zx} y={zy} width={zw} height={zh} rx={unit * 1.4} className={`${styles.zone} ${selectedArea(zone.referenceBoard, zone.rect as Rect) ? styles.zoneActive : ""}`} style={{ fill: colour, stroke: colour }} />
-      <circle cx={zx + unit * 2.4} cy={zy + unit * 2.6} r={unit * 0.9} style={{ fill: colour }} />
-      <text x={zx + unit * 4} y={zy + unit * 3.3} className={styles.zoneLabel} style={{ fontSize: unit * 2.1 }}>{zone.referenceBoard ? <>{zone.referenceBoard}<tspan className={styles.zoneSub} dx={unit * 0.8}>{areaLabel(zone.id, locale)}</tspan></> : areaLabel(zone.id, locale)}</text>
+  // Where each meter's symbol and label sit, so a room's door is drawn clear of them.
+  const pinBoxes = devices.filter(device => !device.size).map(device => {
+    const [dx, dy] = device.position, r = unit, fontSize = unit * 1.1, label = pinLabel(device.name, device.position, reference.layout.rooms, groupBoxes);
+    return { at: device.position, boxes: [[dx - r * 1.75, dy - r * 1.75, r * 3.5, r * 3.5], labelBox([label], dx, dy + r * 1.75 + unit * 1.15, fontSize)] as Rect[] };
+  });
+  const area = (colour: string | undefined) => (colour ? { "--area": colour } : {}) as CSSProperties;
+  // The site's chosen look. Colour blocks are the plain look: no grid, sheet border, title block or doors, and rounder corners.
+  const look = planStyleOf((reference as ProjectSpatialReference & { layout: { style?: unknown } }).layout), drawn = look !== "blocks";
+  const lookClass = look === "blueprint" ? styles.lookBlueprint : look === "blocks" ? styles.lookBlocks : styles.lookDrawing;
+  const ids = { minor: `plan-grid-${gridId}`, major: `plan-grid-major-${gridId}` };
+  return <svg viewBox={`${x} ${y} ${w} ${h + unit * 4}`} className={`${styles.map} ${lookClass} ${large ? styles.large : ""}`} data-look={look} role={interactive ? "group" : "img"} aria-label={devices.length ? t("ariaDevices", { count: devices.length }) : t("aria")}>
+    {/* The sheet: drafting paper with a fine and a coarse grid, inside a drawing border. */}
+    {drawn && <defs>
+      <pattern id={ids.minor} width={unit * 2} height={unit * 2} patternUnits="userSpaceOnUse"><path d={`M${unit * 2} 0 L0 0 0 ${unit * 2}`} className={styles.gridMinor} strokeWidth={unit * 0.06} /></pattern>
+      <pattern id={ids.major} width={unit * 10} height={unit * 10} patternUnits="userSpaceOnUse"><rect width={unit * 10} height={unit * 10} fill={`url(#${ids.minor})`} /><path d={`M${unit * 10} 0 L0 0 0 ${unit * 10}`} className={styles.gridMajor} strokeWidth={unit * 0.1} /></pattern>
+    </defs>}
+    <rect x={x} y={y} width={w} height={h + unit * 4} className={styles.sheet} />
+    {drawn && <rect x={x} y={y} width={w} height={h + unit * 4} fill={`url(#${ids.major})`} />}
+    {drawn && <rect x={x + unit * 0.4} y={y + unit * 0.4} width={w - unit * 0.8} height={h + unit * 3.2} className={styles.frame} strokeWidth={unit * 0.12} />}
+    {areas.map(zone => { const [zx, zy, zw, zh] = zone.rect as Rect; const colour = colours.get(zone.id)!; return <g key={zone.id} style={area(colour)} {...clickable(zone.referenceBoard, zone.referenceBoard ? t("selectArea", { board: zone.referenceBoard, area: areaLabel(zone.id, locale) }) : areaLabel(zone.id, locale), zone.rect as Rect)}>
+      {/* Outer walls in ink; the area's colour is kept to its name plate and a band along the top wall. */}
+      {(() => { const on = selectedArea(zone.referenceBoard, zone.rect as Rect); return <rect x={zx} y={zy} width={zw} height={zh} rx={unit * (drawn ? 0.25 : 1.4)} className={`${styles.planZone} ${on ? styles.planZoneActive : ""}`} strokeWidth={unit * (drawn ? (on ? 0.8 : 0.42) : (on ? 0.4 : 0.18))} />; })()}
+      {drawn && <rect x={zx + unit * 0.25} y={zy + unit * 0.25} width={Math.max(0, zw - unit * 0.5)} height={unit * 0.45} className={styles.planBand} />}
+      <rect x={zx + unit * 1.4} y={zy + unit * 1.75} width={unit * 1.3} height={unit * 1.3} rx={unit * 0.2} className={styles.planSwatch} />
+      <text x={zx + unit * 3.4} y={zy + unit * 2.95} className={styles.planZoneLabel} style={{ fontSize: unit * 1.8 }}>{zone.referenceBoard ? <>{zone.referenceBoard}<tspan className={styles.planZoneSub} dx={unit * 0.8}>{areaLabel(zone.id, locale)}</tspan></> : areaLabel(zone.id, locale)}</text>
     </g>; })}
-    {reference.layout.rooms.map(room => { const [rx, ry, rw, rh] = room.rect as Rect; const colour = colours.get(room.zone); const size = Math.min(unit * 1.75, rw / 7); const board = reference.layout.zones.find(zone => zone.id === room.zone)?.referenceBoard ?? ""; return <g key={room.name} {...clickable(board, t("selectRoom", { board, room: room.name }), room.rect)}>
-      {(() => { const own = (room as { colour?: unknown }).colour; return <rect x={rx} y={ry} width={rw} height={rh} rx={unit * 0.8} className={styles.room} style={isColour(own) ? { stroke: own, fill: `color-mix(in srgb, ${own} 12%, white)` } : colour ? { stroke: colour } : undefined} />; })()}
-      {(() => { const lines = wrapLabel(room.name, Math.max(6, Math.floor(rw / (size * 0.56)))); return text(lines, rx + rw / 2, roomHasPins(room.rect, positions) ? ry + size * 1.5 + (lines.length - 1) * size * 0.6 : ry + rh / 2 + size * 0.35, size, styles.roomLabel); })()}
+    {reference.layout.rooms.map(room => { const [rx, ry, rw, rh] = room.rect as Rect; const colour = colours.get(room.zone); const size = Math.min(unit * 1.45, rw / 8); const board = reference.layout.zones.find(zone => zone.id === room.zone)?.referenceBoard ?? ""; const own = (room as { colour?: unknown }).colour;
+      const lines = wrapLabel(room.name, Math.max(6, Math.floor(rw / (size * 0.58))));
+      const labelY = roomHasPins(room.rect, positions) ? ry + size * 1.6 + (lines.length - 1) * size * 0.6 : ry + rh / 2 + size * 0.35;
+      // Clear of the room's name (drawn from its first line, above the centre), its meters and any equipment inside it.
+      const obstacles = [labelBox(lines, rx + rw / 2, labelY - (lines.length - 1) * size * 0.6, size), ...pinBoxes.filter(item => inside(room.rect, item.at)).flatMap(item => item.boxes),
+        ...subgroups.map(item => item.box).filter(box => overlaps(box, room.rect as Rect)), ...devices.flatMap(device => device.size && inside(room.rect, device.position) ? [[device.position[0] - device.size[0] / 2, device.position[1] - device.size[1] / 2, device.size[0], device.size[1]] as Rect] : [])];
+      const door = drawn ? roomDoor(room.rect as Rect, unit, obstacles) : null;
+      return <g key={room.name} style={area(isColour(own) ? own : colour)} {...clickable(board, t("selectRoom", { board, room: room.name }), room.rect)}>
+      <rect x={rx} y={ry} width={rw} height={rh} rx={drawn ? 0 : unit * 0.8} className={`${styles.planRoom} ${isColour(own) ? styles.planRoomOwn : ""}`} strokeWidth={unit * (drawn ? 0.2 : 0.14)} />
+      {door && <>
+        <line x1={door.x} y1={door.y} x2={door.x + door.along * door.size} y2={door.y} className={styles.planDoorGap} strokeWidth={unit * 0.34} />
+        <line x1={door.x} y1={door.y} x2={door.x} y2={door.y + door.inward * door.size} className={styles.planDoor} strokeWidth={unit * 0.14} />
+        <path d={`M${door.x + door.along * door.size} ${door.y} A${door.size} ${door.size} 0 0 ${door.along * door.inward < 0 ? 0 : 1} ${door.x} ${door.y + door.inward * door.size}`} className={styles.planDoorSwing} strokeWidth={unit * 0.08} strokeDasharray={`${unit * 0.35} ${unit * 0.25}`} />
+      </>}
+      {text(lines, rx + rw / 2, labelY, size, styles.planRoomLabel)}
     </g>; })}
     {subgroups.map(({ zone, box }) => {
       const colour = colours.get(zone.id)!;
       const [gx, gy, gw, gh] = box;
       const pinned = roomHasPins(box, positions);
-      return <g key={zone.id} {...clickable(zone.referenceBoard, zone.equipment ? t("selectGroup", { board: zone.referenceBoard, equipment: zone.equipment }) : t("selectBoard", { board: zone.referenceBoard }), box)}>
-        <rect x={gx} y={gy} width={gw} height={gh} rx={unit * 0.8} className={`${styles.subgroup} ${selectedArea(zone.referenceBoard, box) ? styles.zoneActive : ""}`} style={{ stroke: colour, fill: colour }} />
-        <text x={pinned ? gx + unit * 0.8 : gx + gw / 2} y={pinned ? gy + unit * 1.6 : gy + gh / 2 + unit * 0.6} textAnchor={pinned ? "start" : "middle"} className={styles.subgroupLabel} style={{ fontSize: unit * (pinned ? 1.15 : 1.5) }}>{zone.referenceBoard ? `${zone.referenceBoard} · ` : ""}{zone.equipment ?? t("equipmentInRoom")}</text>
+      return <g key={zone.id} style={area(colour)} {...clickable(zone.referenceBoard, zone.equipment ? t("selectGroup", { board: zone.referenceBoard, equipment: zone.equipment }) : t("selectBoard", { board: zone.referenceBoard }), box)}>
+        {(() => { const on = selectedArea(zone.referenceBoard, box); return <rect x={gx} y={gy} width={gw} height={gh} rx={unit * 0.3} className={`${styles.planEquip} ${on ? styles.planEquipActive : ""}`} strokeWidth={unit * (on ? 0.28 : 0.14)} strokeDasharray={`${unit * 0.6} ${unit * 0.4}`} />; })()}
+        <text x={pinned ? gx + unit * 0.8 : gx + gw / 2} y={pinned ? gy + unit * 1.6 : gy + gh / 2 + unit * 0.6} textAnchor={pinned ? "start" : "middle"} className={styles.planEquipLabel} style={{ fontSize: unit * (pinned ? 1.1 : 1.4) }}>{zone.referenceBoard ? `${zone.referenceBoard} · ` : ""}{zone.equipment ?? t("equipmentInRoom")}</text>
       </g>;
     })}
     {entrance?.position && <g>
-      <path d={`M${entrance.position[0] - unit * 1.4},${entrance.position[1] + unit * 2.2} L${entrance.position[0]},${entrance.position[1]} L${entrance.position[0] + unit * 1.4},${entrance.position[1] + unit * 2.2} Z`} className={styles.entrance} />
-      <text x={entrance.position[0]} y={entrance.position[1] + unit * 4.6} textAnchor="middle" className={styles.entranceLabel} style={{ fontSize: unit * 1.6 }}>{entrance.label ?? t("entrance")}</text>
+      <path d={`M${entrance.position[0] - unit * 1.4},${entrance.position[1] + unit * 2.2} L${entrance.position[0]},${entrance.position[1]} L${entrance.position[0] + unit * 1.4},${entrance.position[1] + unit * 2.2} Z`} className={styles.planEntrance} />
+      <text x={entrance.position[0]} y={entrance.position[1] + unit * 4.4} textAnchor="middle" className={styles.planEntranceLabel} style={{ fontSize: unit * 1.3 }}>{entrance.label ?? t("entrance")}</text>
     </g>}
     {devices.map(device => {
-      const [dx, dy] = device.position, colour = device.colour ?? byBoard.get(device.board) ?? "var(--zone-6)", r = unit * 1.1;
+      const [dx, dy] = device.position, colour = device.colour ?? byBoard.get(device.board) ?? "var(--zone-6)", r = unit * 1;
       const open = onOpenDevice ? () => onOpenDevice(device.id) : undefined;
       return <g key={device.id} className={`${open ? styles.pinLink : ""} ${fadedPin(device) ? styles.faded : ""}`} {...(open ? { role: "button", tabIndex: 0, "aria-label": t("openDevice", { name: device.name }), onClick: open, onKeyDown: (event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } } } : {})}>
         <title>{t(open ? "deviceTitleOpen" : "deviceTitle", { name: device.name, board: device.board })}</title>
-        {device.size ? <DeviceBox x={dx} y={dy} size={device.size} name={device.name} colour={colour} unit={unit} focus={focusDevice === device.id} /> : <>
-        {focusDevice === device.id && <circle cx={dx} cy={dy} r={r * 1.9} className={styles.pinFocus} />}
-        <circle cx={dx} cy={dy} r={r} className={styles.pin} style={{ fill: colour }} />
+        {device.size ? <DeviceBox x={dx} y={dy} size={device.size} name={device.name} colour={colour} unit={unit} focus={focusDevice === device.id} drawing /> : <>
+        {focusDevice === device.id && <circle cx={dx} cy={dy} r={r * 2} className={styles.pinFocus} />}
+        {/* A fixture symbol: a soft halo, the meter in its group's colour, and a bolt. */}
+        <circle cx={dx} cy={dy} r={r * 1.75} className={styles.planPinHalo} style={{ fill: colour }} />
+        <circle cx={dx} cy={dy} r={r} className={styles.planPin} style={{ fill: colour }} strokeWidth={r * 0.3} />
         <path d={`M${dx - r * 0.2},${dy - r * 0.55} L${dx - r * 0.45},${dy + r * 0.05} L${dx},${dy + r * 0.05} L${dx - r * 0.1},${dy + r * 0.6} L${dx + r * 0.45},${dy - r * 0.1} L${dx},${dy - r * 0.1} Z`} className={styles.pinIcon} />
-        <text x={dx} y={dy + r + unit * 1.3} textAnchor="middle" className={styles.pinLabel} style={{ fontSize: unit * 1.15 }}>{pinLabel(device.name, device.position, reference.layout.rooms, groupBoxes)}</text>
+        <text x={dx} y={dy + r * 1.75 + unit * 1.15} textAnchor="middle" className={styles.planPinLabel} style={{ fontSize: unit * 1.1, strokeWidth: unit * 0.35 }}>{pinLabel(device.name, device.position, reference.layout.rooms, groupBoxes)}</text>
         </>}
       </g>;
     })}
-    <text x={x + w - unit} y={y + h + unit * 3} textAnchor="end" className={styles.caption} style={{ fontSize: unit * 1.4 }}>{t("caption")}</text>
+    {/* Title block, as on a drawing sheet. */}
+    {drawn && <rect x={x + w - unit * 23.5} y={y + h + unit * 0.7} width={unit * 22.6} height={unit * 2.5} className={styles.titleBlock} strokeWidth={unit * 0.1} />}
+    <text x={x + w - unit * 12.2} y={y + h + unit * 2.35} textAnchor="middle" className={styles.caption} style={{ fontSize: unit * 1.2 }}>{t("caption")}</text>
   </svg>;
 }
 
-/** A device drawn as a named box (dashed, in its board's colour), like an equipment group, instead of a dot. */
-export function DeviceBox({ x, y, size, name, colour, unit, focus = false, selected = false }: { x: number; y: number; size: [number, number]; name: string; colour: string; unit: number; focus?: boolean; selected?: boolean }) {
+/** A device drawn as a named box (dashed, in its board's colour), like an equipment group, instead of a dot. `drawing` draws it like the map's equipment boxes. */
+export function DeviceBox({ x, y, size, name, colour, unit, focus = false, selected = false, drawing = false }: { x: number; y: number; size: [number, number]; name: string; colour: string; unit: number; focus?: boolean; selected?: boolean; drawing?: boolean }) {
   const [w, h] = size, left = x - w / 2, top = y - h / 2;
   const fontSize = Math.min(unit * 1.5, h * 0.42), lines = wrapLabel(name, Math.max(6, Math.floor((w - unit) / (fontSize * 0.56)))).slice(0, Math.max(1, Math.floor(h / (fontSize * 1.25))));
   return <>
     {(focus || selected) && <rect x={left - unit * 0.6} y={top - unit * 0.6} width={w + unit * 1.2} height={h + unit * 1.2} rx={unit * 1.2} className={styles.pinFocus} />}
-    <rect x={left} y={top} width={w} height={h} rx={unit * 0.8} className={styles.subgroup} style={{ stroke: colour, fill: colour }} />
-    <text x={x} y={y + fontSize * 0.35 - (lines.length - 1) * fontSize * 0.6} textAnchor="middle" className={styles.subgroupLabel} style={{ fontSize }}>{lines.map((line, index) => <tspan key={index} x={x} dy={index ? fontSize * 1.2 : 0}>{line}</tspan>)}</text>
+    {drawing ? <rect x={left} y={top} width={w} height={h} rx={unit * 0.3} className={styles.planEquip} style={{ "--area": colour } as CSSProperties} strokeWidth={unit * 0.14} strokeDasharray={`${unit * 0.6} ${unit * 0.4}`} />
+      : <rect x={left} y={top} width={w} height={h} rx={unit * 0.8} className={styles.subgroup} style={{ stroke: colour, fill: colour }} />}
+    <text x={x} y={y + fontSize * 0.35 - (lines.length - 1) * fontSize * 0.6} textAnchor="middle" className={drawing ? styles.planEquipLabel : styles.subgroupLabel} style={{ fontSize }}>{lines.map((line, index) => <tspan key={index} x={x} dy={index ? fontSize * 1.2 : 0}>{line}</tspan>)}</text>
   </>;
 }
 
