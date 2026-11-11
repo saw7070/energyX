@@ -333,6 +333,7 @@ export const deviceMessages = defineMessages({
   "facts.readings": "Readings received",
   "perYear": "{amount} a year",
   "aboutPerYear": "≈ {amount} a year",
+  "aboutPerDay": "≈ {kwh} a day",
   "label.wholeSite": "whole site",
   "label.thisDevice": "this device",
 
@@ -542,6 +543,7 @@ export const deviceMessages = defineMessages({
     "facts.readings": "已收到的读数",
     "perYear": "每年 {amount}",
     "aboutPerYear": "每年约 {amount}",
+    "aboutPerDay": "每天约 {kwh}",
     "label.wholeSite": "整个场地",
     "label.thisDevice": "此设备",
 
@@ -751,6 +753,7 @@ export const deviceMessages = defineMessages({
     "facts.readings": "Bacaan diterima",
     "perYear": "{amount} setahun",
     "aboutPerYear": "≈ {amount} setahun",
+    "aboutPerDay": "≈ {kwh} sehari",
     "label.wholeSite": "seluruh premis",
     "label.thisDevice": "peranti ini",
 
