@@ -59,7 +59,8 @@ it("pulls the edges of the drawing space to make it bigger or smaller, never cut
   expect(width).toBeGreaterThanOrEqual(500);
   expect(height).toBeGreaterThanOrEqual(540);
   expect(resizeCanvas(plan, 0, 0).viewBox).toEqual([0, 0, Math.round(width), Math.round(height)]);
-  expect(resizeCanvas(plan, 99999, 99999).viewBox).toEqual([0, 0, 5000, 5000]);
+  // The largest plan is the stored format's own limit.
+  expect(resizeCanvas(plan, 99999, 99999).viewBox).toEqual([0, 0, 10000, 10000]);
 
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); vi.stubGlobal("React", React);
   const host = document.createElement("div"); document.body.append(host);
@@ -140,7 +141,7 @@ it("gives each area, equipment box, room and device its own colour, saved with t
   try {
     await act(async () => root.render(<EnergyIqLocaleProvider><FloorPlanEditor projectId="office" notes="" block={null} previous={previous} meters={meters} boards={["DB2", "DB3"]} onCancel={() => undefined} onSaved={() => undefined} /></EnergyIqLocaleProvider>));
     const button = (label: string) => [...host.querySelectorAll("button")].find(item => item.textContent === label)!;
-    const picker = () => host.querySelector("aside fieldset")!;
+    const picker = () => [...host.querySelectorAll("aside fieldset")].find(item => item.querySelector("legend")?.textContent === "Colour")!;
     const pick = async (name: string) => act(async () => (picker().querySelector(`button[aria-label="${name}"]`) as HTMLButtonElement).click());
     // Make a DB3 equipment box inside the showroom and colour it teal.
     await act(async () => button("+ Add equipment inside a room").click());

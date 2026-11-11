@@ -42,7 +42,7 @@
 .canvas:focus-visible { outline:2px solid #3b8a63; outline-offset:2px; }
 
 .editorBody { display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:16px; margin-top:12px; align-items:start; }
-.canvasFrame { padding:10px 14px 14px 8px; border:1px solid #e1e7e1; border-radius:12px; background:#fbfcfb; overflow:auto; }
+.canvasFrame { padding:14px 14px 14px 14px; border:1px solid #e1e7e1; border-radius:12px; background:#fbfcfb; overflow:auto; }
 .stage { position:relative; min-width:100%; }
 .stage > svg { display:block; width:100%; }
 /* Edges of the drawing space: a thin grip to pull; the whole strip is the target. */
@@ -56,6 +56,10 @@
 .edge-s span { top:4px; left:calc(50% - 24px); height:4px; width:48px; }
 .edge-se { right:-14px; bottom:-14px; width:16px; height:16px; cursor:nwse-resize; }
 .edge-se span { right:2px; bottom:2px; width:10px; height:10px; border-radius:2px 2px 6px 2px; }
+.edge-w { top:0; left:-12px; width:12px; height:100%; cursor:ew-resize; }
+.edge-w span { right:4px; top:calc(50% - 24px); width:4px; height:48px; }
+.edge-n { left:0; top:-12px; height:12px; width:100%; cursor:ns-resize; }
+.edge-n span { bottom:4px; left:calc(50% - 24px); height:4px; width:48px; }
 .canvas { touch-action:none; user-select:none; }
 .placingCursor { cursor:crosshair; }
 .gridLine { fill:none; stroke:#e8ede9; stroke-width:1; }
@@ -66,6 +70,10 @@
 .handle { fill:white; stroke:#1d513a; stroke-width:2; }
 .nw, .se { cursor:nwse-resize; }
 .ne, .sw { cursor:nesw-resize; }
+.n, .s { cursor:ns-resize; }
+.e, .w { cursor:ew-resize; }
+/* Alignment guides while dragging: thin lines where the item lines up with others (scaled so they stay thin). */
+.guide { stroke:#d6336c; stroke-dasharray:4 3; pointer-events:none; vector-effect:non-scaling-stroke; stroke-width:1; }
 /* Several selected, drawing a new item, locked items. */
 .marquee { fill:rgba(29,81,58,.08); stroke:#1d513a; stroke-width:1.5; stroke-dasharray:5 4; pointer-events:none; }
 .drawBox { fill:rgba(42,120,214,.10); stroke:#2a78d6; stroke-width:2; stroke-dasharray:8 5; pointer-events:none; }
@@ -79,6 +87,27 @@
 .notice { margin-top:10px; padding:8px 12px; border-radius:8px; background:#eef3f8; color:#24486b; font-size:13px; }
 .arrange { display:grid; gap:6px; }
 .arrangeRow { display:flex; flex-wrap:wrap; gap:6px; }
+/* Grid menu in the toolbar, line-up buttons, typed position and size, custom colour. */
+.gridMenu { position:relative; }
+.gridPopover { position:absolute; top:calc(100% + 6px); left:0; z-index:5; display:grid; gap:10px; width:260px; padding:12px 14px; border:1px solid #d0dbd2; border-radius:10px; background:white; box-shadow:0 6px 20px rgba(31,45,37,.14); }
+.gridPopover label { display:grid; gap:4px; font-size:12px; font-weight:600; color:#4f5f55; }
+.gridPopover select { min-height:32px; padding:4px 8px; border:1px solid #d0dbd2; border-radius:7px; background:white; color:#1f2d25; font-size:13px; }
+.gridPopover .check, .check { display:flex !important; align-items:center; gap:8px; font-size:13px !important; color:#1f2d25 !important; }
+.check input { width:16px; height:16px; min-height:0 !important; accent-color:#1d513a; }
+.subhead { margin:4px 0 0; font-size:12px !important; font-weight:600; color:#4f5f55 !important; }
+.alignGrid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:6px; }
+.alignGrid .tool { padding:5px 6px; }
+.positionField { display:grid; gap:6px; margin:0; padding:0; border:0; min-width:0; }
+.positionField legend { margin-bottom:4px; font-size:12px; font-weight:600; color:#4f5f55; }
+.positionGrid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:6px; }
+.positionGrid input { width:100%; min-width:0; padding:5px 6px !important; font-variant-numeric:tabular-nums; }
+.positionField:disabled { opacity:.6; }
+.customColour { display:flex; align-items:flex-end; gap:8px; }
+.colourWell { flex-shrink:0; width:34px; height:34px; min-height:0 !important; padding:2px !important; border:1px solid #d0dbd2; border-radius:7px; background:white; cursor:pointer; }
+.colourWellOn { box-shadow:0 0 0 2px #1f2d25; }
+.colourCode { flex:1; display:grid; gap:4px; font-size:12px; font-weight:600; color:#4f5f55; }
+.colourCode input { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; text-transform:lowercase; }
+.fieldProblem { color:#a4262c !important; font-weight:600; }
 .danger:disabled { opacity:.5; cursor:not-allowed; background:transparent; }
 .panel select:disabled { opacity:.6; cursor:not-allowed; }
 
@@ -183,3 +212,12 @@
 :global(:where(html[data-energyiq-theme="dark"])) .lockBadge [data-part="body"] { fill:#e6ede9; }
 :global(:where(html[data-energyiq-theme="dark"])) .tool[aria-pressed="true"] { border-color:#8bc3b9; background:#1c2a22; box-shadow:inset 0 0 0 1px #8bc3b9; }
 :global(:where(html[data-energyiq-theme="dark"])) .notice { background:#1b2430; color:#a9c8ea; }
+
+:global(:where(html[data-energyiq-theme="dark"])) .guide { stroke:#f783ac; }
+:global(:where(html[data-energyiq-theme="dark"])) .gridPopover { background:#1d2022; border-color:#32363b; box-shadow:0 6px 20px rgba(0,0,0,.5); }
+:global(:where(html[data-energyiq-theme="dark"])) .gridPopover label, :global(:where(html[data-energyiq-theme="dark"])) .subhead, :global(:where(html[data-energyiq-theme="dark"])) .positionField legend, :global(:where(html[data-energyiq-theme="dark"])) .colourCode { color:#b9c5be !important; }
+:global(:where(html[data-energyiq-theme="dark"])) .gridPopover select, :global(:where(html[data-energyiq-theme="dark"])) .colourWell { background:#191919; border-color:#32363b; color:#e6ede9; }
+:global(:where(html[data-energyiq-theme="dark"])) .check { color:#e6ede9 !important; }
+:global(:where(html[data-energyiq-theme="dark"])) .check input { accent-color:#8bc3b9; }
+:global(:where(html[data-energyiq-theme="dark"])) .colourWellOn { box-shadow:0 0 0 2px #e6ede9; }
+:global(:where(html[data-energyiq-theme="dark"])) .fieldProblem { color:#f3908b !important; }

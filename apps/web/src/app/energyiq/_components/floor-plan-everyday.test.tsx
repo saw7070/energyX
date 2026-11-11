@@ -264,7 +264,8 @@ describe("lock and drawing order", () => {
   it("locks an item so it cannot be dragged, resized, nudged or deleted until unlocked", async () => {
     const view = await render();
     await view.click(view.roomTile("Office")!, [560, 100]);
-    expect(view.canvas().querySelectorAll('rect[class*="handle"]').length).toBe(4);
+    // Four corner grips and four edge grips.
+    expect(view.canvas().querySelectorAll('rect[class*="handle"]').length).toBe(8);
     await act(async () => view.button("Lock in place").click());
     expect(view.canvas().querySelector('g[aria-label="Locked"] title')?.textContent).toBe("Locked");
     expect(view.canvas().querySelectorAll('rect[class*="handle"]').length).toBe(0);
