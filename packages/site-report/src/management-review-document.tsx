@@ -15,7 +15,7 @@ import { buildManagementReview, type ManagementReview, type ReviewGroup, type Re
 import type { SiteReportStyle } from "./report-style.js";
 import { managementReviewMessages } from "./management-review-messages.js";
 import { rich, Rich } from "./rich.js";
-import { niceTicks, ProfileChart, renderSiteReportHtml, useWidth } from "./site-report-document.js";
+import { DaytimeBlock, niceTicks, ProfileChart, renderSiteReportHtml, useWidth } from "./site-report-document.js";
 import { buildSiteReport, kwhText, moneyText, pctText, REPORT_COLOURS as C } from "./site-report-model.js";
 import { REPORT_CSS } from "./site-report-styles.js";
 
@@ -221,9 +221,12 @@ export function ManagementReviewDocument({ review, standalone }: { review: Manag
       {has("profile") && review.profile && <Section id="profile" number={numberOf("profile")} title={t("sec.profile")}>
         <p><Rich text={review.profile.intro} /></p>
         <ProfileChart pattern={{ hours: review.profile.hours, openFrom: review.profile.openFrom, openTo: review.profile.openTo, notes: [], caption: review.profile.caption }} report={review} standalone={standalone} />
+        {review.daytime && <DaytimeBlock daytime={review.daytime} />}
       </Section>}
 
       <Section id="savings" number={numberOf("savings")} title={t("sec.savings")}>
+        {/* Without an average day to sit under, the lights on in the daytime lead the savings. */}
+        {review.daytime && !(has("profile") && review.profile) && <DaytimeBlock daytime={review.daytime} />}
         <p><Rich text={savings.intro} /></p>
         {savings.rows.length > 0 && <div className="table-wrap"><table>
           <thead><tr><th>{t("sav.col.measure")}</th><th>{t("sav.col.basis")}</th><th className="r">{t("sav.col.kwh")}</th>{review.rate != null && <th className="r">{t("sav.col.cost")}</th>}</tr></thead>

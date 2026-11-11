@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { allowedShare, buildManagementReview, daytimeUse, minutesInHours } from "@datafoundry/site-report";
 import { renderSiteReportMarkup } from "@datafoundry/site-report/site-report-document";
+import { renderManagementReviewMarkup } from "@datafoundry/site-report/management-review-document";
 import type { AnalysisData, ScopeData, ScopeMeter, TrendSeries } from "./analysis-data";
 import { closedUseBreakdown, savingsPlan, type HoursByDay } from "./analysis-model";
 import { buildSiteReport } from "./site-report-model";
@@ -143,6 +144,9 @@ describe("meters that are always on by design", () => {
     const review = buildManagementReview(estate(ESTATE, ALWAYS_ON), null, "2026-09-22T10:00:00Z");
     expect(review.summary.findings).toContain("The lights ran at night as planned: only **2%** of the energy was used in the daytime.");
     expect(review.savings.rows.map(row => row.title).join(" ")).not.toContain("Emergency lights");
+    // The review lists the same lights on in the daytime as the full report.
+    expect(review.daytime!.items).toEqual(["Corridor lights: on 6–7 pm on 14 days, 8.4 kWh", "Driveway lamp: on 7–9 am on 3 days, 3.0 kWh"]);
+    expect(renderManagementReviewMarkup(review)).toContain("<li>Corridor lights: on 6–7 pm on 14 days, 8.4 kWh</li>");
   });
 
   it("change nothing for meters without the tick", () => {

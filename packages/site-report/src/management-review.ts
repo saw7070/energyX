@@ -25,7 +25,7 @@ import { formatPeriod } from "./report-period.js";
 import type { StandoutReport } from "./standout-report.js";
 import { alwaysOnByDesignIds } from "./always-on-by-design.js";
 import { daytimeUse } from "./daytime-use.js";
-import { buildSiteReport, clock, DAYTIME_NOTABLE_SHARE, hourRange, inWindow, kwhText, kwText, moneyText, openingWindow, pctText, REPORT_COLOURS, weekdayOf } from "./site-report-model.js";
+import { buildSiteReport, clock, DAYTIME_NOTABLE_SHARE, hourRange, inWindow, kwhText, kwText, moneyText, openingWindow, pctText, REPORT_COLOURS, weekdayOf, type ReportDaytime } from "./site-report-model.js";
 
 type T = Translate<ManagementReviewKey>;
 const reviewText = (locale: EnergyIqLocale, meaning: HoursMeaning): T => forHoursMeaning(translatorFor(managementReviewMessages, locale), managementReviewMessages, meaning);
@@ -75,6 +75,8 @@ export type ManagementReview = {
   groups: { heading: string; intro: string; rows: ReviewGroup[]; byCircuit: boolean; note: string } | null;
   comparison: { heading: string; intro: string; groups: Array<{ key: string; name: string; colour: string; perDay: number }>; parts: Array<{ name: string; perDay: number[] }>; caption: string } | null;
   profile: { hours: number[]; openFrom: number; openTo: number; intro: string; caption: string; days: number } | null;
+  /** Lights-on hours only: which lights were on in the daytime, and when — the full report's own list. */
+  daytime?: ReportDaytime | undefined;
   savings: { intro: string; rows: ReviewSaving[]; totalKwh: number; totalCost: number | null; checks: string[]; note: string };
   method: { intro: string; rows: Array<{ label: string; value: string }>; meters: ReviewMeter[]; notInUseNote: string | null };
   footer: { left: string; right: string };
@@ -345,6 +347,7 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
     total, groups,
     comparison: comparison ? { heading: comparison.heading, intro: comparison.intro, groups: comparison.groups, parts: comparison.parts, caption: comparison.caption } : null,
     profile: profile ? { hours: profile.hours, openFrom: openRange.from, openTo: openRange.to, intro: profile.intro, caption: profile.caption, days: profile.days } : null,
+    ...(base.daytime ? { daytime: base.daytime } : {}),
     savings, method,
     footer: { left: t("foot.left", { count: meterCount, tz: base.tzLabel }), right: t("foot.right", { date: formatPeriod(generatedDay, generatedDay, locale) }) },
   };
