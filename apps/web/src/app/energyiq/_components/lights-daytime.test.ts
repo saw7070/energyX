@@ -218,8 +218,11 @@ describe("which lights were on in the daytime, and when", () => {
 
 describe("a meter that sent readings for only part of a day", () => {
   // Real use is about 0.19 kWh a day: 12 lit hours at 0.016 kWh. Walkway light 1 sent two evening hours on Monday
-  // 3 Aug, each holding what the light had counted since it was last read (0.08 kWh), then nothing. A usual day worked
-  // out from the hours it did send would be 0.08 kWh × 24 ≈ 1.9 kWh: ten times its real use. That must never happen.
+  // 3 Aug, each holding what the light had counted since it was last read (0.08 kWh), then nothing. The report already
+  // gave such a meter no usual day; these tests pin down what it now says about it (no full day, not enough readings,
+  // left out of the 30-day estimate), and that the management review no longer spreads its 0.16 kWh over the site's
+  // days (0.011 kWh a day, too low). The Devices page's 0.08 kW × 24 ≈ 1.9 kWh a day is covered in
+  // device-statistics.test.ts.
   const WALKWAY: Record<string, Meter> = {
     "walkway-1": { name: "Walkway light 1", fullName: "Garden path light 1", group: "Pavilion", kwh: (date, hour) => date === "2026-08-03" && (hour === 19 || hour === 20) ? 0.08 : null },
     // Every hour arrives, except after its last reading on the last evening, which carried a 0.08 kWh catch-up.
@@ -246,7 +249,7 @@ describe("a meter that sent readings for only part of a day", () => {
     expect(walkway.weekdayPerDay).toBeCloseTo(0.192, 9);
     expect(walkway.weekendPerDay).toBeCloseTo(0.192, 9);
     expect(walkway.monthKwh).toBeCloseTo(0.192 * 30, 9);
-    // No figure for either walkway light comes anywhere near the 1.9 kWh a day a per-hour reading would give.
+    // Neither walkway light's usual day comes from the hours of a part day (0.08 kWh × 24 would be 1.9 kWh).
     for (const circuit of report.circuits.filter(item => item.name.startsWith("Walkway"))) expect(Math.max(circuit.weekdayPerDay ?? 0, circuit.weekendPerDay ?? 0, circuit.monthKwh / 30)).toBeLessThan(0.2);
   });
 
