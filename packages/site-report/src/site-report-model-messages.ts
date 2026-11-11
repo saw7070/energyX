@@ -322,6 +322,9 @@ export const siteReportModelMessages = defineMessages({
   "noUse.item": "{name}: no use from {dates}",
   "noUse.itemOn": "{name}: no use on {dates}",
   "noUse.note": "This is not a fault. Some things, such as a fan, are only switched on now and then.",
+  "noUse.check.one": "{names} should come on every night or stay on, so using nothing may mean a fault: check it on site.",
+  "noUse.check.other": "{names} should come on every night or stay on, so using nothing may mean a fault: check them on site.",
+  "noUse.noteOthers": "For the others this is not a fault: some things, such as a fan, are only switched on now and then.",
   "find.noUse": "No use in these dates.",
 
   "foot.left": "Prepared by EnergyX from {count} meters · hourly readings ({tz})",
@@ -661,6 +664,9 @@ export const siteReportModelMessages = defineMessages({
     "noUse.item": "{name}：{dates}没有用电",
     "noUse.itemOn": "{name}：{dates}没有用电",
     "noUse.note": "这不是故障。有些设备（例如风扇）只是偶尔才开。",
+    "noUse.check.one": "{names}本应每晚亮灯或一直开着，没有用电可能是故障，请到现场检查。",
+    "noUse.check.other": "{names}本应每晚亮灯或一直开着，没有用电可能是故障，请到现场检查。",
+    "noUse.noteOthers": "其余的不是故障：有些设备（例如风扇）只是偶尔才开。",
     "find.noUse": "这段时间没有用电。",
 
     "foot.left": "由 EnergyX 根据 {count} 个电表编制 · 每小时读数（{tz}）",
@@ -997,6 +1003,9 @@ export const siteReportModelMessages = defineMessages({
     "noUse.item": "{name}: tiada penggunaan dari {dates}",
     "noUse.itemOn": "{name}: tiada penggunaan pada {dates}",
     "noUse.note": "Ini bukan kerosakan. Sesetengah peralatan, seperti kipas, hanya dihidupkan sekali-sekala.",
+    "noUse.check.one": "{names} sepatutnya menyala setiap malam atau sentiasa hidup, jadi tiada penggunaan mungkin bermakna ada kerosakan: semak di tapak.",
+    "noUse.check.other": "{names} sepatutnya menyala setiap malam atau sentiasa hidup, jadi tiada penggunaan mungkin bermakna ada kerosakan: semak di tapak.",
+    "noUse.noteOthers": "Bagi yang lain, ini bukan kerosakan: sesetengah peralatan, seperti kipas, hanya dihidupkan sekali-sekala.",
     "find.noUse": "Tiada penggunaan dalam tempoh ini.",
 
     "foot.left": "Disediakan oleh EnergyX daripada {count} meter · bacaan setiap jam ({tz})",

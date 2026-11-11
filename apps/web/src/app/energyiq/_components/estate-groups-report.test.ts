@@ -16,7 +16,7 @@ const DATES = Array.from({ length: 14 }, (_, index) => new Date(Date.parse("2026
 const night = (hour: number) => hour >= 19 || hour < 7;
 const BUSY_DAY = "2026-11-08";
 type Profile = (date: string, hour: number) => number;
-type Meter = { name: string; group: string; kwh: Profile };
+type Meter = { name: string; group: string; kwh: Profile; category?: "light" | "load" };
 const lit = (kw: number): Profile => (_date, hour) => night(hour) ? kw : 0;
 // Block A's block lighting runs brighter on 8 Nov: both of its meters, so the group is named rather than one meter.
 const busier = (kw: number): Profile => (date, hour) => night(hour) ? kw + (date === BUSY_DAY ? 0.1 : 0) : 0;
@@ -37,8 +37,9 @@ const METERS: Record<string, Meter> = {
   driveway: { name: "Driveway lamp", group: "driveway", kwh: lit(0.15) },
   chute: { name: "Rubbish chute lamp", group: "driveway", kwh: lit(0.15) },
   playground: { name: "Playground lights", group: "playground", kwh: lit(0.1) },
-  // Nobody switched the pavilion fan on: it sends readings, all of them zero.
-  fan: { name: "Pavilion fan", group: "pavilion", kwh: () => 0 },
+  // Nobody switched the pavilion fan on: it sends readings, all of them zero. It is not a light, so it can rightly sit
+  // unused even at a site with lights-on hours.
+  fan: { name: "Pavilion fan", group: "pavilion", kwh: () => 0, category: "load" },
   sign: { name: "Estate signboard", group: "entrance", kwh: lit(0.05) },
 };
 // Listed in a different order from the one saved: the saved order wins.
@@ -68,7 +69,7 @@ const AVERAGE_DAY = TOTAL / 14;
 
 function estate(extra: Partial<AnalysisData> = {}): AnalysisData {
   // Every meter has a short name, its panel label kept as the full name.
-  const meters = ids.map((id): ScopeMeter => ({ id, name: METERS[id]!.name, fullName: `DB ${id} lighting`, location: METERS[id]!.group, category: "light", official: true, series: series(id, METERS[id]!.kwh) }));
+  const meters = ids.map((id): ScopeMeter => ({ id, name: METERS[id]!.name, fullName: `DB ${id} lighting`, location: METERS[id]!.group, category: METERS[id]!.category ?? "light", official: true, series: series(id, METERS[id]!.kwh) }));
   const total = series("__scope__", (date, hour) => ids.reduce((sum, id) => sum + METERS[id]!.kwh(date, hour), 0));
   total.expectedMinutesPerHour = ids.length * 60;
   for (const cell of total.cells) cell[3] = ids.length * 60;
@@ -255,7 +256,34 @@ describe("meters that used nothing", () => {
     const review = buildManagementReview(estate(), null, GENERATED);
     expect(review.method.meters.find(meter => meter.name === "Pavilion fan")!.note).toBe("No use in these dates");
     expect(review.noUse!.items).toEqual(["Pavilion fan: no use from 2–15 Nov"]);
+    // Only worth knowing, so it comes after the five findings that matter more here.
+    expect(review.summary.findings.join(" ")).not.toContain("Pavilion fan");
     expect(renderManagementReviewMarkup(review)).toContain("No use in these dates");
+  });
+
+  it("are something to check on site when they should run: lighting at a lights-on site, or a meter always on by design", () => {
+    // The playground lights and Block B's emergency lights (always on by design) used nothing, as the fan did.
+    const dark = (data: AnalysisData, off: string[]): AnalysisData => {
+      const project = data.current.project;
+      const meters = project.meters.map(meter => off.includes(meter.id) ? { ...meter, series: { ...meter.series!, cells: meter.series!.cells.map(cell => [cell[0], cell[1], 0, cell[3], cell[4]] as TrendSeries["cells"][number]) } } : meter);
+      return { ...data, current: { ...data.current, project: { ...project, meters } } };
+    };
+    const lit = buildSiteReport(dark(estate(), ["playground", "b-emergency"]), null, GENERATED);
+    expect(lit.noUse!.items).toEqual(["Block B emergency lights: no use from 2–15 Nov", "Playground lights: no use from 2–15 Nov", "Pavilion fan: no use from 2–15 Nov"]);
+    expect(lit.noUse!.note).toBe("Block B emergency lights and Playground lights should come on every night or stay on, so using nothing may mean a fault: check them on site. For the others this is not a fault: some things, such as a fan, are only switched on now and then.");
+    expect(buildSiteReport(dark(estate(), ["playground"]), null, GENERATED, "ms").noUse!.note).toMatch(/^Playground lights sepatutnya menyala setiap malam/);
+    expect(buildSiteReport(dark(estate(), ["playground"]), null, GENERATED, "zh-Hans").noUse!.note).toMatch(/^Playground lights本应每晚亮灯/);
+    // Something to check is not crowded out of the summary by what is only worth knowing.
+    const review = buildManagementReview(dark(estate(), ["playground"]), null, GENERATED);
+    expect(review.summary.findings).toContain("2 meters used nothing in these dates (see Method and data). Some should come on every night or stay on, so check them on site.");
+    expect(review.summary.findings.join(" ")).not.toContain("That is not a fault");
+    // The emergency lights alone, with the fan switched on: the finding names them and asks for a check.
+    const fanOn = estate();
+    fanOn.current.project.meters = fanOn.current.project.meters.map(meter => meter.id === "fan" ? { ...meter, series: { ...meter.series!, cells: meter.series!.cells.map(cell => [cell[0], cell[1], 0.01, cell[3], cell[4]] as TrendSeries["cells"][number]) } } : meter);
+    expect(buildManagementReview(dark(fanOn, ["b-emergency"]), null, GENERATED).summary.findings).toContain("Block B emergency lights used nothing from 2–15 Nov. It should come on every night or stay on, so check it on site.");
+    // At a site with opening hours a light may rightly sit unused; one always on by design still may not.
+    const daytime = { ...dark(estate(), ["playground", "b-emergency"]), hoursMeaning: undefined };
+    expect(buildSiteReport(daytime, null, GENERATED).noUse!.note).toBe("Block B emergency lights should come on every night or stay on, so using nothing may mean a fault: check it on site. For the others this is not a fault: some things, such as a fan, are only switched on now and then.");
   });
 });
 

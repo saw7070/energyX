@@ -13,7 +13,7 @@ import { listText } from "./analysis-messages.js";
 import { forHoursMeaning, forOneDay, translatorFor, type EnergyIqLocale, type Translate } from "./locale.js";
 import { formatPeriod } from "./report-period.js";
 import { analysisGroupTree, biggestMeterGroup, inSavedOrder, type MeterGroupNode, type MeterGroupTree } from "./meter-groups.js";
-import { comparableGroups, energyPerLight, groupBreakdown, groupProfileLines, LIKE_CLOSE_SHARE, likeForLike, meterSeries, metersWithNoUse, NO_USE_KWH, type BreakdownRow, type ProfileLine } from "./group-insights.js";
+import { comparableGroups, energyPerLight, groupBreakdown, groupProfileLines, LIKE_CLOSE_SHARE, likeForLike, meterSeries, metersWithNoUse, mustRunIds, NO_USE_KWH, type BreakdownRow, type ProfileLine } from "./group-insights.js";
 import { DAY_PARTS, siteReportModelMessages, type SiteReportModelKey } from "./site-report-model-messages.js";
 import { notInUseIds, withMetersInUse } from "./meters-in-use.js";
 import { standoutReport, type StandoutReport } from "./standout-report.js";
@@ -672,7 +672,7 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
     averageDay,
     blocks: groupTree ? blockComparison(groupTree, averageDayKwh, { t, list }) : null,
     perLight: data.lightCounts?.length ? perLightBlock(energyPerLight({ counts: data.lightCounts, tree: groupTree, series, dates, names: new Map(raw.flatMap(circuit => circuit.meters.map(meter => [meter.id, meter.name] as const))) }), t) : null,
-    noUse: noUseBlock(metersWithNoUse(raw.flatMap(circuit => circuit.meters), dates), { t, list, locale }),
+    noUse: noUseBlock(metersWithNoUse(raw.flatMap(circuit => circuit.meters), dates), { t, list, locale, mustRun: mustRunIds(raw.flatMap(circuit => circuit.meters), data) }),
     footer: { left: t("foot.left", { count: circuitCount, tz: tzLabel }), right: t("foot.right", { date: en ? `${shortDate(generatedDay)} ${generatedAt.slice(0, 4)}` : formatPeriod(generatedDay, generatedDay, locale) }) },
   };
 }
@@ -803,14 +803,22 @@ function perLightBlock(found: ReturnType<typeof energyPerLight>, t: T): ReportPe
   return { heading: t("perLight.heading"), intro: t("perLight.intro"), note: found.groups.some(group => group.meters >= 2) ? t("perLight.note") : t("perLight.noteMeters"), rows };
 }
 
-/** Meters that used nothing in the dates, said plainly and never as a fault: "Pavilion fan: no use from 4–10 Nov". */
-function noUseBlock(found: ReturnType<typeof metersWithNoUse>, text: { t: T; list: (items: string[]) => string; locale: EnergyIqLocale }): ReportNoUse | null {
-  const { t, list, locale } = text;
+/**
+ * Meters that used nothing in the dates, said plainly: "Pavilion fan: no use from 4–10 Nov". That is never a fault for
+ * something that can rightly sit unused; a meter that should run (`mustRun`: always on by design, or lighting at a
+ * lights-on site) is named as something to check on site instead, as Data availability and the alerts treat it.
+ */
+function noUseBlock(found: ReturnType<typeof metersWithNoUse>, text: { t: T; list: (items: string[]) => string; locale: EnergyIqLocale; mustRun: ReadonlySet<string> }): ReportNoUse | null {
+  const { t, list, locale, mustRun } = text;
   if (!found.length) return null;
+  const check = found.filter(({ meter }) => mustRun.has(meter.id)).map(({ meter }) => meter.name);
   return {
     heading: t("noUse.heading"),
     items: found.map(({ meter, dates }) => { const runs = dateRuns(dates, locale); return t(runs.length === 1 && dates.length > 1 ? "noUse.item" : "noUse.itemOn", { name: meter.name, dates: list(runs) }); }),
-    note: t("noUse.note"),
+    note: !check.length ? t("noUse.note") : sentences([
+      t(check.length === 1 ? "noUse.check.one" : "noUse.check.other", { names: list(check) }),
+      check.length < found.length ? t("noUse.noteOthers") : "",
+    ], locale),
   };
 }
 

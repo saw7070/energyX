@@ -9,12 +9,14 @@
  *   them by name ("Block lighting" with "Block lighting"), never one circuit against another.
  * - The average day hour by hour, one line per group, the same groups in alike blocks added together.
  * - Energy per light, for meters someone recorded a number of light points on.
- * - Meters that used nothing at all in the dates: said plainly, never as a fault.
+ * - Meters that used nothing at all in the dates: said plainly, and never as a fault for a meter that can rightly use
+ *   nothing; one that should run (see mustRunIds) is something to check.
  *
  * Everything here is pure.
  */
 import type { LightCountMeter, ScopeData, ScopeMeter, TrendSeries } from "./analysis-types.js";
 import { inSavedOrder, type MeterGroupNode, type MeterGroupTree } from "./meter-groups.js";
+import { alwaysOnByDesignIds, type AlwaysOnMeter } from "./always-on-by-design.js";
 
 const mean = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 
@@ -266,4 +268,15 @@ export function metersWithNoUse(meters: readonly ScopeMeter[], dates: readonly s
     const kwh = cells.reduce((sum, cell) => sum + (cell[2] ?? 0), 0);
     return kwh < NO_USE_KWH ? [{ meter, dates: [...new Set(cells.map(cell => cell[0]))].sort() }] : [];
   });
+}
+
+/**
+ * Meters that should never go a whole day using nothing, so using nothing is something to check on site rather than
+ * "not a fault": the same rule the server uses before it calls a quiet meter idle (energy-idle-meters.ts). These are a
+ * meter marked always on by design (emergency lighting), and lighting on a site with lights-on hours, whose lights
+ * should come on every night. Anything else can rightly sit unused (a fan nobody switched on).
+ */
+export function mustRunIds(meters: readonly Pick<ScopeMeter, "id" | "category">[], data: { alwaysOnByDesign?: AlwaysOnMeter[] | undefined; hoursMeaning?: "opening" | "lights_on" | undefined }): Set<string> {
+  const byDesign = alwaysOnByDesignIds(data);
+  return new Set(meters.filter(meter => byDesign.has(meter.id) || (data.hoursMeaning === "lights_on" && meter.category === "light")).map(meter => meter.id));
 }

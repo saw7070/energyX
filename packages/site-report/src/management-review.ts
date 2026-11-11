@@ -20,7 +20,7 @@ import type { AnalysisData, ScopeData, ScopeMeter, TrendSeries } from "./analysi
 import { forHoursMeaning, forOneDay, translatorFor, type EnergyIqLocale, type Translate } from "./locale.js";
 import { managementReviewMessages, type ManagementReviewKey } from "./management-review-messages.js";
 import { analysisGroupTree, inSavedOrder, type MeterGroupNode } from "./meter-groups.js";
-import { comparableGroups, groupParts, LIKE_CLOSE_SHARE, metersWithNoUse, partKey, partLabel, type ProfileLine } from "./group-insights.js";
+import { comparableGroups, groupParts, LIKE_CLOSE_SHARE, metersWithNoUse, mustRunIds, partKey, partLabel, type ProfileLine } from "./group-insights.js";
 import { notInUseIds, withMetersInUse, type NotInUseMeter } from "./meters-in-use.js";
 import { formatPeriod } from "./report-period.js";
 import type { StandoutReport } from "./standout-report.js";
@@ -278,9 +278,13 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
   const topPart = topGroup?.parts[0];
   const firstStopped = stopped[0];
   const standoutDates = base.standout.items.map(item => shortDate(item.date, locale));
-  // Meters marked not in use are already explained; the others that used nothing are named plainly.
+  // Meters marked not in use are already explained; the others that used nothing are named plainly. Never "not a
+  // fault" for one that should run (always on by design, or lighting at a lights-on site): that one is to check on site.
   const quiet = meterRows.filter(row => noUse.has(row.id) && !notInUseList.some(item => item.id === row.id));
-  const noUseFinding = quiet.length === 1 ? t("find.noUse.one", { name: quiet[0]!.name, dates: list(dateRuns(noUse.get(quiet[0]!.id)!, locale)) }) : quiet.length > 1 ? t("find.noUse.other", { count: quiet.length }) : "";
+  const mustRun = mustRunIds(meters.map(item => item.meter), data);
+  const toCheck = quiet.some(row => mustRun.has(row.id));
+  const noUseFinding = quiet.length === 1 ? t(toCheck ? "find.noUseCheck.one" : "find.noUse.one", { name: quiet[0]!.name, dates: list(dateRuns(noUse.get(quiet[0]!.id)!, locale)) })
+    : quiet.length > 1 ? t(toCheck ? "find.noUseCheck.other" : "find.noUse.other", { count: quiet.length }) : "";
   const standoutFinding = standoutDates.length ? t(standoutDates.length === 1 ? "find.standout.one" : "find.standout.other", { count: standoutDates.length, dates: list(standoutDates) }) : "";
   const findings = noReadings ? [t("day.find.none")] : [
     partDay ? project.coverage != null && project.coverage < 100 ? t("day.find.missing", { pct: pctText(project.coverage / 100) }) : t("day.find.missingPlain") : "",
@@ -294,9 +298,11 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
     comparison?.finding ?? "",
     stopped.length === 1 && firstStopped ? t("find.stopped.one", { name: firstStopped.name, since: firstStopped.last ? at(firstStopped.last.date, firstStopped.last.hour) : periodText })
       : stopped.length > 1 ? t("find.stopped.other", { count: stopped.length, names: list(stopped.map(row => row.name)) }) : "",
+    // Something to check on site sits beside a meter that stopped, before what is only worth knowing.
+    toCheck ? noUseFinding : "",
     standoutFinding,
     notInUseList.length === 1 ? t("find.notInUse.one", { name: notInUseList[0]!.name }) : notInUseList.length > 1 ? t("find.notInUse.other", { count: notInUseList.length }) : "",
-    noUseFinding,
+    toCheck ? "" : noUseFinding,
   ].filter(Boolean).slice(0, MAX_FINDINGS);
   const worth = (row: { kwhYear: number; costYear: number | null }) => row.costYear != null ? money(row.costYear) : kwhText(row.kwhYear);
   // No readings at all on a daily report's day: the one thing to decide is getting the meters reporting again.

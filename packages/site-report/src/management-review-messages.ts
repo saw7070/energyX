@@ -63,6 +63,8 @@ export const managementReviewMessages = defineMessages({
   "find.notInUse.other": "{count} meters are marked not in use, so they are left out of the daily checks.",
   "find.noUse.one": "{name} used nothing from {dates}. That is not a fault: some things are only switched on now and then.",
   "find.noUse.other": "{count} meters used nothing in these dates (see Method and data). That is not a fault.",
+  "find.noUseCheck.one": "{name} used nothing from {dates}. It should come on every night or stay on, so check it on site.",
+  "find.noUseCheck.other": "{count} meters used nothing in these dates (see Method and data). Some should come on every night or stay on, so check them on site.",
 
   "dec.fixMeter.one": "Get {name} reporting again",
   "dec.fixMeterWhy.one": "No readings since {since}. Check its power, its breaker and its link to the gateway.",
@@ -273,6 +275,8 @@ export const managementReviewMessages = defineMessages({
     "find.notInUse.other": "{count} 个电表已标记为不使用，因此不计入每日检查。",
     "find.noUse.one": "{name}在{dates}没有用电。这不是故障：有些设备只是偶尔才开。",
     "find.noUse.other": "{count} 个电表在这段时间没有用电（见“方法与数据”）。这不是故障。",
+    "find.noUseCheck.one": "{name}在{dates}没有用电。它本应每晚亮灯或一直开着，请到现场检查。",
+    "find.noUseCheck.other": "{count} 个电表在这段时间没有用电（见“方法与数据”）。其中有的本应每晚亮灯或一直开着，请到现场检查。",
 
     "dec.fixMeter.one": "让 {name} 恢复发送读数",
     "dec.fixMeterWhy.one": "自 {since} 起没有读数。请检查它的电源、断路器以及与网关的连接。",
@@ -481,6 +485,8 @@ export const managementReviewMessages = defineMessages({
     "find.notInUse.other": "{count} meter ditanda tidak digunakan, jadi ia tidak dikira dalam semakan harian.",
     "find.noUse.one": "{name} tidak menggunakan apa-apa dari {dates}. Ini bukan kerosakan: sesetengah peralatan hanya dihidupkan sekali-sekala.",
     "find.noUse.other": "{count} meter tidak menggunakan apa-apa dalam tempoh ini (lihat Kaedah dan data). Ini bukan kerosakan.",
+    "find.noUseCheck.one": "{name} tidak menggunakan apa-apa dari {dates}. Ia sepatutnya menyala setiap malam atau sentiasa hidup, jadi semak di tapak.",
+    "find.noUseCheck.other": "{count} meter tidak menggunakan apa-apa dalam tempoh ini (lihat Kaedah dan data). Sesetengahnya sepatutnya menyala setiap malam atau sentiasa hidup, jadi semak di tapak.",
 
     "dec.fixMeter.one": "Pastikan {name} menghantar bacaan semula",
     "dec.fixMeterWhy.one": "Tiada bacaan sejak {since}. Periksa bekalan kuasa, pemutus litar dan sambungannya ke get laluan.",
