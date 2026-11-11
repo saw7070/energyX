@@ -178,6 +178,8 @@ export function ProjectConfigurationView({ setup, notes, policies, projectId, on
   } : {};
   /** Moves a group one place among the groups beside it; it stays selected, so its actions stay in reach. */
   const reorderGroup = async (node: { id: string; name: string }, direction: "up" | "down") => {
+    // A second press while the first move saves would be dropped and cancel the first move's focus, so it waits.
+    if (setupBusy) return;
     const result = moveGroup(doc, node.id, direction, locale);
     if ("error" in result) { setPolicyMessage(""); setSetupError(result.error); return; }
     setMovedGroup({ id: node.id, direction, from: groupOrder });

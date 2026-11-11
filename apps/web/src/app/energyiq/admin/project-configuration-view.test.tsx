@@ -191,26 +191,74 @@ it("lets editors move a group up or down among the groups beside it, from the ke
   vi.spyOn(configApi, "applyEnergyProjectChanges").mockResolvedValue({ hierarchy_revision_id: "h", template_revision_id: "t" });
   const topLevel = () => Array.from(host.querySelectorAll<HTMLElement>("ul > li > button strong")).map(item => item.textContent).filter(name => name !== "Ground floor");
   const moveButton = (label: string) => host.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+  const select = async (name: string) => act(async () => Array.from(host.querySelectorAll("button")).find(button => button.textContent?.includes(name))!.click());
+  let revision = 4;
+  const show = async (nodes: unknown[]) => act(async () => root.render(<ProjectConfigurationView setup={setupWith(nodes, revision)} notes="" policies={null} projectId="estate" canEditSetup />));
+  // Pressed from the keyboard, then the page receives the saved order, as it does once the save goes live.
+  const press = async (label: string) => {
+    moveButton(label)!.focus();
+    await act(async () => moveButton(label)!.click());
+    revision += 1;
+    await show((save.mock.lastCall![1] as { document: { nodes: unknown[] } }).document.nodes);
+  };
   try {
-    await act(async () => root.render(<ProjectConfigurationView setup={setupWith(before, 4)} notes="" policies={null} projectId="estate" canEditSetup />));
-    await act(async () => Array.from(host.querySelectorAll("button")).find(button => button.textContent?.includes("Common area"))!.click());
-    // The last group can only go up; a group with nothing beside it shows no move buttons at all.
-    expect(moveButton("Move Common area down")!.disabled).toBe(true);
-    moveButton("Move Common area up")!.focus();
-    await act(async () => moveButton("Move Common area up")!.click());
+    await show(before);
+    await select("Common area");
+    // The last group can only go up; its visible label stays at the start of what a screen reader hears.
+    expect(moveButton("Move down: Common area")!.disabled).toBe(true);
+    expect(moveButton("Move up: Common area")!.textContent).toBe("Move up");
+    await press("Move up: Common area");
     expect(save).toHaveBeenLastCalledWith("estate", { expectedRevision: 4, document: expect.objectContaining({
       nodes: expect.arrayContaining([expect.objectContaining({ id: "b", sort_order: 30 }), expect.objectContaining({ id: "common", sort_order: 20 }), expect.objectContaining({ id: "a", sort_order: 10 }), expect.objectContaining({ id: "ground", sort_order: 10 })]),
     }) });
     expect(host.textContent).toContain("Moved Common area up.");
-
     // Once the page has the saved order, the group stays selected and its button still has the focus.
+    expect(topLevel()).toEqual(["Block A", "Common area", "Block B"]);
+    expect(document.activeElement).toBe(moveButton("Move up: Common area"));
+
+    // Moved to the top, its up button is switched off, so the focus goes to its down button.
+    await press("Move up: Common area");
+    expect(topLevel()).toEqual(["Common area", "Block A", "Block B"]);
+    expect(moveButton("Move up: Common area")!.disabled).toBe(true);
+    expect(document.activeElement).toBe(moveButton("Move down: Common area"));
+
+    // Moving down redraws the group itself in its new place; the focus follows it there.
+    await press("Move down: Common area");
+    expect(topLevel()).toEqual(["Block A", "Common area", "Block B"]);
+    expect(document.activeElement).toBe(moveButton("Move down: Common area"));
+    // And to the bottom, where its down button is switched off and the up button takes the focus.
+    await press("Move down: Common area");
+    expect(topLevel()).toEqual(["Block A", "Block B", "Common area"]);
+    expect(document.activeElement).toBe(moveButton("Move up: Common area"));
+
+    await select("Ground floor");
+    expect(moveButton("Move up: Ground floor")).toBeNull();
+  } finally { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); }
+});
+
+it("ignores a second move pressed while the first is still saving, and keeps the focus on the first", async () => {
+  vi.stubGlobal("React", React); (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
+  const node = (id: string, name: string, sort_order: number) => ({ id, name, sort_order, tier_definition_id: "top", metadata_status: "confirmed" });
+  const setupWith = (nodes: unknown[], revision: number) => ({ project: { id: "estate", has_unpublished_changes: false, root_scope_id: "root" }, draft: { revision, document: { project: { name: "Estate", timezone: "Asia/Singapore" }, tier_structure_locked: true,
+    tiers: [{ id: "top", ordinal: 1, alias: "Group" }], nodes,
+    meter_mapping: { schema_version: 2, source_kind: "tuya", confirmed: true, rows: [{ id: "m1", source_label: "Lobby", display_name: "Lobby", presentation: { device_name: "Lobby lights" }, scope_id: "b", resource: "electricity", category: "light", coverage: "partial", meter_role: "component", aggregation_usage: "official" }], virtual_meters: [] } } } }) as unknown as EnergyProjectSetupDto;
+  let finish: () => void = () => undefined;
+  const save = vi.spyOn(configApi, "saveEnergyProjectSetupDraft").mockImplementation(() => new Promise(resolve => { finish = () => resolve({} as Awaited<ReturnType<typeof configApi.saveEnergyProjectSetupDraft>>); }));
+  vi.spyOn(configApi, "applyEnergyProjectChanges").mockResolvedValue({ hierarchy_revision_id: "h", template_revision_id: "t" });
+  const moveButton = (label: string) => host.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
+  try {
+    // Block B is on show (it holds the meter); pressed twice quickly, it moves to the bottom once.
+    await act(async () => root.render(<ProjectConfigurationView setup={setupWith([node("a", "Block A", 10), node("b", "Block B", 20), node("c", "Block C", 30)], 4)} notes="" policies={null} projectId="estate" canEditSetup />));
+    moveButton("Move down: Block B").focus();
+    await act(async () => moveButton("Move down: Block B").click());
+    await act(async () => moveButton("Move down: Block B").click());
+    expect(save).toHaveBeenCalledTimes(1);
+    await act(async () => finish());
     const saved = (save.mock.lastCall![1] as { document: { nodes: unknown[] } }).document.nodes;
     await act(async () => root.render(<ProjectConfigurationView setup={setupWith(saved, 5)} notes="" policies={null} projectId="estate" canEditSetup />));
-    expect(topLevel()).toEqual(["Block A", "Common area", "Block B"]);
-    expect(document.activeElement).toBe(moveButton("Move Common area up"));
-
-    await act(async () => Array.from(host.querySelectorAll("button")).find(button => button.textContent?.includes("Ground floor"))!.click());
-    expect(moveButton("Move Ground floor up")).toBeNull();
+    // The first move still hands the focus on: at the bottom, to the group's up button.
+    expect(document.activeElement).toBe(moveButton("Move up: Block B"));
   } finally { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); }
 });
 
