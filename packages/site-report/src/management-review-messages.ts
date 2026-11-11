@@ -61,6 +61,8 @@ export const managementReviewMessages = defineMessages({
   "find.standout.other": "{count} days stood out from a usual day: {dates} (see Days that stood out).",
   "find.notInUse.one": "{name} is marked not in use, so it is left out of the daily checks.",
   "find.notInUse.other": "{count} meters are marked not in use, so they are left out of the daily checks.",
+  "find.noUse.one": "{name} used nothing from {dates}. That is not a fault: some things are only switched on now and then.",
+  "find.noUse.other": "{count} meters used nothing in these dates (see Method and data). That is not a fault.",
 
   "dec.fixMeter.one": "Get {name} reporting again",
   "dec.fixMeterWhy.one": "No readings since {since}. Check its power, its breaker and its link to the gateway.",
@@ -120,6 +122,8 @@ export const managementReviewMessages = defineMessages({
   "pro.caption": "Average of {count} weekdays with complete readings.",
   "lights.pro.caption": "Average of {count} days with complete readings.",
   "pro.captionAll": "Average of {count} days with complete readings.",
+  "pro.lines": "Each line is one group.",
+  "pro.linesAlike": "Each line is one group; the same group in {names} is added into one line.",
   "pro.none": "There are not enough days with complete readings yet to draw an average day.",
 
   "sav.intro.one": "One measure stands out from the readings. It could save up to **{kwh} a year**{cost}.",
@@ -169,6 +173,7 @@ export const managementReviewMessages = defineMessages({
   "met.note.notEnough": "Not enough readings for a usual day",
   "met.note.gaps.one": "Missing readings on 1 day",
   "met.note.gaps.other": "Missing readings on {count} days",
+  "met.note.noUse": "No use in these dates",
   "met.notInUseText": "Meters marked not in use are left out of the complete-day checks, so their silence does not hide the daily figures. Whatever they did record still counts in the totals.",
   "reason.nobody_uses": "nobody uses it",
   "reason.switched_off": "switched off",
@@ -235,6 +240,8 @@ export const managementReviewMessages = defineMessages({
     "find.standout.other": "有 {count} 天与正常日子明显不同：{dates}（见“与平常不同的日子”）。",
     "find.notInUse.one": "{name} 已标记为不使用，因此不计入每日检查。",
     "find.notInUse.other": "{count} 个电表已标记为不使用，因此不计入每日检查。",
+    "find.noUse.one": "{name}在{dates}没有用电。这不是故障：有些设备只是偶尔才开。",
+    "find.noUse.other": "{count} 个电表在这段时间没有用电（见“方法与数据”）。这不是故障。",
 
     "dec.fixMeter.one": "让 {name} 恢复发送读数",
     "dec.fixMeterWhy.one": "自 {since} 起没有读数。请检查它的电源、断路器以及与网关的连接。",
@@ -294,6 +301,8 @@ export const managementReviewMessages = defineMessages({
     "pro.caption": "{count} 个读数完整的工作日的平均值。",
     "lights.pro.caption": "{count} 个读数完整的日子的平均值。",
     "pro.captionAll": "{count} 个读数完整的日子的平均值。",
+    "pro.lines": "每条线代表一个分组。",
+    "pro.linesAlike": "每条线代表一个分组；{names}中相同的分组合并为一条线。",
     "pro.none": "读数完整的日子还不够多，暂时无法画出平均的一天。",
 
     "sav.intro.one": "读数中有 1 项措施较为突出，每年最多可节省 **{kwh}**{cost}。",
@@ -343,6 +352,7 @@ export const managementReviewMessages = defineMessages({
     "met.note.notEnough": "读数不足，无法得出平常一天的用电",
     "met.note.gaps.one": "有 1 天读数缺失",
     "met.note.gaps.other": "有 {count} 天读数缺失",
+    "met.note.noUse": "这段时间没有用电",
     "met.notInUseText": "标记为不使用的电表不计入完整日检查，因此它们没有读数不会让每日数据无法显示。它们实际记录到的用电仍计入总量。",
     "reason.nobody_uses": "没有人使用",
     "reason.switched_off": "已关闭",
@@ -409,6 +419,8 @@ export const managementReviewMessages = defineMessages({
     "find.standout.other": "{count} hari menonjol berbanding hari biasa: {dates} (lihat Hari yang menonjol).",
     "find.notInUse.one": "{name} ditanda tidak digunakan, jadi ia tidak dikira dalam semakan harian.",
     "find.notInUse.other": "{count} meter ditanda tidak digunakan, jadi ia tidak dikira dalam semakan harian.",
+    "find.noUse.one": "{name} tidak menggunakan apa-apa dari {dates}. Ini bukan kerosakan: sesetengah peralatan hanya dihidupkan sekali-sekala.",
+    "find.noUse.other": "{count} meter tidak menggunakan apa-apa dalam tempoh ini (lihat Kaedah dan data). Ini bukan kerosakan.",
 
     "dec.fixMeter.one": "Pastikan {name} menghantar bacaan semula",
     "dec.fixMeterWhy.one": "Tiada bacaan sejak {since}. Periksa bekalan kuasa, pemutus litar dan sambungannya ke get laluan.",
@@ -468,6 +480,8 @@ export const managementReviewMessages = defineMessages({
     "pro.caption": "Purata {count} hari bekerja yang bacaannya lengkap.",
     "lights.pro.caption": "Purata {count} hari yang bacaannya lengkap.",
     "pro.captionAll": "Purata {count} hari yang bacaannya lengkap.",
+    "pro.lines": "Setiap garisan ialah satu kumpulan.",
+    "pro.linesAlike": "Setiap garisan ialah satu kumpulan; kumpulan yang sama di {names} digabungkan dalam satu garisan.",
     "pro.none": "Belum cukup hari dengan bacaan lengkap untuk melukis purata sehari.",
 
     "sav.intro.one": "Satu langkah menonjol daripada bacaan. Ia boleh menjimatkan sehingga **{kwh} setahun**{cost}.",
@@ -517,6 +531,7 @@ export const managementReviewMessages = defineMessages({
     "met.note.notEnough": "Bacaan tidak mencukupi untuk hari biasa",
     "met.note.gaps.one": "Bacaan hilang pada 1 hari",
     "met.note.gaps.other": "Bacaan hilang pada {count} hari",
+    "met.note.noUse": "Tiada penggunaan dalam tempoh ini",
     "met.notInUseText": "Meter yang ditanda tidak digunakan tidak dikira dalam semakan hari lengkap, jadi ketiadaan bacaannya tidak menyembunyikan angka harian. Apa-apa yang ia rekodkan masih dikira dalam jumlah.",
     "reason.nobody_uses": "tiada siapa menggunakannya",
     "reason.switched_off": "dimatikan",

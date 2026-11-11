@@ -85,20 +85,22 @@ describe("management review: sections", () => {
 
   it("gives each top-level group its total and share, and what uses the most inside it", () => {
     const groups = review.groups!;
-    expect(groups.heading).toBe("Block 12B, Block 12A and Common area");
-    expect(groups.rows.map(row => row.name)).toEqual(["Block 12B", "Block 12A", "Common area"]);
+    // In the order the groups were saved, as on the Overview, wherever their size puts them.
+    expect(groups.heading).toBe("Block 12A, Block 12B and Common area");
+    expect(groups.rows.map(row => row.name)).toEqual(["Block 12A", "Block 12B", "Common area"]);
     expect(groups.rows.reduce((sum, row) => sum + row.share, 0)).toBeCloseTo(1, 6);
-    expect(groups.rows[0]!.parts[0]).toMatchObject({ name: "12B corridor lights" });
-    expect(groups.rows[0]!.biggest).toBe("Biggest in Block 12B: **12B corridor lights**, 52% of it.");
+    expect(groups.rows[1]!.parts[0]).toMatchObject({ name: "12B corridor lights" });
+    expect(groups.rows[1]!.biggest).toBe("Biggest in Block 12B: **12B corridor lights**, 52% of it.");
   });
 
   it("compares the two blocks side by side, part for part", () => {
     const comparison = review.comparison!;
-    expect(comparison.heading).toBe("Block 12B against Block 12A");
-    expect(comparison.groups.map(group => group.name)).toEqual(["Block 12B", "Block 12A"]);
+    // The blocks in their saved order; the finding still says which uses more.
+    expect(comparison.heading).toBe("Block 12A against Block 12B");
+    expect(comparison.groups.map(group => group.name)).toEqual(["Block 12A", "Block 12B"]);
     expect(comparison.parts.map(part => part.name)).toEqual(["Corridor lights", "Lift lobby lights", "Emergency lights"]);
-    expect(comparison.parts[1]!.perDay[0]).toBeCloseTo(4.32, 6);
-    expect(comparison.parts[1]!.perDay[1]).toBeCloseTo(3.6, 6);
+    expect(comparison.parts[1]!.perDay[0]).toBeCloseTo(3.6, 6);
+    expect(comparison.parts[1]!.perDay[1]).toBeCloseTo(4.32, 6);
     expect(comparison.intro).toContain("**Block 12B** uses **");
     expect(comparison.intro).toContain("Part for part, the biggest difference is Lift lobby lights: Block 12B uses 20% more than Block 12A.");
   });
@@ -151,7 +153,10 @@ describe("management review: what the hours mean", () => {
     expect(review.summary.findings).toContain("The lights ran at night as planned: only **7%** of the energy was used in the daytime.");
     expect(review.profile!.intro).toContain("Lights come on at about **7 pm** and go off at about **7 am**.");
     expect(review.profile!.intro).toContain("of an average day's use is inside the lights-on hours (7 pm – 7 am).");
-    expect(review.profile!.caption).toBe("Average of 7 days with complete readings.");
+    // One line per group: the blocks' like parts added together, and the common area on its own.
+    expect(review.profile!.caption).toBe("Average of 7 days with complete readings. Each line is one group; the same group in Block 12A and Block 12B is added into one line.");
+    expect(review.profile!.lines?.map(line => line.name)).toEqual(["Corridor lights", "Lift lobby lights", "Emergency lights", "Common area"]);
+    expect(review.profile!.lines![0]!.dayKwh).toBeCloseTo(2 * 0.6 * 12, 6);
     expect(review.method.rows.find(row => row.label === "Lights-on hours")?.value).toBe("19:00 → 07:00 next day");
     // The lights' own measure: half an hour less each night for the part that switches with the lights.
     const trim = review.savings.rows.find(row => row.title === "Fine-tune the light timers and photocells")!;
@@ -221,7 +226,7 @@ describe("management review in other languages and as a document", () => {
   it("writes every sentence in Chinese or Malay", () => {
     const zh = buildManagementReview(site(LIGHTING, { meaning: "lights_on" }), null, GENERATED, "zh-Hans");
     expect(zh.title).toBe("这 7 天说明了什么");
-    expect(zh.comparison!.heading).toBe("Block 12B 与 Block 12A 对比");
+    expect(zh.comparison!.heading).toBe("Block 12A 与 Block 12B 对比");
     expect(zh.summary.findings.join("")).not.toMatch(/ the | used | a day/);
     const ms = buildManagementReview(site(LIGHTING, { meaning: "lights_on" }), null, GENERATED, "ms");
     expect(ms.title).toBe("Apa yang ditunjukkan oleh 7 hari ini");
@@ -232,7 +237,7 @@ describe("management review in other languages and as a document", () => {
     const html = renderManagementReviewHtml(buildManagementReview(site(LIGHTING, { meaning: "lights_on", notInUse: [] }), null, GENERATED));
     expect(html).toMatch(/^<!DOCTYPE html>/);
     expect(html).toContain("<title>Harbour Estate Energy Review · 3–9 Aug 2026</title>");
-    for (const heading of ["Summary", "The things worth deciding", "Total energy, by day, and the cost", "Block 12B against Block 12A", "The average 24 hours", "Saving energy: what it could be worth", "Method and data"]) expect(html).toContain(heading);
+    for (const heading of ["Summary", "The things worth deciding", "Total energy, by day, and the cost", "Block 12A against Block 12B", "The average 24 hours", "Saving energy: what it could be worth", "Method and data"]) expect(html).toContain(heading);
     expect(html).not.toMatch(/undefined|NaN|Infinity|\{\w+\}/);
   });
 

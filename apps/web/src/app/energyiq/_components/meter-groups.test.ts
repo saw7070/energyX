@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analysisGroups, biggestMeterGroup, buildMeterGroupTree, flattenMeterGroups, groupsFromLocations, type GroupedMeter, type MeterGroup } from "@datafoundry/site-report";
+import { analysisGroups, biggestMeterGroup, buildMeterGroupTree, flattenMeterGroups, groupBreakdown, groupsFromLocations, inSavedOrder, wholePercents, type GroupedMeter, type MeterGroup } from "@datafoundry/site-report";
 
 /** The SKTC estate, grouped by what each meter serves rather than the panel it is wired from. */
 const GROUPS: MeterGroup[] = [
@@ -67,6 +67,55 @@ describe("group totals and shares", () => {
     const groups = [...GROUPS, { id: "empty", name: "Emergency lights", parentId: "blk-f" }];
     expect(flattenMeterGroups(buildMeterGroupTree({ groups, meters: METERS, name: "SKTC" })).some(item => item.name === "Emergency lights")).toBe(false);
     expect(flattenMeterGroups(buildMeterGroupTree({ groups, meters: METERS, name: "SKTC", keepEmpty: true })).some(item => item.name === "Emergency lights")).toBe(true);
+  });
+});
+
+describe("the order someone saved for the groups", () => {
+  // Saved as Common area, then the blocks; inside Common area, Driveway, Playground, Pavilion, Entrance.
+  const ordered = GROUPS.map(group => ({ ...group, order: ({ common: 10, "blk-e": 30, "blk-f": 20, driveway: 10, playground: 20, pavilion: 30, entrance: 40 } as Record<string, number>)[group.id] }));
+  const tree = buildMeterGroupTree({ groups: ordered, meters: METERS, name: "Estate" });
+
+  it("keeps groups largest first in the tree, and in their saved order when asked", () => {
+    expect(tree.children.map(child => child.name)).toEqual(["Block 264F", "Block 264E", "Common area"]);
+    expect(inSavedOrder(tree.children).map(child => child.name)).toEqual(["Common area", "Block 264F", "Block 264E"]);
+    const common = tree.children.find(child => child.name === "Common area")!;
+    expect(inSavedOrder(common.children).map(child => child.name)).toEqual(["Driveway", "Playground", "Pavilion", "Entrance"]);
+  });
+
+  it("falls back to the order the list gives for groups without a saved order", () => {
+    expect(inSavedOrder(buildMeterGroupTree({ groups: [...GROUPS].reverse(), meters: METERS, name: "Estate" }).children).map(child => child.name)).toEqual(["Common area", "Block 264E", "Block 264F"]);
+  });
+
+  it("splits the whole site into a breakdown whose shares are all of the whole site, adding up level by level", () => {
+    const rows = groupBreakdown(tree, 16);
+    expect(rows.map(row => row.name)).toEqual(["Common area", "Block 264F", "Block 264E"]);
+    expect(rows.reduce((sum, row) => sum + row.share, 0)).toBeCloseTo(1, 9);
+    expect(rows.reduce((sum, row) => sum + row.perDay!, 0)).toBeCloseTo(16, 9);
+    const common = rows[0]!;
+    expect(common.share).toBeCloseTo(1.4 / 8, 9);
+    expect(common.rows.map(row => [row.name, row.kind])).toEqual([["Driveway", "group"], ["Playground", "group"], ["Pavilion", "group"], ["Entrance", "group"]]);
+    expect(common.rows.reduce((sum, row) => sum + row.share, 0)).toBeCloseTo(common.share, 9);
+    // The meters of a group stay inside it, largest first.
+    expect(common.rows[2]!.rows.map(row => [row.name, row.kind])).toEqual([["Pavilion 1", "meter"], ["Pavilion 2", "meter"], ["pav-fan", "meter"]]);
+    // A block whose meters are filed in it directly opens onto those meters.
+    expect(rows[2]!.rows.map(row => row.name)).toEqual(["e-lobby"]);
+    expect(groupBreakdown(tree, null)[0]!.perDay).toBeNull();
+  });
+
+  it("rounds the shares to whole percentages that add up, level by level", () => {
+    // 40.4% + 38.3% + 21.3% rounds to 99%; the one that lost the most gets the missing point.
+    expect(wholePercents([0.404, 0.383, 0.213], 100)).toEqual([41, 38, 21]);
+    expect(wholePercents([1 / 3, 1 / 3, 1 / 3], 100)).toEqual([34, 33, 33]);
+    expect(wholePercents([0.1, 0.05], 15)).toEqual([10, 5]);
+    expect(wholePercents([], 0)).toEqual([]);
+    const rows = groupBreakdown(tree, 16);
+    expect(rows.reduce((sum, row) => sum + row.pct, 0)).toBe(100);
+    for (const row of rows) if (row.rows.length) expect(row.rows.reduce((sum, child) => sum + child.pct, 0)).toBe(row.pct);
+  });
+
+  it("reads the saved order from the published locations", () => {
+    expect(groupsFromLocations([{ id: "root", name: "Estate", parentId: null }, { id: "blk-f", name: "Block F", parentId: "root", sortOrder: 20 }, { id: "f-gf", name: "Ground floor", parentId: "blk-f" }]))
+      .toEqual([{ id: "blk-f", name: "Block F", parentId: null, order: 20 }, { id: "f-gf", name: "Ground floor", parentId: "blk-f" }]);
   });
 });
 

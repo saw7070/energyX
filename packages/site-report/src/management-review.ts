@@ -8,7 +8,7 @@
  *   Saving energy · Method and data.
  *
  * A section with nothing to say is left out rather than shown empty, except the savings and method sections, which
- * say so in one line. Energy per lighting point is not offered: the meter data holds no count of lights.
+ * say so in one line. Energy per light is shown only for meters someone recorded a number of lights on.
  */
 import type { ProjectSpatialReference } from "@datafoundry/contracts";
 import { listText } from "./analysis-messages.js";
@@ -19,13 +19,14 @@ import {
 import type { AnalysisData, ScopeData, ScopeMeter, TrendSeries } from "./analysis-types.js";
 import { forHoursMeaning, translatorFor, type EnergyIqLocale, type Translate } from "./locale.js";
 import { managementReviewMessages, type ManagementReviewKey } from "./management-review-messages.js";
-import { analysisGroupTree, type MeterGroupNode, type MeterGroupTree } from "./meter-groups.js";
+import { analysisGroupTree, inSavedOrder, type MeterGroupNode } from "./meter-groups.js";
+import { comparableGroups, groupParts, LIKE_CLOSE_SHARE, metersWithNoUse, partKey, partLabel, type ProfileLine } from "./group-insights.js";
 import { notInUseIds, withMetersInUse, type NotInUseMeter } from "./meters-in-use.js";
 import { formatPeriod } from "./report-period.js";
 import type { StandoutReport } from "./standout-report.js";
 import { alwaysOnByDesignIds } from "./always-on-by-design.js";
 import { daytimeUse } from "./daytime-use.js";
-import { buildSiteReport, clock, DAYTIME_NOTABLE_SHARE, hourRange, inWindow, kwhText, kwText, moneyText, openingWindow, pctText, REPORT_COLOURS, weekdayOf, type ReportDaytime } from "./site-report-model.js";
+import { buildSiteReport, clock, dateRuns, DAYTIME_NOTABLE_SHARE, hourRange, inWindow, kwhText, kwText, moneyText, openingWindow, pctText, REPORT_COLOURS, weekdayOf, type ReportDaytime, type ReportNoUse, type ReportPerLight } from "./site-report-model.js";
 
 type T = Translate<ManagementReviewKey>;
 const reviewText = (locale: EnergyIqLocale, meaning: HoursMeaning): T => forHoursMeaning(translatorFor(managementReviewMessages, locale), managementReviewMessages, meaning);
@@ -34,7 +35,7 @@ const reviewText = (locale: EnergyIqLocale, meaning: HoursMeaning): T => forHour
 export const REVIEW_SECTIONS = ["summary", "total", "groups", "comparison", "profile", "savings", "method"] as const;
 export type ReviewSectionId = typeof REVIEW_SECTIONS[number];
 /** Two groups whose kWh a day are within this share of each other read as "close". */
-export const REVIEW_CLOSE_SHARE = 0.05;
+export const REVIEW_CLOSE_SHARE = LIKE_CLOSE_SHARE;
 /** A meter more than this many hours behind the rest of the site has stopped reporting (the Overview's rule). */
 export const REVIEW_STOPPED_HOURS = 12;
 /** Lights-on hours: the timer measure trims this much from each end of the night. */
@@ -46,7 +47,10 @@ const MAX_PARTS = 5;
 export type ReviewDay = { date: string; dow: string; kwh: number; cost: number | null; complete: boolean };
 export type ReviewDecision = { title: string; why: string; worth: string | null };
 export type ReviewBarPart = { name: string; kwh: number; share: number };
-export type ReviewGroup = { key: string; name: string; kwh: number; perDay: number; share: number; colour: string; parts: ReviewBarPart[]; more: number; biggest: string | null };
+/** `pct`: for a top-level group, the full report's whole percentage of the site (they add up to 100); absent for circuits. */
+export type ReviewGroup = { key: string; name: string; kwh: number; perDay: number; share: number; pct?: number | undefined; colour: string; parts: ReviewBarPart[]; more: number; biggest: string | null };
+/** A group's share as readers see it: the whole percentage shared with the full report when there is one. */
+export const reviewGroupPct = (row: Pick<ReviewGroup, "share" | "pct">) => row.pct != null ? `${row.pct}%` : pctText(row.share);
 /** `area` is where it applies (empty for the whole site); `why` is the one line the decisions table shows. */
 export type ReviewSaving = { title: string; area: string; why: string; basis: string; kwhYear: number; costYear: number | null };
 /** `perDay` is the meter's usual day, from days with every hour's readings only; null when it has none (not enough readings). */
@@ -74,7 +78,12 @@ export type ManagementReview = {
   /** Top-level groups (or, with no groups, the biggest circuits as one list). */
   groups: { heading: string; intro: string; rows: ReviewGroup[]; byCircuit: boolean; note: string } | null;
   comparison: { heading: string; intro: string; groups: Array<{ key: string; name: string; colour: string; perDay: number }>; parts: Array<{ name: string; perDay: number[] }>; caption: string } | null;
-  profile: { hours: number[]; openFrom: number; openTo: number; intro: string; caption: string; days: number } | null;
+  /** `lines`: lights-on hours with groups only, the average day as one line per group, as in the full report. */
+  profile: { hours: number[]; openFrom: number; openTo: number; intro: string; caption: string; days: number; lines?: Array<ProfileLine & { colour: string }> | undefined } | null;
+  /** Energy per light, as in the full report; absent when no meter has a number of lights recorded. */
+  perLight?: ReportPerLight | undefined;
+  /** Meters that used nothing in the dates, as in the full report; absent when every meter used something. */
+  noUse?: ReportNoUse | undefined;
   /** Lights-on hours only: which lights were on in the daytime, and when — the full report's own list. */
   daytime?: ReportDaytime | undefined;
   savings: { intro: string; rows: ReviewSaving[]; totalKwh: number; totalCost: number | null; checks: string[]; note: string };
@@ -92,40 +101,10 @@ const hourIndex = (date: string, hour: number) => Date.parse(`${date}T00:00:00Z`
 const sentences = (parts: string[], locale: EnergyIqLocale) => parts.filter(Boolean).join(locale === "zh-Hans" ? "" : " ");
 
 // ---------- groups of the same kind ----------
-const tokens = (name: string) => name.toLowerCase().replace(/[(),:;]/g, " ").split(/\s+/).filter(Boolean);
-/** "12A", "A", "2": the part of a name that tells one group of a kind from another. */
-const isIdentifier = (token: string) => /\d/.test(token) || token.length === 1;
-/** What kind of group a name is: "Block 12A" and "Block A" are both "block"; "Common area" is its own kind. */
-export const groupKind = (name: string) => tokens(name).filter(token => !isIdentifier(token)).join(" ");
-/** A part's name without its group's own identifier: "12A lift lobby lighting" in Block 12A is "lift lobby lighting". */
-const partKey = (name: string, group: string) => { const own = new Set(tokens(group).filter(isIdentifier)); return tokens(name).filter(token => !own.has(token)).join(" "); };
-const partLabel = (name: string, group: string) => {
-  const own = new Set(tokens(group).filter(isIdentifier));
-  const kept = name.split(/\s+/).filter(word => !own.has(word.toLowerCase().replace(/[(),:;]/g, ""))).join(" ").trim();
-  return kept ? kept.charAt(0).toUpperCase() + kept.slice(1) : name;
-};
-/** The groups and meters directly inside a group, largest first. */
-const partsOf = (node: MeterGroupNode): ReviewBarPart[] => [
-  ...node.children.map(child => ({ name: child.name, kwh: child.kwh })),
-  ...node.meters.filter(meter => !meter.unmetered).map(meter => ({ name: meter.name, kwh: meter.kwh })),
-].filter(part => part.kwh > 0).map(part => ({ ...part, share: node.kwh > 0 ? part.kwh / node.kwh : 0 })).sort((a, b) => b.kwh - a.kwh || a.name.localeCompare(b.name));
-
-/**
- * Top-level groups that can be compared: two or more of the same kind (two blocks, three towers). With several such
- * kinds, the one with the most groups, then the most energy, wins. Null when no two groups are alike.
- */
-export function comparableGroups(tree: MeterGroupTree): MeterGroupNode[] | null {
-  const byKind = new Map<string, MeterGroupNode[]>();
-  for (const group of tree.children) {
-    const kind = groupKind(group.name);
-    if (!kind || group.kwh <= 0) continue;
-    byKind.set(kind, [...(byKind.get(kind) ?? []), group]);
-  }
-  const sets = [...byKind.values()].filter(set => set.length >= 2);
-  if (!sets.length) return null;
-  const energy = (set: MeterGroupNode[]) => set.reduce((sum, group) => sum + group.kwh, 0);
-  return sets.sort((a, b) => b.length - a.length || energy(b) - energy(a))[0]!;
-}
+/** The groups and meters directly inside a group, largest first: what uses the most in it. */
+const partsOf = (node: MeterGroupNode): ReviewBarPart[] => groupParts(node)
+  .filter(part => part.kwh > 0).map(part => ({ name: part.name, kwh: part.kwh, share: node.kwh > 0 ? part.kwh / node.kwh : 0 }))
+  .sort((a, b) => b.kwh - a.kwh || a.name.localeCompare(b.name));
 
 // ---------- the review ----------
 export function buildManagementReview(data: AnalysisData, reference: ProjectSpatialReference | null, generatedAt = new Date().toISOString(), locale: EnergyIqLocale = "en"): ManagementReview {
@@ -162,6 +141,8 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
   const siteLast = totalCells.reduce((last, cell) => cell[3] > 0 ? Math.max(last, hourIndex(cell[0], cell[1])) : last, -Infinity);
   const notInUseList = data.notInUse ?? [];
   const reasonText = (stored: string) => { const code = stored.startsWith("reason:") ? stored.slice(7) : ""; return ["nobody_uses", "switched_off", "spare", "removed"].includes(code) ? t(`reason.${code}` as ManagementReviewKey) : stored; };
+  // Meters that sent readings but used nothing: said plainly in the meter list, never as a fault.
+  const noUse = new Map(metersWithNoUse(meters.map(item => item.meter), dates).map(item => [item.meter.id, item.dates]));
   const meterRows = meters.map(({ meter, place }) => {
     const cells = meter.series?.cells ?? [];
     const received = cells.filter(cell => cell[3] > 0);
@@ -178,6 +159,7 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
     const perDay = meter.series ? usualDay(meter.series, dates) : null;
     const note = off ? off.reason ? t("met.note.notInUse", { reason: reasonText(off.reason) }) : t("met.note.notInUsePlain")
       : stopped ? last ? t("met.note.stopped", { since: at(last.date, last.hour) }) : t("met.note.none")
+      : noUse.has(meter.id) ? t("met.note.noUse")
       : meter.series && received.length && perDay == null ? t("met.note.notEnough")
       : gapDays ? t(gapDays === 1 ? "met.note.gaps.one" : "met.note.gaps.other", { count: gapDays }) : "";
     return { id: meter.id, name: meter.name, group: topGroupOf.get(meter.id) ?? place, perDay, note, stopped: !!stopped, last };
@@ -210,13 +192,15 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
 
   // ---------- by group ----------
   const colourOf = new Map((base.groups?.top ?? []).map(group => [group.key, group.colour]));
+  const pctOf = new Map((base.groups?.top ?? []).map(group => [group.key, group.pct]));
   const palette = [REPORT_COLOURS.steel, REPORT_COLOURS.ember, REPORT_COLOURS.amber, "#6B4E9B", "#3E8E7E", "#B3446C"];
   const siteKwh = tree?.kwh ?? totalKwh;
-  const groupRows: ReviewGroup[] = tree ? tree.children.map((group, index) => {
+  // Top-level groups in the order someone saved for them, as on the Overview and in the full report's breakdown.
+  const groupRows: ReviewGroup[] = tree ? inSavedOrder(tree.children).map((group, index) => {
     const parts = partsOf(group);
     const lead = parts[0];
     return {
-      key: group.id, name: group.name, kwh: group.kwh, perDay: perDayOf(group.kwh), share: siteKwh > 0 ? group.kwh / siteKwh : 0,
+      key: group.id, name: group.name, kwh: group.kwh, perDay: perDayOf(group.kwh), share: siteKwh > 0 ? group.kwh / siteKwh : 0, pct: pctOf.get(group.id),
       colour: colourOf.get(group.id) ?? palette[index % palette.length]!, parts: parts.slice(0, MAX_PARTS), more: Math.max(0, parts.length - MAX_PARTS),
       biggest: lead && parts.length > 1 ? t("groups.biggest", { group: group.name, name: lead.name, pct: pctText(lead.share) }) : null,
     };
@@ -233,6 +217,7 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
 
   // ---------- group against group ----------
   const alike = tree ? comparableGroups(tree) : null;
+  const alikeNames = alike ? list(alike.map(group => group.name)) : "";
   const comparison = alike ? compareGroups(alike, { t, locale, perDayOf, colourOf: (group, index) => colourOf.get(group.id) ?? palette[index % palette.length]! }) : null;
 
   // ---------- the average 24 hours ----------
@@ -273,10 +258,13 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
   // What never switches off and could: the always-on level less the meters always on by design (as in the full report).
   const cutKw = base.benchmark.baseKw == null ? null : Math.max(0, base.benchmark.baseKw - base.benchmark.byDesignKw);
   const baseShare = cutKw != null && totalKwh > 0 ? Math.min(1, cutKw * totalCells.filter(cell => cell[2] != null).length / totalKwh) : null;
-  const topGroup = groupRows[0];
+  const topGroup = groupRows.reduce<ReviewGroup | undefined>((best, row) => !best || row.kwh > best.kwh ? row : best, undefined);
   const topPart = topGroup?.parts[0];
   const firstStopped = stopped[0];
   const standoutDates = base.standout.items.map(item => shortDate(item.date, locale));
+  // Meters marked not in use are already explained; the others that used nothing are named plainly.
+  const quiet = meterRows.filter(row => noUse.has(row.id) && !notInUseList.some(item => item.id === row.id));
+  const noUseFinding = quiet.length === 1 ? t("find.noUse.one", { name: quiet[0]!.name, dates: list(dateRuns(noUse.get(quiet[0]!.id)!, locale)) }) : quiet.length > 1 ? t("find.noUse.other", { count: quiet.length }) : "";
   const standoutFinding = standoutDates.length ? t(standoutDates.length === 1 ? "find.standout.one" : "find.standout.other", { count: standoutDates.length, dates: list(standoutDates) }) : "";
   const findings = [
     readDays.length ? t("find.total", { kwh: kwhText(totalKwh), days: readDays.length, perDay: kwhText(perDayOf(totalKwh)), cost: rate != null ? t("find.totalCost", { cost: money(cost(perDayOf(totalKwh)), 2)! }) : "" }) : "",
@@ -284,13 +272,14 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
       : lighting ? t(closedShare >= DAYTIME_NOTABLE_SHARE ? "find.closed" : "lights.find.night", { pct: pctText(closedShare) })
       : baseShare != null && baseShare >= 0.5 && cutKw != null ? t("find.alwaysOn", { kw: kwText(cutKw), day: kwhText(cutKw * 24), pct: pctText(baseShare) })
       : closedShare >= 0.4 ? t("find.closed", { pct: pctText(closedShare) }) : t("find.working", { pct: pctText(1 - closedShare) }),
-    topGroup && groupRows.length > 1 ? topPart && topGroup.parts.length > 1 ? t("find.groupPart", { name: topGroup.name, pct: pctText(topGroup.share), part: topPart.name, partPct: pctText(topPart.share) }) : t("find.group", { name: topGroup.name, pct: pctText(topGroup.share) })
+    topGroup && groupRows.length > 1 ? topPart && topGroup.parts.length > 1 ? t("find.groupPart", { name: topGroup.name, pct: reviewGroupPct(topGroup), part: topPart.name, partPct: pctText(topPart.share) }) : t("find.group", { name: topGroup.name, pct: reviewGroupPct(topGroup) })
       : circuitRows[0] ? t("find.circuit", { name: circuitRows[0].name, pct: pctText(circuitRows[0].share) }) : "",
     comparison?.finding ?? "",
     stopped.length === 1 && firstStopped ? t("find.stopped.one", { name: firstStopped.name, since: firstStopped.last ? at(firstStopped.last.date, firstStopped.last.hour) : periodText })
       : stopped.length > 1 ? t("find.stopped.other", { count: stopped.length, names: list(stopped.map(row => row.name)) }) : "",
     standoutFinding,
     notInUseList.length === 1 ? t("find.notInUse.one", { name: notInUseList[0]!.name }) : notInUseList.length > 1 ? t("find.notInUse.other", { count: notInUseList.length }) : "",
+    noUseFinding,
   ].filter(Boolean).slice(0, MAX_FINDINGS);
   const worth = (row: { kwhYear: number; costYear: number | null }) => row.costYear != null ? money(row.costYear) : kwhText(row.kwhYear);
   const decisions: ReviewDecision[] = [
@@ -346,8 +335,13 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
     summary: { findings, decisions },
     total, groups,
     comparison: comparison ? { heading: comparison.heading, intro: comparison.intro, groups: comparison.groups, parts: comparison.parts, caption: comparison.caption } : null,
-    profile: profile ? { hours: profile.hours, openFrom: openRange.from, openTo: openRange.to, intro: profile.intro, caption: profile.caption, days: profile.days } : null,
+    profile: profile ? { hours: profile.hours, openFrom: openRange.from, openTo: openRange.to, intro: profile.intro, days: profile.days,
+      // Lights-on hours with groups: one line per group, the same lines as the full report's average day.
+      ...(lighting && base.pattern?.lines?.length ? { lines: base.pattern.lines } : {}),
+      caption: lighting && base.pattern?.lines?.length ? paragraph([profile.caption, alikeNames ? t("pro.linesAlike", { names: alikeNames }) : t("pro.lines")]) : profile.caption } : null,
     ...(base.daytime ? { daytime: base.daytime } : {}),
+    ...(base.perLight ? { perLight: base.perLight } : {}),
+    ...(base.noUse ? { noUse: base.noUse } : {}),
     savings, method,
     footer: { left: t("foot.left", { count: meterCount, tz: base.tzLabel }), right: t("foot.right", { date: formatPeriod(generatedDay, generatedDay, locale) }) },
   };

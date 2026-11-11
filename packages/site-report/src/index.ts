@@ -13,6 +13,7 @@ export * from "./analysis-messages.js";
 export * from "./analysis-model.js";
 export * from "./analysis-scope.js";
 export * from "./meter-groups.js";
+export * from "./group-insights.js";
 export * from "./meters-in-use.js";
 export * from "./always-on-by-design.js";
 export * from "./daytime-use.js";

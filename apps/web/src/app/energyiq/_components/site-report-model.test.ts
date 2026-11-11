@@ -205,12 +205,13 @@ describe("site report by group", () => {
     expect(report.profile.intro).toContain("The site's 5 meters are grouped by what they serve: Block 264F **92%** and Common area **8%**.");
     const common = report.profile.zones.find(zone => zone.heading.startsWith("Common area"))!;
     expect(common.heading).toBe("Common area · 9.2 kWh (8%)");
-    expect(common.text).toBe("Split into Entrance 4.2 kWh (45%), Pavilion 3.4 kWh (36%) and Playground 1.7 kWh (18%). **Entrance** is the biggest share of common area and has no sub-meter below it. Wired from panels 264E and 264F.");
+    // Groups read in the order they were saved (here, the order listed), whatever their size; the biggest is still named.
+    expect(common.text).toBe("Split into Pavilion 3.4 kWh (36%), Playground 1.7 kWh (18%) and Entrance 4.2 kWh (45%). **Entrance** is the biggest share of common area and has no sub-meter below it. Wired from panels 264E and 264F.");
     expect(report.profile.zones.find(zone => zone.heading.startsWith("Block 264F"))!.text).toContain("Split into Ground floor 67 kWh (67%) and Building common area 34 kWh (33%).");
     expect(report.groups!.summary).toBe("Block 264F 92% · Common area 8% — biggest single group: Ground floor");
     expect(report.groups!.rows.map(row => [row.name, row.depth, row.parent])).toEqual([
       ["Block 264F", 0, "SKTC Estate"], ["Ground floor", 1, "Block 264F"], ["Building common area", 1, "Block 264F"],
-      ["Common area", 0, "SKTC Estate"], ["Entrance", 1, "Common area"], ["Pavilion", 1, "Common area"], ["Playground", 1, "Common area"],
+      ["Common area", 0, "SKTC Estate"], ["Pavilion", 1, "Common area"], ["Playground", 1, "Common area"], ["Entrance", 1, "Common area"],
     ]);
     expect(report.estimate.spaceCaption).toBe("Each group's share of the estimated month.");
     expect(report.estimate.comparison).toContain("Block 264F uses the most, at **92%** of the energy, compared with Common area's 8%.");
