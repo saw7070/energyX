@@ -5,7 +5,7 @@ import type { MetadataStore } from "@datafoundry/metadata";
 import type { ConfigApiContext, ConfigApiResponse } from "../routes/types.js";
 import { authorizeReportConversation } from "./report-access.js";
 import { listReportArtifacts, readReportArtifact } from "./report-artifacts.js";
-import { hasReportArtifact } from "./report-store.js";
+import { hasReportArtifact, type ReportRun } from "./report-store.js";
 import { findReportService } from "./report-service.js";
 import { canUseActions } from "./action-access.js";
 
@@ -57,9 +57,10 @@ export async function handleReportLibraryApi(request: IncomingMessage, segments:
       return { status: 200, headers, body: createSuccessResult({ snapshot: service.siteReportSnapshot(projectId, run.id) }) };
     }
     if (segments.length !== 1) return missing();
-    const allRuns = service.store.list(projectId).filter(run=>run.workspaceId===context.workspaceId);
-    // The list holds the newest runs only, and daily reports fill it fast. The newest weekly and monthly site reports
-    // are always listed, so the Overview can still find the report it shows.
+    // The finished reports, where daily ones have a window of their own and never push the weekly, monthly and custom
+    // reports out. The newest weekly and monthly site reports are always listed, so the Overview can still find the report it shows.
+    const inWorkspace = (run: ReportRun) => run.workspaceId === context.workspaceId;
+    const allRuns = service.store.libraryReports(projectId).filter(inWorkspace);
     for (const cadence of ["weekly", "monthly"] as const) {
       const latest = service.store.latestSiteReport(projectId, cadence);
       if (latest && latest.workspaceId === context.workspaceId && !allRuns.some(run => run.id === latest.id)) allRuns.push(latest);
@@ -70,7 +71,9 @@ export async function handleReportLibraryApi(request: IncomingMessage, segments:
       if (requested.workspaceId !== context.workspaceId || requested.status !== "succeeded" || !hasReportArtifact(requested)) return missing();
       if (!allRuns.some(run => run.id === requestedId)) allRuns.push(requested);
     }
-    const byId = new Map(allRuns.map(run=>[run.id,run]));
+    // Earlier versions are traced through the newest runs of every kind too, failed attempts included.
+    const recentRuns = service.store.list(projectId).filter(inWorkspace);
+    const byId = new Map([...recentRuns, ...allRuns].map(run=>[run.id,run]));
     const runs = allRuns
       .filter(run => ["report", "chat"].includes(run.kind) && run.status === "succeeded" && run.workspaceId === context.workspaceId);
     const reports = runs.filter(run => !run.actionFeedback).filter(hasReportArtifact).map(run => {
@@ -89,7 +92,8 @@ export async function handleReportLibraryApi(request: IncomingMessage, segments:
         ...(run.siteReport?.style === "management" ? { style: "management" as const } : {}),
         ...(run.finishedAt ? { finishedAt: run.finishedAt } : {}), ...(run.parentRunId ? { parentRunId: run.parentRunId } : {}) };
     });
-    const artifacts = canChat ? runs.filter(run => !run.actionFeedback && run.actorUserId === context.userId).flatMap(run =>
+    // Supporting files belong to the reader's own recent runs, the ones the advisor panel lists.
+    const artifacts = canChat ? recentRuns.filter(run => ["report", "chat"].includes(run.kind) && run.status === "succeeded" && !run.actionFeedback && run.actorUserId === context.userId).flatMap(run =>
       listReportArtifacts(service.archivedOutputDirectory(run.id)).map(file => ({ runId: run.id, ...file, createdAt: run.finishedAt ?? run.createdAt }))
     ).slice(0, 200) : [];
     const settings = service.store.settings(projectId);

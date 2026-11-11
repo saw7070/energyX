@@ -70,6 +70,11 @@ export type ReportRun = {
 export const hasReportArtifact = (run: ReportRun): boolean => run.kind === "report" || (run.kind === "chat" && run.hasReport === true);
 export const hasSkillArtifact = (run: ReportRun): boolean => run.kind === "skill" || (run.kind === "chat" && run.hasSkillDraft === true);
 
+/** How many weekly, monthly and custom reports the Reports list holds: years of a weekly and monthly schedule. */
+const LIBRARY_REPORTS = 400;
+/** How many daily reports it holds besides: about three months of the site's own, or six weeks with the advisor's too. */
+const LIBRARY_DAILY_REPORTS = 92;
+
 export type ReportSession = { id: string; projectId: string; workspaceId: string; actorUserId: string; createdAt: string };
 export type ReportEvent = { sequence: number; runId: string; time: string; type: string; tool?: string; isError?: boolean; text?: string };
 
@@ -281,6 +286,25 @@ export class ReportStore {
   list(projectId: string): ReportRun[] {
     return this.db.prepare("SELECT document FROM energyiq_report_runs WHERE project_id = ? ORDER BY rowid DESC LIMIT 100").all(projectId)
       .map((row) => JSON.parse(String(row.document)) as ReportRun);
+  }
+
+  /**
+   * The finished reports a site's Reports list shows, newest first. `list` holds the newest runs of every kind, and a
+   * daily schedule fills it within weeks; here daily reports (the advisor's and the site's) have a window of their own,
+   * so they never push last month's monthly report, earlier weekly reports or a report somebody asked for out of the list.
+   */
+  libraryReports(projectId: string, limits: { daily?: number; other?: number } = {}): ReportRun[] {
+    // The advisor's daily key is "<project>:daily:<from>:<to>"; a site report carries its cadence itself.
+    const advisorDaily = `${projectId}:daily:`;
+    const select = this.db.prepare(`SELECT rowid AS position, document FROM energyiq_report_runs
+      WHERE project_id = ? AND status = 'succeeded' AND json_extract(document, '$.actionFeedback') IS NULL
+      AND (json_extract(document, '$.kind') = 'report' OR (json_extract(document, '$.kind') = 'chat' AND json_extract(document, '$.hasReport') = 1))
+      AND (COALESCE(json_extract(document, '$.siteReport.cadence') = 'daily', 0) OR substr(COALESCE(schedule_key, ''), 1, ?) = ?) = ?
+      ORDER BY rowid DESC LIMIT ?`);
+    const rows = (daily: boolean, limit: number) => select.all(projectId, advisorDaily.length, advisorDaily, daily ? 1 : 0, limit)
+      .map(row => ({ position: Number(row.position), run: JSON.parse(String(row.document)) as ReportRun }));
+    return [...rows(false, limits.other ?? LIBRARY_REPORTS), ...rows(true, limits.daily ?? LIBRARY_DAILY_REPORTS)]
+      .sort((left, right) => right.position - left.position).map(row => row.run);
   }
 
   sessionRuns(projectId: string, sessionId: string, options: { reportArtifact?: boolean; kind?: ReportRun["kind"]; status?: "succeeded"; limit?: number } = {}): ReportRun[] {

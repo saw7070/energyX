@@ -300,18 +300,31 @@ it("says plainly when a daily report's day has incomplete readings, and estimate
   expect(page).not.toContain("Days that stood out");
 });
 
-it("keeps the newest weekly and monthly site reports listed however many daily reports follow them", async () => {
+it("keeps every weekly, monthly and custom report listed however many daily reports follow them", async () => {
   const { service, settings, call } = setup();
-  const insert = (cadence: "daily" | "weekly" | "monthly", from: string, toExclusive: string) => service.store.insertCompleted({
-    settings, period: { from, toExclusive }, reportingPeriod: { from, toExclusive }, prompt: "Site energy report", actorUserId: "admin",
-    scheduleKey: siteReportScheduleKey("project", cadence, { from, toExclusive }), siteReport: { cadence },
-  }).run;
   const shift = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
-  const monthly = insert("monthly", "2026-06-01", "2026-07-01");
-  const weekly = insert("weekly", "2026-06-29", "2026-07-06");
-  for (let day = 0; day < 105; day += 1) insert("daily", shift("2026-07-06", day), shift("2026-07-06", day + 1));
-  const reports = ((await call()).body as { data: { reports: Array<{ id: string; cadence?: string }> } }).data.reports;
-  expect(reports.filter(report => report.cadence === "daily")).toHaveLength(100);
-  expect(reports.find(report => report.cadence === "weekly")?.id).toBe(weekly.id);
-  expect(reports.find(report => report.cadence === "monthly")?.id).toBe(monthly.id);
+  const site = (cadence: "daily" | "weekly" | "monthly" | "custom", from: string, toExclusive: string) => service.store.insertCompleted({
+    settings, period: { from, toExclusive }, reportingPeriod: { from, toExclusive }, prompt: "Site energy report", actorUserId: "admin",
+    ...(cadence === "custom" ? { custom: true, siteReport: {} } : { scheduleKey: siteReportScheduleKey("project", cadence, { from, toExclusive }), siteReport: { cadence } }),
+  }).run;
+  // The advisor's own daily report, finished the way the worker finishes one.
+  const advisorDaily = (from: string, toExclusive: string) => {
+    service.store.enqueue({ settings, period: { from, toExclusive }, reportingPeriod: { from, toExclusive }, prompt: "Daily report", actorUserId: "admin",
+      scheduleKey: `project:daily:${from}:${toExclusive}` });
+    const claimed = service.store.claim()!;
+    service.store.finish({ ...claimed, status: "succeeded" });
+    return claimed;
+  };
+  const monthly = ["2026-04-01", "2026-05-01", "2026-06-01"].map((from, index, all) => site("monthly", from, all[index + 1] ?? "2026-07-01"));
+  const weekly = Array.from({ length: 6 }, (_, week) => site("weekly", shift("2026-05-25", week * 7), shift("2026-05-25", week * 7 + 7)));
+  const custom = site("custom", "2026-06-10", "2026-06-20");
+  // Fifteen weeks of daily reports from the site and the advisor: far more than the newest runs of every kind hold.
+  const daily = Array.from({ length: 105 }, (_, day) => [site("daily", shift("2026-07-06", day), shift("2026-07-06", day + 1)), advisorDaily(shift("2026-07-06", day), shift("2026-07-06", day + 1))]).flat();
+  const reports = ((await call(["project"], "admin")).body as { data: { reports: Array<{ id: string; cadence?: string }> } }).data.reports;
+  const listed = new Set(reports.map(report => report.id));
+  for (const run of [...monthly, ...weekly, custom]) expect(listed.has(run.id)).toBe(true);
+  // Daily reports keep a window of their own, newest first.
+  const dailyListed = daily.filter(run => listed.has(run.id));
+  expect(dailyListed).toHaveLength(92);
+  expect(dailyListed).toEqual(daily.slice(-92));
 });
