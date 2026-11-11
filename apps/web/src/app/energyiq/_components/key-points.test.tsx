@@ -4,6 +4,8 @@ import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { configApi } from "../../../lib/config-api";
 import { KeyPoints } from "./key-points";
+import { buildSiteReport } from "@datafoundry/site-report";
+import { DATA } from "./standout-days.test-fixture";
 // The fixed report loads its own readings; here it only has to feed the heading, the plain names and the dates.
 const site = vi.hoisted(() => ({ periods: [] as unknown[], saved: null as null | { reportId: string; cadence: string; period: { from: string; toExclusive: string }; generatedAt: string; coverage: number | null }, newerReadings: false, report: {
   title: { before: "Three-quarters of the office load ", emphasis: "never switches off" },
@@ -94,6 +96,23 @@ it("leads with the average day, then where it goes by group, each top-level grou
  await act(async()=>common.click());
  expect(inside.hidden).toBe(true);
  } finally {delete report.groups;delete report.averageDay;await act(async()=>root.unmount());host.remove();request.mockRestore();vi.unstubAllGlobals();}
+});
+
+it("keeps the report's headline for a site without groups, though its report has an average day", async () => {
+ vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);vi.stubGlobal("React",React);
+ // A real report from readings saved without groups: it has an average day, and no breakdown by group to lead.
+ const real = buildSiteReport({ ...DATA, groups: undefined }, null, "2026-11-16T00:00:00Z");
+ expect(real.averageDay?.text).toMatch(/^Uses about .+ kWh a day$/);
+ expect(real.groups).toBeNull();
+ const fixed = site.report;
+ site.report = real as unknown as typeof site.report;
+ const request=vi.spyOn(configApi,"reportActionRequest").mockResolvedValue({ publication:{reportId:"r",selection:{active:[],featuredActionIds:[]}}, metrics:{projectName:"Estate",period:{from:"2026-11-02",toExclusive:"2026-11-16"},energyKwh:0,peakKw:0,coverage:1,cost:null,outsideHoursPercent:null} });
+ const host=document.createElement("div");document.body.append(host);const root=createRoot(host);
+ try {await act(async()=>root.render(<KeyPoints projectId="p"/>));
+ expect(host.querySelector("h2")?.textContent).toBe(`${real.title.before}${real.title.emphasis}`);
+ expect(host.textContent).not.toContain(real.averageDay!.text);
+ expect(host.querySelector("h3")?.textContent).not.toBe("Where it goes");
+ } finally {site.report=fixed;await act(async()=>root.unmount());host.remove();request.mockRestore();vi.unstubAllGlobals();}
 });
 
 it("lists the lights that were on in the daytime under a daytime warning, and nothing extra when the lights ran as planned", async () => {

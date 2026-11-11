@@ -107,8 +107,9 @@ export function KeyPoints({projectId}:{projectId:string}) {
   const saved=site.saved;
   const shownPeriod=saved?.period ?? source?.period ?? null;
   const names=plainNames(report);
-  const averageDay=report?.averageDay ?? null;
   const split=report?.groups?.breakdown?.length ? report.groups.breakdown : null;
+  // The average day leads only above where it goes by group; a site without groups keeps the report's headline.
+  const averageDay=split ? report?.averageDay ?? null : null;
   // Everyday names and times if the published summary is shown: "office area lights" instead of "DB1 L1 Light", "8 pm" instead of "20:00".
   const plain=(text:string)=>plainTimes(names(plainCard(text)), locale);
   return <main className={styles.page}>
@@ -117,7 +118,7 @@ export function KeyPoints({projectId}:{projectId:string}) {
       :!result?<p role="status">{t("loading")}</p>
       :<>
       <section className={styles.hero}><p className={styles.heroEyebrow}>{metrics?.projectName ?? activeProject?.name ?? t("yourProject")}</p>
-        {/* The first view leads with the site's average day, then where it goes by group; the finding follows. */}
+        {/* With groups, the first view leads with the site's average day, then where it goes by group; the finding follows. */}
         <h2>{averageDay ? averageDay.text : report ? <>{report.title.before}<span>{report.title.emphasis}</span></> : site.state && publication?.selection.summary ? plain(publication.selection.summary) : t("fallbackHeadline")}</h2>
         {split && <GroupSplit rows={split} />}
         {averageDay && report && <p className={styles.heroFinding}>{report.title.before}<span>{report.title.emphasis}</span></p>}
