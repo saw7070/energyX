@@ -123,9 +123,13 @@ export function heatColour(share: number | null): string {
   return `rgb(${from.map((channel, index) => Math.round(channel + (to[index]! - channel) * mix)).join(", ")})`;
 }
 
-/** Load in an hour as a whole percentage of the device's busiest hour; null when that hour has no complete readings. */
+/**
+ * Load in an hour as a whole percentage of the device's busiest hour; null when that hour has no complete readings.
+ * An hour whose use shows as 0.00 kW reads 0%, never a sliver of a small busiest hour.
+ */
 export function loadPercent(kw: number | null, busiest: number): number | null {
   if (kw === null) return null;
+  if (Math.round(kw * 100) === 0) return 0;
   return busiest > 0 ? Math.round(kw / busiest * 100) : 0;
 }
 /** White text only on the darkest part of the scale, so labels keep enough contrast. */
@@ -166,13 +170,15 @@ export function UsageHeatmap({ rows, openHours, openingLabel, title, scale = "ro
             {onOpenRow ? <button type="button" className={`${styles.heatName} ${styles.heatNameButton}`} title={t("heat.open", { name: row.name })} onClick={() => onOpenRow(row.id)}>{row.name}</button> : <span className={styles.heatName} title={row.name}>{row.name}</span>}
             {row.profileKw.map((kw, hour) => {
               const load = loadPercent(kw, peak);
-              return <span key={hour} className={`${styles.heatCell} ${kw === null ? styles.heatEmpty : ""} ${openHours.has(hour) ? styles.heatCellOpen : ""} ${active?.row === index && active.hour === hour ? styles.heatActive : ""}`} style={{ background: heatColour(load === null ? null : load / 100), color: load === null ? undefined : heatText(load / 100) }} onPointerMove={event => { const box = event.currentTarget.closest("[data-heatmap]")!.getBoundingClientRect(); const cell = event.currentTarget.getBoundingClientRect(); setActive({ row: index, hour, x: Math.min(box.width - 110, Math.max(110, cell.left - box.left + cell.width / 2)), y: cell.top - box.top }); }}>{load !== null && <span className={styles.heatLabel}>{load}%</span>}</span>;
+              // A tap shows the same details as hovering, for touch screens.
+              const show = (event: React.PointerEvent<HTMLSpanElement>) => { const box = event.currentTarget.closest("[data-heatmap]")!.getBoundingClientRect(); const cell = event.currentTarget.getBoundingClientRect(); setActive({ row: index, hour, x: Math.min(box.width - 110, Math.max(110, cell.left - box.left + cell.width / 2)), y: cell.top - box.top }); };
+              return <span key={hour} data-heat-cell={`${index}:${hour}`} className={`${styles.heatCell} ${kw === null ? styles.heatEmpty : ""} ${openHours.has(hour) ? styles.heatCellOpen : ""} ${active?.row === index && active.hour === hour ? styles.heatActive : ""}`} style={{ background: heatColour(load === null ? null : load / 100), color: load === null ? undefined : heatText(load / 100) }} onPointerMove={show} onPointerDown={show}>{load !== null && <span className={styles.heatLabel}>{load}%</span>}</span>;
             })}
           </div>;
         })}
       </div>)}
-      {current && active && <div className={styles.tooltip} style={{ left: active.x, top: active.y, transform: "translate(-50%, calc(-100% - 6px))" }}><strong>{value == null ? t("heat.noComplete") : t("heat.load", { load: loadPercent(value, busiest(current)) ?? 0, kw: compact(value) })}</strong><span>{t(openHours.has(active.hour) ? "heat.spanOpen" : "heat.span", { name: current.name, from: `${hour24(active.hour)}:00`, to: `${hour24((active.hour + 1) % 24)}:00` })}</span>{value != null && dayTotal(current) > 0 && <span>{t("heat.dailyShare", { pct: Math.round(value / dayTotal(current) * 100) })}</span>}</div>}
+      {current && active && <div className={styles.tooltip} style={{ left: active.x, top: active.y, transform: "translate(-50%, calc(-100% - 6px))" }}><strong>{value == null ? t("heat.noComplete") : t("heat.load", { load: loadPercent(value, busiest(current)) ?? 0, peak: compact(busiest(current)) })}</strong>{value != null && <span>{t(scale === "all" ? "heat.energy" : "heat.energyAverage", { kw: compact(value), kwh: compact(value) })}</span>}<span>{t(openHours.has(active.hour) ? "heat.spanOpen" : "heat.span", { name: current.name, from: `${hour24(active.hour)}:00`, to: `${hour24((active.hour + 1) % 24)}:00` })}</span>{value != null && dayTotal(current) > 0 && <span>{t("heat.dailyShare", { pct: Math.round(value / dayTotal(current) * 100) })}</span>}</div>}
     </div>
-    <p className={styles.legend}><span>{t("heat.low")}</span><span className={styles.heatScale} style={{ background: HEAT_GRADIENT }} /><span>{t("heat.high")}</span><span className={styles.legendNote}>{t(scale === "all" ? "heat.noteAll" : "heat.noteRow")}{onOpenRow ? t("heat.noteClick") : ""}</span></p>
+    <p className={styles.legend}><span className={styles.heatScaleLabel}>{t("heat.scale")}</span><span>{t("heat.low")}</span><span className={styles.heatScale} style={{ background: HEAT_GRADIENT }} /><span>{t("heat.high")}</span><span className={styles.legendNote}>{t(scale === "all" ? "heat.noteAll" : "heat.noteRow")}{onOpenRow ? t("heat.noteClick") : ""}</span></p>
   </figure>;
 }
