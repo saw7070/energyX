@@ -20,7 +20,7 @@ const HANDLES: Handle[] = ["nw", "ne", "sw", "se"];
  * The floor plan inside the Floor layout workspace: the selected location's boards stand out, and clicking an area
  * or a device selects it in the Locations list.
  */
-export function FloorPlanView({ reference, meters, highlight, focusDevice, canEdit, onEdit, onSelectBoard, onSelectDevice }: { reference: StoredSpatialReference | null; meters: PlanMeter[]; highlight: string[] | null; focusDevice: string | null; canEdit: boolean; onEdit: () => void; onSelectBoard: (board: string) => void; onSelectDevice: (id: string) => void }) {
+export function FloorPlanView({ reference, meters, highlight, highlightDevices = null, focusDevice, canEdit, onEdit, onSelectBoard, onSelectDevice }: { reference: StoredSpatialReference | null; meters: PlanMeter[]; highlight: string[] | null; highlightDevices?: string[] | null; focusDevice: string | null; canEdit: boolean; onEdit: () => void; onSelectBoard: (board: string, deviceId?: string) => void; onSelectDevice: (id: string) => void }) {
   const [open, setOpen] = useState(() => { try { return window.localStorage.getItem("energyiq.floorPlanOpen") !== "false"; } catch { return true; } });
   const toggle = () => setOpen(current => { try { window.localStorage.setItem("energyiq.floorPlanOpen", String(!current)); } catch { /* per-browser convenience only */ } return !current; });
   const t = useMessages(floorPlanMessages);
@@ -33,7 +33,7 @@ export function FloorPlanView({ reference, meters, highlight, focusDevice, canEd
         {reference && <button type="button" className={styles.secondary} aria-expanded={open} onClick={toggle}>{open ? t("view.hide") : t("view.show")}</button>}
       </div>
     </header>
-    {reference && open && <div className={styles.mapFrame}><SiteFloorMap reference={reference} devices={placed} highlight={highlight} focusDevice={focusDevice} onSelectBoard={onSelectBoard} onOpenDevice={onSelectDevice} /></div>}
+    {reference && open && <div className={styles.mapFrame}><SiteFloorMap reference={reference} devices={placed} highlight={highlight} highlightDevices={highlightDevices} focusDevice={focusDevice} onSelectBoard={onSelectBoard} onOpenDevice={onSelectDevice} /></div>}
   </section>;
 }
 

@@ -92,10 +92,11 @@ export function pinLabel(name: string, position: [number, number], rooms: Array<
 export const roomHasPins = (rect: number[], positions: Array<[number, number]>) => positions.some(position => inside(rect, position));
 
 /**
- * `highlight` names the boards to emphasise (others fade); `onSelectBoard` makes each area clickable;
+ * `highlight` names the boards to emphasise (others fade); `highlightDevices` says exactly which pins those are, for
+ * when different groups share a name; `onSelectBoard` makes each area clickable, saying which pin it holds if any;
  * `onOpenDevice` makes each pin clickable; `focusDevice` rings one pin.
  */
-export function SiteFloorMap({ reference, large = false, devices = [], onOpenDevice, highlight = null, onSelectBoard, focusDevice = null }: { reference: ProjectSpatialReference; large?: boolean; devices?: MapDevice[]; onOpenDevice?: (id: string) => void; highlight?: string[] | null; onSelectBoard?: (board: string) => void; focusDevice?: string | null }) {
+export function SiteFloorMap({ reference, large = false, devices = [], onOpenDevice, highlight = null, highlightDevices = null, onSelectBoard, focusDevice = null }: { reference: ProjectSpatialReference; large?: boolean; devices?: MapDevice[]; onOpenDevice?: (id: string) => void; highlight?: string[] | null; highlightDevices?: string[] | null; onSelectBoard?: (board: string, deviceId?: string) => void; focusDevice?: string | null }) {
   const t = useMessages(floorMapMessages);
   const { locale } = useEnergyIqLocale();
   const [x, y, w, h] = reference.layout.viewBox;
@@ -117,16 +118,28 @@ export function SiteFloorMap({ reference, large = false, devices = [], onOpenDev
   const positions = devices.map(device => device.position);
   const text = (lines: string[], cx: number, cy: number, size: number, className: string) => <text x={cx} y={cy - (lines.length - 1) * size * 0.6} textAnchor="middle" className={className} style={{ fontSize: size }}>{lines.map((line, index) => <tspan key={index} x={cx} dy={index ? size * 1.2 : 0}>{line}</tspan>)}</text>;
   const interactive = (!!onOpenDevice && devices.length > 0) || !!onSelectBoard;
-  const faded = (board: string) => highlight !== null && !highlight.includes(board);
+  const pinsIn = (board: string, rect: number[]) => devices.filter(device => device.board === board && inside(rect, device.position));
+  // A name alone can't say which of two same-named groups an area is, so an area holding pins goes by whose pins they are.
+  const selectedArea = (board: string, rect: number[]) => {
+    if (!highlight?.includes(board)) return false;
+    const pins = highlightDevices ? pinsIn(board, rect) : [];
+    return !pins.length || pins.some(pin => highlightDevices!.includes(pin.id));
+  };
+  const faded = (board: string, rect: number[]) => highlight !== null && !selectedArea(board, rect);
+  const fadedPin = (device: MapDevice) => highlightDevices ? !highlightDevices.includes(device.id) : highlight !== null && !highlight.includes(device.board);
   // An area that names no panel is part of the drawing only: there is no panel to select.
-  const clickable = (board: string, label: string) => onSelectBoard && board ? { role: "button", tabIndex: 0, "aria-label": label, "aria-pressed": highlight?.includes(board) ?? false, className: `${styles.areaLink} ${faded(board) ? styles.faded : ""}`, onClick: () => onSelectBoard(board), onKeyDown: (event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelectBoard(board); } } } : { className: faded(board) ? styles.faded : undefined };
+  const clickable = (board: string, label: string, rect: number[]) => {
+    if (!onSelectBoard || !board) return { className: faded(board, rect) ? styles.faded : undefined };
+    const select = () => onSelectBoard(board, pinsIn(board, rect)[0]?.id);
+    return { role: "button", tabIndex: 0, "aria-label": label, "aria-pressed": selectedArea(board, rect), className: `${styles.areaLink} ${faded(board, rect) ? styles.faded : ""}`, onClick: select, onKeyDown: (event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); select(); } } };
+  };
   return <svg viewBox={`${x} ${y} ${w} ${h + unit * 4}`} className={`${styles.map} ${large ? styles.large : ""}`} role={interactive ? "group" : "img"} aria-label={devices.length ? t("ariaDevices", { count: devices.length }) : t("aria")}>
-    {areas.map(zone => { const [zx, zy, zw, zh] = zone.rect as Rect; const colour = colours.get(zone.id)!; return <g key={zone.id} {...clickable(zone.referenceBoard, zone.referenceBoard ? t("selectArea", { board: zone.referenceBoard, area: areaLabel(zone.id, locale) }) : areaLabel(zone.id, locale))}>
-      <rect x={zx} y={zy} width={zw} height={zh} rx={unit * 1.4} className={`${styles.zone} ${highlight?.includes(zone.referenceBoard) ? styles.zoneActive : ""}`} style={{ fill: colour, stroke: colour }} />
+    {areas.map(zone => { const [zx, zy, zw, zh] = zone.rect as Rect; const colour = colours.get(zone.id)!; return <g key={zone.id} {...clickable(zone.referenceBoard, zone.referenceBoard ? t("selectArea", { board: zone.referenceBoard, area: areaLabel(zone.id, locale) }) : areaLabel(zone.id, locale), zone.rect as Rect)}>
+      <rect x={zx} y={zy} width={zw} height={zh} rx={unit * 1.4} className={`${styles.zone} ${selectedArea(zone.referenceBoard, zone.rect as Rect) ? styles.zoneActive : ""}`} style={{ fill: colour, stroke: colour }} />
       <circle cx={zx + unit * 2.4} cy={zy + unit * 2.6} r={unit * 0.9} style={{ fill: colour }} />
       <text x={zx + unit * 4} y={zy + unit * 3.3} className={styles.zoneLabel} style={{ fontSize: unit * 2.1 }}>{zone.referenceBoard ? <>{zone.referenceBoard}<tspan className={styles.zoneSub} dx={unit * 0.8}>{areaLabel(zone.id, locale)}</tspan></> : areaLabel(zone.id, locale)}</text>
     </g>; })}
-    {reference.layout.rooms.map(room => { const [rx, ry, rw, rh] = room.rect as Rect; const colour = colours.get(room.zone); const size = Math.min(unit * 1.75, rw / 7); const board = reference.layout.zones.find(zone => zone.id === room.zone)?.referenceBoard ?? ""; return <g key={room.name} {...clickable(board, t("selectRoom", { board, room: room.name }))}>
+    {reference.layout.rooms.map(room => { const [rx, ry, rw, rh] = room.rect as Rect; const colour = colours.get(room.zone); const size = Math.min(unit * 1.75, rw / 7); const board = reference.layout.zones.find(zone => zone.id === room.zone)?.referenceBoard ?? ""; return <g key={room.name} {...clickable(board, t("selectRoom", { board, room: room.name }), room.rect)}>
       {(() => { const own = (room as { colour?: unknown }).colour; return <rect x={rx} y={ry} width={rw} height={rh} rx={unit * 0.8} className={styles.room} style={isColour(own) ? { stroke: own, fill: `color-mix(in srgb, ${own} 12%, white)` } : colour ? { stroke: colour } : undefined} />; })()}
       {(() => { const lines = wrapLabel(room.name, Math.max(6, Math.floor(rw / (size * 0.56)))); return text(lines, rx + rw / 2, roomHasPins(room.rect, positions) ? ry + size * 1.5 + (lines.length - 1) * size * 0.6 : ry + rh / 2 + size * 0.35, size, styles.roomLabel); })()}
     </g>; })}
@@ -134,8 +147,8 @@ export function SiteFloorMap({ reference, large = false, devices = [], onOpenDev
       const colour = colours.get(zone.id)!;
       const [gx, gy, gw, gh] = box;
       const pinned = roomHasPins(box, positions);
-      return <g key={zone.id} {...clickable(zone.referenceBoard, zone.equipment ? t("selectGroup", { board: zone.referenceBoard, equipment: zone.equipment }) : t("selectBoard", { board: zone.referenceBoard }))}>
-        <rect x={gx} y={gy} width={gw} height={gh} rx={unit * 0.8} className={`${styles.subgroup} ${highlight?.includes(zone.referenceBoard) ? styles.zoneActive : ""}`} style={{ stroke: colour, fill: colour }} />
+      return <g key={zone.id} {...clickable(zone.referenceBoard, zone.equipment ? t("selectGroup", { board: zone.referenceBoard, equipment: zone.equipment }) : t("selectBoard", { board: zone.referenceBoard }), box)}>
+        <rect x={gx} y={gy} width={gw} height={gh} rx={unit * 0.8} className={`${styles.subgroup} ${selectedArea(zone.referenceBoard, box) ? styles.zoneActive : ""}`} style={{ stroke: colour, fill: colour }} />
         <text x={pinned ? gx + unit * 0.8 : gx + gw / 2} y={pinned ? gy + unit * 1.6 : gy + gh / 2 + unit * 0.6} textAnchor={pinned ? "start" : "middle"} className={styles.subgroupLabel} style={{ fontSize: unit * (pinned ? 1.15 : 1.5) }}>{zone.referenceBoard ? `${zone.referenceBoard} · ` : ""}{zone.equipment ?? t("equipmentInRoom")}</text>
       </g>;
     })}
@@ -146,7 +159,7 @@ export function SiteFloorMap({ reference, large = false, devices = [], onOpenDev
     {devices.map(device => {
       const [dx, dy] = device.position, colour = device.colour ?? byBoard.get(device.board) ?? "var(--zone-6)", r = unit * 1.1;
       const open = onOpenDevice ? () => onOpenDevice(device.id) : undefined;
-      return <g key={device.id} className={`${open ? styles.pinLink : ""} ${faded(device.board) ? styles.faded : ""}`} {...(open ? { role: "button", tabIndex: 0, "aria-label": t("openDevice", { name: device.name }), onClick: open, onKeyDown: (event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } } } : {})}>
+      return <g key={device.id} className={`${open ? styles.pinLink : ""} ${fadedPin(device) ? styles.faded : ""}`} {...(open ? { role: "button", tabIndex: 0, "aria-label": t("openDevice", { name: device.name }), onClick: open, onKeyDown: (event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } } } : {})}>
         <title>{t(open ? "deviceTitleOpen" : "deviceTitle", { name: device.name, board: device.board })}</title>
         {device.size ? <DeviceBox x={dx} y={dy} size={device.size} name={device.name} colour={colour} unit={unit} focus={focusDevice === device.id} /> : <>
         {focusDevice === device.id && <circle cx={dx} cy={dy} r={r * 1.9} className={styles.pinFocus} />}
