@@ -1,12 +1,12 @@
-import type { MetadataStore, EnergyIqProjectSetupDocument } from "@datafoundry/metadata";
+import type { MetadataStore, EnergyIqMeterPresentation, EnergyIqProjectSetupDocument } from "@datafoundry/metadata";
 import { resolveEnergyProjectCapabilities } from "./energy-project-capabilities.js";
 import { resolveEnergyPublishedHierarchyNodes } from "./energy-query-context.js";
 
-/** presentation.always_on === "true": the meter is meant to run day and night. Read loosely until the setup document types the field. */
-const alwaysOn = (presentation: object | undefined) => (presentation as { always_on?: unknown } | undefined)?.always_on === "true";
+/** presentation.always_on === "true": the meter form's "Always on by design" tick; the meter is meant to run day and night. */
+const alwaysOn = (presentation: EnergyIqMeterPresentation | undefined) => presentation?.always_on === "true";
 /** presentation.light_count: how many light points the meter feeds, a positive whole number kept as text. Anything else: not recorded. */
-const lightCount = (presentation: object | undefined): number | null => {
-  const value = (presentation as { light_count?: unknown } | undefined)?.light_count;
+const lightCount = (presentation: EnergyIqMeterPresentation | undefined): number | null => {
+  const value: unknown = presentation?.light_count;
   const text = typeof value === "string" ? value.trim() : "";
   const count = /^\d+$/.test(text) ? Number(text) : NaN;
   return Number.isSafeInteger(count) && count > 0 ? count : null;
