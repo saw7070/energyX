@@ -6,7 +6,7 @@
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { drawnOpeningRoom, lineWidth, openingSpan, spatialHiddenLayers, spatialLabels, spatialLevelReference, spatialLevels, spatialLines, spatialOpenings, spatialRoomTitle, spatialSymbols } from "@datafoundry/contracts";
+import { drawnOpeningRoom, lineWidth, openingSpan, spatialHiddenLayers, spatialLabels, spatialLevelReference, spatialLevels, spatialLines, spatialOpenings, spatialRoomTitle, spatialSymbols, spatialTextUnit } from "@datafoundry/contracts";
 import { holidayName, joinText } from "./analysis-messages.js";
 import { shortDate } from "./analysis-model.js";
 import { forHoursMeaning, forOneDay, translatorFor, type EnergyIqLocale } from "./locale.js";
@@ -108,6 +108,9 @@ function FloorPlan({ report, level = null }: { report: SiteReport; level?: strin
   const categoryWord = (category: string) => t(`plan.category.${CATEGORIES.find(item => item === category) ?? "other"}`);
   const reference = report.reference!;
   const [vx, vy, vw, vh] = reference.layout.viewBox;
+  // Text labels and lines are sized as the map sizes them (spatialTextUnit): from the width, never more than this
+  // sheet's rooms and areas call for.
+  const unit = spatialTextUnit(reference.layout.viewBox, reference.layout.rooms.map(room => room.rect), reference.layout.zones.filter(zone => zone.rect && zone.independentSpace !== false).map(zone => zone.rect));
   // Layers hidden on the shared map are hidden here too (only known layer names count; saved layouts are untrusted).
   const hidden = spatialHiddenLayers(reference.layout);
   const areas = report.zones.filter(zone => !zone.subgroup && zone.rect);
@@ -146,7 +149,7 @@ function FloorPlan({ report, level = null }: { report: SiteReport; level?: strin
   // Text labels and landmarks often sit outside the building (a car park, a bus stop, a side gate): the legend goes below
   // the lowest of them too, so it is never drawn over them and the plan is tall enough to show them.
   const marks = { labels: hidden.has("labels") ? [] : spatialLabels(reference.layout), symbols: hidden.has("symbols") ? [] : spatialSymbols(reference.layout).filter(item => !item.legacy) };
-  const labelFont = (size: "s" | "m" | "l" | undefined) => vw / 100 * { s: 1.3, m: 1.9, l: 2.8 }[size ?? "m"];
+  const labelFont = (size: "s" | "m" | "l" | undefined) => unit * { s: 1.3, m: 1.9, l: 2.8 }[size ?? "m"];
   const turnedBottom = (halfWidth: number, halfHeight: number, rotation = 0) => { const a = rotation * Math.PI / 180; return Math.abs(Math.sin(a)) * halfWidth + Math.abs(Math.cos(a)) * halfHeight; };
   const marksBottom = Math.max(-Infinity,
     ...marks.labels.map(item => { const font = labelFont(item.size); return item.position[1] + turnedBottom(textWidth(item.text, font) * (item.bold ? 0.55 : 0.5), font * 0.65, item.rotation); }),
@@ -187,7 +190,7 @@ function FloorPlan({ report, level = null }: { report: SiteReport; level?: strin
       const { a, b } = openingSpan(room.rect as [number, number, number, number], opening);
       return <line key={opening.id} x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} stroke="#fff" strokeWidth={3} />;
     })}
-    {!hidden.has("lines") && spatialLines(reference.layout).map(line => <polyline key={line.id} points={line.points.map(point => point.join(",")).join(" ")} fill="none" stroke={line.style === "partition" ? C.muted : line.style === "wall" ? C.ink : C.slate} strokeWidth={+(lineWidth(line.style, line.thickness) * vw / 100).toFixed(2)} strokeLinecap="round" strokeLinejoin="round" {...(line.style === "fence" ? { strokeDasharray: "6,4" } : {})} />)}
+    {!hidden.has("lines") && spatialLines(reference.layout).map(line => <polyline key={line.id} points={line.points.map(point => point.join(",")).join(" ")} fill="none" stroke={line.style === "partition" ? C.muted : line.style === "wall" ? C.ink : C.slate} strokeWidth={+(lineWidth(line.style, line.thickness) * unit).toFixed(2)} strokeLinecap="round" strokeLinejoin="round" {...(line.style === "fence" ? { strokeDasharray: "6,4" } : {})} />)}
     {subgroups.map(zone => {
       const room = reference.layout.rooms.find(item => item.name === zone.parentRoom);
       if (!room) return null;

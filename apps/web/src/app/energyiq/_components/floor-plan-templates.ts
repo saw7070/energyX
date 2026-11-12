@@ -10,6 +10,7 @@ import { MAX_OPENINGS, openingCount } from "./floor-plan-openings";
 import { MAX_SHAPES } from "./floor-plan-plain-shapes";
 import { labelBounds, symbolBounds } from "./floor-plan-marks";
 import { MAX_COORD, MAX_PLAN_SIZE, contentBounds, settleRooms, type FloorPlan, type PlanArea, type PlanRoom, type Point, type Rect, type Selection } from "./floor-plan-model";
+import { planUnit } from "./floor-plan-unit";
 
 /** Most copies one Repeat makes. */
 export const MAX_REPEAT = 20, MAX_ROW_ROOMS = 20;
@@ -56,7 +57,7 @@ export function repeatItems(plan: FloorPlan, selection: Selection[], count: numb
   if (lineCount(plan) + (clip.lines?.length ?? 0) * times > MAX_LINES) return { failure: "tooManyLines" };
   if (openingCount(plan) + (clip.openings?.length ?? 0) * times > MAX_OPENINGS) return { failure: "tooManyOpenings" };
   if ((plan.shapes?.length ?? 0) + (plan.elsewhere?.shapes ?? 0) + (clip.shapes?.length ?? 0) * times > MAX_SHAPES) return { failure: "tooManyShapes" };
-  const boxes = clipBoxes(clip, plan.viewBox[2] / 100);
+  const boxes = clipBoxes(clip, planUnit(plan));
   if (!boxes.length) return { failure: "nothing" };
   const [bx, by, bw, bh] = boundsOf(boxes);
   const step = direction === "across" ? [bw + space, 0] : [0, bh + space];

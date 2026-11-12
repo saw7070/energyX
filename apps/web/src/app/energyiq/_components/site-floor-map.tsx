@@ -1,6 +1,6 @@
 "use client";
 import { useId, useState, type CSSProperties, type KeyboardEvent } from "react";
-import { drawnOpeningRoom, innerBox, insideSpatial, pointsAttribute, polygonOf, spatialLabels, spatialLevelOf, spatialLevelReference, spatialLevels, spatialLines, spatialOpenings, spatialRoomTitle, spatialRotation, spatialShapes, spatialSymbols, spatialZoneLevel, type ProjectSpatialReference } from "@datafoundry/contracts";
+import { drawnOpeningRoom, innerBox, insideSpatial, pointsAttribute, polygonOf, spatialLabels, spatialLevelOf, spatialLevelReference, spatialLevels, spatialLines, spatialOpenings, spatialRoomTitle, spatialRotation, spatialShapes, spatialSymbols, spatialTextUnit, spatialZoneLevel, type ProjectSpatialReference } from "@datafoundry/contracts";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { translatorFor, type EnergyIqLocale } from "./energyiq-messages";
 import { floorMapMessages } from "./site-floor-map-messages";
@@ -180,7 +180,9 @@ function MapSheet({ reference, large = false, devices: allDevices = [], onOpenDe
   const gridId = useId().replace(/[^a-zA-Z0-9]/g, "");
   const { locale } = useEnergyIqLocale();
   const [x, y, w, h] = reference.layout.viewBox;
-  const unit = w / 100;
+  // Text and symbol size: a hundredth of the width, never more than this floor's rooms and areas call for (see
+  // spatialTextUnit). The editor and the report size it the same way, from the same floor.
+  const unit = spatialTextUnit(reference.layout.viewBox, reference.layout.rooms.map(room => room.rect), reference.layout.zones.filter(zone => zone.rect && zone.independentSpace !== false).map(zone => zone.rect));
   const colours = zoneColours(colourSource.layout.zones, chosenColours(colourSource));
   const zoneOf = new Map(reference.layout.zones.map(zone => [zone.id, zone]));
   const entrance = (reference as ProjectSpatialReference & Extras).layout.entrance;

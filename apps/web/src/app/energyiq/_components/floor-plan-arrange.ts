@@ -9,6 +9,7 @@ import { shiftLabel, shiftSymbol, withoutRejected } from "./floor-plan-mark-data
 import { boxFrame, frameBounds, hitsFrame, labelBounds, labelFrame, MARK_LIMIT, normaliseRotation, symbolBounds, symbolFrame, type Frame, type PlanLabel, type PlanSymbol } from "./floor-plan-marks";
 import { copiedOpenings, newRoomId, openingBox, type PlanOpening } from "./floor-plan-openings";
 import { newShapeKey, type PlanShape } from "./floor-plan-plain-shapes";
+import { planUnit } from "./floor-plan-unit";
 import { asOwnArea, clampPoint, clampRect, deviceRect, devicePosition, MAX_AREAS, MAX_ROOMS, moveSelection, NO_PASSENGERS, passengers, promoteEntrance, removeSelection, roomOwner, settleRooms, type FloorPlan, type PlanArea, type PlanRoom, type Point, type Rect, type Selection } from "./floor-plan-model";
 
 export type Riders = ReturnType<typeof NO_PASSENGERS>;
@@ -41,7 +42,7 @@ export const stillThere = (plan: FloorPlan, list: Selection[]) => list.every(ite
  */
 export function boxOf(plan: FloorPlan, item: Selection): Rect | null {
   if (item.kind === "area" || item.kind === "room" || item.kind === "shape") return (find(plan, item) as { rect: Rect } | undefined)?.rect ?? null;
-  const unit = plan.viewBox[2] / 100;
+  const unit = planUnit(plan);
   if (item.kind === "label") { const label = plan.labels?.find(entry => entry.key === item.key); return label ? labelBounds(label, unit) : null; }
   if (item.kind === "symbol") { const symbol = plan.symbols?.find(entry => entry.key === item.key); return symbol ? symbolBounds(symbol, unit) : null; }
   if (item.kind === "device") { const device = plan.devices.find(entry => entry.meterId === item.key); return device ? deviceRect(device) ?? [device.position[0], device.position[1], 0, 0] : null; }
@@ -52,7 +53,7 @@ export function boxOf(plan: FloorPlan, item: Selection): Rect | null {
 
 /** The shape an item turns with (see floor-plan-marks), for the items that can turn: labels, landmarks, the entrance and device boxes. */
 export function frameOf(plan: FloorPlan, item: Selection): Frame | null {
-  const unit = plan.viewBox[2] / 100;
+  const unit = planUnit(plan);
   if (item.kind === "label") { const label = plan.labels?.find(entry => entry.key === item.key); return label ? labelFrame(label, unit) : null; }
   if (item.kind === "symbol") { const symbol = plan.symbols?.find(entry => entry.key === item.key); return symbol ? symbolFrame(symbol, unit) : null; }
   if (item.kind === "entrance") { const entrance = plan.entrance; return entrance ? symbolFrame({ kind: "entrance", position: entrance.position, ...(entrance.size !== undefined ? { size: entrance.size } : {}), ...(entrance.rotation ? { rotation: entrance.rotation } : {}) }, unit) : null; }
@@ -113,7 +114,7 @@ export function moveItems(plan: FloorPlan, list: Selection[], dx: number, dy: nu
   const keys = (kind: Selection["kind"], extra: Set<string>) => new Set([...hosts.filter(item => item.kind === kind).map(item => item.key), ...extra]);
   const areas = keys("area", riders.areas), rooms = keys("room", riders.rooms), devices = keys("device", riders.devices), labels = keys("label", new Set()), symbols = keys("symbol", new Set()), shapes = keys("shape", new Set());
   const shift = (rect: Rect): Rect => clampRect([rect[0] + mx, rect[1] + my, rect[2], rect[3]], plan.viewBox);
-  const step = (point: Point): Point => clampPoint([point[0] + mx, point[1] + my], plan.viewBox);
+  const step = (point: Point): Point => clampPoint([point[0] + mx, point[1] + my], plan.viewBox), unit = planUnit(plan);
   return {
     ...plan,
     areas: plan.areas.map(item => areas.has(item.key) ? { ...item, rect: shift(item.rect) } : item),
@@ -121,8 +122,8 @@ export function moveItems(plan: FloorPlan, list: Selection[], dx: number, dy: nu
     devices: plan.devices.map(item => devices.has(item.meterId) ? { ...item, position: devicePosition(item, [item.position[0] + mx, item.position[1] + my], plan.viewBox) } : item),
     ...(plan.shapes ? { shapes: plan.shapes.map(item => shapes.has(item.key) ? { ...item, rect: shift(item.rect) } : item) } : {}),
     entrance: plan.entrance && hosts.some(item => item.kind === "entrance") ? { ...plan.entrance, position: step(plan.entrance.position) } : plan.entrance,
-    ...(plan.labels ? { labels: plan.labels.map(item => labels.has(item.key) ? shiftLabel(item, mx, my, plan.viewBox) : item) } : {}),
-    ...(plan.symbols ? { symbols: plan.symbols.map(item => symbols.has(item.key) ? shiftSymbol(item, mx, my, plan.viewBox) : item) } : {}),
+    ...(plan.labels ? { labels: plan.labels.map(item => labels.has(item.key) ? shiftLabel(item, mx, my, plan.viewBox, unit) : item) } : {}),
+    ...(plan.symbols ? { symbols: plan.symbols.map(item => symbols.has(item.key) ? shiftSymbol(item, mx, my, plan.viewBox, unit) : item) } : {}),
     ...(plan.lines ? { lines: shiftLines(plan, keys("line", riders.lines), mx, my).lines } : {}),
   };
 }
@@ -136,8 +137,8 @@ export function turnItem(plan: FloorPlan, item: Selection, deg: number): FloorPl
   // A saved turn the checks turned down (riding along as written) goes, so turning back to 0° never brings it back.
   const rotation = normaliseRotation(deg), turned = <T extends { rotation?: number; extra?: Record<string, unknown>; mark?: { extra?: Record<string, unknown> } }>(entry: T): T => { const { rotation: _old, ...rest } = withoutRejected(entry, "rotation", item.kind === "entrance"); return (rotation ? { ...rest, rotation } : rest) as T; };
   const same = (entry: { rotation?: number }) => (entry.rotation ?? 0) === rotation;
-  if (item.kind === "label") { const label = plan.labels?.find(entry => entry.key === item.key); return !label || same(label) ? plan : { ...plan, labels: plan.labels!.map(entry => entry === label ? shiftLabel(turned(entry), 0, 0, plan.viewBox) : entry) }; }
-  if (item.kind === "symbol") { const symbol = plan.symbols?.find(entry => entry.key === item.key); return !symbol || same(symbol) ? plan : { ...plan, symbols: plan.symbols!.map(entry => entry === symbol ? shiftSymbol(turned(entry), 0, 0, plan.viewBox) : entry) }; }
+  if (item.kind === "label") { const label = plan.labels?.find(entry => entry.key === item.key); return !label || same(label) ? plan : { ...plan, labels: plan.labels!.map(entry => entry === label ? shiftLabel(turned(entry), 0, 0, plan.viewBox, planUnit(plan)) : entry) }; }
+  if (item.kind === "symbol") { const symbol = plan.symbols?.find(entry => entry.key === item.key); return !symbol || same(symbol) ? plan : { ...plan, symbols: plan.symbols!.map(entry => entry === symbol ? shiftSymbol(turned(entry), 0, 0, plan.viewBox, planUnit(plan)) : entry) }; }
   if (item.kind === "entrance") return !plan.entrance || same(plan.entrance) ? plan : { ...plan, entrance: turned(plan.entrance) };
   if (item.kind === "device") { const device = plan.devices.find(entry => entry.meterId === item.key); if (!device?.size || same(device)) return plan; const next = turned(device); return { ...plan, devices: plan.devices.map(entry => entry === device ? { ...next, position: devicePosition(next, next.position, plan.viewBox) } : entry) }; }
   return plan;
@@ -278,7 +279,7 @@ export function newMarkId(plan: FloorPlan, prefix: "lb" | "sy"): string {
  * areas that are not on the drawing. The copies of what was picked come back selected.
  */
 export function pasteClip(plan: FloorPlan, clip: Clip, offset: number, copyOf: (name: string) => string, reserved: string[] = []): { plan: FloorPlan; selection: Selection[] } {
-  const unit = plan.viewBox[2] / 100;
+  const unit = planUnit(plan);
   const [dx, dy] = clampDelta([...clip.areas.map(item => item.rect), ...clip.rooms.map(item => item.rect), ...(clip.labels ?? []).map(item => labelBounds(item, unit)), ...(clip.symbols ?? []).map(item => symbolBounds(item, unit)), ...(clip.lines ?? []).map(lineBox), ...(clip.shapes ?? []).map(item => item.rect)], [offset, offset], plan.viewBox);
   const shift = (rect: Rect): Rect => clampRect([rect[0] + dx, rect[1] + dy, rect[2], rect[3]], plan.viewBox);
   // Keys, labels and names on other floors are taken too (see floor-plan-levels).
