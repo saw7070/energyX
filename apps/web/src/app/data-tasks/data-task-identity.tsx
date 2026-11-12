@@ -460,6 +460,11 @@ function csrfAuthHeaders(): Record<string, string> {
   return token ? { "X-CSRF-Token": token } : {};
 }
 
+/** The signed-in identity, or null outside the provider (for features that only use it to keep per-person browser data apart). */
+export function useOptionalDataTaskIdentity(): DataTaskIdentityContextValue | null {
+  return useContext(DataTaskIdentityContext);
+}
+
 export function useDataTaskIdentity(): DataTaskIdentityContextValue {
   const context = useContext(DataTaskIdentityContext);
   if (!context) {

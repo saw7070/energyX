@@ -1,13 +1,15 @@
 "use client";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { flushSync } from "react-dom";
 import { configApi } from "../../../lib/config-api";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { intlLocale } from "./energyiq-messages";
 import { ArrangeActions, GridMenu, LineUpActions } from "./floor-plan-actions";
+import { areaItemName, areaName as areaNameOf, countText, itemId, movedText, parseItemId, resizedText, selectionText, useAnnouncer } from "./floor-plan-announce";
 import { alignItems, distributeItems, placeTyped, sameSize, sizable, type Arranged, type Field } from "./floor-plan-align";
 import { resizeCanvasFrom } from "./floor-plan-canvas";
 import { ColourPicker, withBoardColour } from "./floor-plan-colour";
+import { clearPlanDraft, usePlanDraft } from "./floor-plan-draft";
 import { boxOf, copyItems, everything, fitsLimits, inBox, isIn, isLocked, lockItems, moveItems, newRoomId, pasteClip, removeItems, reorderItems, ridersOf, roomIds, stillThere, toggled, type Clip, type Riders } from "./floor-plan-arrange";
 import { boxBetween, centredBox, isClick, snappedBox } from "./floor-plan-geometry";
 import { floorPlanMessages } from "./floor-plan-messages";
@@ -15,9 +17,13 @@ import { canRedo, canUndo, commitPlan, endTyping, finishChange, redo, selectIn, 
 import { isTextEntry, planShortcut } from "./floor-plan-keys";
 import { PositionFields } from "./floor-plan-position";
 import { boundsOf, editorPrefs, gridSpacing, guideFor, guideTargets, samePrefs, snapToLines, withPrefs, type EditorPrefs, type Guide, type GuideTargets } from "./floor-plan-snap";
+import { AreaShape, DeviceShape, EntranceShape, GroupShape, RoomShape, type ItemDown } from "./floor-plan-shapes";
+import { DraftOffer, ZoomControls } from "./floor-plan-view-controls";
+import { useCoarsePointer, useElementWidth, usePlanViewport } from "./floor-plan-viewport";
+import { maxZoom, MIN_ZOOM, planPoint } from "./floor-plan-zoom";
 import { EnergyIcon } from "./icons";
 import { LockBadge } from "./plan-symbols";
-import { boardColours, boardlessColours, DeviceBox, mapDevices, pinLabel, roomHasPins, SiteFloorMap, wrapLabel } from "./site-floor-map";
+import { boardColours, boardlessColours, mapDevices, pinLabel, roomHasPins, SiteFloorMap } from "./site-floor-map";
 import {
   asGroupIn, asOwnArea, autoPlace, centre, hiddenZones, MAX_AREAS, MAX_ROOMS, NOTES_LIMIT, roomOwner, PLAN_STYLES, planStyleOf, clampPoint, clampRect, contains, NO_PASSENGERS, sameGeometry, settleRooms, defaultDeviceSize, deviceRect, resizeCanvas, notesWithReference, planFromReference, referenceFromPlan, resizeRect, snap, starterPlan,
   type FloorPlan, type Handle, type PlanArea, type Point, type Rect, type Selection, type StoredSpatialReference,
@@ -29,6 +35,18 @@ export type PlanMeter = { id: string; name: string; board: string; type: string 
 const CORNERS: Handle[] = ["nw", "ne", "sw", "se"];
 /** How close (in screen pixels) an edge or centre must come to another item's to line up with it. */
 const GUIDE_REACH = 6;
+/** A finger held still this long on an item adds it to (or takes it out of) the selection, like Shift-click. */
+export const LONG_PRESS_MS = 500;
+/** How far (in screen pixels) a finger may wander and still count as held still. */
+const TOUCH_SLOP = 8;
+/** Resize grips across, in screen pixels: big enough for a finger on a touch screen. */
+const GRIP_PX = 12, TOUCH_GRIP_PX = 28;
+/** How far the keyboard focus ring sits outside an item, in screen pixels. */
+const RING_PX = 6;
+/** Below this width (in CSS pixels) the editor's side panel goes under the plan. */
+const NARROW = 900;
+/** Re-exported so the Facility page can drop a draft when someone leaves the editor without saving. */
+export { clearPlanDraft };
 
 /**
  * The floor plan inside the Floor layout workspace: the selected location's boards stand out, and clicking an area
@@ -57,7 +75,7 @@ export function FloorPlanView({ reference, meters, highlight, highlightDevices =
  * line up with (worked out once, so big plans stay smooth), `reach` how close counts in plan units, and `last` the last
  * amount shown, so a pointer move that changes nothing draws nothing.
  */
-type Drag = { mode: "move" | "resize"; selection: Selection[]; handle?: Handle; start: Point; original: FloorPlan; before: HistoryEntry; riders: Riders; moved: boolean; copied: boolean; warned: boolean; narrow?: Selection; box?: Rect; targets?: GuideTargets; reach: number; last?: Point };
+type Drag = { mode: "move" | "resize"; selection: Selection[]; handle?: Handle; start: Point; original: FloorPlan; before: HistoryEntry; pressed?: Selection[]; riders: Riders; moved: boolean; copied: boolean; warned: boolean; narrow?: Selection; box?: Rect; targets?: GuideTargets; reach: number; last?: Point };
 /**
  * A drag on empty space (or a Shift-drag inside an area): a selection box, or the box of a new area, room or equipment.
  * `click` is the area pressed, which a Shift-click without dragging adds to the selection.
@@ -81,7 +99,8 @@ export function UnsavedBar({ onKeep, onLeave }: { onKeep: () => void; onLeave: (
 
 /** Full-width editor: design areas and rooms, place devices, then save to the layout block in Project notes. */
 /** `onDirtyChange` says whether there are changes not saved yet, so the page can ask before leaving the editor. */
-export function FloorPlanEditor({ projectId, notes, block, previous, meters, boards, onCancel, onSaved, onDirtyChange }: { projectId: string; notes: string; block: string | null; previous: StoredSpatialReference | null; meters: PlanMeter[]; boards: string[]; onCancel: () => void; onSaved: (message: string) => void; onDirtyChange?: (changed: boolean) => void }) {
+/** `userId` is who is signed in: the unsaved draft kept in this browser is theirs alone (see floor-plan-draft). */
+export function FloorPlanEditor({ projectId, userId = "", notes, block, previous, meters, boards, onCancel, onSaved, onDirtyChange }: { projectId: string; userId?: string; notes: string; block: string | null; previous: StoredSpatialReference | null; meters: PlanMeter[]; boards: string[]; onCancel: () => void; onSaved: (message: string) => void; onDirtyChange?: (changed: boolean) => void }) {
   const t = useMessages(floorPlanMessages);
   const { locale } = useEnergyIqLocale();
   // The plan and the selection, with every step Undo and Redo can go to (see floor-plan-history).
@@ -116,6 +135,15 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   const [clipboard, setClipboard] = useState<{ clip: Clip; pasted: number } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const sectionRef = useRef<HTMLElement>(null);
+  // Zoom and pan (see floor-plan-viewport): only what the editor shows moves, never the plan's own coordinates. A pinch
+  // or a pan that starts during a drag drops the drag (`abortRef`, set below).
+  const abortRef = useRef<() => void>(() => undefined);
+  const viewport = usePlanViewport({ svgRef, viewBox: plan.viewBox, projectId, onGestureStart: () => abortRef.current() });
+  const coarse = useCoarsePointer();
+  // On a narrow screen (or a narrow window) the side panel goes under the plan.
+  const editorWidth = useElementWidth(sectionRef);
+  const narrowScreen = editorWidth > 0 && editorWidth < NARROW;
+  const keysId = useId();
   /** Keys work while the plan has focus; clicking it gives it focus. */
   const focusCanvas = () => { const svg = svgRef.current as (SVGSVGElement & { focus?: (options?: FocusOptions) => void }) | null; svg?.focus?.({ preventScroll: true }); };
   /**
@@ -134,13 +162,20 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   const [sweepBox, setSweepBox] = useState<{ kind: Sweep["kind"]; rect: Rect } | null>(null);
   const [vx, vy, vw, vh] = plan.viewBox;
   const unit = vw / 100;
+  // The part of the plan on screen. `screen` is a hundredth of the editor's width in plan units at this zoom (guides use
+  // it); `perPx` is one screen pixel in plan units, so grips and the focus ring are a fixed size on screen however wide
+  // the editor is and however far in or out the plan is zoomed (until the width is known, a 1000-pixel editor is assumed).
+  const [wx, wy, ww, wh] = viewport.window;
+  const screen = unit / viewport.zoom;
+  const perPx = viewport.fitPx > 0 ? 1 / (viewport.fitPx * viewport.zoom) : ww / 1000;
   const mac = isMac(), keyName = (letter: string) => mac ? `⌘${letter}` : `Ctrl+${letter}`;
   // Panels are optional: an area may name none (""), and it is never offered as a panel to choose.
   const allBoards = [...new Set([...boards, ...plan.areas.map(item => item.board)].filter(Boolean))];
   // Colours count only the panels the plan's areas name, exactly as the saved map does, so a panel keeps the same
   // colour while editing and after saving (other groups' names never shift it).
   const planBoards = plan.areas.map(item => item.board);
-  const colours = boardColours(planBoards, plan.colours);
+  const boardKey = JSON.stringify(planBoards);
+  const colours = useMemo(() => boardColours(JSON.parse(boardKey) as string[], plan.colours), [boardKey, plan.colours]);
   const noBoardColours = boardlessColours(planBoards, plan.areas.filter(item => !item.board).map(item => item.key));
   /** An area's colour: its own, else its panel's, else (no panel) the next colour after the panels. */
   const areaColour = (item: PlanArea) => item.colour ?? (item.board ? colours.get(item.board) : noBoardColours.get(item.key)) ?? "var(--zone-6)";
@@ -148,35 +183,42 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   const recolour = <T extends { colour?: string }>(item: T, hex: string | null): T => { const { colour: _old, ...rest } = item; return (hex ? { ...rest, colour: hex } : rest) as T; };
   /** One colour choice is one undo step, however long the colour picker is dragged (`target` names what is coloured). */
   const pickColour = (target: string, apply: (hex: string | null) => FloorPlan) => (hex: string | null, live?: boolean) => commit(apply(hex), live ? { merge: `colour:${target}` } : undefined);
-  const colourPicker = (target: string, value: string | undefined, autoLabel: string, apply: (hex: string | null) => FloorPlan) => <ColourPicker key={target} legend={t("panel.colour")} hint={t("panel.colourHint")} value={value} autoLabel={autoLabel} onPick={pickColour(target, apply)} onDone={() => setHistory(endTyping)} />;
-  const meterById = new Map(meters.map(meter => [meter.id, meter]));
-  const placedIds = new Set(plan.devices.map(item => item.meterId));
+  const colourPicker = (target: string, value: string | undefined, autoLabel: string, apply: (hex: string | null) => FloorPlan) => <ColourPicker key={`colour:${target}`} legend={t("panel.colour")} hint={t("panel.colourHint")} value={value} autoLabel={autoLabel} onPick={pickColour(target, apply)} onDone={() => setHistory(endTyping)} />;
+  const meterById = useMemo(() => new Map(meters.map(meter => [meter.id, meter])), [meters]);
+  const meterName = (id: string) => meterById.get(id)?.name;
+  const placedKey = JSON.stringify(plan.devices.map(item => item.meterId).sort());
+  const placedIds = useMemo(() => new Set(JSON.parse(placedKey) as string[]), [placedKey]);
   const shown = (meterId: string) => meterById.has(meterId);
 
   /** One undo step; `merge` makes letters typed into one field a single step. */
   const commit = (next: FloorPlan, options?: { selection?: Selection[]; merge?: string }) => { setHistory(current => commitPlan(current, next, options)); setError(""); setNotice(""); };
   const show = (next: FloorPlan) => setHistory(current => showPlan(current, next));
-  const undoStep = () => { setHistory(undo); setError(""); setNotice(""); };
+  // What a screen reader hears (see useAnnouncer): the selection, moves, resizes, adds, deletes, undo and redo.
+  const selectionKey = selection.map(itemId).join("|");
+  const { live, speak, say } = useAnnouncer({ plan, selectionKey, trigger: history, describe: () => selectionText(t, plan, selection, meterName) });
+  // Undo and Redo keep focus where it was (on the item, or the plan); if what had focus went away, the plan takes it.
+  const refocus = useRef(false);
+  const keepFocus = () => { const svg = svgRef.current; refocus.current = !!svg && svg.contains(document.activeElement); };
+  const undoStep = () => { if (!canUndo(historyRef.current)) return; keepFocus(); say(() => t("a11y.undone")); setHistory(undo); setError(""); setNotice(""); };
   /** Leaving a field, or pressing Enter in it, ends that bit of typing: typing there again is a new undo step. */
   const typing = { onBlur: () => setHistory(endTyping), onKeyDown: (event: React.KeyboardEvent) => { if (event.key === "Enter") setHistory(endTyping); } };
-  const redoStep = () => { setHistory(redo); setError(""); setNotice(""); };
-  const toPoint = (clientX: number, clientY: number): Point => {
-    const svg = svgRef.current, matrix = svg?.getScreenCTM();
-    if (!svg || !matrix) return [vx + vw / 2, vy + vh / 2];
-    const point = new DOMPoint(clientX, clientY).matrixTransform(matrix.inverse());
-    return [point.x, point.y];
-  };
+  const redoStep = () => { if (!canRedo(historyRef.current)) return; keepFocus(); say(() => t("a11y.redone")); setHistory(redo); setError(""); setNotice(""); };
+  /** A pointer's plan position, through the one helper that reads the SVG's screen matrix (so it is right at any zoom). */
+  const toPoint = (clientX: number, clientY: number): Point => planPoint(svgRef.current, clientX, clientY) ?? [wx + ww / 2, wy + wh / 2];
   const place = (meterId: string, at: Point, plan = history.present.plan) => {
     setPlacing(null);
     if (plan.devices.some(item => item.meterId === meterId && item.locked)) { setNotice(t("editor.locked")); return; }
     commit({ ...plan, devices: [...plan.devices.filter(item => item.meterId !== meterId), { meterId, position: clampPoint([snap(at[0], step), snap(at[1], step)], plan.viewBox) }] }, { selection: [{ kind: "device", key: meterId }] });
+    say(next => countText(t, next, [{ kind: "device", key: meterId }], meterName, "a11y.added", "a11y.addedMany"));
     focusCanvas();
   };
   /** Deletes what is selected, except locked items, which stay (and stay selected). */
   const remove = () => {
     if (!selection.length) return;
     const kept = selection.filter(item => isLocked(plan, item)), next = removeItems(plan, selection);
-    if (next !== plan) commit(next, { selection: kept });
+    const gone = countText(t, plan, selection.filter(item => !isLocked(plan, item)), meterName, "a11y.deleted", "a11y.deletedMany");
+    // Focus on a deleted item would fall out of the editor (and its keys stop working): it goes back to the plan.
+    if (next !== plan) { keepFocus(); say(() => gone); commit(next, { selection: kept }); }
     if (kept.length) setNotice(t("editor.locked"));
   };
   const hidden = hiddenZones(plan);
@@ -192,7 +234,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     // A saved layout holds at most so many areas and rooms: say so instead of adding one that cannot be saved.
     if (!fitsLimits(plan, hidden.length, kind === "room" ? 0 : 1, kind === "room" ? 1 : 0)) { setNotice(tooMany()); return; }
     const box = drawn && !isClick(drawn) ? clampRect(drawn, plan.viewBox) : null;
-    const done = (next: FloorPlan, item: Selection) => { commit(next, { selection: [item] }); setTool(null); focusCanvas(); };
+    const done = (next: FloorPlan, item: Selection) => { say(placed => countText(t, placed, [item], meterName, "a11y.added", "a11y.addedMany")); commit(next, { selection: [item] }); setTool(null); focusCanvas(); };
     if (kind === "area") {
       const key = `area-${Date.now()}`, size: Point = [snap(vw * 0.35, grid), snap(vh * 0.55, grid)];
       const rect = box ?? (at ? centredBox(at, size, plan.viewBox, step) : clampRect([vx + 20, vy + 20, size[0], size[1]], plan.viewBox));
@@ -225,7 +267,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     const rect = box ?? clampRect([rx + 12, ry + rh - height - 12, Math.max(20, rw - 24), height], plan.viewBox);
     done({ ...plan, areas: [...plan.areas, { key, label: nextLabel(), board, insideRoom: room.key, equipment: "", rect }] }, { kind: "area", key });
   };
-  const addEntrance = () => { commit({ ...plan, entrance: { label: t("name.mainEntrance"), position: [vx + vw / 2, vy + vh - 40] } }, { selection: [{ kind: "entrance", key: "entrance" }] }); focusCanvas(); };
+  const addEntrance = () => { say(placed => countText(t, placed, [{ kind: "entrance", key: "entrance" }], meterName, "a11y.added", "a11y.addedMany")); commit({ ...plan, entrance: { label: t("name.mainEntrance"), position: [vx + vw / 2, vy + vh - 40] } }, { selection: [{ kind: "entrance", key: "entrance" }] }); focusCanvas(); };
   const updateArea = (key: string, patch: Partial<PlanArea>, merge?: string) => commit({ ...plan, areas: plan.areas.map(item => item.key === key ? { ...item, ...patch } : item) }, merge ? { merge } : undefined);
 
   // Duplicate, copy and paste: areas and rooms come with what is inside them; devices are placed once, so never copied.
@@ -236,7 +278,9 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   /** Puts a copy on the plan; refused, with a message, when the plan could then not be saved. */
   const putCopy = (clip: Clip, offset: number) => {
     if (!fits(clip)) { setNotice(tooMany()); return false; }
-    const result = pasteClip(plan, clip, offset, copyName, reserved); commit(result.plan, { selection: result.selection }); focusCanvas(); return true;
+    const result = pasteClip(plan, clip, offset, copyName, reserved);
+    say(placed => countText(t, placed, result.selection, meterName, "a11y.added", "a11y.addedMany"));
+    commit(result.plan, { selection: result.selection }); focusCanvas(); return true;
   };
   const duplicate = () => { const clip = copyItems(plan, selection); if (clip) { if (putCopy(clip, grid) && leftOut()) setNotice(t("editor.notCopied")); } else if (selection.length) setNotice(t("editor.notCopied")); };
   const copy = () => { const clip = copyItems(plan, selection); if (!clip) { setNotice(t("editor.notCopied")); return false; } setClipboard({ clip, pasted: 0 }); const copied = t("editor.copied", { pasteKey: keyName("V") }); setNotice(leftOut() ? `${copied} ${t("editor.notCopied")}` : copied); return true; };
@@ -270,15 +314,54 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     const riders = ridersOf(original, moving), hosts = moving.filter(entry => !isLocked(original, entry)).flatMap(entry => { const box = boxOf(original, entry); return box ? [box] : []; });
     // What moves (the picked items and everything riding on them) never lines up with itself.
     const riding = (other: Selection) => isIn(moving, other) || (other.kind === "room" ? riders.rooms.has(other.key) : other.kind === "area" ? riders.areas.has(other.key) : other.kind === "device" && riders.devices.has(other.key));
-    drag.current = { mode: "move", selection: moving, start, original, before: { plan, selection: next }, riders, moved: false, copied: !!copied, warned: false, ...(narrow ? { narrow } : {}), ...(hosts.length ? { box: boundsOf(hosts), targets: targetsAround(original, riding) } : {}), reach: GUIDE_REACH / pxPerUnit() };
+    drag.current = { mode: "move", selection: moving, start, original, before: { plan, selection: next }, pressed: selection, riders, moved: false, copied: !!copied, warned: false, ...(narrow ? { narrow } : {}), ...(hosts.length ? { box: boundsOf(hosts), targets: targetsAround(original, riding) } : {}), reach: GUIDE_REACH / pxPerUnit() };
+    // On a touch screen, holding a finger still on an item adds it to the selection (or takes it out), like Shift-click.
+    if (event.pointerType === "touch" && !copied) holdFor(event, item, selection);
   };
-  /** Screen pixels per plan unit, so guides pull from the same distance on screen however big the plan is. */
-  const pxPerUnit = () => { const width = svgRef.current?.getBoundingClientRect().width ?? 0; return width > 0 ? width / vw : 1; };
+  const press = useRef<{ id: number; at: Point; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const clearPress = () => { if (press.current) { clearTimeout(press.current.timer); press.current = null; } };
+  const holdFor = (event: ReactPointerEvent, item: Selection, before: Selection[]) => {
+    clearPress();
+    const timer = setTimeout(() => {
+      press.current = null;
+      abortPointer();
+      setSelection(toggled(before, item));
+      try { navigator.vibrate?.(12); } catch { /* not every device can */ }
+    }, LONG_PRESS_MS);
+    press.current = { id: event.pointerId, at: [event.clientX, event.clientY], timer };
+  };
+  /**
+   * A tap that places a device on a touch screen: it places when the finger lifts, not when it lands, so a finger that
+   * moves on (a scroll) or is joined by a second one (a pinch) places nothing.
+   */
+  const pendingPlace = useRef<{ id: number; at: Point; meterId: string } | null>(null);
+  /** Drops a drag, selection box or long press under way and puts the plan back as it was (a pinch or a pan took over). */
+  const abortPointer = () => {
+    clearPress();
+    pendingPlace.current = null;
+    if (sweep.current) { sweep.current = null; setSweepBox(null); }
+    const current = drag.current;
+    drag.current = null;
+    if (!current) return;
+    setGuides(lines => lines.length ? [] : lines);
+    // What was selected before the press comes back too (pressing an item had selected it).
+    setHistory(list => showPlan(list, current.before.plan, current.pressed ?? current.before.selection));
+  };
+  useLayoutEffect(() => { abortRef.current = abortPointer; });
+  // A long press still waiting when the editor closes never fires afterwards.
+  useEffect(() => () => { if (press.current) clearTimeout(press.current.timer); }, []);
+  /** Screen pixels per plan unit (at the current zoom), so guides pull from the same distance on screen however big the plan is. */
+  const pxPerUnit = () => { const scale = svgRef.current?.getScreenCTM()?.a; return scale && Number.isFinite(scale) && scale > 0 ? scale : 1; };
   /** The edges and centres of everything on the plan except what `skip` names, for alignment guides. */
   const targetsAround = (source: FloorPlan, skip: (item: Selection) => boolean) => guideTargets(everything(source, shown).filter(item => !skip(item)).flatMap(item => { const box = boxOf(source, item); return box ? [box] : []; }));
   const onPointerMove = (event: ReactPointerEvent) => {
+    const tap = pendingPlace.current;
+    if (tap && event.pointerId === tap.id) { if (Math.hypot(event.clientX - tap.at[0], event.clientY - tap.at[1]) > TOUCH_SLOP) pendingPlace.current = null; return; }
     const area = sweep.current;
     if (area) { const end = toPoint(event.clientX, event.clientY); setSweepBox({ kind: area.kind, rect: area.kind === "draw" ? snappedBox(area.start, end, step) : boxBetween(area.start, end) }); return; }
+    // A finger held still for a long press does not move anything; moving it further makes it a drag.
+    const held = press.current;
+    if (held && event.pointerId === held.id) { if (Math.hypot(event.clientX - held.at[0], event.clientY - held.at[1]) <= TOUCH_SLOP) return; clearPress(); }
     const current = drag.current;
     if (!current) return;
     const [x, y] = toPoint(event.clientX, event.clientY);
@@ -297,11 +380,12 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     }
     const target = current.selection[0]!;
     if (isLocked(current.original, target)) return;
-    const resize = (rect: Rect) => resizeRect(rect, current.handle!, dx, dy, current.original.viewBox);
-    show(target.kind === "area" ? { ...current.original, areas: current.original.areas.map(item => item.key === target.key ? { ...item, rect: resize(item.rect) } : item) }
-      : target.kind === "device" ? { ...current.original, devices: current.original.devices.map(item => { const rect = item.meterId === target.key ? deviceRect(item) : null; if (!rect) return item; const [x, y, w, h] = resize(rect); return { ...item, position: [x + w / 2, y + h / 2] as Point, size: [w, h] as Point }; }) }
-      : { ...current.original, rooms: current.original.rooms.map(item => item.key === target.key ? { ...item, rect: resize(item.rect) } : item) });
+    show(withBox(current.original, target, rect => resizeRect(rect, current.handle!, dx, dy, current.original.viewBox)));
   };
+  /** The plan with one area, room or device box given a new box (worked out from its current one). */
+  const withBox = (source: FloorPlan, target: Selection, change: (rect: Rect) => Rect): FloorPlan => target.kind === "area" ? { ...source, areas: source.areas.map(item => item.key === target.key ? { ...item, rect: change(item.rect) } : item) }
+    : target.kind === "device" ? { ...source, devices: source.devices.map(item => { const rect = item.meterId === target.key ? deviceRect(item) : null; if (!rect) return item; const [x, y, w, h] = change(rect); return { ...item, position: [x + w / 2, y + h / 2] as Point, size: [w, h] as Point }; }) }
+    : target.kind === "room" ? { ...source, rooms: source.rooms.map(item => item.key === target.key ? { ...item, rect: change(item.rect) } : item) } : source;
   /**
    * How far a drag goes for a pointer movement of (rawX, rawY): on the grid, or lined up with the edge or centre of a
    * nearby item when one is within reach (with the guide lines to draw). `free` (snapping off, or Cmd/Ctrl held) follows
@@ -389,6 +473,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     setGuides(lines => lines.length ? [] : lines);
     if (current.copied && !current.moved) { setHistory(list => showPlan(list, current.before.plan, current.before.selection)); return; }
     if (!current.moved) { if (current.narrow) setSelection([current.narrow]); return; }
+    say(next => current.mode === "resize" ? resizedText(t, boxOf(next, current.selection[0]!)) : movedText(t, next, current.selection));
     setHistory(list => { const settled = settleRooms(list.present.plan); return finishChange(list, current.before, sameGeometry(settled, current.before.plan) ? current.before.plan : settled); });
     setError("");
   };
@@ -404,12 +489,18 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     const { plan } = latest();
     focusCanvas();
     if (event.button !== 0) return;
-    if (placing) { place(placing, toPoint(event.clientX, event.clientY), plan); return; }
+    if (placing) {
+      if (event.pointerType === "touch") { pendingPlace.current = { id: event.pointerId, at: [event.clientX, event.clientY], meterId: placing }; return; }
+      place(placing, toPoint(event.clientX, event.clientY), plan); return;
+    }
     const empty = event.target === event.currentTarget || !!(event.target as Element).getAttribute?.("data-grid");
     if (!tool && !empty) return;
     beginSweep(event);
   };
   const endPointer = (event: ReactPointerEvent) => {
+    clearPress();
+    const tap = pendingPlace.current;
+    if (tap && event.pointerId === tap.id) { pendingPlace.current = null; if (placing === tap.meterId) place(tap.meterId, toPoint(tap.at[0], tap.at[1])); return; }
     const area = sweep.current;
     if (!area) { endDrag(); return; }
     sweep.current = null; setSweepBox(null);
@@ -417,23 +508,37 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     if (area.kind === "draw") { if (tool) create(tool, area.start, snappedBox(area.start, end, step)); return; }
     // A click on empty space clears the selection (Shift keeps it); a box selects everything fully inside it.
     const box = boxBetween(area.start, end);
-    if (Math.max(box[2], box[3]) < unit * 0.8) { if (area.click) setSelection(toggled(area.base, area.click)); else if (!area.additive) setSelection([]); return; }
+    if (Math.max(box[2], box[3]) < screen * 0.8) { if (area.click) setSelection(toggled(area.base, area.click)); else if (!area.additive) setSelection([]); return; }
     const found = inBox(plan, box, shown);
     setSelection(area.additive ? [...area.base, ...found.filter(item => !isIn(area.base, item))] : found);
   };
-  const cancelPointer = () => { if (sweep.current) { sweep.current = null; setSweepBox(null); } else endDrag(); };
+  const cancelPointer = () => { clearPress(); pendingPlace.current = null; if (sweep.current) { sweep.current = null; setSweepBox(null); } else endDrag(); };
   /** Arrow presses in a row are separate steps, but holding an arrow down is one step however far it goes. */
   const nudgeRun = useRef(0);
 
   // Shortcuts only while focus is inside the editor, never while typing in a field, and on a button only Undo, Redo and
   // Escape (see floor-plan-keys). Copy and Select all leave text picked on the page to the browser.
   const onKeyDown = (event: React.KeyboardEvent) => {
+    // Space held on the plan: drag to move around it.
+    if (viewport.keyDown(event)) return;
+    // Placing a device, Enter puts it in the middle of the room or area with focus, or else in the middle of what is shown.
+    if (placing && event.key === "Enter" && !event.metaKey && !event.ctrlKey && !event.altKey && svgRef.current?.contains(event.target as Node)) {
+      event.preventDefault();
+      const item = parseItemId((event.target as Element | null)?.getAttribute?.("data-item")), box = item ? boxOf(plan, item) : null;
+      place(placing, box ? (box[2] ? centre(box) : [box[0], box[1]]) : [wx + ww / 2, wy + wh / 2]);
+      return;
+    }
     // With a tool chosen, Enter on the plan adds the item at its usual place, for keyboard users.
     if (tool && event.key === "Enter" && event.target === svgRef.current) { event.preventDefault(); create(tool, null, null); return; }
     const shortcut = planShortcut(event, grid);
     if (!shortcut) return;
+    // Cmd/Ctrl + plus, minus or 0 zoom the plan here, never the whole page.
+    if (shortcut.kind === "zoom") { event.preventDefault(); zoomTo(shortcut.how); return; }
     if (shortcut.kind === "undo" || shortcut.kind === "redo") { event.preventDefault(); if (shortcut.kind === "undo") undoStep(); else redoStep(); return; }
     if (shortcut.kind === "escape") { setPlacing(null); setTool(null); setNotice(""); sweep.current = null; setSweepBox(null); setSelection([]); setLeaving(false); return; }
+    if (shortcut.kind === "cycle") { event.preventDefault(); cycle(shortcut.by); return; }
+    // Enter on the item with focus selects it (Shift+Enter adds it to the selection).
+    if (shortcut.kind === "select") { const item = parseItemId((event.target as Element | null)?.getAttribute?.("data-item")); if (!item) return; event.preventDefault(); setSelection(shortcut.toggle ? toggled(selection, item) : [item]); return; }
     if (shortcut.kind === "selectAll") { if (textPicked()) return; event.preventDefault(); setSelection(everything(plan, shown)); return; }
     if (shortcut.kind === "paste") { if (clipboard) { event.preventDefault(); paste(); } return; }
     // Cmd/Ctrl+D always means Duplicate here, even with nothing selected (never the browser's "Bookmark this page").
@@ -443,10 +548,85 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     event.preventDefault();
     if (shortcut.kind === "delete") { remove(); return; }
     if (!event.repeat) nudgeRun.current += 1;
+    if (shortcut.kind === "resize") { resizeByKey(shortcut.by); return; }
     const moved = moveItems(plan, selection, shortcut.by[0], shortcut.by[1], shortcut.alone ? NO_PASSENGERS() : ridersOf(plan, selection));
     if (moved === plan) { if (selection.some(item => isLocked(plan, item))) setNotice(t("editor.locked")); return; }
+    say(next => movedText(t, next, selection));
     commit(settleRooms(moved), { merge: `nudge:${selection.map(item => `${item.kind}:${item.key}`).join(",")}:${nudgeRun.current}` });
   };
+  /** Cmd/Ctrl+arrow: one selected area, room or device box grows (right, down) or shrinks (left, up) by a grid step. */
+  const resizeByKey = (by: Point) => {
+    if (!single) return;
+    if (isLocked(plan, single)) { setNotice(t("editor.locked")); return; }
+    const box = boxOf(plan, single);
+    if (!box || !box[2]) return;
+    const next = withBox(plan, single, rect => resizeRect(rect, "se", by[0], by[1], plan.viewBox));
+    if (sameGeometry(next, plan)) return;
+    say(placed => resizedText(t, boxOf(placed, single)));
+    commit(settleRooms(next), { merge: `resize:${itemId(single)}:${nudgeRun.current}` });
+  };
+
+  // Keyboard focus on the plan's items: [ and ] move it from item to item (zoomed in, the plan moves to show it), and a
+  // ring shows where it is. Focus that comes from a pointer press shows no ring.
+  const [focused, setFocused] = useState<Selection | null>(null);
+  const focusItem = (item: Selection) => {
+    const box = boxOf(plan, item);
+    if (box) viewport.reveal(box);
+    const element = [...(svgRef.current?.querySelectorAll("[data-item]") ?? [])].find(node => node.getAttribute("data-item") === itemId(item)) as (Element & { focus?: (options?: FocusOptions) => void }) | undefined;
+    element?.focus?.({ preventScroll: true });
+    setFocused(item);
+  };
+  const cycle = (by: 1 | -1) => {
+    const items = everything(plan, shown);
+    if (!items.length) return;
+    const from = focused ?? selection[0] ?? null, at = from ? items.findIndex(item => item.kind === from.kind && item.key === from.key) : -1;
+    focusItem(items[at < 0 ? (by > 0 ? 0 : items.length - 1) : (at + by + items.length) % items.length]!);
+  };
+  const onCanvasFocus = (event: React.FocusEvent) => {
+    const item = parseItemId((event.target as Element).getAttribute?.("data-item"));
+    let visible = true;
+    try { visible = (event.target as Element).matches(":focus-visible"); } catch { /* an older browser: show the ring */ }
+    setFocused(item && visible ? item : null);
+  };
+  const onCanvasBlur = (event: React.FocusEvent) => { if (!svgRef.current?.contains(event.relatedTarget as Node | null)) setFocused(null); };
+
+  // Zoom from the buttons and keys is read out; the wheel and pinches are not (they would say it many times a second).
+  const zoomSpoken = useRef(false);
+  const zoomTo = (how: "in" | "out" | "fit" | "actual") => {
+    zoomSpoken.current = true;
+    const moved = how === "in" ? viewport.zoomIn() : how === "out" ? viewport.zoomOut() : how === "fit" ? viewport.fit() : viewport.actual();
+    if (!moved) { zoomSpoken.current = false; speak(t("zoom.level", { percent: viewport.percent })); }
+  };
+  useEffect(() => { if (zoomSpoken.current) { zoomSpoken.current = false; speak(t("zoom.level", { percent: viewport.percent })); } }, [viewport.percent]); // eslint-disable-line react-hooks/exhaustive-deps
+  // After Undo, Redo or a delete, focus goes back on the plan if what had it went away.
+  useLayoutEffect(() => {
+    if (!refocus.current) return;
+    refocus.current = false;
+    const svg = svgRef.current;
+    if (svg && !svg.contains(document.activeElement)) focusCanvas();
+  }, [history]);
+
+  // An unsaved draft is kept in this browser while editing, and one left from before is offered back (floor-plan-draft).
+  const draft = usePlanDraft({ projectId, userId, block, previous, locale, opened, plan, prefs, changed, busy: () => !!drag.current || !!sweep.current || !!edgeDrag.current, onReplaced: () => setNotice(t("draft.replaced")) });
+  // The grid choices that came with a restored draft go with its undo step: Undo back to the saved plan puts the saved
+  // choices back too (so a plan put back as it was saves exactly as it was), and Redo brings the draft's back.
+  const restoredPrefs = useRef<{ plan: FloorPlan; before: EditorPrefs; after: EditorPrefs } | null>(null);
+  const restoreDraft = () => {
+    const next = draft.restore();
+    if (!next) return;
+    const after = editorPrefs(next);
+    restoredPrefs.current = { plan: next, before: prefs, after };
+    setHistory(current => commitPlan(current, next, { selection: [] }));
+    setPrefs(after);
+    setError(""); setNotice(t("draft.restored"));
+    focusCanvas();
+  };
+  useEffect(() => {
+    const restored = restoredPrefs.current;
+    if (!restored) return;
+    if (plan === opened && samePrefs(prefs, restored.after)) setPrefs(restored.before);
+    else if (plan === restored.plan && samePrefs(prefs, restored.before)) setPrefs(restored.after);
+  }, [plan]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Leaving the page with changes not saved asks first; so does Cancel, inside the page.
   useEffect(() => {
@@ -471,6 +651,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
       const current = await configApi.reportAgentRequest<{ settings: Record<string, unknown> & { contextNotes: string } }>(projectId, "");
       if (current.settings.contextNotes !== notes) { setError(t("editor.notesChanged")); return; }
       await configApi.reportAgentRequest(projectId, "settings", { method: "PUT", body: JSON.stringify({ ...current.settings, contextNotes: nextNotes }) });
+      draft.finish();
       onSaved(t("editor.saved"));
     } catch (reason) { const message = reason instanceof Error ? reason.message : ""; setError(/SETTINGS_CHANGED/.test(message) ? t("editor.notesChanged") : /ADMIN/.test(message) ? t("editor.adminOnly") : t("editor.saveFailed")); }
     finally { setSaving(false); }
@@ -489,7 +670,6 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   const placingName = placing ? meterById.get(placing)?.name : null;
   const own = plan.areas.filter(item => !item.insideRoom), groups = plan.areas.filter(item => item.insideRoom);
   const positions = plan.devices.map(item => item.position);
-  const itemClass = (locked?: true) => `${styles.item} ${locked ? styles.lockedItem : ""}`;
 
   // The actions shared by whatever is selected: duplicate, lock, and drawing order within its kind.
   const lockable = selection.filter(item => item.kind !== "entrance");
@@ -500,19 +680,48 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   /** Line-up results: one undo step, and a short note when locked items were left where they are. */
   const arrange = (result: Arranged) => { if (result.plan !== plan) commit(settleRooms(result.plan)); if (result.skipped) setNotice(t("align.lockedSkipped")); };
   /** Typed X, Y, W or H for one item: one undo step; says whether the value had to change to fit. */
-  const positionFields = (item: Selection, box: Rect) => <PositionFields key={`${item.kind}:${item.key}`} box={box} origin={[vx, vy]} disabled={singleLocked} onCommit={(field: Field, value: number) => { const result = placeTyped(plan, item, field, value); if (result.plan !== plan) commit(result.plan); return result.adjusted; }} />;
-  const gridCell = gridSpacing(grid, vw);
+  const positionFields = (item: Selection, box: Rect) => <PositionFields key={`position:${item.kind}:${item.key}`} box={box} origin={[vx, vy]} disabled={singleLocked} onCommit={(field: Field, value: number) => { const result = placeTyped(plan, item, field, value); if (result.plan !== plan) commit(result.plan); return result.adjusted; }} />;
+  const gridCell = gridSpacing(grid, ww);
+  const focusShown = focused && stillThere(plan, [focused]).length ? focused : null;
+  const focusBox = focusShown ? boxOf(plan, focusShown) : null;
 
   const [placingBefore, placingAfter = ""] = t("editor.placing").split("{name}");
-  const areaName = (label: string) => label.length <= 2 ? t("name.area", { id: label }) : label;
+  const areaName = (label: string) => areaNameOf(t, label);
 
-  // A live picture of the saved look, from the plan as it stands; nothing while the drawing is not yet valid.
-  const preview = useMemo(() => { try { return referenceFromPlan(plan, projectId, previous, locale); } catch { return null; } }, [plan, projectId, previous, locale]);
+  // A live picture of the saved look, from the plan as it stands; nothing while the drawing is not yet valid. It follows
+  // a step behind while dragging (a deferred value), so a drag on a big plan stays smooth.
+  const previewPlan = useDeferredValue(plan);
+  const preview = useMemo(() => { try { return referenceFromPlan(previewPlan, projectId, previous, locale); } catch { return null; } }, [previewPlan, projectId, previous, locale]);
+  const previewMap = useMemo(() => preview ? <SiteFloorMap reference={preview} devices={mapDevices(preview, meters)} /> : null, [preview, meters]);
+  // Each item on the canvas is its own small component, redrawn only when it changes; they all share one press handler.
+  const downRef = useRef<ItemDown>(() => undefined);
+  useLayoutEffect(() => { downRef.current = startDrag; });
+  const itemDown = useCallback<ItemDown>((event, item) => downRef.current(event, item), []);
+  const startPlacing = (meterId: string) => {
+    setTool(null);
+    const next = placing === meterId ? null : meterId;
+    setPlacing(next);
+    focusCanvas();
+    // With the side panel under the plan, bring the plan into view so the next tap can place it.
+    if (next && narrowScreen) svgRef.current?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+  };
+  const paletteBoards = JSON.stringify(allBoards.filter(board => meters.some(meter => meter.board === board)));
+  const startPlacingRef = useRef(startPlacing);
+  useLayoutEffect(() => { startPlacingRef.current = startPlacing; });
+  // The device list is long on a big site: it is drawn again only when what it shows changes, never on a pointer move.
+  const palette = useMemo(() => (JSON.parse(paletteBoards) as string[]).map(board => <div key={board} className={styles.paletteGroup}>
+    <p><span className={styles.swatch} style={{ background: colours.get(board) ?? "var(--zone-6)" }} />{board}</p>
+    <ul>{meters.filter(meter => meter.board === board).map(meter => { const onPlan = placedIds.has(meter.id); return <li key={meter.id} draggable onDragStart={event => { event.dataTransfer.setData("text/plain", meter.id); event.dataTransfer.effectAllowed = "move"; }} className={onPlan ? styles.onPlan : undefined}>
+      <span className={styles.grip} aria-hidden="true">⋮⋮</span>
+      <span className={styles.deviceName}><strong>{meter.name}</strong><small>{meter.type}</small></span>
+      {onPlan ? <button type="button" onClick={() => { setHistory(current => selectIn(current, [{ kind: "device", key: meter.id }])); setNotice(""); }}>{t("panel.onPlan")}</button> : <button type="button" aria-pressed={placing === meter.id} onClick={() => startPlacingRef.current(meter.id)}>{t("panel.place")}</button>}
+    </li>; })}</ul>
+  </div>), [paletteBoards, meters, placedIds, placing, colours, t]);
   const redoKey = mac ? "⇧⌘Z" : "Ctrl+Y";
   const toolButton = (kind: Tool, label: string, hint: string, disabled = false) => <button type="button" className={styles.tool} aria-pressed={tool === kind} disabled={disabled} title={hint} onClick={() => chooseTool(kind)}>{label}</button>;
-  return <section ref={sectionRef} className={`${styles.card} ${styles.editing}`} aria-label={t("editor.title")} tabIndex={-1} onKeyDown={onKeyDown}>
+  return <section ref={sectionRef} className={`${styles.card} ${styles.editing} ${narrowScreen ? styles.narrow : ""}`} data-layout={narrowScreen ? "narrow" : "wide"} aria-label={t("editor.title")} tabIndex={-1} onKeyDown={onKeyDown} onKeyUp={viewport.keyUp}>
     <header className={styles.cardHeader}>
-      <div><h4>{t("editor.title")}</h4><p>{t("editor.help", { undoKey: keyName("Z"), redoKey, copyKey: keyName("C"), pasteKey: keyName("V"), duplicateKey: keyName("D") })}</p><p>{t("editor.drawingOnly")}</p></div>
+      <div><h4>{t("editor.title")}</h4><p>{t("editor.help", { undoKey: keyName("Z"), redoKey, copyKey: keyName("C"), pasteKey: keyName("V"), duplicateKey: keyName("D"), commandKey: mac ? "⌘" : "Ctrl" })}</p><p>{t("editor.drawingOnly")}</p></div>
       <div className={styles.actions}>
         <button type="button" className={styles.secondary} disabled={saving} onClick={cancel}>{t("editor.cancel")}</button>
         <button type="button" className={styles.primary} disabled={saving} onClick={() => void save()}>{saving ? t("editor.saving") : t("editor.save")}</button>
@@ -525,12 +734,15 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
       {toolButton("equipment", t("editor.addEquipment"), plan.rooms.length ? t("editor.hintEquipment") : t("editor.addRoomFirst"), !plan.rooms.length)}
       {!plan.entrance && <button type="button" className={styles.tool} title={t("editor.hintEntrance")} onClick={addEntrance}>{t("editor.addEntrance")}</button>}
       <GridMenu prefs={prefs} onChange={setPrefs} commandKey={mac ? "⌘" : "Ctrl"} />
+      <ZoomControls percent={viewport.percent} edgesHidden={!!viewport.view} whole={!viewport.view} canIn={viewport.zoom < maxZoom(viewport.fitPx) - 1e-6} canOut={viewport.zoom > MIN_ZOOM + 1e-6} commandKey={mac ? "⌘" : "Ctrl"} keyFor={keyName} onIn={() => zoomTo("in")} onOut={() => zoomTo("out")} onFit={() => zoomTo("fit")} onActual={() => zoomTo("actual")} />
       <span className={styles.toolGap} />
       <button type="button" className={styles.tool} disabled={!canUndo(history)} onClick={undoStep}>{t("editor.undo")}</button>
       <button type="button" className={styles.tool} disabled={!canRedo(history)} title={t("editor.hintRedo", { redoKey })} onClick={redoStep}>{t("editor.redo")}</button>
       <button type="button" className={styles.tool} disabled={!deletable} title={t("editor.hintDelete")} onClick={remove}>{t("editor.delete")}</button>
     </div>
-    {leaving && <UnsavedBar onKeep={() => setLeaving(false)} onLeave={onCancel} />}
+    {leaving && <UnsavedBar onKeep={() => setLeaving(false)} onLeave={() => { draft.finish(); onCancel(); }} />}
+    {draft.offer && <DraftOffer savedAt={draft.offer.savedAt} stale={draft.offer.stale} onRestore={restoreDraft} onDiscard={() => { draft.discard(); focusCanvas(); }} />}
+    <p id={keysId} className={styles.srOnly}>{t("a11y.keys", { commandKey: mac ? "⌘" : "Ctrl" })}</p>
     {placingName && <p className={styles.placing} role="status">{placingBefore}<strong>{placingName}</strong>{placingAfter} <button type="button" onClick={() => setPlacing(null)}>{t("editor.cancel")}</button></p>}
     {tool && <p className={styles.placing} role="status">{t(TOOL_STATUS[tool])} <button type="button" onClick={() => { setTool(null); setNotice(""); }}>{t("editor.cancel")}</button></p>}
     {notice && <p className={styles.notice} role="status">{notice}</p>}
@@ -540,51 +752,34 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
       <div className={styles.canvasFrame}>
         {/* The drawing space; pull its right or bottom edge (or the corner) to make it bigger or smaller. */}
         <div className={styles.stage} style={stretch ? { width: stretch } : undefined}>
-        <svg ref={svgRef} viewBox={`${vx} ${vy} ${vw} ${vh}`} className={`${mapStyles.map} ${styles.canvas} ${placing || tool ? styles.placingCursor : ""}`} role="application" aria-label={t("editor.canvas")} tabIndex={0}
+        <svg ref={svgRef} viewBox={`${wx} ${wy} ${ww} ${wh}`} className={`${mapStyles.map} ${styles.canvas} ${placing || tool ? styles.placingCursor : ""} ${viewport.panning ? styles.panning : viewport.spaceHeld ? styles.panReady : ""}`} role="application" aria-label={t("editor.canvas")} aria-describedby={keysId} tabIndex={0}
+          {...viewport.handlers} onFocus={onCanvasFocus} onBlur={onCanvasBlur}
           onPointerMove={onPointerMove} onPointerUp={endPointer} onPointerCancel={cancelPointer} onPointerDown={startSweep}
           onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); const id = event.dataTransfer.getData("text/plain"); if (meterById.has(id)) place(id, toPoint(event.clientX, event.clientY)); }}>
           {/* The grid (the Grid menu can hide it); the empty space under it still takes clicks either way. */}
           {prefs.showGrid && <defs><pattern id="floor-plan-grid" width={gridCell} height={gridCell} patternUnits="userSpaceOnUse"><path d={`M${gridCell} 0 L0 0 0 ${gridCell}`} className={styles.gridLine} /></pattern></defs>}
           <rect data-grid="1" x={vx} y={vy} width={vw} height={vh} fill={prefs.showGrid ? "url(#floor-plan-grid)" : "transparent"} />
-          {own.map(item => { const colour = areaColour(item); const [x, y, w, h] = item.rect; return <g key={item.key} className={itemClass(item.locked)} onPointerDown={event => startDrag(event, { kind: "area", key: item.key })}>
-            <rect x={x} y={y} width={w} height={h} rx={unit * 1.4} className={mapStyles.zone} style={{ fill: colour, stroke: colour }} />
-            <circle cx={x + unit * 2.4} cy={y + unit * 2.6} r={unit * 0.9} style={{ fill: colour }} />
-            <text x={x + unit * 4} y={y + unit * 3.3} className={mapStyles.zoneLabel} style={{ fontSize: unit * 2.1 }}>{item.board ? <>{item.board}<tspan className={mapStyles.zoneSub} dx={unit * 0.8}>{areaName(item.label)}</tspan></> : areaName(item.label)}</text>
-          </g>; })}
-          {plan.rooms.map(room => { const [x, y, w, h] = room.rect; const colour = room.colour ?? roomColour(room.rect); return <g key={room.key} className={itemClass(room.locked)} onPointerDown={event => startDrag(event, { kind: "room", key: room.key })}>
-            <rect x={x} y={y} width={w} height={h} rx={unit * 0.8} className={`${mapStyles.room} ${colour ? "" : styles.orphan}`} style={room.colour ? { stroke: room.colour, fill: `color-mix(in srgb, ${room.colour} 12%, white)` } : colour ? { stroke: colour } : undefined} />
-            {(() => { const size = Math.min(unit * 1.75, w / 7), lines = wrapLabel(room.name, Math.max(6, Math.floor(w / (size * 0.56)))); const top = roomHasPins(room.rect, positions) ? y + size * 1.5 : y + h / 2 + size * 0.35 - (lines.length - 1) * size * 0.6; return <text x={x + w / 2} y={top} textAnchor="middle" className={mapStyles.roomLabel} style={{ fontSize: size }}>{lines.map((line, index) => <tspan key={index} x={x + w / 2} dy={index ? size * 1.2 : 0}>{line}</tspan>)}</text>; })()}
-          </g>; })}
-          {groups.map(item => { const colour = areaColour(item); const [x, y, w, h] = item.rect; const pinned = roomHasPins(item.rect, positions); return <g key={item.key} className={itemClass(item.locked)} onPointerDown={event => startDrag(event, { kind: "area", key: item.key })}>
-            <rect x={x} y={y} width={w} height={h} rx={unit * 0.8} className={mapStyles.subgroup} style={{ stroke: colour, fill: colour }} />
-            <text x={pinned ? x + unit * 0.8 : x + w / 2} y={pinned ? y + unit * 1.6 : y + h / 2 + unit * 0.6} textAnchor={pinned ? "start" : "middle"} className={mapStyles.subgroupLabel} style={{ fontSize: unit * (pinned ? 1.15 : 1.5) }}>{item.board ? `${item.board} · ` : ""}{item.equipment || t("panel.groupFallback")}</text>
-          </g>; })}
-          {plan.entrance && (() => { const [x, y] = plan.entrance.position; return <g className={styles.item} onPointerDown={event => startDrag(event, { kind: "entrance", key: "entrance" })}>
-            <path d={`M${x - unit * 1.4},${y + unit * 2.2} L${x},${y} L${x + unit * 1.4},${y + unit * 2.2} Z`} className={mapStyles.entrance} />
-            <text x={x} y={y + unit * 4.6} textAnchor="middle" className={mapStyles.entranceLabel} style={{ fontSize: unit * 1.6 }}>{plan.entrance.label}</text>
-            {isIn(selection, { kind: "entrance", key: "entrance" }) && <circle cx={x} cy={y + unit * 1.2} r={unit * 2.6} className={styles.selectRing} />}
-          </g>; })()}
-          {plan.devices.map(item => { const meter = meterById.get(item.meterId); if (!meter) return null; const [x, y] = item.position; const r = unit * 1.1; const selected = isIn(selection, { kind: "device", key: item.meterId }); return <g key={item.meterId} className={itemClass(item.locked)} onPointerDown={event => startDrag(event, { kind: "device", key: item.meterId })}>
-            <title>{`${meter.name} · ${meter.board}`}</title>
-            {item.size ? <DeviceBox x={x} y={y} size={item.size} name={meter.name} colour={item.colour ?? colours.get(meter.board) ?? "var(--zone-6)"} unit={unit} /> : <>
-            {selected && <circle cx={x} cy={y} r={r * 1.7} className={styles.selectRing} />}
-            <circle cx={x} cy={y} r={r} className={mapStyles.pin} style={{ fill: item.colour ?? colours.get(meter.board) ?? "var(--zone-6)" }} />
-            <text x={x} y={y + r + unit * 1.3} textAnchor="middle" className={mapStyles.pinLabel} style={{ fontSize: unit * 1.15 }}>{pinLabel(meter.name, item.position, plan.rooms, groups)}</text>
-            </>}
-          </g>; })}
+          {own.map(item => <AreaShape key={item.key} item={item} colour={areaColour(item)} name={areaName(item.label)} unit={unit} label={areaItemName(t, item)} onDown={itemDown} />)}
+          {plan.rooms.map(room => <RoomShape key={room.key} room={room} colour={room.colour ?? roomColour(room.rect)} pinned={roomHasPins(room.rect, positions)} unit={unit} label={t("a11y.room", { name: room.name })} onDown={itemDown} />)}
+          {groups.map(item => <GroupShape key={item.key} item={item} colour={areaColour(item)} pinned={roomHasPins(item.rect, positions)} fallback={t("panel.groupFallback")} unit={unit} label={areaItemName(t, item)} onDown={itemDown} />)}
+          {plan.entrance && <EntranceShape entrance={plan.entrance} selected={isIn(selection, { kind: "entrance", key: "entrance" })} unit={unit} label={t("a11y.entrance", { name: plan.entrance.label })} onDown={itemDown} />}
+          {plan.devices.map(item => { const meter = meterById.get(item.meterId); if (!meter) return null; return <DeviceShape key={item.meterId} item={item} name={meter.name} board={meter.board} colour={item.colour ?? colours.get(meter.board) ?? "var(--zone-6)"} pin={item.size ? "" : pinLabel(meter.name, item.position, plan.rooms, groups)} selected={isIn(selection, { kind: "device", key: item.meterId })} unit={unit} label={t("a11y.device", { name: meter.name })} onDown={itemDown} />; })}
           {/* A padlock on each locked item, so it is clear why it does not move. */}
           {everything(plan, shown).filter(item => isLocked(plan, item)).map(item => { const [x, y, w] = boxOf(plan, item)!, size = unit * 1.9; return <LockBadge key={`lock:${item.kind}:${item.key}`} x={w ? x + w - size - unit * 0.4 : x + unit * 1} y={w ? y + unit * 0.4 : y - unit * 2.9} size={size} className={styles.lockBadge} label={t("editor.lockedBadge")} />; })}
           {selection.map(item => { const at = boxOf(plan, item); if (!at || !at[2] || (item.kind === "device" && !shown(item.key))) return null; const [x, y, w, h] = at; return <rect key={`selected:${item.kind}:${item.key}`} x={x} y={y} width={w} height={h} className={styles.selectBox} />; })}
-          {handleRect && (() => { const [x, y, w, h] = handleRect; const size = unit * 1.3; const spot: Record<Handle, Point> = { nw: [x, y], n: [x + w / 2, y], ne: [x + w, y], e: [x + w, y + h / 2], se: [x + w, y + h], s: [x + w / 2, y + h], sw: [x, y + h], w: [x, y + h / 2] };
+          {focusBox && focusShown && (focusBox[2] ? <rect data-focus-ring="1" x={focusBox[0] - perPx * RING_PX} y={focusBox[1] - perPx * RING_PX} width={focusBox[2] + perPx * RING_PX * 2} height={focusBox[3] + perPx * RING_PX * 2} rx={perPx * RING_PX} className={styles.focusRing} />
+            : <circle data-focus-ring="1" cx={focusBox[0]} cy={focusShown.kind === "entrance" ? focusBox[1] + unit * 1.2 : focusBox[1]} r={Math.max(focusShown.kind === "entrance" ? unit * 3.2 : unit * 2.2, perPx * RING_PX * 2.5)} className={styles.focusRing} />)}
+          {handleRect && (() => { const [x, y, w, h] = handleRect; const size = perPx * (coarse ? TOUCH_GRIP_PX : GRIP_PX); const spot: Record<Handle, Point> = { nw: [x, y], n: [x + w / 2, y], ne: [x + w, y], e: [x + w, y + h / 2], se: [x + w, y + h], s: [x + w / 2, y + h], sw: [x, y + h], w: [x, y + h / 2] };
             // Grips on the middle of each edge resize one side only; they show where the side is long enough to tell them from the corners.
             const handles: Handle[] = [...CORNERS, ...(w >= size * 4 ? ["n", "s"] as const : []), ...(h >= size * 4 ? ["e", "w"] as const : [])];
             return <g>
             {handles.map(handle => <rect key={handle} data-handle={handle} x={spot[handle][0] - size / 2} y={spot[handle][1] - size / 2} width={size} height={size} rx={size * 0.2} className={`${styles.handle} ${styles[handle]}`} onPointerDown={event => startDrag(event, single!, "resize", handle)} />)}
           </g>; })()}
-          {guides.map(guide => { const pad = unit; return guide.axis === "x" ? <line key={`x${guide.at}`} data-guide="x" x1={guide.at} x2={guide.at} y1={guide.from - pad} y2={guide.to + pad} className={styles.guide} /> : <line key={`y${guide.at}`} data-guide="y" x1={guide.from - pad} x2={guide.to + pad} y1={guide.at} y2={guide.at} className={styles.guide} />; })}
+          {guides.map(guide => { const pad = screen; return guide.axis === "x" ? <line key={`x${guide.at}`} data-guide="x" x1={guide.at} x2={guide.at} y1={guide.from - pad} y2={guide.to + pad} className={styles.guide} /> : <line key={`y${guide.at}`} data-guide="y" x1={guide.from - pad} x2={guide.to + pad} y1={guide.at} y2={guide.at} className={styles.guide} />; })}
           {sweepBox && <rect x={sweepBox.rect[0]} y={sweepBox.rect[1]} width={sweepBox.rect[2]} height={sweepBox.rect[3]} className={sweepBox.kind === "draw" ? styles.drawBox : styles.marquee} />}
         </svg>
-        {edgeHandle("w", t("editor.edgeLeft"))}{edgeHandle("n", t("editor.edgeTop"))}{edgeHandle("e", t("editor.edgeRight"))}{edgeHandle("s", t("editor.edgeBottom"))}{edgeHandle("se", t("editor.edgeCorner"))}
+        {/* The edges of the drawing space are at the frame's edges only while the whole plan is shown. */}
+        {!viewport.view && <>{edgeHandle("w", t("editor.edgeLeft"))}{edgeHandle("n", t("editor.edgeTop"))}{edgeHandle("e", t("editor.edgeRight"))}{edgeHandle("s", t("editor.edgeBottom"))}{edgeHandle("se", t("editor.edgeCorner"))}</>}
         </div>
       </div>
 
@@ -647,22 +842,17 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
             <span className={`${styles.styleSwatch} ${styles[`swatch_${look}`]}`} aria-hidden="true" />
             <span><strong>{t(`style.${look}`)}</strong><small>{t(`style.${look}Hint`)}</small></span>
           </button>; })}</div>
-          {preview && <><p className={styles.previewTitle}>{t("style.preview")}</p><div className={styles.previewFrame}><SiteFloorMap reference={preview} devices={mapDevices(preview, meters)} /></div></>}
+          {previewMap && <><p className={styles.previewTitle}>{t("style.preview")}</p><div className={styles.previewFrame}>{previewMap}</div></>}
         </div>
         <div className={styles.panel}>
           <div className={styles.paletteHead}><h5>{t("panel.devices")}</h5><span>{t("panel.placedCount", { placed: plan.devices.filter(item => meterById.has(item.meterId)).length, total: meters.length })}</span></div>
           {waiting.length > 0 && <button type="button" className={styles.tool} onClick={() => commit(autoPlace(plan, meters))}>{t("panel.placeRest")}</button>}
           <p className={styles.hint}>{t("panel.hint")}</p>
-          {allBoards.filter(board => meters.some(meter => meter.board === board)).map(board => <div key={board} className={styles.paletteGroup}>
-            <p><span className={styles.swatch} style={{ background: colours.get(board) ?? "var(--zone-6)" }} />{board}</p>
-            <ul>{meters.filter(meter => meter.board === board).map(meter => { const onPlan = placedIds.has(meter.id); return <li key={meter.id} draggable onDragStart={event => { event.dataTransfer.setData("text/plain", meter.id); event.dataTransfer.effectAllowed = "move"; }} className={onPlan ? styles.onPlan : undefined}>
-              <span className={styles.grip} aria-hidden="true">⋮⋮</span>
-              <span className={styles.deviceName}><strong>{meter.name}</strong><small>{meter.type}</small></span>
-              {onPlan ? <button type="button" onClick={() => setSelection([{ kind: "device", key: meter.id }])}>{t("panel.onPlan")}</button> : <button type="button" aria-pressed={placing === meter.id} onClick={() => { setTool(null); setPlacing(placing === meter.id ? null : meter.id); focusCanvas(); }}>{t("panel.place")}</button>}
-            </li>; })}</ul>
-          </div>)}
+          {palette}
         </div>
       </aside>
     </div>
+    {/* Read out politely by screen readers: what was selected, moved, resized, added, deleted, undone or redone. */}
+    <div className={styles.srOnly} aria-live="polite" aria-atomic="true" data-live="plan">{live}</div>
   </section>;
 }
