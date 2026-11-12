@@ -38,7 +38,11 @@ export type HiddenZone = { index: number; zone: Json; rooms?: string[] };
  */
 export type CarriedLayout = { order?: string[]; zones?: HiddenZone[]; entrance?: Point | null; noDevices?: true; rawEntrance?: { value: unknown }; devices?: Array<{ index: number; device: unknown }>; rawDevices?: { value: unknown } };
 /** `colours` holds a colour chosen for a board (board name → #rrggbb); boards without one use the automatic order. */
-export type FloorPlan = { viewBox: Rect; areas: PlanArea[]; rooms: PlanRoom[]; devices: PlanDevice[]; entrance: PlanEntrance | null; colours?: Record<string, string>; style?: PlanStyle; extra?: Json; carried?: CarriedLayout };
+/**
+ * `editor` is the saved `layout.editor` block (grid and snap choices, see floor-plan-snap), kept as saved: only the editor
+ * reads it, and the map, reports and the advisor ignore it.
+ */
+export type FloorPlan = { viewBox: Rect; areas: PlanArea[]; rooms: PlanRoom[]; devices: PlanDevice[]; entrance: PlanEntrance | null; colours?: Record<string, string>; style?: PlanStyle; editor?: Json; extra?: Json; carried?: CarriedLayout };
 /**
  * How the plan is drawn for everyone at the site: an architect's building drawing (the default), a blueprint, or soft
  * colour blocks. Only the look changes; nothing the plan shows or selects does.
@@ -51,7 +55,7 @@ export type Selection = { kind: "area" | "room" | "device" | "entrance"; key: st
 /** The stored block: the shared contract plus the optional extras the Floor plan adds or keeps. */
 export type StoredSpatialReference = ProjectSpatialReference & {
   property?: Record<string, unknown>;
-  layout: ProjectSpatialReference["layout"] & { entrance?: { label?: string; position?: Point; referenceBoard?: string }; devices?: Array<{ meterId: string; position: Point; size?: Point }>; boardColours?: Record<string, string>; style?: PlanStyle; boardMarkers?: Record<string, unknown> };
+  layout: ProjectSpatialReference["layout"] & { entrance?: { label?: string; position?: Point; referenceBoard?: string }; devices?: Array<{ meterId: string; position: Point; size?: Point }>; boardColours?: Record<string, string>; style?: PlanStyle; boardMarkers?: Record<string, unknown>; editor?: Record<string, unknown> };
 };
 
 export const MIN_SIZE = 20;
@@ -82,8 +86,8 @@ const roomIdOf = (room: unknown): { id?: string } => { const value = (room as { 
  * for a room `id` when `roomId` holds it (a well-formed id no earlier room uses).
  */
 const owned = (raw: unknown, keys: readonly string[], roomId: { id?: string } = {}) => [...keys, ...("id" in roomId ? ["id"] : []), ...("locked" in lockedOf(raw) ? ["locked"] : [])];
-const isPoint = (value: unknown): value is Point => Array.isArray(value) && value.length === 2 && value.every(n => typeof n === "number" && Number.isFinite(n));
-const isRect = (value: unknown): value is Rect => Array.isArray(value) && value.length === 4 && value.every(n => typeof n === "number" && Number.isFinite(n));
+export const isPoint = (value: unknown): value is Point => Array.isArray(value) && value.length === 2 && value.every(n => typeof n === "number" && Number.isFinite(n));
+export const isRect = (value: unknown): value is Rect => Array.isArray(value) && value.length === 4 && value.every(n => typeof n === "number" && Number.isFinite(n));
 
 export const snap = (value: number, step: number) => step > 0 ? Math.round(value / step) * step : value;
 export const centre = ([x, y, w, h]: Rect): Point => [x + w / 2, y + h / 2];
@@ -103,12 +107,13 @@ export function clampRect([x, y, w, h]: Rect, [vx, vy, vw, vh]: Rect): Rect {
 export function clampPoint([x, y]: Point, [vx, vy, vw, vh]: Rect): Point {
   return [Math.min(Math.max(vx, x), vx + vw), Math.min(Math.max(vy, y), vy + vh)];
 }
-export type Handle = "nw" | "ne" | "sw" | "se";
-/** Drags one corner; the opposite corner stays put. */
+/** A resize grip: a corner, or the middle of an edge (n, e, s, w), which moves that edge only. */
+export type Handle = "nw" | "ne" | "sw" | "se" | "n" | "e" | "s" | "w";
+/** Drags one corner (the opposite corner stays put) or one edge (the opposite edge stays put). */
 export function resizeRect([x, y, w, h]: Rect, handle: Handle, dx: number, dy: number, viewBox: Rect): Rect {
   let left = x, top = y, right = x + w, bottom = y + h;
-  if (handle.includes("w")) left = Math.min(left + dx, right - MIN_SIZE); else right = Math.max(right + dx, left + MIN_SIZE);
-  if (handle.includes("n")) top = Math.min(top + dy, bottom - MIN_SIZE); else bottom = Math.max(bottom + dy, top + MIN_SIZE);
+  if (handle.includes("w")) left = Math.min(left + dx, right - MIN_SIZE); else if (handle.includes("e")) right = Math.max(right + dx, left + MIN_SIZE);
+  if (handle.includes("n")) top = Math.min(top + dy, bottom - MIN_SIZE); else if (handle.includes("s")) bottom = Math.max(bottom + dy, top + MIN_SIZE);
   const [vx, vy, vw, vh] = viewBox;
   left = Math.max(vx, left); top = Math.max(vy, top); right = Math.min(vx + vw, right); bottom = Math.min(vy + vh, bottom);
   return [left, top, right - left, bottom - top];
@@ -166,12 +171,14 @@ export function planFromReference(reference: StoredSpatialReference, locale: Ene
   const rawEntrance: unknown = (layout as { entrance?: unknown }).entrance;
   const entrance = isRecord(rawEntrance) && isPoint(rawEntrance.position) ? { label: typeof rawEntrance.label === "string" && rawEntrance.label ? rawEntrance.label : translatorFor(floorPlanMessages, locale)("name.entrance"), position: [...rawEntrance.position] as Point, ...carriedOf(rawEntrance, ENTRANCE_KEYS) } : null;
   const colours = Object.fromEntries(Object.entries(isRecord(layout.boardColours) ? layout.boardColours : {}).filter(([, value]) => typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)));
-  const { extra, order } = carriedOf(layout, LAYOUT_KEYS);
+  // A well-formed editor block is the editor's own (kept as saved); anything else there rides along untouched.
+  const editor = isRecord(layout.editor) ? { ...layout.editor } : undefined;
+  const { extra, order } = carriedOf(layout, editor ? [...LAYOUT_KEYS, "editor"] : LAYOUT_KEYS);
   const carried: CarriedLayout = {
     ...(order ? { order } : {}), ...(hidden.length ? { zones: hidden } : {}), ...(layout.zones.some(zone => "directionFromEntrance" in zone) ? { entrance: entrance ? [...entrance.position] as Point : null } : {}), ...(rawDevices === undefined ? { noDevices: true as const } : {}),
     ...("entrance" in layout && !entrance ? { rawEntrance: { value: rawEntrance } } : {}), ...(skipped.length ? { devices: skipped } : {}), ...(rawDevices !== undefined && !Array.isArray(rawDevices) ? { rawDevices: { value: rawDevices } } : {}),
   };
-  return { viewBox: [...layout.viewBox] as Rect, areas, rooms, devices, entrance, ...(Object.keys(colours).length ? { colours } : {}), ...((layout as { style?: unknown }).style !== undefined ? { style: planStyleOf(layout as { style?: unknown }) } : {}), ...(extra ? { extra } : {}), ...(Object.keys(carried).length ? { carried } : {}) };
+  return { viewBox: [...layout.viewBox] as Rect, areas, rooms, devices, entrance, ...(Object.keys(colours).length ? { colours } : {}), ...((layout as { style?: unknown }).style !== undefined ? { style: planStyleOf(layout as { style?: unknown }) } : {}), ...(editor ? { editor } : {}), ...(extra ? { extra } : {}), ...(Object.keys(carried).length ? { carried } : {}) };
 }
 /** Areas the layout holds that are not on the drawing: kept as saved, listed for the reader. */
 export const hiddenZones = (plan: FloorPlan): Array<{ id: string; board: string }> => (plan.carried?.zones ?? []).map(({ zone }) => ({ id: String(zone.id), board: typeof zone.referenceBoard === "string" ? zone.referenceBoard : "" }));
@@ -301,24 +308,37 @@ export function autoPlace(plan: FloorPlan, meters: Array<{ id: string; name: str
   return added.length ? { ...plan, devices: [...plan.devices, ...added] } : plan;
 }
 
-/** Largest plan the editor offers, in plan units (the stored format accepts up to 10,000). */
-export const MAX_PLAN_SIZE = 5000;
-/** The smallest width and height that still hold everything drawn (with room for labels), from the plan's top-left. */
-export function contentExtent(plan: FloorPlan): Point {
-  const [vx, vy, vw] = plan.viewBox, unit = vw / 100, margin = 20;
+/**
+ * Largest coordinate the stored format accepts (project-spatial.ts checks every number is at most 10,000). The editor
+ * keeps the plan's right and bottom edges at or below it, so every saved position stays valid.
+ */
+export const MAX_COORD = 10_000;
+/** Largest plan the editor offers, in plan units: the stored format's own limit. */
+export const MAX_PLAN_SIZE = MAX_COORD;
+/** Smallest drawing space the editor offers. */
+export const MIN_PLAN: Point = [MIN_SIZE * 10, MIN_SIZE * 8];
+/** Where everything drawn sits, with room for labels: [left, top, right, bottom] in plan units, or null for an empty plan. */
+export function contentBounds(plan: FloorPlan): [number, number, number, number] | null {
+  const unit = plan.viewBox[2] / 100, margin = 20;
   // Areas not on the drawing still hold their place when they have one: the plan can never shrink below them.
   const hiddenRects = (plan.carried?.zones ?? []).map(({ zone }) => zone.rect).filter(isRect);
   const boxes: Rect[] = [...plan.areas.map(item => item.rect), ...plan.rooms.map(item => item.rect), ...hiddenRects, ...plan.devices.map(item => deviceRect(item) ?? [item.position[0] - unit * 5, item.position[1], unit * 10, unit * 3] as Rect)];
   // The entrance label sits under its arrow.
   if (plan.entrance) boxes.push([plan.entrance.position[0] - unit * 8, plan.entrance.position[1], unit * 16, unit * 6]);
-  return [Math.max(MIN_SIZE * 10, ...boxes.map(([x, , w]) => x + w - vx + margin)), Math.max(MIN_SIZE * 8, ...boxes.map(([, y, , h]) => y + h - vy + margin))];
+  if (!boxes.length) return null;
+  return [Math.min(...boxes.map(([x]) => x - margin)), Math.min(...boxes.map(([, y]) => y - margin)), Math.max(...boxes.map(([x, , w]) => x + w + margin)), Math.max(...boxes.map(([, y, , h]) => y + h + margin))];
 }
-/** Makes the drawing area bigger or smaller, never cutting off anything already drawn. */
+/** The smallest width and height that still hold everything drawn (with room for labels), from the plan's top-left. */
+export function contentExtent(plan: FloorPlan): Point {
+  const [vx, vy] = plan.viewBox, bounds = contentBounds(plan);
+  return [Math.max(MIN_PLAN[0], bounds ? bounds[2] - vx : 0), Math.max(MIN_PLAN[1], bounds ? bounds[3] - vy : 0)];
+}
+/** Makes the drawing area bigger or smaller from its right and bottom edges, never cutting off anything already drawn. */
 export function resizeCanvas(plan: FloorPlan, width: number, height: number): FloorPlan {
   const [minWidth, minHeight] = contentExtent(plan);
   const [vx, vy] = plan.viewBox;
-  const fit = (value: number, minimum: number) => Math.round(Math.min(MAX_PLAN_SIZE, Math.max(minimum, value)));
-  return { ...plan, viewBox: [vx, vy, fit(width, minWidth), fit(height, minHeight)] };
+  const fit = (value: number, minimum: number, origin: number) => Math.round(Math.min(MAX_PLAN_SIZE, MAX_COORD - origin, Math.max(minimum, value)));
+  return { ...plan, viewBox: [vx, vy, fit(width, minWidth, vx), fit(height, minHeight, vy)] };
 }
 
 export function removeSelection(plan: FloorPlan, selection: Selection): FloorPlan {
@@ -415,6 +435,7 @@ export function referenceFromPlan(plan: FloorPlan, projectId: string, previous: 
     ...(plan.carried?.noDevices && !plan.devices.length ? {} : rawDevices && !plan.devices.length ? { devices: rawDevices.value } : { devices }),
     ...(boardColours && Object.keys(boardColours).length ? { boardColours } : {}),
     ...(plan.style ? { style: plan.style } : {}),
+    ...(plan.editor ? { editor: plan.editor } : {}),
   }, { ...(extra ? { extra } : {}), ...(plan.carried?.order ? { order: plan.carried.order } : {}) }, (key, value) => key === "boardMarkers" && !isRecord(value)) as StoredSpatialReference["layout"];
   const reference: StoredSpatialReference = {
     ...(previous ?? {}),

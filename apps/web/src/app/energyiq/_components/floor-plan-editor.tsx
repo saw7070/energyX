@@ -1,17 +1,23 @@
 "use client";
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { flushSync } from "react-dom";
 import { configApi } from "../../../lib/config-api";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { intlLocale } from "./energyiq-messages";
-import { ArrangeActions } from "./floor-plan-actions";
+import { ArrangeActions, GridMenu, LineUpActions } from "./floor-plan-actions";
+import { alignItems, distributeItems, placeTyped, sameSize, sizable, type Arranged, type Field } from "./floor-plan-align";
+import { resizeCanvasFrom } from "./floor-plan-canvas";
+import { ColourPicker, withBoardColour } from "./floor-plan-colour";
 import { boxOf, copyItems, everything, fitsLimits, inBox, isIn, isLocked, lockItems, moveItems, newRoomId, pasteClip, removeItems, reorderItems, ridersOf, roomIds, stillThere, toggled, type Clip, type Riders } from "./floor-plan-arrange";
 import { boxBetween, centredBox, isClick, snappedBox } from "./floor-plan-geometry";
 import { floorPlanMessages } from "./floor-plan-messages";
 import { canRedo, canUndo, commitPlan, endTyping, finishChange, redo, selectIn, showPlan, startHistory, undo, type HistoryEntry } from "./floor-plan-history";
-import { planShortcut } from "./floor-plan-keys";
+import { isTextEntry, planShortcut } from "./floor-plan-keys";
+import { PositionFields } from "./floor-plan-position";
+import { boundsOf, editorPrefs, gridSpacing, guideFor, guideTargets, samePrefs, snapToLines, withPrefs, type EditorPrefs, type Guide, type GuideTargets } from "./floor-plan-snap";
 import { EnergyIcon } from "./icons";
 import { LockBadge } from "./plan-symbols";
-import { boardColours, boardlessColours, DeviceBox, mapDevices, PANEL_COLOURS, pinLabel, roomHasPins, SiteFloorMap, wrapLabel } from "./site-floor-map";
+import { boardColours, boardlessColours, DeviceBox, mapDevices, pinLabel, roomHasPins, SiteFloorMap, wrapLabel } from "./site-floor-map";
 import {
   asGroupIn, asOwnArea, autoPlace, centre, hiddenZones, MAX_AREAS, MAX_ROOMS, NOTES_LIMIT, roomOwner, PLAN_STYLES, planStyleOf, clampPoint, clampRect, contains, NO_PASSENGERS, sameGeometry, settleRooms, defaultDeviceSize, deviceRect, resizeCanvas, notesWithReference, planFromReference, referenceFromPlan, resizeRect, snap, starterPlan,
   type FloorPlan, type Handle, type PlanArea, type Point, type Rect, type Selection, type StoredSpatialReference,
@@ -20,8 +26,9 @@ import mapStyles from "./site-floor-map.module.css";
 import styles from "./floor-plan-editor.module.css";
 
 export type PlanMeter = { id: string; name: string; board: string; type: string };
-const GRID = 10;
-const HANDLES: Handle[] = ["nw", "ne", "sw", "se"];
+const CORNERS: Handle[] = ["nw", "ne", "sw", "se"];
+/** How close (in screen pixels) an edge or centre must come to another item's to line up with it. */
+const GUIDE_REACH = 6;
 
 /**
  * The floor plan inside the Floor layout workspace: the selected location's boards stand out, and clicking an area
@@ -45,7 +52,12 @@ export function FloorPlanView({ reference, meters, highlight, highlightDevices =
 }
 
 /** A drag on an item: moving the selection (or, with Alt, a copy of it), or resizing one item from a corner. */
-type Drag = { mode: "move" | "resize"; selection: Selection[]; handle?: Handle; start: Point; original: FloorPlan; before: HistoryEntry; riders: Riders; moved: boolean; copied: boolean; warned: boolean; narrow?: Selection };
+/**
+ * `box` is where the dragged items were when the drag began, `targets` the edges and centres of everything else they can
+ * line up with (worked out once, so big plans stay smooth), `reach` how close counts in plan units, and `last` the last
+ * amount shown, so a pointer move that changes nothing draws nothing.
+ */
+type Drag = { mode: "move" | "resize"; selection: Selection[]; handle?: Handle; start: Point; original: FloorPlan; before: HistoryEntry; riders: Riders; moved: boolean; copied: boolean; warned: boolean; narrow?: Selection; box?: Rect; targets?: GuideTargets; reach: number; last?: Point };
 /**
  * A drag on empty space (or a Shift-drag inside an area): a selection box, or the box of a new area, room or equipment.
  * `click` is the area pressed, which a Shift-click without dragging adds to the selection.
@@ -55,8 +67,8 @@ type Sweep = { kind: "marquee" | "draw"; start: Point; additive: boolean; base: 
 type Tool = "area" | "room" | "equipment";
 const TOOL_STATUS = { area: "editor.drawArea", room: "editor.drawRoom", equipment: "editor.drawEquipment" } as const satisfies Record<Tool, string>;
 /** Which edge of the drawing space is being pulled: right (wider), bottom (taller) or the corner (both). */
-type Edge = "e" | "s" | "se";
-type EdgeDrag = { edge: Edge; startX: number; startY: number; scale: number; original: FloorPlan; before: HistoryEntry; moved: boolean };
+type Edge = "e" | "s" | "se" | "w" | "n";
+type EdgeDrag = { edge: Edge; startX: number; startY: number; scale: number; original: FloorPlan; before: HistoryEntry; moved: boolean; warned: boolean };
 const isMac = () => typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
 /** Text picked on the page (in the help or a list): Copy and Select all then stay the browser's own. */
 const textPicked = () => { try { const picked = window.getSelection(); return !!picked && !picked.isCollapsed && picked.toString().trim().length > 0; } catch { return false; } };
@@ -75,11 +87,19 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   // The plan and the selection, with every step Undo and Redo can go to (see floor-plan-history).
   const [history, setHistory] = useState(() => startHistory(previous ? planFromReference(previous, locale) : starterPlan(boards, locale)));
   const { plan } = history.present;
+  // The history as last drawn, for a press that must first save a field still being typed in (see `latest`).
+  const historyRef = useRef(history);
+  useLayoutEffect(() => { historyRef.current = history; });
   // Several items can be selected; anything taken off the plan meanwhile (an undo, a delete) simply drops out.
   const selection = stillThere(plan, history.present.selection);
   const single = selection.length === 1 ? selection[0]! : null;
   const [opened] = useState(plan);
-  const changed = plan !== opened;
+  // The grid choices are the editor's own: saved with the layout, but never an undo step (see floor-plan-snap). With
+  // snapping off, `step` is 0 and things go exactly where they are put.
+  const [prefs, setPrefs] = useState<EditorPrefs>(() => editorPrefs(plan));
+  const [openedPrefs] = useState(prefs);
+  const changed = plan !== opened || !samePrefs(prefs, openedPrefs);
+  const grid = prefs.grid, step = prefs.snap ? grid : 0;
   const dirtyListener = useRef(onDirtyChange);
   useEffect(() => { dirtyListener.current = onDirtyChange; });
   useEffect(() => { dirtyListener.current?.(changed); }, [changed]);
@@ -95,8 +115,20 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   // The editor's own clipboard (never the computer's): what Copy took, and how many times it was pasted.
   const [clipboard, setClipboard] = useState<{ clip: Clip; pasted: number } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
   /** Keys work while the plan has focus; clicking it gives it focus. */
   const focusCanvas = () => { const svg = svgRef.current as (SVGSVGElement & { focus?: (options?: FocusOptions) => void }) | null; svg?.focus?.({ preventScroll: true }); };
+  /**
+   * The plan and selection to start a drag from. A position or colour code field saves when it is left, so pressing
+   * the plan straight after typing (without Enter) first saves that field, at once, and the drag then starts from the
+   * plan with the typed value in it, never the one before (which would undo the typing and leave a stray undo step).
+   */
+  const latest = () => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && isTextEntry(active) && sectionRef.current?.contains(active)) flushSync(() => active.blur());
+    const present = historyRef.current.present;
+    return { plan: present.plan, selection: stillThere(present.plan, present.selection) };
+  };
   const drag = useRef<Drag | null>(null);
   const sweep = useRef<Sweep | null>(null);
   const [sweepBox, setSweepBox] = useState<{ kind: Sweep["kind"]; rect: Rect } | null>(null);
@@ -114,13 +146,9 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   const areaColour = (item: PlanArea) => item.colour ?? (item.board ? colours.get(item.board) : noBoardColours.get(item.key)) ?? "var(--zone-6)";
   /** Each area, equipment box, room and device can have its own colour; without one it follows its panel (a room, its area). */
   const recolour = <T extends { colour?: string }>(item: T, hex: string | null): T => { const { colour: _old, ...rest } = item; return (hex ? { ...rest, colour: hex } : rest) as T; };
-  const colourPicker = (value: string | undefined, autoLabel: string, onChange: (hex: string | null) => void) => <fieldset className={styles.colourField}><legend>{t("panel.colour")}</legend>
-    <div className={styles.swatches}>
-      {PANEL_COLOURS.map(item => <button type="button" key={item.key} className={styles.swatchButton} style={{ background: item.hex }} aria-label={t(`colour.${item.key}`)} title={t(`colour.${item.key}`)} aria-pressed={value === item.hex} onClick={() => onChange(item.hex)} />)}
-      <button type="button" className={styles.autoColour} aria-pressed={!value} onClick={() => onChange(null)}>{autoLabel}</button>
-    </div>
-    <small>{t("panel.colourHint")}</small>
-  </fieldset>;
+  /** One colour choice is one undo step, however long the colour picker is dragged (`target` names what is coloured). */
+  const pickColour = (target: string, apply: (hex: string | null) => FloorPlan) => (hex: string | null, live?: boolean) => commit(apply(hex), live ? { merge: `colour:${target}` } : undefined);
+  const colourPicker = (target: string, value: string | undefined, autoLabel: string, apply: (hex: string | null) => FloorPlan) => <ColourPicker key={target} legend={t("panel.colour")} hint={t("panel.colourHint")} value={value} autoLabel={autoLabel} onPick={pickColour(target, apply)} onDone={() => setHistory(endTyping)} />;
   const meterById = new Map(meters.map(meter => [meter.id, meter]));
   const placedIds = new Set(plan.devices.map(item => item.meterId));
   const shown = (meterId: string) => meterById.has(meterId);
@@ -138,10 +166,10 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     const point = new DOMPoint(clientX, clientY).matrixTransform(matrix.inverse());
     return [point.x, point.y];
   };
-  const place = (meterId: string, at: Point) => {
+  const place = (meterId: string, at: Point, plan = history.present.plan) => {
     setPlacing(null);
     if (plan.devices.some(item => item.meterId === meterId && item.locked)) { setNotice(t("editor.locked")); return; }
-    commit({ ...plan, devices: [...plan.devices.filter(item => item.meterId !== meterId), { meterId, position: clampPoint([snap(at[0], GRID), snap(at[1], GRID)], plan.viewBox) }] }, { selection: [{ kind: "device", key: meterId }] });
+    commit({ ...plan, devices: [...plan.devices.filter(item => item.meterId !== meterId), { meterId, position: clampPoint([snap(at[0], step), snap(at[1], step)], plan.viewBox) }] }, { selection: [{ kind: "device", key: meterId }] });
     focusCanvas();
   };
   /** Deletes what is selected, except locked items, which stay (and stay selected). */
@@ -166,8 +194,8 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     const box = drawn && !isClick(drawn) ? clampRect(drawn, plan.viewBox) : null;
     const done = (next: FloorPlan, item: Selection) => { commit(next, { selection: [item] }); setTool(null); focusCanvas(); };
     if (kind === "area") {
-      const key = `area-${Date.now()}`, size: Point = [snap(vw * 0.35, GRID), snap(vh * 0.55, GRID)];
-      const rect = box ?? (at ? centredBox(at, size, plan.viewBox, GRID) : clampRect([vx + 20, vy + 20, size[0], size[1]], plan.viewBox));
+      const key = `area-${Date.now()}`, size: Point = [snap(vw * 0.35, grid), snap(vh * 0.55, grid)];
+      const rect = box ?? (at ? centredBox(at, size, plan.viewBox, step) : clampRect([vx + 20, vy + 20, size[0], size[1]], plan.viewBox));
       done({ ...plan, areas: [...plan.areas, { key, label: nextLabel(), board: "", rect }] }, { kind: "area", key });
       return;
     }
@@ -177,7 +205,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
       const key = `room-${Date.now()}`;
       const roomName = (number: number) => t("name.newRoom", { number });
       let number = plan.rooms.length + 1; while (plan.rooms.some(room => room.name === roomName(number))) number += 1;
-      const rect = box ?? (at ? centredBox(at, [180, 110], plan.viewBox, GRID) : clampRect([hx + 20, hy + 50, 180, 110], plan.viewBox));
+      const rect = box ?? (at ? centredBox(at, [180, 110], plan.viewBox, step) : clampRect([hx + 20, hy + 50, 180, 110], plan.viewBox));
       // A new room gets a stable id, so later things can point at it even after it is renamed.
       const next = settleRooms({ ...plan, rooms: [...plan.rooms, { key, name: roomName(number), rect, ...(host && !box && !at ? { area: host.key } : {}), id: newRoomId(roomIds(plan)) }] });
       // A room belongs to an area: one drawn outside every area is not added (the tool stays on), as for equipment.
@@ -210,22 +238,23 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     if (!fits(clip)) { setNotice(tooMany()); return false; }
     const result = pasteClip(plan, clip, offset, copyName, reserved); commit(result.plan, { selection: result.selection }); focusCanvas(); return true;
   };
-  const duplicate = () => { const clip = copyItems(plan, selection); if (clip) { if (putCopy(clip, GRID) && leftOut()) setNotice(t("editor.notCopied")); } else if (selection.length) setNotice(t("editor.notCopied")); };
+  const duplicate = () => { const clip = copyItems(plan, selection); if (clip) { if (putCopy(clip, grid) && leftOut()) setNotice(t("editor.notCopied")); } else if (selection.length) setNotice(t("editor.notCopied")); };
   const copy = () => { const clip = copyItems(plan, selection); if (!clip) { setNotice(t("editor.notCopied")); return false; } setClipboard({ clip, pasted: 0 }); const copied = t("editor.copied", { pasteKey: keyName("V") }); setNotice(leftOut() ? `${copied} ${t("editor.notCopied")}` : copied); return true; };
   /** Each paste lands one grid step further on, so pasting again does not stack copies on top of each other. */
-  const paste = () => { if (!clipboard) return; const pasted = clipboard.pasted + 1; if (putCopy(clipboard.clip, GRID * pasted)) setClipboard({ ...clipboard, pasted }); };
+  const paste = () => { if (!clipboard) return; const pasted = clipboard.pasted + 1; if (putCopy(clipboard.clip, grid * pasted)) setClipboard({ ...clipboard, pasted }); };
 
   const startDrag = (event: ReactPointerEvent, item: Selection, mode: Drag["mode"] = "move", handle?: Handle) => {
     if (placing || tool || event.button !== 0) return;
     const adding = event.shiftKey || event.metaKey || event.ctrlKey;
     // Shift- or Cmd/Ctrl-pressing an area not yet selected starts a selection box, so the rooms inside a block can be
     // boxed even where areas cover the whole plan; a click without dragging still adds the area itself.
-    if (mode === "move" && adding && item.kind === "area" && !isIn(selection, item)) { event.stopPropagation(); beginSweep(event, item); return; }
+    if (mode === "move" && adding && item.kind === "area" && !isIn(history.present.selection, item)) { event.stopPropagation(); beginSweep(event, item); return; }
     event.stopPropagation();
+    const { plan, selection } = latest();
     (event.currentTarget as Element).setPointerCapture?.(event.pointerId);
     focusCanvas();
     const start = toPoint(event.clientX, event.clientY);
-    if (mode === "resize") { drag.current = { mode, selection: [item], ...(handle ? { handle } : {}), start, original: plan, before: { plan, selection }, riders: NO_PASSENGERS(), moved: false, copied: false, warned: false }; return; }
+    if (mode === "resize") { const box = boxOf(plan, item) ?? undefined; drag.current = { mode, selection: [item], ...(handle ? { handle } : {}), start, original: plan, before: { plan, selection }, riders: NO_PASSENGERS(), moved: false, copied: false, warned: false, ...(box ? { box, targets: targetsAround(plan, other => other.kind === item.kind && other.key === item.key) } : {}), reach: GUIDE_REACH / pxPerUnit() }; return; }
     // Shift- or Cmd/Ctrl-click adds or takes out one item; pressing an item already selected drags the whole selection.
     const next = adding ? toggled(selection, item) : isIn(selection, item) ? selection : [item];
     setSelection(next);
@@ -238,17 +267,27 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     const original = copied?.plan ?? plan, moving = copied?.selection ?? next;
     // A plain click on one of several selected items, without dragging, selects just that one.
     const narrow = !adding && !event.altKey && next.length > 1 ? item : undefined;
-    drag.current = { mode: "move", selection: moving, start, original, before: { plan, selection: next }, riders: ridersOf(original, moving), moved: false, copied: !!copied, warned: false, ...(narrow ? { narrow } : {}) };
+    const riders = ridersOf(original, moving), hosts = moving.filter(entry => !isLocked(original, entry)).flatMap(entry => { const box = boxOf(original, entry); return box ? [box] : []; });
+    // What moves (the picked items and everything riding on them) never lines up with itself.
+    const riding = (other: Selection) => isIn(moving, other) || (other.kind === "room" ? riders.rooms.has(other.key) : other.kind === "area" ? riders.areas.has(other.key) : other.kind === "device" && riders.devices.has(other.key));
+    drag.current = { mode: "move", selection: moving, start, original, before: { plan, selection: next }, riders, moved: false, copied: !!copied, warned: false, ...(narrow ? { narrow } : {}), ...(hosts.length ? { box: boundsOf(hosts), targets: targetsAround(original, riding) } : {}), reach: GUIDE_REACH / pxPerUnit() };
   };
+  /** Screen pixels per plan unit, so guides pull from the same distance on screen however big the plan is. */
+  const pxPerUnit = () => { const width = svgRef.current?.getBoundingClientRect().width ?? 0; return width > 0 ? width / vw : 1; };
+  /** The edges and centres of everything on the plan except what `skip` names, for alignment guides. */
+  const targetsAround = (source: FloorPlan, skip: (item: Selection) => boolean) => guideTargets(everything(source, shown).filter(item => !skip(item)).flatMap(item => { const box = boxOf(source, item); return box ? [box] : []; }));
   const onPointerMove = (event: ReactPointerEvent) => {
     const area = sweep.current;
-    if (area) { const end = toPoint(event.clientX, event.clientY); setSweepBox({ kind: area.kind, rect: area.kind === "draw" ? snappedBox(area.start, end, GRID) : boxBetween(area.start, end) }); return; }
+    if (area) { const end = toPoint(event.clientX, event.clientY); setSweepBox({ kind: area.kind, rect: area.kind === "draw" ? snappedBox(area.start, end, step) : boxBetween(area.start, end) }); return; }
     const current = drag.current;
     if (!current) return;
     const [x, y] = toPoint(event.clientX, event.clientY);
-    const dx = snap(x - current.start[0], GRID), dy = snap(y - current.start[1], GRID);
+    const { dx, dy, lines } = dragAmount(current, x - current.start[0], y - current.start[1], !prefs.snap || event.metaKey || event.ctrlKey);
     if (!dx && !dy && !current.moved) return;
-    current.moved = true;
+    // The same amount as last time draws nothing new.
+    if (current.last && current.last[0] === dx && current.last[1] === dy) return;
+    current.last = [dx, dy]; current.moved = true;
+    setGuides(lines);
     if (current.mode === "move") {
       const next = moveItems(current.original, current.selection, dx, dy, current.riders);
       // Locked items stay put: say why once, instead of silently ignoring the drag.
@@ -263,28 +302,60 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
       : target.kind === "device" ? { ...current.original, devices: current.original.devices.map(item => { const rect = item.meterId === target.key ? deviceRect(item) : null; if (!rect) return item; const [x, y, w, h] = resize(rect); return { ...item, position: [x + w / 2, y + h / 2] as Point, size: [w, h] as Point }; }) }
       : { ...current.original, rooms: current.original.rooms.map(item => item.key === target.key ? { ...item, rect: resize(item.rect) } : item) });
   };
+  /**
+   * How far a drag goes for a pointer movement of (rawX, rawY): on the grid, or lined up with the edge or centre of a
+   * nearby item when one is within reach (with the guide lines to draw). `free` (snapping off, or Cmd/Ctrl held) follows
+   * the pointer exactly. A resize only moves the edges its grip pulls.
+   */
+  const dragAmount = (current: Drag, rawX: number, rawY: number, free: boolean): { dx: number; dy: number; lines: Guide[] } => {
+    const handle = current.mode === "resize" ? current.handle! : null;
+    const across = !handle || /[we]/.test(handle), upDown = !handle || /[ns]/.test(handle);
+    let dx = across ? (free ? rawX : snap(rawX, grid)) : 0, dy = upDown ? (free ? rawY : snap(rawY, grid)) : 0;
+    if (free || !current.targets || !current.box) return { dx, dy, lines: [] };
+    const { targets, reach } = current, [bx, by, bw, bh] = current.box;
+    const edges = (start: number, size: number, raw: number, low: string, high: string) => !handle ? [start + raw, start + raw + size / 2, start + raw + size] : handle.includes(low) ? [start + raw] : handle.includes(high) ? [start + size + raw] : [];
+    const sx = across ? snapToLines(targets.x, edges(bx, bw, rawX, "w", "e"), reach) : null, sy = upDown ? snapToLines(targets.y, edges(by, bh, rawY, "n", "s"), reach) : null;
+    if (sx) dx = rawX + sx.shift;
+    if (sy) dy = rawY + sy.shift;
+    const placed: Rect = handle ? resizeRect(current.box, handle, dx, dy, current.original.viewBox) : [bx + dx, by + dy, bw, bh];
+    return { dx, dy, lines: [...(sx ? [guideFor(targets.x, "x", sx.at, placed)] : []), ...(sy ? [guideFor(targets.y, "y", sy.at, placed)] : [])] };
+  };
+  const [guides, setGuides] = useState<Guide[]>([]);
   // Pulling an edge of the drawing space: the pointer's movement in screen pixels, at the scale when the pull began.
   const edgeDrag = useRef<EdgeDrag | null>(null);
   const [stretch, setStretch] = useState<number | null>(null);
   const startEdge = (event: ReactPointerEvent, edge: Edge) => {
     if (event.button !== 0) return;
     event.preventDefault(); event.stopPropagation();
-    (event.currentTarget as Element).setPointerCapture?.(event.pointerId);
+    const { plan } = latest(), before = historyRef.current.present;
+    // The press does not move focus (it is prevented): put it on the edge, so the editor's keys keep working.
+    const handle = event.currentTarget as HTMLElement;
+    handle.focus?.({ preventScroll: true });
+    handle.setPointerCapture?.(event.pointerId);
     const width = svgRef.current?.getBoundingClientRect().width ?? 0;
-    edgeDrag.current = { edge, startX: event.clientX, startY: event.clientY, scale: width > 0 ? width / vw : 1, original: plan, before: history.present, moved: false };
+    edgeDrag.current = { edge, startX: event.clientX, startY: event.clientY, scale: width > 0 ? width / plan.viewBox[2] : 1, original: plan, before, moved: false, warned: false };
   };
   const moveEdge = (event: ReactPointerEvent) => {
     const current = edgeDrag.current;
     if (!current) return;
     const [, , ow, oh] = current.original.viewBox;
-    const width = current.edge === "s" ? ow : snap(ow + (event.clientX - current.startX) / current.scale, GRID);
-    const height = current.edge === "e" ? oh : snap(oh + (event.clientY - current.startY) / current.scale, GRID);
-    const next = resizeCanvas(current.original, width, height);
-    if (!current.moved && next.viewBox[2] === ow && next.viewBox[3] === oh) return;
+    let next: FloorPlan;
+    if (current.edge === "w" || current.edge === "n") {
+      // The left or top edge: pulling it out makes the plan bigger on that side (see floor-plan-canvas).
+      const size = current.edge === "w" ? snap(ow - (event.clientX - current.startX) / current.scale, grid) : snap(oh - (event.clientY - current.startY) / current.scale, grid);
+      const result = resizeCanvasFrom(current.original, current.edge, size);
+      if (result.blocked && !current.warned) { current.warned = true; setNotice(t("editor.cannotGrow")); }
+      next = result.plan;
+    } else {
+      const width = current.edge === "s" ? ow : snap(ow + (event.clientX - current.startX) / current.scale, grid);
+      const height = current.edge === "e" ? oh : snap(oh + (event.clientY - current.startY) / current.scale, grid);
+      next = resizeCanvas(current.original, width, height);
+    }
+    if (!current.moved && next.viewBox.every((value, index) => value === current.original.viewBox[index])) return;
     current.moved = true;
     show(next);
     // Keep the drawing at the same scale while pulling, so the edge follows the pointer; the frame scrolls if needed.
-    if (current.edge !== "s") setStretch(next.viewBox[2] * current.scale);
+    if (current.edge !== "s" && current.edge !== "n") setStretch(next.viewBox[2] * current.scale);
   };
   const endEdge = () => {
     const current = edgeDrag.current;
@@ -292,11 +363,18 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     if (current?.moved) { setHistory(list => finishChange(list, current.before, sameGeometry(list.present.plan, current.before.plan) ? current.before.plan : list.present.plan)); setError(""); }
   };
   const nudgeEdge = (event: React.KeyboardEvent, edge: Edge) => {
-    const step = event.shiftKey ? GRID * 10 : GRID * 5;
-    const moves: Record<string, Point> = { ArrowRight: [step, 0], ArrowLeft: [-step, 0], ArrowDown: [0, step], ArrowUp: [0, -step] };
+    const by = event.shiftKey ? 100 : 50;
+    const moves: Record<string, Point> = { ArrowRight: [by, 0], ArrowLeft: [-by, 0], ArrowDown: [0, by], ArrowUp: [0, -by] };
     const move = moves[event.key];
     if (!move) return;
     event.preventDefault(); event.stopPropagation();
+    // On the left or top edge, Left or Up pulls the edge outwards (bigger); Right or Down pushes it in.
+    if (edge === "w" || edge === "n") {
+      const result = resizeCanvasFrom(plan, edge, edge === "w" ? vw - move[0] : vh - move[1]);
+      commit(result.plan);
+      if (result.blocked) setNotice(t("editor.cannotGrow"));
+      return;
+    }
     commit(resizeCanvas(plan, vw + (edge === "s" ? 0 : move[0]), vh + (edge === "e" ? 0 : move[1])));
   };
   const edgeHandle = (edge: Edge, label: string) => <button type="button" className={`${styles.edge} ${styles[`edge-${edge}`]}`} aria-label={label} title={label}
@@ -308,6 +386,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     const current = drag.current;
     drag.current = null;
     if (!current) return;
+    setGuides(lines => lines.length ? [] : lines);
     if (current.copied && !current.moved) { setHistory(list => showPlan(list, current.before.plan, current.before.selection)); return; }
     if (!current.moved) { if (current.narrow) setSelection([current.narrow]); return; }
     setHistory(list => { const settled = settleRooms(list.present.plan); return finishChange(list, current.before, sameGeometry(settled, current.before.plan) ? current.before.plan : settled); });
@@ -315,15 +394,17 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   };
   /** Starts a selection box (or, with a tool chosen, the new item's box) where the pointer was pressed. */
   const beginSweep = (event: ReactPointerEvent, click?: Selection) => {
+    const { selection } = latest();
     focusCanvas();
     svgRef.current?.setPointerCapture?.(event.pointerId);
     sweep.current = { kind: tool ? "draw" : "marquee", start: toPoint(event.clientX, event.clientY), additive: event.shiftKey || event.metaKey || event.ctrlKey, base: selection, ...(click ? { click } : {}) };
   };
   // Pressing empty space starts a selection box; with a tool chosen, pressing anywhere starts the new item's box.
   const startSweep = (event: ReactPointerEvent<SVGSVGElement>) => {
+    const { plan } = latest();
     focusCanvas();
     if (event.button !== 0) return;
-    if (placing) { place(placing, toPoint(event.clientX, event.clientY)); return; }
+    if (placing) { place(placing, toPoint(event.clientX, event.clientY), plan); return; }
     const empty = event.target === event.currentTarget || !!(event.target as Element).getAttribute?.("data-grid");
     if (!tool && !empty) return;
     beginSweep(event);
@@ -333,7 +414,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
     if (!area) { endDrag(); return; }
     sweep.current = null; setSweepBox(null);
     const end = toPoint(event.clientX, event.clientY);
-    if (area.kind === "draw") { if (tool) create(tool, area.start, snappedBox(area.start, end, GRID)); return; }
+    if (area.kind === "draw") { if (tool) create(tool, area.start, snappedBox(area.start, end, step)); return; }
     // A click on empty space clears the selection (Shift keeps it); a box selects everything fully inside it.
     const box = boxBetween(area.start, end);
     if (Math.max(box[2], box[3]) < unit * 0.8) { if (area.click) setSelection(toggled(area.base, area.click)); else if (!area.additive) setSelection([]); return; }
@@ -349,7 +430,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   const onKeyDown = (event: React.KeyboardEvent) => {
     // With a tool chosen, Enter on the plan adds the item at its usual place, for keyboard users.
     if (tool && event.key === "Enter" && event.target === svgRef.current) { event.preventDefault(); create(tool, null, null); return; }
-    const shortcut = planShortcut(event, GRID);
+    const shortcut = planShortcut(event, grid);
     if (!shortcut) return;
     if (shortcut.kind === "undo" || shortcut.kind === "redo") { event.preventDefault(); if (shortcut.kind === "undo") undoStep(); else redoStep(); return; }
     if (shortcut.kind === "escape") { setPlacing(null); setTool(null); setNotice(""); sweep.current = null; setSweepBox(null); setSelection([]); setLeaving(false); return; }
@@ -379,7 +460,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   const save = async () => {
     setError(""); setLeaving(false);
     let reference: StoredSpatialReference;
-    try { reference = referenceFromPlan(plan, projectId, previous, locale); } catch (reason) { setError(reason instanceof Error ? reason.message : t("editor.checkLayout")); return; }
+    try { reference = referenceFromPlan(withPrefs(plan, prefs), projectId, previous, locale); } catch (reason) { setError(reason instanceof Error ? reason.message : t("editor.checkLayout")); return; }
     // The plan is saved inside Project notes, which have a size limit: say so plainly instead of failing.
     const nextNotes = notesWithReference(notes, block, reference);
     if (nextNotes.length > NOTES_LIMIT) { const format = (value: number) => value.toLocaleString(intlLocale(locale)); setError(t("editor.tooBig", { limit: format(NOTES_LIMIT), size: format(nextNotes.length) })); return; }
@@ -416,6 +497,11 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   const fronted = reorderItems(plan, selection, "front"), backed = reorderItems(plan, selection, "back");
   const actions = lockable.length > 0 ? <ArrangeActions onDuplicate={copyItems(plan, selection) ? duplicate : undefined} duplicateKey={keyName("D")} locked={allLocked} many={lockable.length > 1} onLock={() => commit(lockItems(plan, lockable, !allLocked))} order onFront={fronted !== plan ? () => commit(fronted) : undefined} onBack={backed !== plan ? () => commit(backed) : undefined} /> : null;
   const deletable = selection.some(item => !isLocked(plan, item));
+  /** Line-up results: one undo step, and a short note when locked items were left where they are. */
+  const arrange = (result: Arranged) => { if (result.plan !== plan) commit(settleRooms(result.plan)); if (result.skipped) setNotice(t("align.lockedSkipped")); };
+  /** Typed X, Y, W or H for one item: one undo step; says whether the value had to change to fit. */
+  const positionFields = (item: Selection, box: Rect) => <PositionFields key={`${item.kind}:${item.key}`} box={box} origin={[vx, vy]} disabled={singleLocked} onCommit={(field: Field, value: number) => { const result = placeTyped(plan, item, field, value); if (result.plan !== plan) commit(result.plan); return result.adjusted; }} />;
+  const gridCell = gridSpacing(grid, vw);
 
   const [placingBefore, placingAfter = ""] = t("editor.placing").split("{name}");
   const areaName = (label: string) => label.length <= 2 ? t("name.area", { id: label }) : label;
@@ -424,7 +510,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
   const preview = useMemo(() => { try { return referenceFromPlan(plan, projectId, previous, locale); } catch { return null; } }, [plan, projectId, previous, locale]);
   const redoKey = mac ? "⇧⌘Z" : "Ctrl+Y";
   const toolButton = (kind: Tool, label: string, hint: string, disabled = false) => <button type="button" className={styles.tool} aria-pressed={tool === kind} disabled={disabled} title={hint} onClick={() => chooseTool(kind)}>{label}</button>;
-  return <section className={`${styles.card} ${styles.editing}`} aria-label={t("editor.title")} tabIndex={-1} onKeyDown={onKeyDown}>
+  return <section ref={sectionRef} className={`${styles.card} ${styles.editing}`} aria-label={t("editor.title")} tabIndex={-1} onKeyDown={onKeyDown}>
     <header className={styles.cardHeader}>
       <div><h4>{t("editor.title")}</h4><p>{t("editor.help", { undoKey: keyName("Z"), redoKey, copyKey: keyName("C"), pasteKey: keyName("V"), duplicateKey: keyName("D") })}</p><p>{t("editor.drawingOnly")}</p></div>
       <div className={styles.actions}>
@@ -438,6 +524,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
       {toolButton("room", t("editor.addRoom"), t("editor.hintRoom"))}
       {toolButton("equipment", t("editor.addEquipment"), plan.rooms.length ? t("editor.hintEquipment") : t("editor.addRoomFirst"), !plan.rooms.length)}
       {!plan.entrance && <button type="button" className={styles.tool} title={t("editor.hintEntrance")} onClick={addEntrance}>{t("editor.addEntrance")}</button>}
+      <GridMenu prefs={prefs} onChange={setPrefs} commandKey={mac ? "⌘" : "Ctrl"} />
       <span className={styles.toolGap} />
       <button type="button" className={styles.tool} disabled={!canUndo(history)} onClick={undoStep}>{t("editor.undo")}</button>
       <button type="button" className={styles.tool} disabled={!canRedo(history)} title={t("editor.hintRedo", { redoKey })} onClick={redoStep}>{t("editor.redo")}</button>
@@ -456,8 +543,9 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
         <svg ref={svgRef} viewBox={`${vx} ${vy} ${vw} ${vh}`} className={`${mapStyles.map} ${styles.canvas} ${placing || tool ? styles.placingCursor : ""}`} role="application" aria-label={t("editor.canvas")} tabIndex={0}
           onPointerMove={onPointerMove} onPointerUp={endPointer} onPointerCancel={cancelPointer} onPointerDown={startSweep}
           onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); const id = event.dataTransfer.getData("text/plain"); if (meterById.has(id)) place(id, toPoint(event.clientX, event.clientY)); }}>
-          <defs><pattern id="floor-plan-grid" width={GRID * 2} height={GRID * 2} patternUnits="userSpaceOnUse"><path d={`M${GRID * 2} 0 L0 0 0 ${GRID * 2}`} className={styles.gridLine} /></pattern></defs>
-          <rect data-grid="1" x={vx} y={vy} width={vw} height={vh} fill="url(#floor-plan-grid)" />
+          {/* The grid (the Grid menu can hide it); the empty space under it still takes clicks either way. */}
+          {prefs.showGrid && <defs><pattern id="floor-plan-grid" width={gridCell} height={gridCell} patternUnits="userSpaceOnUse"><path d={`M${gridCell} 0 L0 0 0 ${gridCell}`} className={styles.gridLine} /></pattern></defs>}
+          <rect data-grid="1" x={vx} y={vy} width={vw} height={vh} fill={prefs.showGrid ? "url(#floor-plan-grid)" : "transparent"} />
           {own.map(item => { const colour = areaColour(item); const [x, y, w, h] = item.rect; return <g key={item.key} className={itemClass(item.locked)} onPointerDown={event => startDrag(event, { kind: "area", key: item.key })}>
             <rect x={x} y={y} width={w} height={h} rx={unit * 1.4} className={mapStyles.zone} style={{ fill: colour, stroke: colour }} />
             <circle cx={x + unit * 2.4} cy={y + unit * 2.6} r={unit * 0.9} style={{ fill: colour }} />
@@ -487,12 +575,16 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
           {/* A padlock on each locked item, so it is clear why it does not move. */}
           {everything(plan, shown).filter(item => isLocked(plan, item)).map(item => { const [x, y, w] = boxOf(plan, item)!, size = unit * 1.9; return <LockBadge key={`lock:${item.kind}:${item.key}`} x={w ? x + w - size - unit * 0.4 : x + unit * 1} y={w ? y + unit * 0.4 : y - unit * 2.9} size={size} className={styles.lockBadge} label={t("editor.lockedBadge")} />; })}
           {selection.map(item => { const at = boxOf(plan, item); if (!at || !at[2] || (item.kind === "device" && !shown(item.key))) return null; const [x, y, w, h] = at; return <rect key={`selected:${item.kind}:${item.key}`} x={x} y={y} width={w} height={h} className={styles.selectBox} />; })}
-          {handleRect && (() => { const [x, y, w, h] = handleRect; const size = unit * 1.3; const corner: Record<Handle, Point> = { nw: [x, y], ne: [x + w, y], sw: [x, y + h], se: [x + w, y + h] }; return <g>
-            {HANDLES.map(handle => <rect key={handle} x={corner[handle][0] - size / 2} y={corner[handle][1] - size / 2} width={size} height={size} rx={size * 0.2} className={`${styles.handle} ${styles[handle]}`} onPointerDown={event => startDrag(event, single!, "resize", handle)} />)}
+          {handleRect && (() => { const [x, y, w, h] = handleRect; const size = unit * 1.3; const spot: Record<Handle, Point> = { nw: [x, y], n: [x + w / 2, y], ne: [x + w, y], e: [x + w, y + h / 2], se: [x + w, y + h], s: [x + w / 2, y + h], sw: [x, y + h], w: [x, y + h / 2] };
+            // Grips on the middle of each edge resize one side only; they show where the side is long enough to tell them from the corners.
+            const handles: Handle[] = [...CORNERS, ...(w >= size * 4 ? ["n", "s"] as const : []), ...(h >= size * 4 ? ["e", "w"] as const : [])];
+            return <g>
+            {handles.map(handle => <rect key={handle} data-handle={handle} x={spot[handle][0] - size / 2} y={spot[handle][1] - size / 2} width={size} height={size} rx={size * 0.2} className={`${styles.handle} ${styles[handle]}`} onPointerDown={event => startDrag(event, single!, "resize", handle)} />)}
           </g>; })()}
+          {guides.map(guide => { const pad = unit; return guide.axis === "x" ? <line key={`x${guide.at}`} data-guide="x" x1={guide.at} x2={guide.at} y1={guide.from - pad} y2={guide.to + pad} className={styles.guide} /> : <line key={`y${guide.at}`} data-guide="y" x1={guide.from - pad} x2={guide.to + pad} y1={guide.at} y2={guide.at} className={styles.guide} />; })}
           {sweepBox && <rect x={sweepBox.rect[0]} y={sweepBox.rect[1]} width={sweepBox.rect[2]} height={sweepBox.rect[3]} className={sweepBox.kind === "draw" ? styles.drawBox : styles.marquee} />}
         </svg>
-        {edgeHandle("e", t("editor.edgeRight"))}{edgeHandle("s", t("editor.edgeBottom"))}{edgeHandle("se", t("editor.edgeCorner"))}
+        {edgeHandle("w", t("editor.edgeLeft"))}{edgeHandle("n", t("editor.edgeTop"))}{edgeHandle("e", t("editor.edgeRight"))}{edgeHandle("s", t("editor.edgeBottom"))}{edgeHandle("se", t("editor.edgeCorner"))}
         </div>
       </div>
 
@@ -500,6 +592,7 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
         {selection.length > 1 && <div className={styles.panel}>
           <h5>{t("panel.selected", { count: selection.length })}</h5>
           <p className={styles.hint}>{t("panel.selectedHint")}</p>
+          <LineUpActions count={selection.length} sizable={selection.filter(item => sizable(plan, item)).length > 1} onAlign={how => arrange(alignItems(plan, selection, how))} onDistribute={axis => arrange(distributeItems(plan, selection, axis))} onSize={dimension => arrange(sameSize(plan, selection, dimension))} />
           {actions}
           <button type="button" className={styles.danger} disabled={!deletable} onClick={remove}>{t("editor.delete")}</button>
         </div>}
@@ -507,7 +600,9 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
           <h5>{selectedArea.insideRoom ? t("panel.group") : t("panel.area")}</h5>
           <label>{t("panel.label")}<input value={selectedArea.label} maxLength={40} {...typing} onChange={event => updateArea(selectedArea.key, { label: event.target.value }, `label:${selectedArea.key}`)} /></label>
           <label>{t("panel.board")}<select value={selectedArea.board} onChange={event => updateArea(selectedArea.key, { board: event.target.value })}><option value="">{t("panel.noBoard")}</option>{allBoards.map(board => <option key={board} value={board}>{board}</option>)}</select></label>
-          {colourPicker(selectedArea.colour, selectedArea.board ? t("panel.colourAuto", { board: selectedArea.board }) : t("panel.colourAutoNone"), hex => commit({ ...plan, areas: plan.areas.map(item => item.key === selectedArea.key ? recolour(item, hex) : item) }))}
+          {positionFields(single!, selectedArea.rect)}
+          {colourPicker(`area:${selectedArea.key}`, selectedArea.colour, selectedArea.board ? t("panel.colourAuto", { board: selectedArea.board }) : t("panel.colourAutoNone"), hex => ({ ...plan, areas: plan.areas.map(item => item.key === selectedArea.key ? recolour(item, hex) : item) }))}
+          {selectedArea.board && <ColourPicker key={`board:${selectedArea.board}:${selectedArea.key}`} legend={t("panelColour.title")} hint={t("panelColour.hint", { board: selectedArea.board })} value={plan.colours?.[selectedArea.board]} autoLabel={t("panelColour.auto")} onPick={pickColour(`board:${selectedArea.board}`, hex => withBoardColour(plan, selectedArea.board, hex))} onDone={() => setHistory(endTyping)} />}
           <label>{t("panel.shownAs")}<select value={selectedArea.insideRoom ?? ""} disabled={singleLocked} onChange={event => { const room = plan.rooms.find(item => item.key === event.target.value); commit({ ...plan, areas: plan.areas.map(item => item.key !== selectedArea.key ? item : room ? asGroupIn(item, room) : asOwnArea(item)) }); }}>
             <option value="">{t("panel.ownArea")}</option>{plan.rooms.map(room => <option key={room.key} value={room.key}>{t("panel.insideRoom", { room: room.name })}</option>)}
           </select></label>
@@ -518,7 +613,8 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
         {selectedRoom && <div className={styles.panel}>
           <h5>{t("panel.room")}</h5>
           <label>{t("panel.name")}<input value={selectedRoom.name} maxLength={60} {...typing} onChange={event => commit({ ...plan, rooms: plan.rooms.map(item => item.key === selectedRoom.key ? { ...item, name: event.target.value } : item) }, { merge: `name:${selectedRoom.key}` })} /></label>
-          {colourPicker(selectedRoom.colour, t("panel.colourAutoRoom"), hex => commit({ ...plan, rooms: plan.rooms.map(item => item.key === selectedRoom.key ? recolour(item, hex) : item) }))}
+          {positionFields(single!, selectedRoom.rect)}
+          {colourPicker(`room:${selectedRoom.key}`, selectedRoom.colour, t("panel.colourAutoRoom"), hex => ({ ...plan, rooms: plan.rooms.map(item => item.key === selectedRoom.key ? recolour(item, hex) : item) }))}
           {actions}
           <button type="button" className={styles.danger} disabled={singleLocked} onClick={remove}>{t("panel.deleteRoom")}</button>
         </div>}
@@ -528,7 +624,8 @@ export function FloorPlanEditor({ projectId, notes, block, previous, meters, boa
           <label>{t("panel.showAs")}<select value={selectedPlacement?.size ? "box" : "dot"} disabled={singleLocked} onChange={event => setDeviceShape(selectedDevice.id, event.target.value === "box")}>
             <option value="dot">{t("panel.showDot")}</option><option value="box">{t("panel.showBox")}</option>
           </select></label>
-          {colourPicker(selectedPlacement?.colour, t("panel.colourAuto", { board: selectedDevice.board }), hex => commit({ ...plan, devices: plan.devices.map(item => item.meterId === selectedDevice.id ? recolour(item, hex) : item) }))}
+          {selectedPlacement?.size && positionFields(single!, deviceRect(selectedPlacement)!)}
+          {colourPicker(`device:${selectedDevice.id}`, selectedPlacement?.colour, t("panel.colourAuto", { board: selectedDevice.board }), hex => ({ ...plan, devices: plan.devices.map(item => item.meterId === selectedDevice.id ? recolour(item, hex) : item) }))}
           {actions}
           <button type="button" className={styles.danger} disabled={singleLocked} onClick={remove}>{t("panel.takeOff")}</button>
         </div>}

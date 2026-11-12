@@ -271,4 +271,17 @@ describe("template and floor plan", () => {
     expect(saved.areas.map(area => area.label)).toEqual(["Block 12A", "Common area"]);
     expect(floorPlanWithGroupAreas(previous, ["Block 12A"])).toBeNull();
   });
+
+  it("never offers group areas that would sit past the stored format's 10,000 limit", () => {
+    // A plan starting at y=4000 and already 6000 tall, filled to the bottom: a new row would land past 10,000.
+    const drawn = starterPlan(["12A"]);
+    const full = { ...drawn, rooms: drawn.rooms.slice(0, 1).map(room => ({ ...room, rect: [40, 4060, 200, 150] as [number, number, number, number] })), devices: [], viewBox: [0, 4000, 1000, 6000] as [number, number, number, number], areas: drawn.areas.map(area => ({ ...area, label: "Block 12A", rect: [20, 4020, 900, 5900] as [number, number, number, number] })) };
+    const previous = referenceFromPlan(full, "maple", null) as StoredSpatialReference;
+    expect(floorPlanWithGroupAreas(previous, ["Common area"])).toBeNull();
+    // With room below, the grown plan still stops at 10,000 and saves.
+    const roomy = referenceFromPlan({ ...full, viewBox: [0, 4000, 1000, 3000], areas: full.areas.map(area => ({ ...area, rect: [20, 4020, 900, 2500] as [number, number, number, number] })) }, "maple", null) as StoredSpatialReference;
+    const next = floorPlanWithGroupAreas(roomy, ["Common area"])!;
+    expect(next.plan.viewBox[1] + next.plan.viewBox[3]).toBeLessThanOrEqual(10_000);
+    expect(() => referenceFromPlan(next.plan, "maple", roomy)).not.toThrow();
+  });
 });
