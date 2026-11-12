@@ -206,7 +206,7 @@ const TOUR_TEXT: Record<Exclude<EnergyIqLocale, "en">, TourText[]> = {
       { title: "站点", text: "站点名称和时区、分组和电表数量，以及已保存的更改是否已生效。" },
       { title: "场地设施标签页", text: "设置的每个部分都有自己的标签页，数字表示该标签页中的项目数。" },
       { title: "建议", text: "在可以改进时出现，例如有些电表可按所供电的设备分类，这样图表就能按用途显示用电去向。" },
-      { title: "分组", text: "按用途整理的电表（例如楼栋里的 Block lighting），以及每个分组的电表数量。点击一个分组即可查看其电表。可更改设置的人可以新建分组、把分组放进另一个分组、用“上移”“下移”调整分组位置、把电表拖到别的分组，或选择“从表格整理分组”。电表上的“修改”可设置简称、“按设计全天开启”和“灯的数量”。" },
+      { title: "分组", text: "按用途整理的电表（例如楼栋里的 Block lighting），以及每个分组的电表数量。点击一个分组即可查看其电表。可更改设置的人可以新建分组、把分组放进另一个分组、用“上移”“下移”调整分组位置、把电表拖到别的分组，或选择“从表格整理分组”。电表上的“修改”可设置简称、“按设计一直开着”和“灯的数量”。" },
       { title: "平面图", text: "显示每个配电箱和设备所在位置的示意图。点击列表中的分组，其电表会在图上高亮显示。“编辑布局”供管理员绘制房间和放置设备。合计和占比来自分组，而不是这张图。" },
     ] },
     { title: "设备", where: "主菜单 → 场地设施 → 设备", intro: "每台设备的用电量、费用以及运行时间。", parts: [
@@ -336,7 +336,7 @@ const TOUR_TEXT: Record<Exclude<EnergyIqLocale, "en">, TourText[]> = {
       { title: "Premis", text: "Nama dan zon waktu premis, bilangan kumpulan dan meter, dan sama ada perubahan yang disimpan sudah digunakan." },
       { title: "Tab premis", text: "Setiap bahagian tetapan mempunyai tab sendiri. Nombor menunjukkan bilangan item dalam tab itu." },
       { title: "Cadangan", text: "Muncul apabila sesuatu boleh dijelaskan lagi, contohnya meter yang boleh diisih mengikut apa yang dikuasakan, supaya carta dapat menunjukkan ke mana tenaga pergi mengikut jenis." },
-      { title: "Kumpulan", text: "Meter yang dikumpulkan mengikut apa yang dibekalkannya, seperti Block lighting di dalam blok, dengan bilangan meter setiap kumpulan. Klik satu untuk melihat meternya. Mereka yang boleh mengubah tetapan boleh menambah kumpulan, meletakkan kumpulan di dalam kumpulan lain, mengalihkan kumpulan dengan Naikkan atau Turunkan, menyeret meter ke kumpulan lain, atau memilih Susun daripada hamparan. Ubah pada meter menetapkan nama ringkas, Sentiasa menyala mengikut reka bentuk dan Bilangan lampu." },
+      { title: "Kumpulan", text: "Meter yang dikumpulkan mengikut apa yang dibekalkannya, seperti Block lighting di dalam blok, dengan bilangan meter setiap kumpulan. Klik satu untuk melihat meternya. Mereka yang boleh mengubah tetapan boleh menambah kumpulan, meletakkan kumpulan di dalam kumpulan lain, mengalihkan kumpulan dengan Naikkan atau Turunkan, menyeret meter ke kumpulan lain, atau memilih Susun daripada hamparan. Ubah pada meter menetapkan nama ringkas, Sentiasa hidup mengikut reka bentuk dan Bilangan lampu." },
       { title: "Pelan lantai", text: "Lakaran lokasi setiap papan dan peranti. Klik kumpulan dalam senarai dan meternya diserlahkan di sini. Edit susun atur membolehkan pentadbir melukis bilik dan meletakkan peranti. Jumlah dan bahagian datang daripada Kumpulan, bukan lukisan ini." },
     ] },
     { title: "Peranti", where: "Menu utama → Premis → Peranti", intro: "Berapa banyak tenaga yang digunakan setiap peranti, kosnya dan bila ia beroperasi.", parts: [

@@ -10,6 +10,10 @@ import { renderManagementReviewMarkup } from "@datafoundry/site-report/managemen
 import type { AnalysisData, ScopeData, ScopeMeter, TrendSeries } from "./analysis-data";
 import { closedUseBreakdown, savingsPlan, type HoursByDay } from "./analysis-model";
 import { buildSiteReport } from "./site-report-model";
+import { translatorFor } from "./energyiq-messages";
+import { structureMessages } from "./facility-messages";
+import { storyMessages } from "./analysis-story-messages";
+import { deviceMessages } from "./site-devices-messages";
 
 const WEEK = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 const every = (from: string, to: string): HoursByDay => Object.fromEntries(WEEK.map(day => [day, [{ from, to }]]));
@@ -209,10 +213,23 @@ describe("which lights were on in the daytime, and when", () => {
   it("is worded in Chinese and Malay", () => {
     const zh = buildSiteReport(estate(ESTATE, ALWAYS_ON), null, "2026-09-22T10:00:00Z", "zh-Hans").daytime!;
     expect(zh.items[0]).toMatch(/^Corridor lights：.+亮着，共 14 天，8\.4 kWh$/);
-    expect(zh.alwaysOn).toBe("按设计需要一直开着，所以不计入白天用电：Emergency lights。");
+    expect(zh.alwaysOn).toBe("按设计一直开着，所以不计入白天用电：Emergency lights。");
     const ms = buildSiteReport(estate(ESTATE, ALWAYS_ON), null, "2026-09-22T10:00:00Z", "ms").daytime!;
     expect(ms.items[1]).toMatch(/^Driveway lamp: menyala .+ pada 3 hari, 3\.0 kWh$/);
     expect(ms.rule).toBe("Lampu yang menyala atau padam dalam masa 20 minit dari waktu lampu menyala dikira tepat pada masanya.");
+  });
+});
+
+describe("the always-on tick, by one name", () => {
+  it("is called the same on the meter form, in Analysis, on Devices and in the reports, in every language", () => {
+    for (const locale of ["en", "zh-Hans", "ms"] as const) {
+      const term = translatorFor(structureMessages, locale)("meter.alwaysOn");
+      expect(translatorFor(storyMessages, locale)("on.tagByDesign")).toBe(term);
+      expect(translatorFor(deviceMessages, locale)("finding.byDesign.title")).toBe(term);
+      // The report names the meters it left out with the same words, whatever the case of the first letter.
+      const said = buildSiteReport(estate(ESTATE, ALWAYS_ON), null, "2026-09-22T10:00:00Z", locale).daytime!.alwaysOn!;
+      expect(said.toLowerCase()).toContain(term.toLowerCase());
+    }
   });
 });
 

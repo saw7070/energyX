@@ -567,7 +567,7 @@ export const storyMessages = defineMessages({
     "lights.when.title": "Hari biasa, jam demi jam",
     "lights.when.takeaway": "Waktu lampu menyala ialah {hours}. {pct}% tenaga digunakan di luar waktu itu, iaitu pada waktu siang.",
     "lights.when.takeawayAssumed": "Waktu lampu menyala ialah {hours} (andaian — tiada waktu lampu menyala disimpan dalam Kemudahan → Waktu operasi). {pct}% tenaga digunakan di luar waktu itu, iaitu pada waktu siang.",
-    "lights.when.barNote": "Bar di bawah mengira setiap jam di luar waktu itu ({pct}%), termasuk lampu yang sentiasa menyala mengikut reka bentuk dan {minutes} minit yang dibenarkan pada setiap hujung.",
+    "lights.when.barNote": "Bar di bawah mengira setiap jam di luar waktu itu ({pct}%), termasuk lampu yang sentiasa hidup mengikut reka bentuk dan {minutes} minit yang dibenarkan pada setiap hujung.",
     "lights.when.working": "Dalam waktu lampu menyala",
     "lights.when.leftOn": "Dibiarkan hidup pada waktu siang",
     "lights.when.afterHours": "Waktu siang",

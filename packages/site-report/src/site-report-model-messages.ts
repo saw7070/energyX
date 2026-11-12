@@ -547,8 +547,8 @@ export const siteReportModelMessages = defineMessages({
     "cap.paler": "颜色较浅的柱形表示读数缺失的日子。",
     "outro.high": "按 30 天的月份计算，从不关闭的用电就有 **{kwh}，占估算电费的 {pct}{costs}**。有人上班时只在此基础上多用约 {extra}。所以真正的节省必须来自无人时关掉设备，而不是改变上班时的习惯。",
     "outro.costs": "，即 {month} 中的 {base}",
-    "outro.byDesign": "这里没有计入按设计需要一直开着的电表，它们的功率为 {kw}（约每天 {day}）。",
-    "outro.allByDesign": "日夜不停的用电全部来自按设计需要一直开着的电表：{kw}（约每天 {day}），本来就要日夜运行。",
+    "outro.byDesign": "这里没有计入按设计一直开着的电表，它们的功率为 {kw}（约每天 {day}）。",
+    "outro.allByDesign": "日夜不停的用电全部来自按设计一直开着的电表：{kw}（约每天 {day}），本来就要日夜运行。",
     "outro.low": "按 30 天的月份计算，从不关闭的用电为 **{kwh}，占估算电费的 {pct}**。电费大部分来自上班时间的用电，所以节省的关键在于排好开关时间，以及有人在场时如何使用设备。",
 
     "note.ramp": "员工到达",
@@ -586,7 +586,7 @@ export const siteReportModelMessages = defineMessages({
     "call.alwaysOn": "这里没有看起来像故障的情况：费用来自从不关闭的设备。",
     "call.none": "这段时间内，没有电表出现不寻常的用电。",
     "call.noneElse": "这段时间内，没有其他电表出现不寻常的用电。",
-    "call.byDesign": "按设计需要一直开着，日夜运行属于正常：{names}。",
+    "call.byDesign": "按设计一直开着，日夜运行属于正常：{names}。",
     "find.byDesign": "按设计一直开着：它本来就要日夜运行，所以属于正常。",
     "call.timer.one": "{items}，可以加装定时器{worth}{end}",
     "call.timer.other": "{items}，可以加装定时器{worth}{end}",
@@ -646,7 +646,7 @@ export const siteReportModelMessages = defineMessages({
     "daytime.item.other": "{name}：{hours}亮着，共 {days} 天，{kwh}",
     "daytime.more": "另有 {count} 个",
     "daytime.none": "白天没有灯亮着。",
-    "daytime.alwaysOn": "按设计需要一直开着，所以不计入白天用电：{names}。",
+    "daytime.alwaysOn": "按设计一直开着，所以不计入白天用电：{names}。",
     "daytime.rule": "灯在亮灯时间前后 {minutes} 分钟内开启或关闭，都算按时。",
 
     "avgDay.cost": "平均每天用电约 {kwh}（约 {cost}）",
