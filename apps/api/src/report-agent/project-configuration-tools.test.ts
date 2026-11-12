@@ -52,7 +52,9 @@ it("tells the advisor to keep every floor layout key it does not know, and to ch
   const metadata = new Proxy({}, { get: () => { throw Error("MUST_NOT_READ"); } }) as MetadataStore;
   const update = createProjectConfigurationTools({ metadata, run: { actorUserId: "u", workspaceId: "w", projectId: "p" } }).tools.find(tool => tool.name === "project_context_update")!.description;
   expect(update).toContain("every key you do not recognise at the top level, in layout, and in each zone, room, device and entrance");
-  expect(update).toContain("Never add, remove, rename, move or rewrite labels, symbols, lines, openings, points, levels or devices unless asked");
+  expect(update).toContain("Never add, remove, rename, move or rewrite labels, symbols, lines, openings, points, shapes, levels or devices unless asked");
+  // Free shapes: the advisor keeps a shaped room's box as the box around its points, and plain shapes hold nothing.
+  expect(update).toContain("its rect must stay their bounding box"); expect(update).toContain("layout.shapes are plain drawn shapes");
 });
 it("round trips a valid structure/meter/virtual draft through the existing store without publishing", async () => {
   const { metadata, executeTool } = fixture();

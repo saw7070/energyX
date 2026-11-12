@@ -458,3 +458,4 @@ export const createEnvConfig = (env: Record<string, string | undefined>): EnvCon
 });
 export * from "./project-spatial.js";
 export * from "./project-spatial-drawing.js";
+export * from "./spatial-polygon.js";

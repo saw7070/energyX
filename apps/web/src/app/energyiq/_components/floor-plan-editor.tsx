@@ -20,7 +20,11 @@ import { canRedo, canUndo, commitPlan, endTyping, finishChange, redo, selectIn, 
 import { isTextEntry, planShortcut } from "./floor-plan-keys";
 import { PositionFields } from "./floor-plan-position";
 import { boundsOf, editorPrefs, gridSpacing, guideFor, guideTargets, samePrefs, snapToLines, withPrefs, type EditorPrefs, type Guide, type GuideTargets } from "./floor-plan-snap";
-import { AreaShape, DeviceShape, EntranceShape, GroupShape, LabelShape, RoomShape, SymbolShape, type ItemDown } from "./floor-plan-shapes";
+import { AreaShape, DeviceShape, EntranceShape, GroupShape, LabelShape, PlainShapeItem, RoomShape, SymbolShape, type ItemDown } from "./floor-plan-shapes";
+import { DEFAULT_SHAPE_FILL, MAX_SHAPES, newShape, type PlanShape } from "./floor-plan-plain-shapes";
+import { addCorner, asRectangle, boxCorners, MAX_POLYGON_POINTS, cornersOf, fromCorners, holds, insideBox, middleOf, moveCorner, nearestOnSide, placeCorner, presetOutline, removeCorner, shapeProblem, withPreset, type Outlined, type ShapePreset } from "./floor-plan-polygon";
+import { CornerGrips, CornerPanel, DrawPreview, outlinedItem, PlainShapePanel, ShapeChoices, ShapeSelect, withOutlined, type ShapePick } from "./floor-plan-shape-tools";
+import { shapeMessages } from "./floor-plan-shape-messages";
 import { DraftOffer, ZoomControls } from "./floor-plan-view-controls";
 import { useCoarsePointer, useElementWidth, usePlanViewport } from "./floor-plan-viewport";
 import { maxZoom, MIN_ZOOM, planPoint } from "./floor-plan-zoom";
@@ -89,12 +93,16 @@ type Drag = { mode: "move" | "resize" | "rotate"; selection: Selection[]; handle
  */
 type Sweep = { kind: "marquee" | "draw"; start: Point; additive: boolean; base: Selection[]; click?: Selection };
 /** What the next drag (or click) on the plan draws. */
-type Tool = "area" | "room" | "equipment" | "text" | "landmark" | "door" | "line";
-const TOOL_STATUS = { area: "editor.drawArea", room: "editor.drawRoom", equipment: "editor.drawEquipment", text: "editor.drawText", landmark: "editor.drawLandmark", door: "editor.drawDoor", line: "editor.drawLine" } as const satisfies Record<Tool, string>;
+type Tool = "area" | "room" | "equipment" | "text" | "landmark" | "door" | "line" | "shape";
+const TOOL_STATUS = { area: "editor.drawArea", room: "editor.drawRoom", equipment: "editor.drawEquipment", text: "editor.drawText", landmark: "editor.drawLandmark", door: "editor.drawDoor", line: "editor.drawLine" } as const satisfies Record<Exclude<Tool, "shape">, string>;
 /** Tools that put something at the point clicked, rather than in a box dragged out (a door goes on the wall nearest it). */
 const pointTool = (tool: Tool | null) => tool === "text" || tool === "landmark" || tool === "door";
 /** How far the turning handle sits above an item, in screen pixels. */
 const TURN_PX = 26;
+/** A shape being drawn corner by corner (the "Draw shape" choice): the corners so far and where the pointer is. */
+type Drawing = { corners: Point[]; hover: Point | null };
+/** A corner of the selected shape being dragged: which item and corner, and the plan when the drag began. */
+type CornerDrag = { item: Selection; index: number; before: HistoryEntry; original: FloorPlan; targets: GuideTargets; reach: number; moved: boolean; refused: boolean };
 /** Which edge of the drawing space is being pulled: right (wider), bottom (taller) or the corner (both). */
 type Edge = "e" | "s" | "se" | "w" | "n";
 type EdgeDrag = { edge: Edge; startX: number; startY: number; scale: number; original: FloorPlan; before: HistoryEntry; moved: boolean; warned: boolean };
@@ -113,6 +121,7 @@ export function UnsavedBar({ onKeep, onLeave }: { onKeep: () => void; onLeave: (
 /** `userId` is who is signed in: the unsaved draft kept in this browser is theirs alone (see floor-plan-draft). */
 export function FloorPlanEditor({ projectId, userId = "", notes, block, previous, meters, boards, onCancel, onSaved, onDirtyChange }: { projectId: string; userId?: string; notes: string; block: string | null; previous: StoredSpatialReference | null; meters: PlanMeter[]; boards: string[]; onCancel: () => void; onSaved: (message: string) => void; onDirtyChange?: (changed: boolean) => void }) {
   const t = useMessages(floorPlanMessages);
+  const ts = useMessages(shapeMessages);
   const { locale } = useEnergyIqLocale();
   // The plan and the selection, with every step Undo and Redo can go to (see floor-plan-history).
   const [history, setHistory] = useState(() => startHistory(previous ? planFromReference(previous, locale) : starterPlan(boards, locale)));
@@ -141,6 +150,11 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   // The landmark the + Landmark tool puts down next.
   const [landmark, setLandmark] = useState<string | null>(null);
   const kindName = useKindName();
+  // Free shapes: the shape new areas, rooms and plain shapes take, a shape being drawn, and the picked corner.
+  const [pick, setPick] = useState<ShapePick>("rect");
+  const [drawing, setDrawing] = useState<Drawing | null>(null);
+  const [pickedCorner, setPickedCorner] = useState<{ key: string; index: number } | null>(null);
+  const cornerDrag = useRef<CornerDrag | null>(null);
   const [error, setError] = useState("");
   /** A text label just added: its Text field takes focus with its text selected, so typing replaces "Text" at once. */
   const [freshLabel, setFreshLabel] = useState<string | null>(null);
@@ -242,37 +256,52 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   const reserved = hidden.map(item => item.id);
   const copyName = (name: string) => t("name.copy", { name });
   const nextLabel = () => { for (let index = 0; index < 26; index += 1) { const label = String.fromCharCode(65 + index); if (!plan.areas.some(item => item.label === label) && !hidden.some(item => item.id === label)) return label; } return t("name.area", { id: plan.areas.length + 1 }); };
-  const chooseTool = (next: Tool) => { setPlacing(null); setNotice(""); setLandmark(null); setTool(current => current === next ? null : next); focusCanvas(); };
+  const chooseTool = (next: Tool) => { setPlacing(null); setNotice(""); setLandmark(null); setDrawing(null); setTool(current => current === next ? null : next); focusCanvas(); };
   /** Picking a landmark from the menu: the next click on the plan puts it there. */
   const chooseLandmark = (kind: string) => { setPlacing(null); setNotice(""); setLandmark(kind); setTool("landmark"); focusCanvas(); };
-  const stopTool = () => { setTool(null); setLandmark(null); };
+  const stopTool = () => { setTool(null); setLandmark(null); setDrawing(null); };
+  /** The shape a new item of this kind takes: a circle only for a plain shape; tools that draw no area, room or shape take none. */
+  const pickFor = (kind: Tool): ShapePick => (kind !== "area" && kind !== "room" && kind !== "shape") || (pick === "ellipse" && kind !== "shape") ? "rect" : pick;
+  /** Whether clicks on the plan add corners of a new shape (the "Draw shape" choice). */
+  const drawMode = !!tool && tool !== "equipment" && pickFor(tool) === "draw";
   /**
    * Adds what the tool draws: in the box dragged on the plan, at its usual size where the plan was clicked (`at`), or,
    * from the keyboard (neither), at its usual place. One undo step; the new item comes back selected.
    */
-  const create = (kind: Tool, at: Point | null, drawn: Rect | null) => {
+  const create = (kind: Tool, at: Point | null, drawn: Rect | null, shaped?: Outlined) => {
     if (kind === "text" || kind === "landmark") { addMark(kind, at ?? (drawn ? centre(drawn) : null)); return; }
     if (kind === "door") { addDoor(at); return; }
     if (kind === "line") return;
-    // A saved layout holds at most so many areas and rooms: say so instead of adding one that cannot be saved.
-    if (!fitsLimits(plan, hidden.length, kind === "room" ? 0 : 1, kind === "room" ? 1 : 0)) { setNotice(tooMany()); return; }
-    const box = drawn && !isClick(drawn) ? clampRect(drawn, plan.viewBox) : null;
-    const done = (next: FloorPlan, item: Selection) => { say(placed => countText(t, placed, [item], meterName, "a11y.added", "a11y.addedMany", kindName)); commit(next, { selection: [item] }); setTool(null); focusCanvas(); };
+    // A saved layout holds at most so many areas and rooms (and plain shapes): say so instead of adding one that cannot be saved.
+    if (kind === "shape" ? (plan.shapes?.length ?? 0) >= MAX_SHAPES : !fitsLimits(plan, hidden.length, kind === "room" ? 0 : 1, kind === "room" ? 1 : 0)) { setNotice(kind === "shape" ? ts("problem.tooManyShapes", { max: MAX_SHAPES }) : tooMany()); return; }
+    const box = shaped ? shaped.rect : drawn && !isClick(drawn) ? clampRect(drawn, plan.viewBox) : null;
+    // The shape chosen for it: drawn corner by corner, or an L, U or T in its box (a circle is for plain shapes only).
+    const choice = pickFor(kind), outline = shaped?.outline ?? (choice === "rect" || choice === "draw" || choice === "ellipse" ? undefined : presetOutline(choice));
+    const shapeOf = outline ? { outline } : {};
+    const done = (next: FloorPlan, item: Selection) => { say(placed => countText(t, placed, [item], meterName, "a11y.added", "a11y.addedMany", kindName)); commit(next, { selection: [item] }); setTool(null); setDrawing(null); focusCanvas(); };
+    if (kind === "shape") {
+      const rect = box ?? (at ? centredBox(at, [160, 100], plan.viewBox, step) : clampRect([vx + 20, vy + 20, 160, 100], plan.viewBox));
+      const shape = newShape(plan.shapes ?? [], outline ? "polygon" : choice === "ellipse" ? "ellipse" : "rect", rect, outline);
+      done({ ...plan, shapes: [...(plan.shapes ?? []), shape] }, { kind: "shape", key: shape.key });
+      return;
+    }
     if (kind === "area") {
       const key = `area-${Date.now()}`, size: Point = [snap(vw * 0.35, grid), snap(vh * 0.55, grid)];
       const rect = box ?? (at ? centredBox(at, size, plan.viewBox, step) : clampRect([vx + 20, vy + 20, size[0], size[1]], plan.viewBox));
-      done({ ...plan, areas: [...plan.areas, { key, label: nextLabel(), board: "", rect }] }, { kind: "area", key });
+      done({ ...plan, areas: [...plan.areas, { key, label: nextLabel(), board: "", rect, ...shapeOf }] }, { kind: "area", key });
       return;
     }
     if (kind === "room") {
       const host = (single?.kind === "area" ? plan.areas.find(item => item.key === single.key && !item.insideRoom) : undefined) ?? plan.areas.find(item => !item.insideRoom);
-      const [hx, hy] = host ? host.rect : [vx + 20, vy + 20];
+      // From the keyboard, the room goes in the host's largest part (never the notch of an L or U).
+      const inner = host ? insideBox(host) : null, [hx, hy] = inner ?? [vx + 20, vy + 20];
       const key = `room-${Date.now()}`;
       const roomName = (number: number) => t("name.newRoom", { number });
       let number = plan.rooms.length + 1; while (plan.rooms.some(room => room.name === roomName(number))) number += 1;
-      const rect = box ?? (at ? centredBox(at, [180, 110], plan.viewBox, step) : clampRect([hx + 20, hy + 50, 180, 110], plan.viewBox));
+      const usual = clampRect([hx + 20, hy + 50, 180, 110], plan.viewBox), [ix, iy] = inner ? centre(inner) : [0, 0];
+      const rect = box ?? (at ? centredBox(at, [180, 110], plan.viewBox, step) : host && !holds(host, centre(usual)) ? clampRect([ix - 90, iy - 55, 180, 110], plan.viewBox) : usual);
       // A new room gets a stable id, so later things can point at it even after it is renamed.
-      const next = settleRooms({ ...plan, rooms: [...plan.rooms, { key, name: roomName(number), rect, ...(host && !box && !at ? { area: host.key } : {}), id: newRoomId(roomIds(plan)) }] });
+      const next = settleRooms({ ...plan, rooms: [...plan.rooms, { key, name: roomName(number), rect, ...shapeOf, ...(host && !box && !at ? { area: host.key } : {}), id: newRoomId(roomIds(plan)) }] });
       // A room belongs to an area: one drawn outside every area is not added (the tool stays on), as for equipment.
       if (!roomOwner(next, next.rooms[next.rooms.length - 1]!)) { setNotice(t("editor.roomNeedsArea")); return; }
       done(next, { kind: "room", key });
@@ -280,10 +309,10 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     }
     // Equipment on its own panel inside a room, such as a DB3 bank of LED screens in the showroom: pick its board and what it supplies next.
     const point = box ? centre(box) : at;
-    const room = point ? plan.rooms.filter(item => contains(item.rect, point)).sort((a, b) => a.rect[2] * a.rect[3] - b.rect[2] * b.rect[3])[0]
+    const room = point ? plan.rooms.filter(item => holds(item, point)).sort((a, b) => a.rect[2] * a.rect[3] - b.rect[2] * b.rect[3])[0]
       : (single?.kind === "room" ? plan.rooms.find(item => item.key === single.key) : undefined) ?? plan.rooms[0];
     if (!room) { setNotice(t("editor.equipmentNeedsRoom")); return; }
-    const hostBoard = plan.areas.filter(item => !item.insideRoom && contains(item.rect, centre(room.rect))).sort((a, b) => a.rect[2] * a.rect[3] - b.rect[2] * b.rect[3])[0]?.board;
+    const hostBoard = plan.areas.filter(item => !item.insideRoom && holds(item, middleOf(room))).sort((a, b) => a.rect[2] * a.rect[3] - b.rect[2] * b.rect[3])[0]?.board;
     const board = allBoards.find(item => !plan.areas.some(area => area.board === item)) ?? hostBoard ?? allBoards[0] ?? "";
     const [rx, ry, rw, rh] = room.rect, height = Math.min(60, rh * 0.4);
     const key = `group-${Date.now()}`;
@@ -379,6 +408,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   };
   /** Double-click: finishes the line being drawn, or adds a point where the selected line was double-clicked. */
   const onDoubleClick = (event: React.MouseEvent) => {
+    if (drawMode) { finishDraw(); return; }
     if (tool === "line") { event.preventDefault(); finishLine(); return; }
     const line = single?.kind === "line" ? plan.lines?.find(item => item.key === single.key) : undefined;
     if (!line || line.locked) return;
@@ -397,6 +427,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   /** Puts a copy on the plan; refused, with a message, when the plan could then not be saved. */
   const putCopy = (clip: Clip, offset: number) => {
     if (!fits(clip)) { setNotice(fitsMarks(plan, clip.labels?.length ?? 0, clip.symbols?.length ?? 0) ? tooMany() : t("editor.tooManyMarks", { max: MARK_LIMIT })); return false; }
+    if ((plan.shapes?.length ?? 0) + (clip.shapes?.length ?? 0) > MAX_SHAPES) { setNotice(ts("problem.tooManyShapes", { max: MAX_SHAPES })); return false; }
     const result = pasteClip(plan, clip, offset, copyName, reserved);
     say(placed => countText(t, placed, result.selection, meterName, "a11y.added", "a11y.addedMany", kindName));
     commit(result.plan, { selection: result.selection }); focusCanvas(); return true;
@@ -472,6 +503,9 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     clearPress();
     pendingPlace.current = null; pendingPoint.current = null;
     if (sweep.current) { sweep.current = null; setSweepBox(null); }
+    const corner = cornerDrag.current;
+    cornerDrag.current = null;
+    if (corner) { setGuides(lines => lines.length ? [] : lines); setHistory(list => showPlan(list, corner.before.plan, corner.before.selection)); return; }
     const current = drag.current;
     drag.current = null;
     if (!current) return;
@@ -493,6 +527,9 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     if (touch && event.pointerId === touch.id && Math.hypot(event.clientX - touch.at[0], event.clientY - touch.at[1]) > TOUCH_SLOP) pendingPoint.current = null;
     if (pointDrag.current) { movePoint(toPoint(event.clientX, event.clientY)); return; }
     if (linePoints) { setLineHover(snapped(toPoint(event.clientX, event.clientY))); return; }
+    if (cornerDrag.current) { dragCorner(cornerDrag.current, event); return; }
+    // Drawing a shape: a line follows the pointer from the last corner.
+    if (drawMode && drawing?.corners.length) { const last = drawing.corners[drawing.corners.length - 1]!; setDrawing({ ...drawing, hover: placeCorner(toPoint(event.clientX, event.clientY), step, plan.viewBox, last, event.shiftKey) }); return; }
     const area = sweep.current;
     if (area) { if (area.kind === "draw" && pointTool(tool)) return; const end = toPoint(event.clientX, event.clientY); setSweepBox({ kind: area.kind, rect: area.kind === "draw" ? snappedBox(area.start, end, step) : boxBetween(area.start, end) }); return; }
     // A finger held still for a long press does not move anything; moving it further makes it a drag.
@@ -530,7 +567,8 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   /** The plan with one area, room or device box given a new box (worked out from its current one). */
   const withBox = (source: FloorPlan, target: Selection, change: (rect: Rect) => Rect): FloorPlan => target.kind === "area" ? { ...source, areas: source.areas.map(item => item.key === target.key ? { ...item, rect: change(item.rect) } : item) }
     : target.kind === "device" ? { ...source, devices: source.devices.map(item => { const rect = item.meterId === target.key ? deviceRect(item) : null; if (!rect) return item; const [x, y, w, h] = change(rect); return { ...item, position: [x + w / 2, y + h / 2] as Point, size: [w, h] as Point }; }) }
-    : target.kind === "room" ? { ...source, rooms: source.rooms.map(item => item.key === target.key ? { ...item, rect: change(item.rect) } : item) } : source;
+    : target.kind === "room" ? { ...source, rooms: source.rooms.map(item => item.key === target.key ? { ...item, rect: change(item.rect) } : item) }
+    : target.kind === "shape" ? { ...source, shapes: (source.shapes ?? []).map(item => item.key === target.key ? { ...item, rect: change(item.rect) } : item) } : source;
   /**
    * How far a drag goes for a pointer movement of (rawX, rawY): on the grid, or lined up with the edge or centre of a
    * nearby item when one is within reach (with the guide lines to draw). `free` (snapping off, or Cmd/Ctrl held) follows
@@ -648,11 +686,89 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     const hit = !tool && empty ? markAt(plan, toPoint(event.clientX, event.clientY)) : null;
     if (hit) { startDrag(event, hit); return; }
     if (!tool && !empty) return;
+    if (drawMode) { addDrawCorner(event); return; }
     beginSweep(event);
+  };
+  /**
+   * Draw shape: each click adds a corner (on the grid, or with Shift at 45° steps from the last corner). Clicking the
+   * first corner again, a double-click or Enter finishes; Backspace takes back the last corner; Esc stops.
+   */
+  const addDrawCorner = (event: ReactPointerEvent) => {
+    const corners = drawing?.corners ?? [], last = corners[corners.length - 1], first = corners[0];
+    const at = placeCorner(toPoint(event.clientX, event.clientY), step, plan.viewBox, last ?? null, event.shiftKey);
+    if (first && corners.length >= 3 && Math.hypot(at[0] - first[0], at[1] - first[1]) <= perPx * GRIP_PX) { finishDraw(corners); return; }
+    // The second press of a double-click lands on the corner just added: it adds nothing.
+    if (last && Math.hypot(at[0] - last[0], at[1] - last[1]) <= Math.max(perPx * 3, 0.5)) return;
+    if (corners.length >= MAX_POLYGON_POINTS) { setNotice(ts("problem.many", { max: MAX_POLYGON_POINTS })); return; }
+    setNotice("");
+    setDrawing({ corners: [...corners, at], hover: null });
+  };
+  /** Finishes the shape being drawn: the new item takes it, or a plain message says why it cannot (and drawing goes on). */
+  const finishDraw = (corners: Point[] = drawing?.corners ?? []) => {
+    if (!tool || tool === "equipment") return;
+    const problem = shapeProblem(corners);
+    if (problem) { setNotice(problem === "crossing" ? ts("draw.crossing") : problem === "many" ? ts("problem.many", { max: MAX_POLYGON_POINTS }) : problem === "few" ? ts("problem.few") : ts("problem.small")); return; }
+    create(tool, null, null, fromCorners(corners)!);
+  };
+  /** Pressing a corner grip of the selected shape: picks that corner and starts dragging it (one undo step). */
+  const startCorner = (event: ReactPointerEvent, index: number) => {
+    if (event.button !== 0 || !single || placing || tool) return;
+    event.stopPropagation();
+    const { plan, selection } = latest();
+    (event.currentTarget as Element).setPointerCapture?.(event.pointerId);
+    focusCanvas();
+    setPickedCorner({ key: itemId(single), index });
+    const item = outlinedItem(plan, single), corners = item && cornersOf(item);
+    if (!corners || isLocked(plan, single)) return;
+    // A corner lines up with the item's other corners and with the edges and centres of everything else.
+    const others = corners.filter((_, i) => i !== index).map(([x, y]) => [x, y, 0, 0] as Rect);
+    const boxes = everything(plan, shown).filter(other => !(other.kind === single.kind && other.key === single.key)).flatMap(other => { const box = boxOf(plan, other); return box ? [box] : []; });
+    cornerDrag.current = { item: single, index, before: { plan, selection }, original: plan, targets: guideTargets([...boxes, ...others]), reach: GUIDE_REACH / pxPerUnit(), moved: false, refused: false };
+  };
+  /** Moves the dragged corner: on the grid or lined up with a guide, or with Shift at 45° steps from the corner before it. */
+  const dragCorner = (corner: CornerDrag, event: ReactPointerEvent) => {
+    const corners = (() => { const item = outlinedItem(corner.original, corner.item); return item && cornersOf(item); })();
+    if (!corners) return;
+    const free = !prefs.snap || event.metaKey || event.ctrlKey, anchor = corners[(corner.index - 1 + corners.length) % corners.length]!;
+    let at = placeCorner(toPoint(event.clientX, event.clientY), free ? 0 : grid, corner.original.viewBox, anchor, event.shiftKey);
+    const lines: Guide[] = [];
+    if (!free && !event.shiftKey) {
+      const sx = snapToLines(corner.targets.x, [at[0]], corner.reach), sy = snapToLines(corner.targets.y, [at[1]], corner.reach);
+      at = [at[0] + (sx?.shift ?? 0), at[1] + (sy?.shift ?? 0)];
+      if (sx) lines.push(guideFor(corner.targets.x, "x", sx.at, [at[0], at[1], 0, 0]));
+      if (sy) lines.push(guideFor(corner.targets.y, "y", sy.at, [at[0], at[1], 0, 0]));
+    }
+    // A shape that would cross over itself is refused: the last good shape stays, and letting go says why.
+    const next = withOutlined(corner.original, corner.item, entry => moveCorner(entry, corner.index, at));
+    corner.refused = next === corner.original;
+    if (corner.refused) return;
+    corner.moved = true;
+    setGuides(lines);
+    show(next);
+  };
+  const endCorner = (corner: CornerDrag) => {
+    cornerDrag.current = null;
+    setGuides(lines => lines.length ? [] : lines);
+    if (corner.refused) setNotice(ts("problem.crossing"));
+    if (!corner.moved) return;
+    setHistory(list => { const settled = settleRooms(list.present.plan); return finishChange(list, corner.before, sameGeometry(settled, corner.before.plan) ? corner.before.plan : settled); });
+    setError("");
+  };
+  /** Double-clicking a side of the selected shape adds a corner there (picked, ready to drag). */
+  const addCornerAt = (index: number, at: { clientX: number; clientY: number }) => {
+    if (!single || singleLocked) return;
+    const item = outlinedItem(plan, single), corners = item && (cornersOf(item) ?? boxCorners(item.rect));
+    if (!corners) return;
+    const spot = nearestOnSide(toPoint(at.clientX, at.clientY), corners[index]!, corners[(index + 1) % corners.length]!);
+    const next = withOutlined(plan, single, entry => addCorner(entry, index, spot));
+    if (next === plan) { setNotice(corners.length >= MAX_POLYGON_POINTS ? ts("problem.many", { max: MAX_POLYGON_POINTS }) : ts("problem.crossing")); return; }
+    commit(next);
+    setPickedCorner({ key: itemId(single), index: index + 1 });
   };
   const endPointer = (event: ReactPointerEvent) => {
     clearPress();
     if (pointDrag.current) { endPoint(); return; }
+    if (cornerDrag.current) { endCorner(cornerDrag.current); return; }
     const tap = pendingPlace.current;
     if (tap && event.pointerId === tap.id) { pendingPlace.current = null; if (placing === tap.meterId) place(tap.meterId, toPoint(tap.at[0], tap.at[1])); return; }
     const touch = pendingPoint.current;
@@ -668,7 +784,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     const found = inBox(plan, box, shown);
     setSelection(area.additive ? [...area.base, ...found.filter(item => !isIn(area.base, item))] : found);
   };
-  const cancelPointer = () => { endPoint(); clearPress(); pendingPlace.current = null; pendingPoint.current = null; if (sweep.current) { sweep.current = null; setSweepBox(null); } else endDrag(); };
+  const cancelPointer = () => { endPoint(); clearPress(); pendingPlace.current = null; pendingPoint.current = null; if (cornerDrag.current) { abortPointer(); return; } if (sweep.current) { sweep.current = null; setSweepBox(null); } else endDrag(); };
   /** Arrow presses in a row are separate steps, but holding an arrow down is one step however far it goes. */
   const nudgeRun = useRef(0);
 
@@ -681,11 +797,30 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     if (placing && event.key === "Enter" && !event.metaKey && !event.ctrlKey && !event.altKey && svgRef.current?.contains(event.target as Node)) {
       event.preventDefault();
       const item = parseItemId((event.target as Element | null)?.getAttribute?.("data-item")), box = item ? boxOf(plan, item) : null;
-      place(placing, box ? (box[2] ? centre(box) : [box[0], box[1]]) : [wx + ww / 2, wy + wh / 2]);
+      // In a shaped room or area, a point surely inside its shape (the middle of an L's box is in its notch).
+      const shaped = item && (item.kind === "room" || item.kind === "area") ? outlinedItem(plan, item) : null;
+      place(placing, shaped ? middleOf(shaped) : box ? (box[2] ? centre(box) : [box[0], box[1]]) : [wx + ww / 2, wy + wh / 2]);
       return;
     }
     // Drawing a line, Enter finishes it; with fewer than two points it adds a wall across the middle, to move with the arrow keys.
     if (tool === "line" && event.key === "Enter" && svgRef.current?.contains(event.target as Node)) { event.preventDefault(); finishLine(true); return; }
+    // Drawing a shape: Enter finishes it; Backspace, Delete or Undo takes back the last corner. Backspace and Delete never
+    // reach what is selected while drawing, even with no corners left; Undo undoes the plan only when nothing is drawn.
+    if (drawMode && svgRef.current?.contains(event.target as Node)) {
+      const takeBack = () => { if (drawing?.corners.length) setDrawing({ corners: drawing.corners.slice(0, -1), hover: drawing.hover }); };
+      if (event.key === "Enter" && !event.metaKey && !event.ctrlKey) { event.preventDefault(); finishDraw(); return; }
+      if (event.key === "Backspace" || event.key === "Delete") { event.preventDefault(); takeBack(); return; }
+      if (drawing?.corners.length && planShortcut(event, grid)?.kind === "undo") { event.preventDefault(); takeBack(); return; }
+    }
+    // A corner grip with focus: Enter or Space picks it, the arrows move it a grid step (one undo step while held), and
+    // Delete or Backspace removes it.
+    const gripIndex = Number((event.target as Element | null)?.getAttribute?.("data-corner") ?? NaN);
+    if (cornerGrips && Number.isInteger(gripIndex) && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      const by = (grid || 1) * (event.shiftKey ? 5 : 1), arrows: Record<string, Point> = { ArrowLeft: [-by, 0], ArrowRight: [by, 0], ArrowUp: [0, -by], ArrowDown: [0, by] };
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); pickCorner(gripIndex); return; }
+      if (event.key === "Delete" || event.key === "Backspace") { event.preventDefault(); deleteCorner(gripIndex); return; }
+      if (arrows[event.key]) { event.preventDefault(); nudgeCorner(gripIndex, arrows[event.key]!, event.repeat); return; }
+    }
     // With a tool chosen, Enter on the plan adds the item at its usual place, for keyboard users.
     if (tool && event.key === "Enter" && event.target === svgRef.current) { event.preventDefault(); create(tool, null, null); return; }
     const shortcut = planShortcut(event, grid);
@@ -704,7 +839,8 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     if (!selection.length) return;
     if (shortcut.kind === "copy") { if (!textPicked() && copy()) event.preventDefault(); return; }
     event.preventDefault();
-    if (shortcut.kind === "delete") { remove(); return; }
+    // With a corner picked, Delete removes that corner, not the whole area, room or shape.
+    if (shortcut.kind === "delete") { if (cornerIndex !== null && cornerGrips) deleteCorner(); else remove(); return; }
     if (!event.repeat) nudgeRun.current += 1;
     if (shortcut.kind === "resize") { resizeByKey(shortcut.by); return; }
     const moved = moveItems(plan, selection, shortcut.by[0], shortcut.by[1], shortcut.alone ? NO_PASSENGERS() : ridersOf(plan, selection));
@@ -774,7 +910,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   }, [history]);
 
   // An unsaved draft is kept in this browser while editing, and one left from before is offered back (floor-plan-draft).
-  const draft = usePlanDraft({ projectId, userId, block, previous, locale, opened, plan, prefs, changed, busy: () => !!drag.current || !!sweep.current || !!edgeDrag.current, onReplaced: () => setNotice(t("draft.replaced")) });
+  const draft = usePlanDraft({ projectId, userId, block, previous, locale, opened, plan, prefs, changed, busy: () => !!drag.current || !!sweep.current || !!edgeDrag.current || !!cornerDrag.current, onReplaced: () => setNotice(t("draft.replaced")) });
   // The grid choices that came with a restored draft go with its undo step: Undo back to the saved plan puts the saved
   // choices back too (so a plan put back as it was saves exactly as it was), and Redo brings the draft's back.
   const restoredPrefs = useRef<{ plan: FloorPlan; before: EditorPrefs; after: EditorPrefs } | null>(null);
@@ -831,14 +967,53 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   const selectedRoom = single?.kind === "room" ? plan.rooms.find(item => item.key === single.key) : undefined;
   const selectedDevice = single?.kind === "device" ? meterById.get(single.key) : undefined;
   const selectedPlacement = single?.kind === "device" ? plan.devices.find(item => item.meterId === single.key) : undefined;
+  const selectedShape = single?.kind === "shape" ? plan.shapes?.find(item => item.key === single.key) : undefined;
   const singleLocked = !!single && isLocked(plan, single);
   const selectedLine = single?.kind === "line" ? plan.lines?.find(item => item.key === single.key) : undefined;
   const selectedOpening = single?.kind === "opening" ? plan.openings?.find(item => item.key === single.key) : undefined;
   const pickedPoint = selectedLine && picked?.line === selectedLine.key ? picked.index : null;
   // Corner handles for one selected item that is not locked; several selected items each get an outline.
-  const handleRect = single && !singleLocked ? selectedArea?.rect ?? selectedRoom?.rect ?? (selectedPlacement && !selectedPlacement.rotation && deviceRect(selectedPlacement)) ?? undefined : undefined;
+  const handleRect = single && !singleLocked ? selectedArea?.rect ?? selectedRoom?.rect ?? selectedShape?.rect ?? (selectedPlacement && !selectedPlacement.rotation && deviceRect(selectedPlacement)) ?? undefined : undefined;
+  // A selected free shape (not locked, no tool chosen) shows a grip on each corner; the picked corner can be deleted.
+  const outlined = outlinedItem(plan, single), shapeCorners = outlined ? cornersOf(outlined) : null;
+  const cornerGrips = !!shapeCorners && !singleLocked && !tool && !placing ? shapeCorners : null;
+  const cornerIndex = single && pickedCorner?.key === itemId(single) && shapeCorners && pickedCorner.index < shapeCorners.length ? pickedCorner.index : null;
+  /** One change to the selected item's shape: one undo step, and rooms then belong to the area they now sit in. */
+  const reshape = (next: FloorPlan) => { if (next !== plan) commit(settleRooms(next)); };
+  const deleteCorner = (index: number | null = cornerIndex) => { if (!single || index === null || !shapeCorners || singleLocked) return; const next = withOutlined(plan, single, entry => removeCorner(entry, index)); if (next === plan) { setNotice(shapeCorners.length <= 3 ? ts("problem.few") : ts("problem.crossing")); return; } reshape(next); setPickedCorner(null); focusCanvas(); };
+  const pickCorner = (index: number) => { if (single) setPickedCorner({ key: itemId(single), index }); };
+  /** "Add corner": a new corner in the middle of the side after the picked corner (or after the last one), picked. */
+  const addCornerMid = () => {
+    if (!single || singleLocked || !shapeCorners) return;
+    const index = cornerIndex ?? shapeCorners.length - 1, a = shapeCorners[index]!, b = shapeCorners[(index + 1) % shapeCorners.length]!;
+    const next = withOutlined(plan, single, entry => addCorner(entry, index, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]));
+    if (next === plan) { setNotice(shapeCorners.length >= MAX_POLYGON_POINTS ? ts("problem.many", { max: MAX_POLYGON_POINTS }) : ts("problem.crossing")); return; }
+    commit(next);
+    pickCorner(index + 1);
+  };
+  /** Arrow keys on a corner grip: the corner moves a grid step; holding the arrow down is one undo step. */
+  const nudgeCorner = (index: number, by: Point, repeat: boolean) => {
+    if (!single || singleLocked || !shapeCorners?.[index]) return;
+    const [cx, cy] = shapeCorners[index]!, next = withOutlined(plan, single, entry => moveCorner(entry, index, clampPoint([cx + by[0], cy + by[1]], plan.viewBox)));
+    pickCorner(index);
+    if (next === plan) { setNotice(ts("problem.crossing")); return; }
+    if (!repeat) nudgeRun.current += 1;
+    commit(settleRooms(next), { merge: `corner:${itemId(single)}:${index}:${nudgeRun.current}` });
+  };
+  /** "Make rectangle": the shape becomes a plain box again, in the box around it (a plain outline becomes a rectangle). */
+  const makeRectangle = () => { if (!single) return; reshape(single.kind === "shape" ? { ...plan, shapes: (plan.shapes ?? []).map(item => item.key === single.key ? { ...asRectangle(item), kind: "rect" as const } : item) } : withOutlined(plan, single, entry => asRectangle(entry))); setPickedCorner(null); };
+  /** Which shape choice an item shows: a preset whose corners it still has, else its own outline. */
+  const presetOf = (item: Outlined & { kind?: PlanShape["kind"] }): ShapePreset | "ellipse" | "custom" => item.kind === "ellipse" ? "ellipse" : !item.outline ? "rect" : (["L", "U", "T"] as const).find(preset => JSON.stringify(presetOutline(preset)) === JSON.stringify(item.outline)) ?? "custom";
+  const choosePreset = (pick: ShapePreset | "ellipse") => {
+    if (!single) return;
+    if (single.kind === "shape") { reshape({ ...plan, shapes: (plan.shapes ?? []).map(item => { if (item.key !== single.key) return item; const box = asRectangle(item); return pick === "ellipse" ? { ...box, kind: "ellipse" as const } : pick === "rect" ? { ...box, kind: "rect" as const } : { ...withPreset(box, pick), kind: "polygon" as const }; }) }); return; }
+    if (pick !== "ellipse") reshape(withOutlined(plan, single, entry => withPreset(entry, pick)));
+    setPickedCorner(null);
+  };
+  const cornerPanel = shapeCorners && single ? <CornerPanel count={shapeCorners.length} picked={cornerIndex} disabled={singleLocked} onAdd={addCornerMid} onDelete={() => deleteCorner()} onRectangle={makeRectangle} /> : null;
+  const updateShape = (key: string, patch: (shape: PlanShape) => PlanShape, merge?: string) => commit({ ...plan, shapes: (plan.shapes ?? []).map(item => item.key === key ? patch(item) : item) }, merge ? { merge } : undefined);
   const setDeviceShape = (meterId: string, box: boolean) => commit({ ...plan, devices: plan.devices.map(item => { if (item.meterId !== meterId) return item; const { size: _size, rotation: _turn, ...dot } = item; return box ? { ...dot, size: item.size ?? defaultDeviceSize(plan.viewBox) } : dot; }) });
-  const roomColour = (rect: Rect) => { const host = plan.areas.filter(item => !item.insideRoom && contains(item.rect, centre(rect))).sort((a, b) => a.rect[2] * a.rect[3] - b.rect[2] * b.rect[3])[0]; return host ? (host.board ? colours.get(host.board) : noBoardColours.get(host.key)) : undefined; };
+  const roomColour = (room: Outlined) => { const host = plan.areas.filter(item => !item.insideRoom && holds(item, middleOf(room))).sort((a, b) => a.rect[2] * a.rect[3] - b.rect[2] * b.rect[3])[0]; return host ? (host.board ? colours.get(host.board) : noBoardColours.get(host.key)) : undefined; };
   const waiting = meters.filter(meter => !placedIds.has(meter.id));
   const placingName = placing ? meterById.get(placing)?.name : null;
   const own = plan.areas.filter(item => !item.insideRoom), groups = plan.areas.filter(item => item.insideRoom);
@@ -870,7 +1045,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   // The turning handle and the turned outline, for the items that can turn.
   const turnable = (item: Selection) => item.kind === "label" || item.kind === "symbol" || item.kind === "entrance" || (item.kind === "device" && !!plan.devices.find(entry => entry.meterId === item.key)?.size);
   const turnFrame = single && !singleLocked && turnable(single) && (single.kind !== "device" || shown(single.key)) ? frameOf(plan, single) : null;
-  const outlined = (item: Selection): Frame | null => {
+  const turnedOutline = (item: Selection): Frame | null => {
     if (item.kind === "label" || item.kind === "symbol") return frameOf(plan, item);
     if (item.kind === "entrance") return plan.entrance && (plan.entrance.size !== undefined || plan.entrance.rotation) ? frameOf(plan, item) : null;
     if (item.kind === "device") { const device = plan.devices.find(entry => entry.meterId === item.key); return device?.size && device.rotation && shown(device.meterId) ? frameOf(plan, item) : null; }
@@ -932,6 +1107,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
       <button type="button" className={styles.tool} title={t("editor.hintEntrance")} onClick={addEntrance}>{t("editor.addEntrance")}</button>
       {toolButton("door", t("editor.addDoor"), plan.rooms.length ? t("editor.hintDoor") : t("editor.addRoomFirst"), !plan.rooms.length)}
       {toolButton("line", t("editor.addLine"), t("editor.hintLine"))}
+      {toolButton("shape", ts("tool.addShape"), ts("tool.hintShape"))}
       <GridMenu prefs={prefs} onChange={setPrefs} commandKey={mac ? "⌘" : "Ctrl"} />
       <ZoomControls percent={viewport.percent} edgesHidden={!!viewport.view} whole={!viewport.view} canIn={viewport.zoom < maxZoom(viewport.fitPx) - 1e-6} canOut={viewport.zoom > MIN_ZOOM + 1e-6} commandKey={mac ? "⌘" : "Ctrl"} keyFor={keyName} onIn={() => zoomTo("in")} onOut={() => zoomTo("out")} onFit={() => zoomTo("fit")} onActual={() => zoomTo("actual")} />
       <span className={styles.toolGap} />
@@ -939,11 +1115,12 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
       <button type="button" className={styles.tool} disabled={!canRedo(history)} title={t("editor.hintRedo", { redoKey })} onClick={redoStep}>{t("editor.redo")}</button>
       <button type="button" className={styles.tool} disabled={!deletable} title={t("editor.hintDelete")} onClick={remove}>{t("editor.delete")}</button>
     </div>
+    {(tool === "area" || tool === "room" || tool === "shape") && <ShapeChoices tool={tool} value={pickFor(tool)} onChange={next => { setPick(next); setDrawing(null); setNotice(""); focusCanvas(); }} />}
     {leaving && <UnsavedBar onKeep={() => setLeaving(false)} onLeave={() => { draft.finish(); onCancel(); }} />}
     {draft.offer && <DraftOffer savedAt={draft.offer.savedAt} stale={draft.offer.stale} onRestore={restoreDraft} onDiscard={() => { draft.discard(); focusCanvas(); }} />}
     <p id={keysId} className={styles.srOnly}>{t("a11y.keys", { commandKey: mac ? "⌘" : "Ctrl" })}</p>
     {placingName && <p className={styles.placing} role="status">{placingBefore}<strong>{placingName}</strong>{placingAfter} <button type="button" onClick={() => setPlacing(null)}>{t("editor.cancel")}</button></p>}
-    {tool && <p className={styles.placing} role="status">{t(TOOL_STATUS[tool], { name: kindName(landmark ?? "entrance") })} {tool === "line" && <button type="button" disabled={(linePoints?.length ?? 0) < 2} onClick={() => finishLine()}>{t("editor.finishLine")}</button>} <button type="button" onClick={() => { stopTool(); setNotice(""); }}>{t("editor.cancel")}</button></p>}
+    {tool && <p className={styles.placing} role="status">{drawMode ? <>{ts("draw.status")}{drawing?.corners.length ? ` ${ts("draw.count", { count: drawing.corners.length })}` : ""} <button type="button" onClick={() => finishDraw()}>{ts("draw.finish")}</button></> : tool === "shape" ? ts("tool.drawShape") : t(TOOL_STATUS[tool], { name: kindName(landmark ?? "entrance") })} {tool === "line" && <button type="button" disabled={(linePoints?.length ?? 0) < 2} onClick={() => finishLine()}>{t("editor.finishLine")}</button>} <button type="button" onClick={() => { stopTool(); setNotice(""); }}>{t("editor.cancel")}</button></p>}
     {notice && <p className={styles.notice} role="status">{notice}</p>}
     {error && <p role="alert" className={styles.error}>{error}</p>}
 
@@ -959,7 +1136,9 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
           {prefs.showGrid && <defs><pattern id="floor-plan-grid" width={gridCell} height={gridCell} patternUnits="userSpaceOnUse"><path d={`M${gridCell} 0 L0 0 0 ${gridCell}`} className={styles.gridLine} /></pattern></defs>}
           <rect data-grid="1" x={vx} y={vy} width={vw} height={vh} fill={prefs.showGrid ? "url(#floor-plan-grid)" : "transparent"} />
           {own.map(item => <AreaShape key={item.key} item={item} colour={areaColour(item)} name={areaName(item.label)} unit={unit} label={areaItemName(t, item)} onDown={itemDown} />)}
-          {plan.rooms.map(room => <RoomShape key={room.key} room={room} colour={room.colour ?? roomColour(room.rect)} pinned={roomHasPins(room.rect, positions)} unit={unit} label={t("a11y.room", { name: room.name })} onDown={itemDown} />)}
+          {/* Plain shapes (a lawn, a driveway): over the areas, under the rooms. */}
+          {(plan.shapes ?? []).map(shape => <PlainShapeItem key={shape.key} shape={shape} unit={unit} label={t("a11y.shape", { name: shape.label?.trim() || t(`a11y.shapeKind.${shape.kind}`) })} onDown={itemDown} />)}
+          {plan.rooms.map(room => <RoomShape key={room.key} room={room} colour={room.colour ?? roomColour(room)} pinned={positions.some(position => holds(room, position))} unit={unit} label={t("a11y.room", { name: room.name })} onDown={itemDown} />)}
           {groups.map(item => <GroupShape key={item.key} item={item} colour={areaColour(item)} pinned={roomHasPins(item.rect, positions)} fallback={t("panel.groupFallback")} unit={unit} label={areaItemName(t, item)} onDown={itemDown} />)}
           {plan.lines?.map(line => <LineShape key={line.key} line={line} unit={unit} label={t("a11y.line", { style: t(`line.${line.style}`) })} onDown={itemDown} />)}
           {plan.openings?.map(opening => { const room = plan.rooms.find(item => item.key === opening.room); return room ? <OpeningShape key={opening.key} opening={opening} rect={room.rect} unit={unit} label={t("a11y.opening", { kind: t(`opening.${opening.kind}`), room: room.name })} onDown={itemDown} /> : null; })}
@@ -969,17 +1148,20 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
           {plan.devices.map(item => { const meter = meterById.get(item.meterId); if (!meter) return null; return <DeviceShape key={item.meterId} item={item} name={meter.name} board={meter.board} colour={item.colour ?? colours.get(meter.board) ?? "var(--zone-6)"} pin={item.size ? "" : pinLabel(meter.name, item.position, plan.rooms, groups)} selected={isIn(selection, { kind: "device", key: item.meterId })} unit={unit} label={t("a11y.device", { name: meter.name })} onDown={itemDown} />; })}
           {/* A padlock on each locked item, so it is clear why it does not move. */}
           {everything(plan, shown).filter(item => isLocked(plan, item)).map(item => { const [x, y, w] = boxOf(plan, item)!, size = unit * 1.9; return <LockBadge key={`lock:${item.kind}:${item.key}`} x={w ? x + w - size - unit * 0.4 : x + unit * 1} y={w ? y + unit * 0.4 : y - unit * 2.9} size={size} className={styles.lockBadge} label={t("editor.lockedBadge")} />; })}
-          {selection.map(item => { const frame = outlined(item); if (frame) return <polygon key={`selected:${item.kind}:${item.key}`} data-turned="1" points={frameCorners(frame).map(point => point.join(",")).join(" ")} className={styles.turnBox} />; const at = boxOf(plan, item); if (!at || !at[2] || (item.kind === "device" && !shown(item.key))) return null; const [x, y, w, h] = at; return <rect key={`selected:${item.kind}:${item.key}`} x={x} y={y} width={w} height={h} className={styles.selectBox} />; })}
+          {selection.map(item => { const frame = turnedOutline(item); if (frame) return <polygon key={`selected:${item.kind}:${item.key}`} data-turned="1" points={frameCorners(frame).map(point => point.join(",")).join(" ")} className={styles.turnBox} />; const at = boxOf(plan, item); if (!at || !at[2] || (item.kind === "device" && !shown(item.key))) return null; const [x, y, w, h] = at; return <rect key={`selected:${item.kind}:${item.key}`} x={x} y={y} width={w} height={h} className={styles.selectBox} />; })}
           {focusBox && focusShown && (focusBox[2] ? <rect data-focus-ring="1" x={focusBox[0] - perPx * RING_PX} y={focusBox[1] - perPx * RING_PX} width={focusBox[2] + perPx * RING_PX * 2} height={focusBox[3] + perPx * RING_PX * 2} rx={perPx * RING_PX} className={styles.focusRing} />
             : <circle data-focus-ring="1" cx={focusBox[0]} cy={focusShown.kind === "entrance" ? focusBox[1] + unit * 1.2 : focusBox[1]} r={Math.max(focusShown.kind === "entrance" ? unit * 3.2 : unit * 2.2, perPx * RING_PX * 2.5)} className={styles.focusRing} />)}
           {handleRect && (() => { const [x, y, w, h] = handleRect; const size = perPx * (coarse ? TOUCH_GRIP_PX : GRIP_PX); const spot: Record<Handle, Point> = { nw: [x, y], n: [x + w / 2, y], ne: [x + w, y], e: [x + w, y + h / 2], se: [x + w, y + h], s: [x + w / 2, y + h], sw: [x, y + h], w: [x, y + h / 2] };
             // Grips on the middle of each edge resize one side only; they show where the side is long enough to tell them from the corners.
-            const handles: Handle[] = [...CORNERS, ...(w >= size * 4 ? ["n", "s"] as const : []), ...(h >= size * 4 ? ["e", "w"] as const : [])];
+            // A box corner where the shape has a corner of its own is left to the corner grip (which moves just that corner).
+            const handles: Handle[] = [...CORNERS, ...(w >= size * 4 ? ["n", "s"] as const : []), ...(h >= size * 4 ? ["e", "w"] as const : [])].filter(handle => !cornerGrips?.some(corner => Math.hypot(corner[0] - spot[handle][0], corner[1] - spot[handle][1]) < size));
             return <g>
             {handles.map(handle => <rect key={handle} data-handle={handle} x={spot[handle][0] - size / 2} y={spot[handle][1] - size / 2} width={size} height={size} rx={size * 0.2} className={`${styles.handle} ${styles[handle]}`} onPointerDown={event => startDrag(event, single!, "resize", handle)} />)}
           </g>; })()}
           {turnFrame && (() => { const { from, to } = handleSpot(turnFrame, perPx * TURN_PX), r = perPx * (coarse ? TOUCH_GRIP_PX : GRIP_PX) / 2;
             return <g><line x1={from[0]} y1={from[1]} x2={to[0]} y2={to[1]} className={styles.turnLine} /><circle data-turn="1" cx={to[0]} cy={to[1]} r={r} className={styles.turnHandle} onPointerDown={event => startTurn(event, single!)}><title>{t("rotate.handle")}</title></circle></g>; })()}
+          {cornerGrips && <CornerGrips corners={cornerGrips} picked={cornerIndex} size={perPx * (coarse ? TOUCH_GRIP_PX : GRIP_PX)} onCorner={startCorner} onPick={pickCorner} onSide={addCornerAt} onSideDown={event => single && startDrag(event, single)} />}
+          {drawing && drawMode && <DrawPreview corners={drawing.corners} hover={drawing.hover} size={perPx * GRIP_PX} />}
           {guides.map(guide => { const pad = screen; return guide.axis === "x" ? <line key={`x${guide.at}`} data-guide="x" x1={guide.at} x2={guide.at} y1={guide.from - pad} y2={guide.to + pad} className={styles.guide} /> : <line key={`y${guide.at}`} data-guide="y" x1={guide.from - pad} x2={guide.to + pad} y1={guide.at} y2={guide.at} className={styles.guide} />; })}
           {/* The points of the selected line: drag one to move it, click one to pick it. */}
           {selectedLine && !singleLocked && !tool && selectedLine.points.map((point, index) => <circle key={index} data-point={index} cx={point[0]} cy={point[1]} r={perPx * (coarse ? 14 : 6)} className={pickedPoint === index ? styles.vertexPicked : styles.vertex} onPointerDown={event => startPoint(event, selectedLine.key, index)} />)}
@@ -1004,6 +1186,8 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
           <label>{t("panel.label")}<input value={selectedArea.label} maxLength={40} {...typing} onChange={event => updateArea(selectedArea.key, { label: event.target.value }, `label:${selectedArea.key}`)} /></label>
           <label>{t("panel.board")}<select value={selectedArea.board} onChange={event => updateArea(selectedArea.key, { board: event.target.value })}><option value="">{t("panel.noBoard")}</option>{allBoards.map(board => <option key={board} value={board}>{board}</option>)}</select></label>
           {positionFields(single!, selectedArea.rect)}
+          {!selectedArea.insideRoom && <ShapeSelect value={presetOf(selectedArea)} disabled={singleLocked} onChange={choosePreset} />}
+          {!selectedArea.insideRoom && cornerPanel}
           {colourPicker(`area:${selectedArea.key}`, selectedArea.colour, selectedArea.board ? t("panel.colourAuto", { board: selectedArea.board }) : t("panel.colourAutoNone"), hex => ({ ...plan, areas: plan.areas.map(item => item.key === selectedArea.key ? recolour(item, hex) : item) }))}
           {selectedArea.board && <ColourPicker key={`board:${selectedArea.board}:${selectedArea.key}`} legend={t("panelColour.title")} hint={t("panelColour.hint", { board: selectedArea.board })} value={plan.colours?.[selectedArea.board]} autoLabel={t("panelColour.auto")} onPick={pickColour(`board:${selectedArea.board}`, hex => withBoardColour(plan, selectedArea.board, hex))} onDone={() => setHistory(endTyping)} />}
           <label>{t("panel.shownAs")}<select value={selectedArea.insideRoom ?? ""} disabled={singleLocked} onChange={event => { const room = plan.rooms.find(item => item.key === event.target.value); commit({ ...plan, areas: plan.areas.map(item => item.key !== selectedArea.key ? item : room ? asGroupIn(item, room) : asOwnArea(item)) }); }}>
@@ -1017,6 +1201,8 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
           <h5>{t("panel.room")}</h5>
           <label>{t("panel.name")}<input value={selectedRoom.name} maxLength={60} {...typing} onChange={event => commit({ ...plan, rooms: plan.rooms.map(item => item.key === selectedRoom.key ? { ...item, name: event.target.value } : item) }, { merge: `name:${selectedRoom.key}` })} /></label>
           {positionFields(single!, selectedRoom.rect)}
+          <ShapeSelect value={presetOf(selectedRoom)} disabled={singleLocked} onChange={choosePreset} />
+          {cornerPanel}
           {colourPicker(`room:${selectedRoom.key}`, selectedRoom.colour, t("panel.colourAutoRoom"), hex => ({ ...plan, rooms: plan.rooms.map(item => item.key === selectedRoom.key ? recolour(item, hex) : item) }))}
           <RoomDoors plan={plan} room={selectedRoom} locked={singleLocked} commit={(next, chosen) => commit(next, chosen ? { selection: chosen } : undefined)} onSelect={item => setSelection([item])} onPicked={item => { focusAfter.current = item; }} onFull={() => setNotice(t("editor.tooManyOpenings", { max: MAX_OPENINGS }))} />
           {actions}
@@ -1037,6 +1223,12 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
         </div>}
         {selectedOpening && <OpeningPanel plan={plan} opening={selectedOpening} locked={singleLocked} commit={next => commit(next)} onDelete={remove} />}
         {selectedLine && <LinePanel plan={plan} line={selectedLine} locked={singleLocked} point={pickedPoint} commit={next => commit(next)} onPointGone={() => setPicked(null)} onPointAdded={index => setPicked({ line: selectedLine.key, index })} actions={actions} onDelete={remove} />}
+        {selectedShape && <PlainShapePanel shape={selectedShape} disabled={singleLocked} shapeValue={presetOf(selectedShape)} typing={typing}
+          onCaption={text => updateShape(selectedShape.key, shape => { const { label: _label, ...rest } = shape; return text ? { ...rest, label: text } : rest; }, `caption:${selectedShape.key}`)}
+          onShape={choosePreset} onOutline={outline => updateShape(selectedShape.key, shape => ({ ...shape, stroke: outline }))}
+          position={<>{positionFields(single!, selectedShape.rect)}{selectedShape.kind === "polygon" && cornerPanel}</>}
+          colourPicker={colourPicker(`shape:${selectedShape.key}`, selectedShape.fill === DEFAULT_SHAPE_FILL ? undefined : selectedShape.fill, ts("shape.fillAuto"), hex => ({ ...plan, shapes: (plan.shapes ?? []).map(item => item.key === selectedShape.key ? { ...item, fill: hex ?? DEFAULT_SHAPE_FILL } : item) }))}
+          actions={actions} onDelete={remove} />}
         {single?.kind === "entrance" && plan.entrance && <SymbolPanel symbol={{ key: "entrance", kind: "entrance", label: plan.entrance.label, ...(plan.entrance.size !== undefined ? { size: plan.entrance.size } : {}), ...(plan.entrance.rotation ? { rotation: plan.entrance.rotation } : {}) }} entrance
           onCaption={text => commit({ ...plan, entrance: { ...plan.entrance!, label: text } }, { merge: "entrance:label" })} onSize={size => commit({ ...plan, entrance: { ...plan.entrance!, size } })}
           colour={markColour("entrance", plan.entrance.colour, hex => ({ ...plan, entrance: recolour(plan.entrance!, hex, true) }))} actions={actions} locked={singleLocked} typing={typing} commandKey={mac ? "⌘" : "Ctrl"} unit={unit} onRotate={deg => turn(single, deg)} onDelete={remove} />}

@@ -3,6 +3,9 @@ import { memo, type PointerEvent as ReactPointerEvent } from "react";
 import { labelFrame, symbolFrame, type Frame, type PlanLabel, type PlanSymbol } from "./floor-plan-marks";
 import type { PlanArea, PlanDevice, PlanEntrance, PlanRoom, Selection } from "./floor-plan-model";
 import { EntranceMark, LabelMark, SymbolMark, type MarkClasses } from "./plan-symbols";
+import type { PlanShape } from "./floor-plan-plain-shapes";
+import { cornersOf, insideBox, pointsText } from "./floor-plan-polygon";
+import { PlainShapeBody } from "./plan-shapes";
 import { DeviceBox, wrapLabel } from "./site-floor-map";
 import mapStyles from "./site-floor-map.module.css";
 import styles from "./floor-plan-editor.module.css";
@@ -19,9 +22,10 @@ const itemClass = (locked?: true) => `${styles.item} ${locked ? styles.lockedIte
 const focusable = (id: string, label: string) => ({ "data-item": id, tabIndex: -1, role: "img", "aria-label": label });
 
 export const AreaShape = memo(function AreaShape({ item, colour, name, unit, label, onDown }: Common & { item: PlanArea; colour: string; name: string }) {
-  const [x, y, w, h] = item.rect;
+  // A free-shape area (an L-shaped block) is drawn as its outline, its name plate in its largest part.
+  const corners = cornersOf(item), [x, y, w, h] = corners ? insideBox(item) : item.rect;
   return <g className={itemClass(item.locked)} {...focusable(`area:${item.key}`, label)} onPointerDown={event => onDown(event, { kind: "area", key: item.key })}>
-    <rect x={x} y={y} width={w} height={h} rx={unit * 1.4} className={mapStyles.zone} style={{ fill: colour, stroke: colour }} />
+    {corners ? <polygon points={pointsText(corners)} strokeLinejoin="round" className={mapStyles.zone} style={{ fill: colour, stroke: colour }} /> : <rect x={x} y={y} width={w} height={h} rx={unit * 1.4} className={mapStyles.zone} style={{ fill: colour, stroke: colour }} />}
     <circle cx={x + unit * 2.4} cy={y + unit * 2.6} r={unit * 0.9} style={{ fill: colour }} />
     <text x={x + unit * 4} y={y + unit * 3.3} className={mapStyles.zoneLabel} style={{ fontSize: unit * 2.1 }}>{item.board ? <>{item.board}<tspan className={mapStyles.zoneSub} dx={unit * 0.8}>{name}</tspan></> : name}</text>
   </g>;
@@ -29,11 +33,13 @@ export const AreaShape = memo(function AreaShape({ item, colour, name, unit, lab
 
 /** `colour` is the room's own colour, else its area's; a room in no area has none and is drawn dashed red. */
 export const RoomShape = memo(function RoomShape({ room, colour, pinned, unit, label, onDown }: Common & { room: PlanRoom; colour: string | undefined; pinned: boolean }) {
-  const [x, y, w, h] = room.rect;
+  // A free-shape room is drawn as its outline, its name in its largest part.
+  const corners = cornersOf(room), [x, y, w, h] = corners ? insideBox(room) : room.rect;
   const size = Math.min(unit * 1.75, w / 7), lines = wrapLabel(room.name, Math.max(6, Math.floor(w / (size * 0.56))));
   const top = pinned ? y + size * 1.5 : y + h / 2 + size * 0.35 - (lines.length - 1) * size * 0.6;
+  const look = { className: `${mapStyles.room} ${colour ? "" : styles.orphan}`, style: room.colour ? { stroke: room.colour, fill: `color-mix(in srgb, ${room.colour} 12%, white)` } : colour ? { stroke: colour } : undefined };
   return <g className={itemClass(room.locked)} {...focusable(`room:${room.key}`, label)} onPointerDown={event => onDown(event, { kind: "room", key: room.key })}>
-    <rect x={x} y={y} width={w} height={h} rx={unit * 0.8} className={`${mapStyles.room} ${colour ? "" : styles.orphan}`} style={room.colour ? { stroke: room.colour, fill: `color-mix(in srgb, ${room.colour} 12%, white)` } : colour ? { stroke: colour } : undefined} />
+    {corners ? <polygon points={pointsText(corners)} strokeLinejoin="round" {...look} /> : <rect x={x} y={y} width={w} height={h} rx={unit * 0.8} {...look} />}
     <text x={x + w / 2} y={top} textAnchor="middle" className={mapStyles.roomLabel} style={{ fontSize: size }}>{lines.map((line, index) => <tspan key={index} x={x + w / 2} dy={index ? size * 1.2 : 0}>{line}</tspan>)}</text>
   </g>;
 });
@@ -90,5 +96,12 @@ export const DeviceShape = memo(function DeviceShape({ item, name, board, colour
       <circle cx={x} cy={y} r={r} className={mapStyles.pin} style={{ fill: colour }} />
       <text x={x} y={y + r + unit * 1.3} textAnchor="middle" className={mapStyles.pinLabel} style={{ fontSize: unit * 1.15 }}>{pin}</text>
     </>}
+  </g>;
+});
+
+/** A plain shape (a lawn, a driveway): a rectangle, a circle or an outline, in its fill colour, with its caption. */
+export const PlainShapeItem = memo(function PlainShapeItem({ shape, unit, label, onDown }: Common & { shape: PlanShape }) {
+  return <g className={itemClass(shape.locked)} {...focusable(`shape:${shape.key}`, label)} onPointerDown={event => onDown(event, { kind: "shape", key: shape.key })}>
+    <PlainShapeBody kind={shape.kind} rect={shape.rect} corners={shape.kind === "polygon" ? cornersOf(shape) : null} fill={shape.fill} stroke={shape.stroke} label={shape.label} unit={unit} className={styles.plainShape} labelClassName={styles.plainShapeLabel} />
   </g>;
 });

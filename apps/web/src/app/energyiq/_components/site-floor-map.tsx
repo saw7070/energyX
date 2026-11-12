@@ -1,6 +1,6 @@
 "use client";
 import { useId, type CSSProperties, type KeyboardEvent } from "react";
-import { openingRoom, spatialLabels, spatialLines, spatialOpenings, spatialRotation, spatialSymbols, type ProjectSpatialReference } from "@datafoundry/contracts";
+import { innerBox, insideSpatial, openingRoom, pointsAttribute, polygonOf, spatialLabels, spatialLines, spatialOpenings, spatialRotation, spatialShapes, spatialSymbols, type ProjectSpatialReference } from "@datafoundry/contracts";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { translatorFor, type EnergyIqLocale } from "./energyiq-messages";
 import { floorMapMessages } from "./site-floor-map-messages";
@@ -17,6 +17,7 @@ import { LineSymbol, OpeningSymbol, type LineClasses, type OpeningClasses } from
 /** Stylesheet classes for doors, windows and walls on the map (see plan-openings). */
 const OPENING_CLASSES: OpeningClasses = { gap: styles.planDoorGap!, leaf: styles.planDoor!, swing: styles.planDoorSwing!, window: styles.planWindow! };
 const LINE_CLASSES: LineClasses = { wall: styles.planLineWall!, partition: styles.planLinePartition!, fence: styles.planLineFence!, road: styles.planLineRoad! };
+import { PlainShapeBody } from "./plan-shapes";
 
 const mapText = (locale: EnergyIqLocale) => translatorFor(floorMapMessages, locale);
 
@@ -86,13 +87,16 @@ export function mapDevices(reference: ProjectSpatialReference, meters: Array<{ i
   });
 }
 const inside = ([x, y, w, h]: number[], [px, py]: [number, number]) => px >= x && px <= x + w && py >= y && py <= y + h;
+/** A box, or an area or room that may be drawn as a free shape (its saved `points`, ignored when malformed). */
+type Spot = number[] | { rect?: number[] | undefined; points?: unknown };
+const inSpot = (spot: Spot, point: [number, number]) => Array.isArray(spot) ? inside(spot, point) : insideSpatial(spot as { rect: unknown; points?: unknown }, point);
 const escapeWords = (text: string) => text.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
 /**
  * Pin label without what the surroundings already say: the room it sits in ("Showroom TV 1" in the Showroom reads "TV 1")
  * and, inside an equipment box, the words of that box's description ("LED Display 1" in "LED panels" reads "Display 1").
  */
-export function pinLabel(name: string, position: [number, number], rooms: Array<{ name: string; rect: number[] }>, groups: Array<{ rect: number[]; equipment?: string }> = []): string {
-  const room = rooms.find(item => inside(item.rect, position));
+export function pinLabel(name: string, position: [number, number], rooms: Array<{ name: string; rect: number[]; points?: unknown }>, groups: Array<{ rect: number[]; equipment?: string }> = []): string {
+  const room = rooms.find(item => insideSpatial(item, position));
   const group = groups.find(item => inside(item.rect, position));
   let label = name;
   for (const word of (group?.equipment ?? "").split(/\s+/).filter(item => item.length >= 3)) {
@@ -159,17 +163,18 @@ export function SiteFloorMap({ reference, large = false, devices = [], onOpenDev
   const positions = devices.map(device => device.position);
   const text = (lines: string[], cx: number, cy: number, size: number, className: string) => <text x={cx} y={cy - (lines.length - 1) * size * 0.6} textAnchor="middle" className={className} style={{ fontSize: size }}>{lines.map((line, index) => <tspan key={index} x={cx} dy={index ? size * 1.2 : 0}>{line}</tspan>)}</text>;
   const interactive = (!!onOpenDevice && devices.length > 0) || !!onSelectBoard;
-  const pinsIn = (board: string, rect: number[]) => devices.filter(device => device.board === board && inside(rect, device.position));
+  // Where pins count as in an area or room: its box, or for a free shape (an L-shaped block) its outline, never the notch.
+  const pinsIn = (board: string, rect: Spot) => devices.filter(device => device.board === board && inSpot(rect, device.position));
   // A name alone can't say which of two same-named groups an area is, so an area holding pins goes by whose pins they are.
-  const selectedArea = (board: string, rect: number[]) => {
+  const selectedArea = (board: string, rect: Spot) => {
     if (!highlight?.includes(board)) return false;
     const pins = highlightDevices ? pinsIn(board, rect) : [];
     return !pins.length || pins.some(pin => highlightDevices!.includes(pin.id));
   };
-  const faded = (board: string, rect: number[]) => highlight !== null && !selectedArea(board, rect);
+  const faded = (board: string, rect: Spot) => highlight !== null && !selectedArea(board, rect);
   const fadedPin = (device: MapDevice) => highlightDevices ? !highlightDevices.includes(device.id) : highlight !== null && !highlight.includes(device.board);
   // An area that names no panel is part of the drawing only: there is no panel to select.
-  const clickable = (board: string, label: string, rect: number[]) => {
+  const clickable = (board: string, label: string, rect: Spot) => {
     if (!onSelectBoard || !board) return { className: faded(board, rect) ? styles.faded : undefined };
     const select = () => onSelectBoard(board, pinsIn(board, rect)[0]?.id);
     return { role: "button", tabIndex: 0, "aria-label": label, "aria-pressed": selectedArea(board, rect), className: `${styles.areaLink} ${faded(board, rect) ? styles.faded : ""}`, onClick: select, onKeyDown: (event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); select(); } } };
@@ -198,22 +203,28 @@ export function SiteFloorMap({ reference, large = false, devices = [], onOpenDev
     <rect x={x} y={y} width={w} height={h + unit * 4} className={styles.sheet} />
     {drawn && <rect x={x} y={y} width={w} height={h + unit * 4} fill={`url(#${ids.major})`} />}
     {drawn && <rect x={x + unit * 0.4} y={y + unit * 0.4} width={w - unit * 0.8} height={h + unit * 3.2} className={styles.frame} strokeWidth={unit * 0.12} />}
-    {areas.map(zone => { const [zx, zy, zw, zh] = zone.rect as Rect; const colour = colours.get(zone.id)!; return <g key={zone.id} style={area(colour)} {...clickable(zone.referenceBoard, zone.referenceBoard ? t("selectArea", { board: zone.referenceBoard, area: areaLabel(zone.id, locale) }) : areaLabel(zone.id, locale), zone.rect as Rect)}>
-      {/* Outer walls in ink; the area's colour is kept to its name plate and a band along the top wall. */}
-      {(() => { const on = selectedArea(zone.referenceBoard, zone.rect as Rect); return <rect x={zx} y={zy} width={zw} height={zh} rx={unit * (drawn ? 0.25 : 1.4)} className={`${styles.planZone} ${on ? styles.planZoneActive : ""}`} strokeWidth={unit * (drawn ? (on ? 0.8 : 0.42) : (on ? 0.4 : 0.18))} />; })()}
-      {drawn && <rect x={zx + unit * 0.25} y={zy + unit * 0.25} width={Math.max(0, zw - unit * 0.5)} height={unit * 0.45} className={styles.planBand} />}
+    {areas.map(zone => { const outline = polygonOf(zone.points, zone.rect), [zx, zy, zw, zh] = outline ? innerBox(outline) as Rect : zone.rect as Rect; const colour = colours.get(zone.id)!; return <g key={zone.id} style={area(colour)} {...clickable(zone.referenceBoard, zone.referenceBoard ? t("selectArea", { board: zone.referenceBoard, area: areaLabel(zone.id, locale) }) : areaLabel(zone.id, locale), zone)}>
+      {/* Outer walls in ink; the area's colour is kept to its name plate and a band along the top wall. A free-shape
+          area (an L-shaped block) is drawn as its outline, its name plate in its largest part, without the band. */}
+      {(() => { const on = selectedArea(zone.referenceBoard, zone), look = { className: `${styles.planZone} ${on ? styles.planZoneActive : ""}`, strokeWidth: unit * (drawn ? (on ? 0.8 : 0.42) : (on ? 0.4 : 0.18)) }; return outline ? <polygon points={pointsAttribute(outline)} strokeLinejoin="round" data-shape="outline" {...look} /> : <rect x={zx} y={zy} width={zw} height={zh} rx={unit * (drawn ? 0.25 : 1.4)} {...look} />; })()}
+      {drawn && !outline && <rect x={zx + unit * 0.25} y={zy + unit * 0.25} width={Math.max(0, zw - unit * 0.5)} height={unit * 0.45} className={styles.planBand} />}
       <rect x={zx + unit * 1.4} y={zy + unit * 1.75} width={unit * 1.3} height={unit * 1.3} rx={unit * 0.2} className={styles.planSwatch} />
       <text x={zx + unit * 3.4} y={zy + unit * 2.95} className={styles.planZoneLabel} style={{ fontSize: unit * 1.8 }}>{zone.referenceBoard ? <>{zone.referenceBoard}<tspan className={styles.planZoneSub} dx={unit * 0.8}>{areaLabel(zone.id, locale)}</tspan></> : areaLabel(zone.id, locale)}</text>
     </g>; })}
-    {reference.layout.rooms.map(room => { const [rx, ry, rw, rh] = room.rect as Rect; const colour = colours.get(room.zone); const size = Math.min(unit * 1.45, rw / 8); const board = reference.layout.zones.find(zone => zone.id === room.zone)?.referenceBoard ?? ""; const own = (room as { colour?: unknown }).colour;
+    {/* Plain shapes (a lawn, a driveway): part of the drawing only, over the areas and under the rooms. */}
+    {spatialShapes(reference.layout).map((shape, index) => <g key={`${index}:${shape.id}`} data-shape={shape.kind} aria-hidden="true"><PlainShapeBody kind={shape.kind} rect={shape.rect} corners={shape.points} fill={shape.fill} stroke={shape.stroke} label={shape.label} unit={unit} className={styles.planShape} labelClassName={styles.planShapeLabel} /></g>)}
+    {reference.layout.rooms.map(room => { const outline = polygonOf(room.points, room.rect), [rx, ry, rw, rh] = outline ? innerBox(outline) as Rect : room.rect as Rect; const colour = colours.get(room.zone); const size = Math.min(unit * 1.45, rw / 8); const board = reference.layout.zones.find(zone => zone.id === room.zone)?.referenceBoard ?? ""; const own = (room as { colour?: unknown }).colour;
       const lines = wrapLabel(room.name, Math.max(6, Math.floor(rw / (size * 0.58))));
-      const labelY = roomHasPins(room.rect, positions) ? ry + size * 1.6 + (lines.length - 1) * size * 0.6 : ry + rh / 2 + size * 0.35;
+      const labelY = positions.some(position => insideSpatial(room, position)) ? ry + size * 1.6 + (lines.length - 1) * size * 0.6 : ry + rh / 2 + size * 0.35;
       // Clear of the room's name (drawn from its first line, above the centre), its meters and any equipment inside it.
       const obstacles = [labelBox(lines, rx + rw / 2, labelY - (lines.length - 1) * size * 0.6, size), ...pinBoxes.filter(item => inside(room.rect, item.at)).flatMap(item => item.boxes),
         ...subgroups.map(item => item.box).filter(box => overlaps(box, room.rect as Rect)), ...devices.flatMap(device => device.size && inside(room.rect, device.position) ? [[device.position[0] - device.size[0] / 2, device.position[1] - device.size[1] / 2, device.size[0], device.size[1]] as Rect] : [])];
-      const door = drawn && (room as { autoDoor?: unknown }).autoDoor !== false && !ownDoor.has(room) ? roomDoor(room.rect as Rect, unit, obstacles) : null;
-      return <g key={room.name} style={area(isColour(own) ? own : colour)} {...clickable(board, t("selectRoom", { board, room: room.name }), room.rect)}>
-      <rect x={rx} y={ry} width={rw} height={rh} rx={drawn ? 0 : unit * 0.8} className={`${styles.planRoom} ${isColour(own) ? styles.planRoomOwn : ""}`} strokeWidth={unit * (drawn ? 0.2 : 0.14)} />
+      // Automatic doors go in a box room's corners only: a free-shape room's corners are not where a door would be. A room
+      // with a door of its own (or autoDoor: false) has none either.
+      const door = drawn && !outline && (room as { autoDoor?: unknown }).autoDoor !== false && !ownDoor.has(room) ? roomDoor(room.rect as Rect, unit, obstacles) : null;
+      const roomLook = { className: `${styles.planRoom} ${isColour(own) ? styles.planRoomOwn : ""}`, strokeWidth: unit * (drawn ? 0.2 : 0.14) };
+      return <g key={room.name} style={area(isColour(own) ? own : colour)} {...clickable(board, t("selectRoom", { board, room: room.name }), room)}>
+      {outline ? <polygon points={pointsAttribute(outline)} strokeLinejoin="round" data-shape="outline" {...roomLook} /> : <rect x={rx} y={ry} width={rw} height={rh} rx={drawn ? 0 : unit * 0.8} {...roomLook} />}
       {door && <>
         <line x1={door.x} y1={door.y} x2={door.x + door.along * door.size} y2={door.y} className={styles.planDoorGap} strokeWidth={unit * 0.34} />
         <line x1={door.x} y1={door.y} x2={door.x} y2={door.y + door.inward * door.size} className={styles.planDoor} strokeWidth={unit * 0.14} />

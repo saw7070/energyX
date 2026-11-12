@@ -15,6 +15,7 @@ import { clock, hourRange, kwhText, moneyText, pctText, REPORT_COLOURS as C, typ
 import { siteReportMessages } from "./site-report-messages.js";
 import { REPORT_CSS } from "./site-report-styles.js";
 import { wrapLabel } from "./wrap-label.js";
+import { innerBox, pointsAttribute, polygonOf, spatialShapes } from "@datafoundry/contracts";
 
 export { Rich };
 
@@ -133,18 +134,26 @@ function FloorPlan({ report }: { report: SiteReport }) {
     {doorOnWall
       ? <><path d={`M${minX} ${maxY} V${minY} H${maxX} V${maxY}`} fill="none" stroke={C.ink} strokeWidth={2.5} /><line x1={minX} y1={maxY} x2={ex - 32} y2={maxY} stroke={C.ink} strokeWidth={2.5} /><line x1={ex + 32} y1={maxY} x2={maxX} y2={maxY} stroke={C.ink} strokeWidth={2.5} /></>
       : <rect x={minX} y={minY} width={maxX - minX} height={maxY - minY} fill="none" stroke={C.ink} strokeWidth={2.5} />}
-    {areas.map(zone => { const [x, y, w, h] = zone.rect!; return <g key={zone.key}>
-      <rect x={x} y={y} width={w} height={h} fill={zone.colour} fillOpacity={0.065} stroke={zone.colour} strokeWidth={1.5} />
-      <text className="svgt zone-title" x={x + 10} y={y + 24}>{zone.label}{zone.area ? ` · ${zone.area}` : ""}</text>
-      <text className="svgt rsub" x={x + 10} y={y + 40}>{est(zone)}</text>
+    {areas.map(zone => { const [x, y, w, h] = zone.rect!, [tx, ty] = zone.points ? innerBox(zone.points) : zone.rect!; return <g key={zone.key}>
+      {/* A free-shape area (an L-shaped block) is drawn as its outline, with its title in its largest part. */}
+      {zone.points ? <polygon points={pointsAttribute(zone.points)} fill={zone.colour} fillOpacity={0.065} stroke={zone.colour} strokeWidth={1.5} strokeLinejoin="round" /> : <rect x={x} y={y} width={w} height={h} fill={zone.colour} fillOpacity={0.065} stroke={zone.colour} strokeWidth={1.5} />}
+      <text className="svgt zone-title" x={tx + 10} y={ty + 24}>{zone.label}{zone.area ? ` · ${zone.area}` : ""}</text>
+      <text className="svgt rsub" x={tx + 10} y={ty + 40}>{est(zone)}</text>
+    </g>; })}
+    {/* Plain shapes (a lawn, a driveway): part of the drawing only, under the rooms. */}
+    {spatialShapes(reference.layout).map((shape, index) => { const [x, y, w, h] = shape.rect, fill = shape.fill ?? "#e4ebe6", line = shape.stroke === "none" ? { stroke: "none" } : { stroke: C.line, ...(shape.stroke === "dashed" ? { strokeDasharray: "6 4" } : {}) }, [lx, ly, lw, lh] = shape.points ? innerBox(shape.points) : shape.rect; return <g key={`${index}:${shape.id}`} data-shape={shape.kind}>
+      {shape.kind === "ellipse" ? <ellipse cx={x + w / 2} cy={y + h / 2} rx={w / 2} ry={h / 2} fill={fill} fillOpacity={0.5} {...line} /> : shape.points ? <polygon points={pointsAttribute(shape.points)} fill={fill} fillOpacity={0.5} strokeLinejoin="round" {...line} /> : <rect x={x} y={y} width={w} height={h} fill={fill} fillOpacity={0.5} {...line} />}
+      {shape.label && <text className="svgt rsub" x={lx + lw / 2} y={ly + lh / 2 + 4} textAnchor="middle">{shape.label}</text>}
     </g>; })}
     {reference.layout.rooms.map(room => {
-      const [x, y, w, h] = room.rect as [number, number, number, number];
+      // A free-shape room is drawn as its outline, its name in its largest part; malformed points fall back to the box.
+      const outline = polygonOf((room as { points?: unknown }).points, room.rect);
+      const [x, y, w, h] = outline ? innerBox(outline) : room.rect as [number, number, number, number];
       const lines = wrapLabel(room.name, Math.max(6, Math.floor((w - 8) / 6.8)));
       const host = subgroups.find(zone => zone.parentRoom === room.name);
       const cy = y + h / 2 + (host ? 12 : 4) - (lines.length - 1) * 8;
       return <g key={room.name}>
-        <rect className="room" x={x} y={y} width={w} height={h} />
+        {outline ? <polygon className="room" points={pointsAttribute(outline)} /> : <rect className="room" x={x} y={y} width={w} height={h} />}
         <text className="svgt rlabel" x={x + w / 2} y={cy} textAnchor="middle" fontWeight={host || w * h > 30000 ? 600 : 400}>{lines.map((line, index) => <tspan key={index} x={x + w / 2} dy={index ? 16 : 0}>{line}</tspan>)}</text>
       </g>;
     })}
@@ -159,7 +168,8 @@ function FloorPlan({ report }: { report: SiteReport }) {
     {subgroups.map(zone => {
       const room = reference.layout.rooms.find(item => item.name === zone.parentRoom);
       if (!room) return null;
-      const [x, y, w] = room.rect as [number, number, number, number];
+      // In a free-shape room the equipment goes in its largest part, never in the notch of an L.
+      const outline = polygonOf((room as { points?: unknown }).points, room.rect), [x, y, w] = outline ? innerBox(outline) : room.rect as [number, number, number, number];
       const count = Math.min(6, Math.max(1, zone.circuitKeys.reduce((sum, key) => sum + (report.circuits.find(circuit => circuit.key === key)?.meterIds.length ?? 0), 0)));
       const barW = Math.min(56, (w - 28 - (count - 1) * 10) / count);
       return <g key={zone.key}>
