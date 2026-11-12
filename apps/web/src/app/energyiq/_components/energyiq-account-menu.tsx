@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { DataTaskAvatar, useDataTaskIdentity } from "../../data-tasks/data-task-identity";
 import { useEnergyIqAccess } from "./energyiq-access";
+import { clearAllPlanDrafts } from "./floor-plan-draft-key";
 import { EnergyIcon } from "./icons";
 import { useEnergyIqLocale } from "./energyiq-locale";
 import styles from "./energyiq-account-menu.module.css";
@@ -52,7 +53,7 @@ export function EnergyIqAccountMenu({ collapsed, placement = "up" }: { collapsed
       <button role="menuitem" onClick={() => { setMenu(null); router.push("/energyiq/settings#security"); }}><EnergyIcon name="settings" />{t("account.security")}</button>
       <button role="menuitem" onClick={() => { setMenu(null); router.push("/energyiq/guide"); }}><EnergyIcon name="document" />{t("account.userGuide")}</button>
       <button role="menuitem" onClick={() => { setMenu(null); router.push("/legal"); }}><EnergyIcon name="document" />{t("account.legal")}</button>
-      <button role="menuitem" className={styles.signOut} onClick={() => { setMenu(null); signOut(); }}><EnergyIcon name="arrow" />{t("account.signOut")}</button>
+      <button role="menuitem" className={styles.signOut} onClick={() => { setMenu(null); clearAllPlanDrafts(); signOut(); }}><EnergyIcon name="arrow" />{t("account.signOut")}</button>
       {error && <p role="alert">{error}</p>}
     </div>, document.body)}
     {panel && createPortal(<AccountDialog title={t(panel === "admin" ? "account.adminConsole" : "account.profile")} wide={panel === "admin"} onClose={() => { setPanel(null); requestAnimationFrame(() => trigger.current?.focus()); }}>

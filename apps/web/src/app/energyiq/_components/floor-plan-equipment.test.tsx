@@ -9,6 +9,11 @@ import { FloorPlanEditor } from "./floor-plan-editor";
 import { contentExtent, moveSelection, passengers, planFromReference, referenceFromPlan, resizeCanvas, settleRooms, type FloorPlan, type StoredSpatialReference } from "./floor-plan-model";
 
 const meters = [{ id: "led", name: "LED Display 1", board: "DB3", type: "Other" }];
+/** A click on the plan itself (not on an item): with a drawing tool chosen, it adds the item there. */
+async function clickPlan(host: HTMLElement, x: number, y: number) {
+  const canvas = host.querySelector('svg[role="application"]')!;
+  await act(async () => { canvas.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, clientX: x, clientY: y })); canvas.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, button: 0, clientX: x, clientY: y })); });
+}
 const previous: StoredSpatialReference = {
   schemaVersion: 1, projectId: "office", provenance: { file: "plan", status: "Drawn in EnergyX" },
   layout: { viewBox: [0, 0, 1000, 640], zones: [{ id: "B", referenceBoard: "DB2", rect: [20, 20, 460, 500] }], rooms: [{ name: "Showroom", zone: "B", rect: [40, 80, 260, 200] }], devices: [{ meterId: "led", position: [150, 150] }] },
@@ -22,8 +27,9 @@ it("adds equipment inside a room from the toolbar and shows a device as a named 
     await act(async () => root.render(<EnergyIqLocaleProvider><FloorPlanEditor projectId="office" notes="" block={null} previous={previous} meters={meters} boards={["DB2", "DB3"]} onCancel={() => undefined} onSaved={() => undefined} /></EnergyIqLocaleProvider>));
     const button = (label: string) => [...host.querySelectorAll("button")].find(item => item.textContent === label)!;
 
-    // One click makes the dashed "DB3 · …" box inside the showroom, on the board no area uses yet, ready to describe.
+    // Choosing the tool and clicking the showroom makes the dashed "DB3 · …" box inside it, on the board no area uses yet, ready to describe.
     await act(async () => button("+ Add equipment inside a room").click());
+    await clickPlan(host, 100, 120);
     const panel = host.querySelector("aside")!;
     expect(panel.querySelector("h5")?.textContent).toBe("Equipment group");
     expect((panel.querySelector("select") as HTMLSelectElement).value).toBe("DB3");
@@ -53,7 +59,8 @@ it("pulls the edges of the drawing space to make it bigger or smaller, never cut
   expect(width).toBeGreaterThanOrEqual(500);
   expect(height).toBeGreaterThanOrEqual(540);
   expect(resizeCanvas(plan, 0, 0).viewBox).toEqual([0, 0, Math.round(width), Math.round(height)]);
-  expect(resizeCanvas(plan, 99999, 99999).viewBox).toEqual([0, 0, 5000, 5000]);
+  // The largest plan is the stored format's own limit.
+  expect(resizeCanvas(plan, 99999, 99999).viewBox).toEqual([0, 0, 10000, 10000]);
 
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); vi.stubGlobal("React", React);
   const host = document.createElement("div"); document.body.append(host);
@@ -101,13 +108,16 @@ it("moves only an area's own rooms, even when another area overlaps them", () =>
   expect(relocated.rooms[0]!.area).toBe("A");
 });
 
-it("tells people they can hold Alt to move an area without its rooms", async () => {
+it("tells people how to pick several items, copy them, and nudge an area without its rooms", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); vi.stubGlobal("React", React);
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host);
   try {
     await act(async () => root.render(<EnergyIqLocaleProvider><FloorPlanEditor projectId="office" notes="" block={null} previous={previous} meters={meters} boards={["DB2", "DB3"]} onCancel={() => undefined} onSaved={() => undefined} /></EnergyIqLocaleProvider>));
-    expect(host.querySelector("header p")?.textContent).toContain("hold Alt (⌥) while dragging to move an area on its own");
+    const help = host.querySelector("header p")?.textContent;
+    expect(help).toContain("Shift-click to pick several");
+    expect(help).toContain("hold Alt (⌥) to nudge an area on its own");
+    expect(help).toContain("holding Alt (⌥) while dragging drags out a copy");
   } finally {
     await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals();
   }
@@ -131,10 +141,11 @@ it("gives each area, equipment box, room and device its own colour, saved with t
   try {
     await act(async () => root.render(<EnergyIqLocaleProvider><FloorPlanEditor projectId="office" notes="" block={null} previous={previous} meters={meters} boards={["DB2", "DB3"]} onCancel={() => undefined} onSaved={() => undefined} /></EnergyIqLocaleProvider>));
     const button = (label: string) => [...host.querySelectorAll("button")].find(item => item.textContent === label)!;
-    const picker = () => host.querySelector("aside fieldset")!;
+    const picker = () => [...host.querySelectorAll("aside fieldset")].find(item => item.querySelector("legend")?.textContent === "Colour")!;
     const pick = async (name: string) => act(async () => (picker().querySelector(`button[aria-label="${name}"]`) as HTMLButtonElement).click());
     // Make a DB3 equipment box inside the showroom and colour it teal.
     await act(async () => button("+ Add equipment inside a room").click());
+    await clickPlan(host, 100, 120);
     await pick("Teal");
     const group = () => host.querySelector('svg[role="application"] rect[class*="subgroup"]') as SVGRectElement;
     expect(group().style.fill).toBe("#1b9aaa");
@@ -169,6 +180,7 @@ it("adds an area with no electrical panel and saves it, saying the plan is a dra
     expect(host.querySelector("header")?.textContent).toContain("This is a drawing only: moving areas or devices here changes no totals.");
     const button = (label: string) => [...host.querySelectorAll("button")].find(item => item.textContent === label)!;
     await act(async () => button("+ Add area").click());
+    await clickPlan(host, 760, 300);
     const board = [...host.querySelectorAll("aside label")].find(label => label.textContent?.startsWith("Electrical panel (optional)"))!.querySelector("select") as HTMLSelectElement;
     expect(board.value).toBe("");
     expect(board.selectedOptions[0]?.textContent).toBe("No panel");

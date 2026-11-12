@@ -15,7 +15,7 @@ export type Carried = { extra?: Json; order?: string[] };
 /** Where an area was when the layout was opened, for keys that hold only while it stays put. */
 export type AreaBaseline = { rect: Rect; rooms: string[]; derived?: true };
 
-export const LAYOUT_KEYS = ["viewBox", "zones", "rooms", "entrance", "devices", "boardColours", "style"] as const;
+export const LAYOUT_KEYS = ["viewBox", "zones", "rooms", "entrance", "devices", "boardColours", "style", "labels", "symbols"] as const;
 export const ZONE_KEYS = ["id", "referenceBoard", "meterLocations", "rect", "independentSpace", "physicalParentRoom", "equipment", "colour"] as const;
 /** Keys that describe equipment inside a room: owned for equipment, carried as saved on a stand-alone area. */
 export const GROUP_KEYS = ["independentSpace", "physicalParentRoom", "equipment"];
@@ -23,6 +23,9 @@ export const STANDALONE_ZONE_KEYS = ZONE_KEYS.filter(key => !GROUP_KEYS.includes
 export const ROOM_KEYS = ["name", "zone", "rect", "colour"] as const;
 export const DEVICE_KEYS = ["meterId", "position", "size", "colour"] as const;
 export const ENTRANCE_KEYS = ["label", "position"] as const;
+/** Keys of a text label and of a landmark the editor owns (only while each holds a value it understands; see floor-plan-mark-data). */
+export const LABEL_KEYS = ["id", "text", "position", "size", "rotation", "colour", "bold", "locked"] as const;
+export const SYMBOL_KEYS = ["id", "kind", "position", "size", "rotation", "label", "colour", "locked"] as const;
 /** Zone keys that describe the area's role (a stand-alone area or equipment inside a room) and its place on the site. */
 export const ROLE_KEYS = ["kind", "rooms", "directionFromEntrance"];
 

@@ -1,11 +1,17 @@
 "use client";
 import { useId, type CSSProperties, type KeyboardEvent } from "react";
-import type { ProjectSpatialReference } from "@datafoundry/contracts";
+import { spatialLabels, spatialRotation, spatialSymbols, type ProjectSpatialReference } from "@datafoundry/contracts";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { translatorFor, type EnergyIqLocale } from "./energyiq-messages";
 import { floorMapMessages } from "./site-floor-map-messages";
 import styles from "./site-floor-map.module.css";
 import { planStyleOf } from "./floor-plan-model";
+import { EntranceMark, LabelMark, SymbolMark, type MarkClasses } from "./plan-symbols";
+import { planSymbolMessages } from "./plan-symbol-messages";
+import { isKnownSymbol } from "./floor-plan-marks";
+
+/** The map draws labels and landmarks in the plan style's own ink (see site-floor-map.module.css). */
+const MAP_MARKS: MarkClasses = { mark: styles.planMark!, halo: styles.planMarkHalo!, text: styles.planMarkText!, entrance: styles.planEntrance!, entranceLabel: styles.planEntranceLabel! };
 
 const mapText = (locale: EnergyIqLocale) => translatorFor(floorMapMessages, locale);
 
@@ -45,7 +51,7 @@ export function zoneColours(zones: Zone[], chosen: Record<string, string> = {}):
 /** "A" reads as "Area A" (Chinese "区域 A", Malay "Kawasan A"); a longer label such as "Office wing" is shown as written. */
 export const areaLabel = (id: string, locale: EnergyIqLocale = "en") => id.length <= 2 ? mapText(locale)("area", { id }) : id;
 /** A device on the map: where it is, what it is called and which board feeds it. */
-export type MapDevice = { id: string; name: string; board: string; position: [number, number]; size?: [number, number]; colour?: string };
+export type MapDevice = { id: string; name: string; board: string; position: [number, number]; size?: [number, number]; rotation?: number; colour?: string };
 /** Splits a room name into lines that fit its tile. */
 export function wrapLabel(text: string, maxChars: number): string[] {
   const lines: string[] = [];
@@ -67,7 +73,12 @@ export function propertySummary(reference: ProjectSpatialReference, locale: Ener
 /** Devices saved on the layout that still exist, with their current names and boards. */
 export function mapDevices(reference: ProjectSpatialReference, meters: Array<{ id: string; name: string; board: string }>): MapDevice[] {
   const byId = new Map(meters.map(meter => [meter.id, meter]));
-  return ((reference as ProjectSpatialReference & Extras).layout.devices ?? []).flatMap(item => { const meter = byId.get(item.meterId); const colour = (item as { colour?: unknown }).colour; return meter && Array.isArray(item.position) ? [{ ...meter, position: item.position, ...(Array.isArray(item.size) && item.size.length === 2 ? { size: item.size } : {}), ...(isColour(colour) ? { colour } : {}) }] : []; });
+  return ((reference as ProjectSpatialReference & Extras).layout.devices ?? []).flatMap(item => {
+    const meter = byId.get(item.meterId); const colour = (item as { colour?: unknown }).colour, sized = Array.isArray(item.size) && item.size.length === 2;
+    // A box can be turned (a dot never is); saved data is untrusted, so only a finite number of degrees counts.
+    const rotation = sized ? spatialRotation((item as { rotation?: unknown }).rotation) : null;
+    return meter && Array.isArray(item.position) ? [{ ...meter, position: item.position, ...(sized ? { size: item.size } : {}), ...(rotation ? { rotation } : {}), ...(isColour(colour) ? { colour } : {}) }] : [];
+  });
 }
 const inside = ([x, y, w, h]: number[], [px, py]: [number, number]) => px >= x && px <= x + w && py >= y && py <= y + h;
 const escapeWords = (text: string) => text.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
@@ -120,7 +131,7 @@ export function roomDoor([rx, ry, rw, rh]: Rect, unit: number, obstacles: Rect[]
  * `onOpenDevice` makes each pin clickable; `focusDevice` rings one pin.
  */
 export function SiteFloorMap({ reference, large = false, devices = [], onOpenDevice, highlight = null, highlightDevices = null, onSelectBoard, focusDevice = null }: { reference: ProjectSpatialReference; large?: boolean; devices?: MapDevice[]; onOpenDevice?: (id: string) => void; highlight?: string[] | null; highlightDevices?: string[] | null; onSelectBoard?: (board: string, deviceId?: string) => void; focusDevice?: string | null }) {
-  const t = useMessages(floorMapMessages);
+  const t = useMessages(floorMapMessages), kindName = useMessages(planSymbolMessages);
   // Pattern ids must be unique per map on the page (the plan and its enlarged copy) and safe inside url(#…).
   const gridId = useId().replace(/[^a-zA-Z0-9]/g, "");
   const { locale } = useEnergyIqLocale();
@@ -209,16 +220,20 @@ export function SiteFloorMap({ reference, large = false, devices = [], onOpenDev
         <text x={pinned ? gx + unit * 0.8 : gx + gw / 2} y={pinned ? gy + unit * 1.6 : gy + gh / 2 + unit * 0.6} textAnchor={pinned ? "start" : "middle"} className={styles.planEquipLabel} style={{ fontSize: unit * (pinned ? 1.1 : 1.4) }}>{zone.referenceBoard ? `${zone.referenceBoard} · ` : ""}{zone.equipment ?? t("equipmentInRoom")}</text>
       </g>;
     })}
-    {entrance?.position && <g>
-      <path d={`M${entrance.position[0] - unit * 1.4},${entrance.position[1] + unit * 2.2} L${entrance.position[0]},${entrance.position[1]} L${entrance.position[0] + unit * 1.4},${entrance.position[1] + unit * 2.2} Z`} className={styles.planEntrance} />
-      <text x={entrance.position[0]} y={entrance.position[1] + unit * 4.4} textAnchor="middle" className={styles.planEntranceLabel} style={{ fontSize: unit * 1.3 }}>{entrance.label ?? t("entrance")}</text>
-    </g>}
+    {/* Text labels and landmarks: drawing only, above rooms and below devices. The entrance a layout saved before
+        landmarks existed is drawn exactly as it always was. */}
+    {spatialLabels(reference.layout).map((item, index) => <LabelMark key={`label-${index}`} text={item.text} position={item.position} {...(item.size ? { size: item.size } : {})} {...(item.rotation ? { rotation: item.rotation } : {})} {...(item.colour ? { colour: item.colour } : {})} bold={!!item.bold} unit={unit} classes={MAP_MARKS} />)}
+    {spatialSymbols(reference.layout).map((item, index) => {
+      const own = { ...(item.size !== undefined ? { size: item.size } : {}), ...(item.rotation ? { rotation: item.rotation } : {}), ...(item.colour ? { colour: item.colour } : {}) };
+      if (item.kind === "entrance") return <EntranceMark key={`symbol-${index}`} position={item.position} {...own} label={item.legacy ? entrance?.label ?? t("entrance") : item.label ?? t("entrance")} unit={unit} legacy={{ offset: unit * 4.4, font: unit * 1.3 }} classes={MAP_MARKS} />;
+      return <g key={`symbol-${index}`}><title>{[kindName(isKnownSymbol(item.kind) ? item.kind : "other"), item.label].filter(Boolean).join(" · ")}</title><SymbolMark kind={item.kind} position={item.position} {...own} {...(item.label ? { label: item.label } : {})} unit={unit} classes={MAP_MARKS} /></g>;
+    })}
     {devices.map(device => {
       const [dx, dy] = device.position, colour = device.colour ?? byBoard.get(device.board) ?? "var(--zone-6)", r = unit * 1;
       const open = onOpenDevice ? () => onOpenDevice(device.id) : undefined;
       return <g key={device.id} className={`${open ? styles.pinLink : ""} ${fadedPin(device) ? styles.faded : ""}`} {...(open ? { role: "button", tabIndex: 0, "aria-label": t("openDevice", { name: device.name }), onClick: open, onKeyDown: (event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } } } : {})}>
         <title>{t(open ? "deviceTitleOpen" : "deviceTitle", { name: device.name, board: device.board })}</title>
-        {device.size ? <DeviceBox x={dx} y={dy} size={device.size} name={device.name} colour={colour} unit={unit} focus={focusDevice === device.id} drawing /> : <>
+        {device.size ? device.rotation ? <g transform={`rotate(${device.rotation} ${dx} ${dy})`}><DeviceBox x={dx} y={dy} size={device.size} name={device.name} colour={colour} unit={unit} focus={focusDevice === device.id} drawing /></g> : <DeviceBox x={dx} y={dy} size={device.size} name={device.name} colour={colour} unit={unit} focus={focusDevice === device.id} drawing /> : <>
         {focusDevice === device.id && <circle cx={dx} cy={dy} r={r * 2} className={styles.pinFocus} />}
         {/* A fixture symbol: a soft halo, the meter in its group's colour, and a bolt. */}
         <circle cx={dx} cy={dy} r={r * 1.75} className={styles.planPinHalo} style={{ fill: colour }} />

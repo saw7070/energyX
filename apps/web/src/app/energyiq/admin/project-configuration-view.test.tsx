@@ -471,8 +471,10 @@ it("asks before switching Facility tabs while the floor layout has changes not s
     await click("Floor layout");
     expect(editor()).not.toBeNull();
     onTabChange.mockClear();
-    // With a change, it asks first.
+    // With a change, it asks first: choose + Add room, then click the plan to add one there.
     await click("+ Add room");
+    const canvas = editor()!.querySelector('svg[role="application"]')!;
+    await act(async () => { for (const type of ["pointerdown", "pointerup"]) canvas.dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0, clientX: 300, clientY: 150 })); });
     await click("Project notes");
     expect(host.querySelector('[role="alert"]')?.textContent).toContain("You have changes that are not saved yet.");
     expect(editor()).not.toBeNull();

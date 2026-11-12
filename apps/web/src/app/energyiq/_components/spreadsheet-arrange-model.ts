@@ -11,7 +11,7 @@ import { addGroup, metersInGroup, moveMetersToGroup, removeGroup } from "./meter
 import { applyMeterEdit } from "./site-structure-editing";
 import { projectMeterFullName } from "./project-meter-name";
 import { decodeXmlText } from "./live-device-list";
-import { DEFAULT_VIEWBOX, MAX_PLAN_SIZE, contentExtent, hiddenZones, planFromReference, starterPlan, type FloorPlan, type PlanArea, type StoredSpatialReference } from "./floor-plan-model";
+import { DEFAULT_VIEWBOX, MAX_COORD, MAX_PLAN_SIZE, contentExtent, hiddenZones, planFromReference, starterPlan, type FloorPlan, type PlanArea, type StoredSpatialReference } from "./floor-plan-model";
 import type { EnergyIqLocale } from "./energyiq-messages";
 
 /** What a column holds. Several columns may be groups (read left to right); the others are used once each. */
@@ -438,6 +438,8 @@ export function floorPlanWithGroupAreas(previous: StoredSpatialReference | null,
   const used = new Set(existing.areas.map(area => area.key));
   const freeKey = (start: number) => { let index = start; while (used.has(`area-${index}`)) index += 1; used.add(`area-${index}`); return `area-${index}`; };
   const areas: PlanArea[] = added.map((label, index) => ({ key: freeKey(existing.areas.length + 1 + index), label, board: "", rect: [vx + margin + index * (width + gap), top, width, height] }));
-  const needed = Math.min(MAX_PLAN_SIZE, Math.max(vh, top - vy + height + margin));
+  // The stored format keeps every coordinate at or below MAX_COORD: when the new row would sit past it, nothing is offered.
+  if (top + height + margin > MAX_COORD || top - vy + height + margin > MAX_PLAN_SIZE) return null;
+  const needed = Math.min(MAX_PLAN_SIZE, MAX_COORD - vy, Math.max(vh, top - vy + height + margin));
   return { plan: { ...existing, viewBox: [vx, vy, vw, needed], areas: [...existing.areas, ...areas] }, added };
 }
