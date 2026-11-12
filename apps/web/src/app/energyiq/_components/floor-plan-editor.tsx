@@ -34,7 +34,7 @@ import { useCoarsePointer, useElementWidth, usePlanViewport } from "./floor-plan
 import { maxZoom, MIN_ZOOM, planPoint } from "./floor-plan-zoom";
 import { LinePanel, LinePreview, LineShape, OpeningPanel, OpeningShape, RoomDoors } from "./floor-plan-drawing-ui";
 import { addLine, insertPoint, MAX_LINES, nearestSegment, setPoint } from "./floor-plan-lines";
-import { addOpening, MAX_OPENINGS, wallAt } from "./floor-plan-openings";
+import { addOpening, MAX_OPENINGS, takesDoors, wallAt } from "./floor-plan-openings";
 import { EnergyIcon } from "./icons";
 import { LockBadge } from "./plan-symbols";
 import { boardColours, boardlessColours, mapDevices, pinLabel, roomHasPins, SiteFloorMap } from "./site-floor-map";
@@ -381,8 +381,10 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
    */
   const addDoor = (at: Point | null) => {
     const picked = single?.kind === "room" ? plan.rooms.find(item => item.key === single.key) : undefined;
-    const spot = at ? wallAt(plan, at, Math.max(unit * 3, perPx * 16)) : (picked ?? plan.rooms[0]) ? { room: (picked ?? plan.rooms[0])!, wall: "s" as const, offset: 0.5 } : null;
+    const fallback = picked ?? plan.rooms.find(takesDoors);
+    const spot = at ? wallAt(plan, at, Math.max(unit * 3, perPx * 16)) : fallback ? { room: fallback, wall: "s" as const, offset: 0.5 } : null;
     if (!spot) { setNotice(t("editor.doorNeedsWall")); return; }
+    if (!takesDoors(spot.room)) { setNotice(t("editor.doorShapedRoom")); return; }
     if (spot.room.locked) { setNotice(t("editor.locked")); return; }
     const result = addOpening(plan, spot.room.key, spot.wall, spot.offset);
     if (!result) { setNotice(t("editor.tooManyOpenings", { max: MAX_OPENINGS })); return; }
@@ -1232,7 +1234,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
           {shownLayer("rooms") && plan.rooms.map(room => <RoomShape key={room.key} room={room} colour={room.colour ?? roomColour(room)} pinned={positions.some(position => holds(room, position))} unit={unit} label={t("a11y.room", { name: roomTitle(room) })} onDown={itemDown} />)}
           {shownLayer("equipment") && groups.map(item => <GroupShape key={item.key} item={item} colour={areaColour(item)} pinned={roomHasPins(item.rect, positions)} fallback={t("panel.groupFallback")} unit={unit} label={areaItemName(t, item)} onDown={itemDown} />)}
           {shownLayer("lines") && plan.lines?.map(line => <LineShape key={line.key} line={line} unit={unit} label={t("a11y.line", { style: t(`line.${line.style}`) })} onDown={itemDown} />)}
-          {shownLayer("lines") && plan.openings?.map(opening => { const room = plan.rooms.find(item => item.key === opening.room); return room ? <OpeningShape key={opening.key} opening={opening} rect={room.rect} unit={unit} label={t("a11y.opening", { kind: t(`opening.${opening.kind}`), room: roomTitle(room) })} onDown={itemDown} /> : null; })}
+          {shownLayer("lines") && plan.openings?.map(opening => { const room = plan.rooms.find(item => item.key === opening.room); return room && takesDoors(room) ? <OpeningShape key={opening.key} opening={opening} rect={room.rect} unit={unit} label={t("a11y.opening", { kind: t(`opening.${opening.kind}`), room: roomTitle(room) })} onDown={itemDown} /> : null; })}
           {shownLayer("labels") && (plan.labels ?? []).map(item => <LabelShape key={item.key} item={item} unit={unit} label={t("a11y.label", { name: item.text })} onDown={itemDown} />)}
           {shownLayer("symbols") && (plan.symbols ?? []).map(item => <SymbolShape key={item.key} item={item} unit={unit} label={symbolName(t, item, kindName)} fallback={t("name.entrance")} onDown={itemDown} />)}
           {plan.entrance && shownLayer("symbols") && <EntranceShape entrance={plan.entrance} selected={isIn(selection, { kind: "entrance", key: "entrance" })} unit={unit} label={t("a11y.entrance", { name: plan.entrance.label })} onDown={itemDown} />}

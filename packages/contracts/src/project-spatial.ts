@@ -176,8 +176,9 @@ export function spatialHiddenLayers(layout: unknown): Set<typeof SPATIAL_LAYERS[
 /** A room's name as shown: its short `displayName` when it has a usable one, else its name. */
 export const spatialRoomTitle = (room: { name: string; displayName?: unknown }): string => typeof room.displayName === "string" && room.displayName.trim() && room.displayName.length <= 120 ? room.displayName.trim() : room.name;
 /**
- * The layout as one floor sees it: only that floor's zones, rooms, devices and entrance. Board markers stay only for
- * boards with an area on that floor. A layout with fewer than two floors is returned unchanged.
+ * The layout as one floor sees it: only that floor's zones, rooms, devices and entrance, and its text labels, landmarks,
+ * lines and plain shapes (each names its floor in `level` like a room). Doors and windows are on their room's floor.
+ * Board markers stay only for boards with an area on that floor. A layout with fewer than two floors is returned unchanged.
  */
 export function spatialLevelReference<T extends ProjectSpatialReference>(reference: T, level: string): T {
   const levels = spatialLevels(reference.layout);
@@ -187,6 +188,10 @@ export function spatialLevelReference<T extends ProjectSpatialReference>(referen
   const zones = layout.zones.filter(zone => spatialZoneLevel(zone, layout, levels) === level), boards = new Set(zones.map(zone => zone.referenceBoard).filter(Boolean));
   const next: Record<string, unknown> = { ...layout, zones, rooms: layout.rooms.filter(on) };
   if (Array.isArray(layout.devices)) next.devices = layout.devices.filter(on);
+  for (const field of ["labels", "symbols", "lines", "shapes"] as const) { const list = (layout as Record<string, unknown>)[field]; if (Array.isArray(list)) next[field] = list.filter(on); }
+  // A door names its room by id, else by name (see openingRoom): it stays while that room is on this floor.
+  const openings = (layout as { openings?: unknown }).openings;
+  if (Array.isArray(openings)) { const rooms = next.rooms as Array<{ name: string; id?: unknown }>; next.openings = openings.filter(item => { const room = isObject(item) ? item.room : undefined; return typeof room === "string" && rooms.some(entry => entry.id === room || entry.name === room); }); }
   if (layout.entrance !== undefined && !on(layout.entrance)) delete next.entrance;
   if (isObject(layout.boardMarkers)) next.boardMarkers = Object.fromEntries(Object.entries(layout.boardMarkers).filter(([board]) => boards.has(board)));
   return { ...reference, layout: next as T["layout"] };

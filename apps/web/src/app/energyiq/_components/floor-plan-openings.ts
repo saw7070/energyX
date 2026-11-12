@@ -58,6 +58,12 @@ export function newRoomId(taken: Iterable<string>): string {
 }
 
 export const isDoorLike = (kind: SpatialOpeningKind) => kind !== "window";
+/**
+ * Whether doors and windows can go on a room: only a box room. A free-shape room (an L or a drawn outline) takes none:
+ * its box walls are not all its walls. Doors it had before it was reshaped are kept (and come back if it is made a
+ * rectangle again) but are not drawn, as on the map and in the report (see drawnOpeningRoom).
+ */
+export const takesDoors = (room: { outline?: unknown }) => !room.outline;
 /** The room's openings, in drawing order. */
 export const openingsOf = (plan: FloorPlan, roomKey: string) => (plan.openings ?? []).filter(item => item.room === roomKey);
 /** Usual width of a new opening: about a door's width on a plan this size, never wider than most of its wall. */
@@ -87,7 +93,7 @@ const withRoomId = (rooms: PlanRoom[], roomKey: string): PlanRoom[] => { const t
  */
 export function addOpening(plan: FloorPlan, roomKey: string, wall: SpatialWall, offset: number, kind: SpatialOpeningKind = "door"): { plan: FloorPlan; key: string } | null {
   const room = plan.rooms.find(item => item.key === roomKey);
-  if (!room || (plan.openings?.length ?? 0) >= MAX_OPENINGS) return null;
+  if (!room || !takesDoors(room) || (plan.openings?.length ?? 0) >= MAX_OPENINGS) return null;
   const length = wallLength(room.rect, wall), width = defaultWidth(plan, kind, length), key = newKey(plan);
   const half = width / 2 / Math.max(1, length), at = round(Math.min(Math.max(offset, half), 1 - half));
   const opening: PlanOpening = { key, room: roomKey, wall, offset: at, width, kind };

@@ -3,6 +3,8 @@
  * They are optional layout keys (schemaVersion stays 1), and the layout is untrusted (a notes edit or the advisor can
  * write anything), so every reader takes only the entries checked here: known kinds, finite numbers in range, capped lists.
  */
+import { polygonOf } from "./spatial-polygon.js";
+
 export type SpatialWall = "n" | "e" | "s" | "w";
 export const SPATIAL_WALLS = ["n", "e", "s", "w"] as const;
 export const OPENING_KINDS = ["door", "double", "opening", "window"] as const;
@@ -61,6 +63,15 @@ export const spatialLines = (layout: unknown): SpatialLine[] => firstOfEach(isRe
 /** The room an opening belongs to: the one with its id, else the one with its name. */
 export function openingRoom<R extends { name: string }>(rooms: readonly R[], opening: { room: string }): R | undefined {
   return rooms.find(room => (room as { id?: unknown }).id === opening.room) ?? rooms.find(room => room.name === opening.room);
+}
+/**
+ * The room a door or window is drawn on: its room, unless that room is drawn as a free shape (usable `points`). Doors sit
+ * on a box room's four walls; an L-shaped room's box walls are not all its walls, so its doors are kept but not drawn
+ * (the editor does not add doors to free-shape rooms, and draws no automatic door on them either).
+ */
+export function drawnOpeningRoom<R extends { name: string; rect: unknown }>(rooms: readonly R[], opening: { room: string }): R | undefined {
+  const room = openingRoom(rooms, opening);
+  return room && !polygonOf((room as { points?: unknown }).points, room.rect) ? room : undefined;
 }
 /**
  * Where an opening sits on its room's wall: from `a` (the end nearer the wall's start) to `b`, with `inward` pointing into

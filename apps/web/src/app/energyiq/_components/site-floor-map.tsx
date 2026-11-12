@@ -1,6 +1,6 @@
 "use client";
 import { useId, useState, type CSSProperties, type KeyboardEvent } from "react";
-import { innerBox, insideSpatial, openingRoom, pointsAttribute, polygonOf, spatialLabels, spatialLevelOf, spatialLevelReference, spatialLevels, spatialLines, spatialOpenings, spatialRoomTitle, spatialRotation, spatialShapes, spatialSymbols, spatialZoneLevel, type ProjectSpatialReference } from "@datafoundry/contracts";
+import { drawnOpeningRoom, innerBox, insideSpatial, pointsAttribute, polygonOf, spatialLabels, spatialLevelOf, spatialLevelReference, spatialLevels, spatialLines, spatialOpenings, spatialRoomTitle, spatialRotation, spatialShapes, spatialSymbols, spatialZoneLevel, type ProjectSpatialReference } from "@datafoundry/contracts";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { translatorFor, type EnergyIqLocale } from "./energyiq-messages";
 import { floorMapMessages } from "./site-floor-map-messages";
@@ -226,7 +226,7 @@ function MapSheet({ reference, large = false, devices: allDevices = [], onOpenDe
   const ids = { minor: `plan-grid-${gridId}`, major: `plan-grid-major-${gridId}` };
   // Doors, windows and walls the site drew (checked: the layout is untrusted). A room with a door of its own, or with its
   // automatic door switched off, gets no automatic door; every other room keeps the one worked out below.
-  const openings = spatialOpenings(reference.layout).flatMap(opening => { const room = openingRoom(reference.layout.rooms, opening); return room ? [{ opening, room }] : []; });
+  const openings = spatialOpenings(reference.layout).flatMap(opening => { const room = drawnOpeningRoom(reference.layout.rooms, opening); return room ? [{ opening, room }] : []; });
   const ownDoor = new Set(openings.filter(item => item.opening.kind !== "window").map(item => item.room));
   const walls = spatialLines(reference.layout);
   return <svg viewBox={`${x} ${y} ${w} ${h + unit * 4}`} className={`${styles.map} ${lookClass} ${large ? styles.large : ""}`} data-look={look} role={interactive ? "group" : "img"} aria-label={devices.length ? t("ariaDevices", { count: devices.length }) : t("aria")}>

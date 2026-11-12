@@ -5,7 +5,7 @@ import { useMessages } from "./energyiq-locale";
 import { insertPoint, MAX_LINE_POINTS, midpointAfter, removePoint, restyleLine, type PlanLine } from "./floor-plan-lines";
 import { floorPlanMessages } from "./floor-plan-messages";
 import type { FloorPlan, PlanRoom, Point, Rect, Selection } from "./floor-plan-model";
-import { addOpening, flipOpening, isDoorLike, openingsOf, updateOpening, type PlanOpening } from "./floor-plan-openings";
+import { addOpening, flipOpening, isDoorLike, openingsOf, takesDoors, updateOpening, type PlanOpening } from "./floor-plan-openings";
 import { parseAmount } from "./floor-plan-position";
 import type { ItemDown } from "./floor-plan-shapes";
 import { LineSymbol, OpeningSymbol, type LineClasses, type OpeningClasses } from "./plan-openings";
@@ -66,6 +66,11 @@ export function RoomDoors({ plan, room, locked, commit, onSelect, onPicked, onFu
   const setAuto = (on: boolean) => commit({ ...plan, rooms: plan.rooms.map(item => { if (item.key !== room.key) return item; const { autoDoor: _old, autoDoorOffByDoor: _by, ...rest } = item; return on ? rest : { ...rest, autoDoor: false as const }; }) });
   const add = () => { const result = addOpening(plan, room.key, freeWall(plan, room), 0.5); if (!result) { onFull(); return; } const item: Selection = { kind: "opening", key: result.key }; commit(result.plan, [item]); onPicked(item); };
   const pick = (item: Selection) => { onSelect(item); onPicked(item); };
+  // A free-shape room takes no doors (see takesDoors): say so, and still list any it kept, so they can be deleted.
+  if (!takesDoors(room)) return <fieldset className={styles.doorsField}><legend>{t("panel.doors")}</legend>
+    <small>{t("panel.doorsShaped")}</small>
+    {own.length > 0 && <ul className={styles.doorList}>{own.map(item => <li key={item.key}><button type="button" onClick={() => pick({ kind: "opening", key: item.key })}>{t(`opening.${item.kind}`)} · {t(`wall.${item.wall}`)}</button></li>)}</ul>}
+  </fieldset>;
   return <fieldset className={styles.doorsField}><legend>{t("panel.doors")}</legend>
     <label className={styles.check}><input type="checkbox" checked={room.autoDoor !== false && !hasDoor} disabled={hasDoor || locked} onChange={event => setAuto(event.target.checked)} />{t("panel.autoDoor")}</label>
     <small>{t("panel.autoDoorHint")}</small>

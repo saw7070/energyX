@@ -6,7 +6,7 @@
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { lineWidth, openingRoom, openingSpan, spatialHiddenLayers, spatialLabels, spatialLevelReference, spatialLevels, spatialLines, spatialOpenings, spatialRoomTitle, spatialSymbols } from "@datafoundry/contracts";
+import { drawnOpeningRoom, lineWidth, openingSpan, spatialHiddenLayers, spatialLabels, spatialLevelReference, spatialLevels, spatialLines, spatialOpenings, spatialRoomTitle, spatialSymbols } from "@datafoundry/contracts";
 import { holidayName, joinText } from "./analysis-messages.js";
 import { shortDate } from "./analysis-model.js";
 import { forHoursMeaning, translatorFor, type EnergyIqLocale } from "./locale.js";
@@ -174,7 +174,7 @@ function FloorPlan({ report, level = null }: { report: SiteReport; level?: strin
     })}
     {/* Doors and windows the site drew, as simple gaps in the room walls; walls, fences and road edges as plain lines. */}
     {!hidden.has("lines") && spatialOpenings(reference.layout).map(opening => {
-      const room = openingRoom(reference.layout.rooms, opening);
+      const room = drawnOpeningRoom(reference.layout.rooms, opening);
       if (!room) return null;
       const { a, b } = openingSpan(room.rect as [number, number, number, number], opening);
       return <line key={opening.id} x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} stroke="#fff" strokeWidth={3} />;
