@@ -71,7 +71,11 @@ export function defaultWidth(plan: FloorPlan, kind: SpatialOpeningKind, length: 
   const unit = plan.viewBox[2] / 100, wanted = unit * (kind === "door" ? 3 : kind === "opening" ? 4 : 5);
   return Math.max(4, Math.round(Math.min(wanted, length * 0.8)));
 }
-const newKey = (plan: FloorPlan) => { const taken = new Set([...(plan.openings ?? []).map(item => item.key), ...carriedIds(plan.carried?.openings)]); let number = taken.size + 1; while (taken.has(`op-${number}`)) number += 1; return `op-${number}`; };
+/** Door ids already used: on this floor, by entries kept as saved, and (for one floor of several) on the other floors. */
+const takenKeys = (plan: FloorPlan) => new Set([...(plan.openings ?? []).map(item => item.key), ...carriedIds(plan.carried?.openings), ...(plan.elsewhere?.drawingIds ?? [])]);
+/** How many doors and windows the site holds: the stored format's limit counts every floor. */
+export const openingCount = (plan: FloorPlan) => (plan.openings?.length ?? 0) + (plan.elsewhere?.openings ?? 0);
+const newKey = (plan: FloorPlan) => { const taken = takenKeys(plan); let number = taken.size + 1; while (taken.has(`op-${number}`)) number += 1; return `op-${number}`; };
 const round = (value: number) => Math.round(value * 10000) / 10000;
 /**
  * The room with its automatic door switched off by a door of its own (`autoDoorOffByDoor`, never saved): a room with doors
@@ -93,7 +97,7 @@ const withRoomId = (rooms: PlanRoom[], roomKey: string): PlanRoom[] => { const t
  */
 export function addOpening(plan: FloorPlan, roomKey: string, wall: SpatialWall, offset: number, kind: SpatialOpeningKind = "door"): { plan: FloorPlan; key: string } | null {
   const room = plan.rooms.find(item => item.key === roomKey);
-  if (!room || !takesDoors(room) || (plan.openings?.length ?? 0) >= MAX_OPENINGS) return null;
+  if (!room || !takesDoors(room) || openingCount(plan) >= MAX_OPENINGS) return null;
   const length = wallLength(room.rect, wall), width = defaultWidth(plan, kind, length), key = newKey(plan);
   const half = width / 2 / Math.max(1, length), at = round(Math.min(Math.max(offset, half), 1 - half));
   const opening: PlanOpening = { key, room: roomKey, wall, offset: at, width, kind };
@@ -163,7 +167,7 @@ export function wallAt(plan: FloorPlan, [px, py]: Point, reach: number): { room:
  * keys, as many as the plan still has room for. Nothing carried comes along: it described the original only.
  */
 export function copiedOpenings(plan: FloorPlan, source: PlanOpening[], rooms: Map<string, string>): PlanOpening[] {
-  const taken = new Set((plan.openings ?? []).map(item => item.key)), room = Math.max(0, MAX_OPENINGS - taken.size);
+  const taken = takenKeys(plan), room = Math.max(0, MAX_OPENINGS - openingCount(plan));
   return source.filter(item => rooms.has(item.room)).slice(0, room).map(item => {
     let number = 1; while (taken.has(`op-copy-${number}`)) number += 1;
     const key = `op-copy-${number}`; taken.add(key);

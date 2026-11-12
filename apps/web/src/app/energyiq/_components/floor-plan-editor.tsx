@@ -33,14 +33,14 @@ import { DraftOffer, ZoomControls } from "./floor-plan-view-controls";
 import { useCoarsePointer, useElementWidth, usePlanViewport } from "./floor-plan-viewport";
 import { maxZoom, MIN_ZOOM, planPoint } from "./floor-plan-zoom";
 import { LinePanel, LinePreview, LineShape, OpeningPanel, OpeningShape, RoomDoors } from "./floor-plan-drawing-ui";
-import { addLine, insertPoint, MAX_LINES, nearestSegment, setPoint } from "./floor-plan-lines";
-import { addOpening, MAX_OPENINGS, takesDoors, wallAt } from "./floor-plan-openings";
+import { addLine, insertPoint, lineCount, MAX_LINES, nearestSegment, setPoint } from "./floor-plan-lines";
+import { addOpening, MAX_OPENINGS, openingCount, takesDoors, wallAt } from "./floor-plan-openings";
 import { EnergyIcon } from "./icons";
 import { EnlargeablePreview, PlanEnlargeDialog } from "./plan-enlarge";
 import { LockBadge } from "./plan-symbols";
 import { boardColours, boardlessColours, mapDevices, pinLabel, roomHasPins, SiteFloorMap } from "./site-floor-map";
 import {
-  asGroupIn, asOwnArea, autoPlace, centre, hiddenZones, promoteEntrance, MAX_AREAS, MAX_ROOMS, NOTES_LIMIT, roomOwner, PLAN_STYLES, planStyleOf, clampPoint, clampRect, contains, NO_PASSENGERS, sameGeometry, settleRooms, defaultDeviceSize, deviceRect, resizeCanvas, notesWithReference, planFromReference, referenceFromPlan, resizeRect, roomTitle, snap, starterPlan,
+  asGroupIn, asOwnArea, autoPlace, centre, hasMainEntrance, hiddenZones, promoteEntrance, MAX_AREAS, MAX_ROOMS, NOTES_LIMIT, roomOwner, PLAN_STYLES, planStyleOf, clampPoint, clampRect, NO_PASSENGERS, sameGeometry, settleRooms, defaultDeviceSize, deviceRect, resizeCanvas, notesWithReference, planFromReference, referenceFromPlan, resizeRect, roomTitle, snap, starterPlan,
   type FloorPlan, type Handle, type PlanArea, type Point, type Rect, type Selection, type StoredSpatialReference,
 } from "./floor-plan-model";
 import mapStyles from "./site-floor-map.module.css";
@@ -300,7 +300,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     if (kind === "door") { addDoor(at); return; }
     if (kind === "line") return;
     // A saved layout holds at most so many areas and rooms (and plain shapes): say so instead of adding one that cannot be saved.
-    if (kind === "shape" ? (plan.shapes?.length ?? 0) >= MAX_SHAPES : !fitsLimits(plan, hidden.length, kind === "room" ? 0 : 1, kind === "room" ? 1 : 0)) { setNotice(kind === "shape" ? ts("problem.tooManyShapes", { max: MAX_SHAPES }) : tooMany()); return; }
+    if (kind === "shape" ? (plan.shapes?.length ?? 0) + (plan.elsewhere?.shapes ?? 0) >= MAX_SHAPES : !fitsLimits(plan, hidden.length, kind === "room" ? 0 : 1, kind === "room" ? 1 : 0)) { setNotice(kind === "shape" ? ts("problem.tooManyShapes", { max: MAX_SHAPES }) : tooMany()); return; }
     const box = shaped ? shaped.rect : drawn && !isClick(drawn) ? clampRect(drawn, plan.viewBox) : null;
     // The shape chosen for it: drawn corner by corner, or an L, U or T in its box (a circle is for plain shapes only).
     const choice = pickFor(kind), outline = shaped?.outline ?? (choice === "rect" || choice === "draw" || choice === "ellipse" ? undefined : presetOutline(choice));
@@ -348,10 +348,11 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   };
   /**
    * Puts a text label or a landmark at `at` (on the grid), or from the keyboard (no point) in the middle of what is shown.
-   * An entrance becomes the first entrance when the plan has none yet. One undo step; the new item comes back selected.
+   * An entrance becomes the first entrance when the site has none yet (on any floor). One undo step; the new item comes
+   * back selected.
    */
   const addMark = (kind: "text" | "landmark", at: Point | null, symbolKind = landmark ?? "entrance", spot?: Point) => {
-    const isText = kind === "text", firstEntrance = !isText && symbolKind === "entrance" && !plan.entrance;
+    const isText = kind === "text", firstEntrance = !isText && symbolKind === "entrance" && !hasMainEntrance(plan);
     if (!firstEntrance && !fitsMarks(plan, isText ? 1 : 0, isText ? 0 : 1)) { setNotice(t("editor.tooManyMarks", { max: MARK_LIMIT })); return; }
     const point = spot ?? clampPoint(at ? [snap(at[0], step), snap(at[1], step)] : [wx + ww / 2, wy + wh / 2], plan.viewBox);
     let next: FloorPlan, item: Selection;
@@ -368,15 +369,21 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     say(placed => countText(t, placed, [item], meterName, "a11y.added", "a11y.addedMany", kindName));
     reveal([isText ? "labels" : "symbols"]); commit(next, { selection: [item] }); stopTool(); focusCanvas();
   };
-  /** Another entrance's name: the lowest number no entrance uses yet, so deleting "Entrance 2" never makes two "Entrance 3". */
-  const entranceName = () => nextEntranceName([plan.entrance?.label, ...(plan.symbols ?? []).filter(entry => entry.kind === "entrance").map(entry => entry.label)], number => t("name.otherEntrance", { number }));
-  /** + Add entrance: the main entrance at the bottom of the plan, or another entrance beside the last one, on a free spot. */
+  /**
+   * Another entrance's name: the lowest number no entrance uses yet (on any floor), so deleting "Entrance 2" never makes
+   * two "Entrance 3".
+   */
+  const entranceName = () => nextEntranceName([plan.entrance?.label, ...(plan.symbols ?? []).filter(entry => entry.kind === "entrance").map(entry => entry.label), ...(plan.elsewhere?.entrances ?? [])], number => t("name.otherEntrance", { number }));
+  /**
+   * + Add entrance: the main entrance at the bottom of the plan, or another entrance beside the last one on this floor
+   * (at the bottom of the plan when this floor has none yet), on a free spot.
+   */
   const addEntrance = () => {
     setPlacing(null); stopTool();
-    if (!plan.entrance) { addMark("landmark", [vx + vw / 2, vy + vh - 40], "entrance"); return; }
+    const entrances = [...(plan.entrance ? [plan.entrance.position] : []), ...(plan.symbols ?? []).filter(entry => entry.kind === "entrance").map(entry => entry.position)];
+    if (!entrances.length) { addMark("landmark", [vx + vw / 2, vy + vh - 40], "entrance"); return; }
     const place = (point: Point) => clampPoint([snap(point[0], step), snap(point[1], step)], plan.viewBox), label = entranceName();
     const fits = (point: Point) => { const shown = shiftSymbol({ key: "", kind: "entrance", position: point, label }, 0, 0, plan.viewBox).position; return shown[0] === point[0] && shown[1] === point[1]; };
-    const entrances = [plan.entrance.position, ...(plan.symbols ?? []).filter(entry => entry.kind === "entrance").map(entry => entry.position)];
     addMark("landmark", null, "entrance", nextEntranceSpot(entrances, plan.viewBox, unit * 8, place, fits));
   };
   /**
@@ -457,7 +464,10 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   /** Puts a copy on the plan; refused, with a message, when the plan could then not be saved. */
   const putCopy = (clip: Clip, offset: number) => {
     if (!fits(clip)) { setNotice(fitsMarks(plan, clip.labels?.length ?? 0, clip.symbols?.length ?? 0) ? tooMany() : t("editor.tooManyMarks", { max: MARK_LIMIT })); return false; }
-    if ((plan.shapes?.length ?? 0) + (clip.shapes?.length ?? 0) > MAX_SHAPES) { setNotice(ts("problem.tooManyShapes", { max: MAX_SHAPES })); return false; }
+    if ((plan.shapes?.length ?? 0) + (plan.elsewhere?.shapes ?? 0) + (clip.shapes?.length ?? 0) > MAX_SHAPES) { setNotice(ts("problem.tooManyShapes", { max: MAX_SHAPES })); return false; }
+    // Lines and the copied rooms' doors count over every floor too: never copy fewer than were picked without saying so.
+    if (lineCount(plan) + (clip.lines?.length ?? 0) > MAX_LINES) { setNotice(t("editor.tooManyLines", { max: MAX_LINES })); return false; }
+    if (openingCount(plan) + (clip.openings?.length ?? 0) > MAX_OPENINGS) { setNotice(t("editor.tooManyOpenings", { max: MAX_OPENINGS })); return false; }
     const result = pasteClip(plan, clip, offset, copyName, reserved);
     revealAdded(result.plan);
     say(placed => countText(t, placed, result.selection, meterName, "a11y.added", "a11y.addedMany", kindName));
@@ -471,7 +481,12 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   /** Repeat: copies of the selection in a row, one undo step; the originals and copies come back selected. */
   const repeat = (count: number, direction: "across" | "down", gap: number) => {
     const result = repeatItems(plan, selection, count, direction, gap, copyName, reserved);
-    if ("failure" in result) { setNotice(result.failure === "tooMany" ? tooMany() : result.failure === "noSpace" ? t("repeat.noSpace") : t("editor.notCopied")); return; }
+    if ("failure" in result) {
+      const { failure } = result;
+      setNotice(failure === "tooMany" ? tooMany() : failure === "noSpace" ? t("repeat.noSpace") : failure === "tooManyMarks" ? t("editor.tooManyMarks", { max: MARK_LIMIT }) : failure === "tooManyLines" ? t("editor.tooManyLines", { max: MAX_LINES })
+        : failure === "tooManyOpenings" ? t("editor.tooManyOpenings", { max: MAX_OPENINGS }) : failure === "tooManyShapes" ? ts("problem.tooManyShapes", { max: MAX_SHAPES }) : t("editor.notCopied"));
+      return;
+    }
     revealAdded(result.plan);
     say(placed => countText(t, placed, result.selection, meterName, "a11y.added", "a11y.addedMany"));
     commit(result.plan, { selection: result.selection }); focusCanvas();

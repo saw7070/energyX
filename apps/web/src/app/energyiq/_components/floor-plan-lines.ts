@@ -92,16 +92,20 @@ export function nearestSegment(points: Point[], [px, py]: Point): { after: numbe
   }
   return best;
 }
-/** A new line key no other line has. */
+/** Line keys (their saved ids) already used: on this floor, by entries kept as saved, and (for one floor of several) on the other floors. */
+export const takenLineKeys = (plan: FloorPlan) => new Set([...(plan.lines ?? []).map(item => item.key), ...(plan.carried?.lines ?? []).flatMap(item => typeof (item as { id?: unknown } | null)?.id === "string" ? [(item as { id: string }).id] : []), ...(plan.elsewhere?.drawingIds ?? [])]);
+/** How many lines the site holds: the stored format's limit counts every floor. */
+export const lineCount = (plan: FloorPlan) => (plan.lines?.length ?? 0) + (plan.elsewhere?.lines ?? 0);
+/** A new line key no other line has, on any floor. */
 export function newLineKey(plan: FloorPlan, prefix = "ln"): string {
-  const taken = new Set((plan.lines ?? []).map(item => item.key));
+  const taken = takenLineKeys(plan);
   let number = taken.size + 1; while (taken.has(`${prefix}-${number}`)) number += 1;
   return `${prefix}-${number}`;
 }
 /** Adds a finished line through `points` (two or more, repeats in a row dropped). Null when it is too short or the plan is full. */
 export function addLine(plan: FloorPlan, points: Point[], style: SpatialLineStyle = "wall"): { plan: FloorPlan; key: string } | null {
   const clean = points.map(point => inside(point, plan.viewBox)).filter((point, index, list) => index === 0 || point[0] !== list[index - 1]![0] || point[1] !== list[index - 1]![1]).slice(0, MAX_LINE_POINTS);
-  if (clean.length < 2 || (plan.lines?.length ?? 0) >= MAX_LINES) return null;
+  if (clean.length < 2 || lineCount(plan) >= MAX_LINES) return null;
   const key = newLineKey(plan);
   return { plan: { ...plan, lines: [...(plan.lines ?? []), { key, points: clean, style }] }, key };
 }

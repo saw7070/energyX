@@ -3,10 +3,10 @@ import { translatorFor, type EnergyIqLocale } from "./energyiq-messages";
 import { floorPlanMessages } from "./floor-plan-messages";
 import { entranceMarked, entranceParts, entranceSymbol, firstEntrance, readLabels, readSymbols, shiftLabel, shiftSymbol, keepBoxInside, withPlaced, writeLabel, writeSymbol, type EntranceMarkParts, type MarkSkip } from "./floor-plan-mark-data";
 import { boxFrame, frameBounds, labelBounds, MARK_LIMIT, symbolBounds, symbolFrame, TEXT_MAX as MARK_TEXT_MAX, unionBox, type PlanLabel, type PlanSymbol } from "./floor-plan-marks";
-import { readLines, writeLines, lineBox, moveLine, shiftLines, type PlanLine } from "./floor-plan-lines";
-import { markDoorRooms, readOpenings, removeOpening, slideOpening, writeOpenings, type PlanOpening } from "./floor-plan-openings";
+import { readLines, writeLines, lineBox, MAX_LINES, moveLine, shiftLines, type PlanLine } from "./floor-plan-lines";
+import { markDoorRooms, MAX_OPENINGS, readOpenings, removeOpening, slideOpening, writeOpenings, type PlanOpening } from "./floor-plan-openings";
 import { holds, insideBox, middleOf, outlineFromSaved, savedShape } from "./floor-plan-polygon";
-import { shapesFromLayout, shapesForLayout, type PlanShape } from "./floor-plan-plain-shapes";
+import { MAX_SHAPES, shapesFromLayout, shapesForLayout, type PlanShape } from "./floor-plan-plain-shapes";
 import { boardFilledIn, carriedOf, DEVICE_KEYS, ENTRANCE_KEYS, GROUP_KEYS, isRecord, LAYOUT_KEYS, ROLE_KEYS, ROOM_KEYS, sameNames, samePoint, sameRect, STANDALONE_ZONE_KEYS, withCarried, withoutCarried, withoutFilledBoard, ZONE_KEYS, type AreaBaseline, type Carried, type Json } from "./floor-plan-carry";
 
 /** [x, y, width, height] in plan units. */
@@ -42,8 +42,15 @@ export type { PlanLabel, PlanSymbol };
  * `displayName` is the short name shown when its stored name had to be made unique across floors ("Store (2)").
  */
 export type PlanLevel = { id: string; name: string } & Carried;
-/** What the other floors use, for a plan that shows one floor only: names, labels and keys a new item may not take. */
-export type Elsewhere = { keys: string[]; labels: string[]; names: string[]; ids: string[]; areas: number; rooms: number };
+/**
+ * What the other floors use, for a plan that shows one floor only: names, labels and keys a new item may not take, and
+ * how many items they hold (the stored format's limits count the whole site). `drawingIds` are the keys and saved ids of
+ * the other floors' doors, lines, shapes, labels and landmarks, which a new one never takes (readers keep only the first
+ * of an id). `entrance` says the site's main entrance is on another floor, so this floor has none of its own to fill;
+ * `entrances` are the names of the other floors' entrances, so a new one is not named like one of them.
+ */
+export type Elsewhere = { keys: string[]; labels: string[]; names: string[]; ids: string[]; areas: number; rooms: number;
+  drawingIds?: string[]; lines?: number; openings?: number; shapes?: number; labelCount?: number; symbols?: number; entrance?: true; entrances?: string[] };
 /**
  * An area the layout holds without a place on the drawing, kept as saved, at its place in the saved list. `rooms` is the
  * names of the rooms filed under it when the layout opened, kept when it has its own room list (see referenceFromPlan).
@@ -246,7 +253,9 @@ export function planFromReference(reference: StoredSpatialReference, locale: Ene
   // The first entrance is the legacy one (taking the entrance symbol at its place, if any),
   // else the first entrance symbol: either way it is drawn once, and `layout.entrance` is written from it.
   const labelList = floorLifted(readLabels((layout as { labels?: unknown }).labels), floors), symbolList = floorLifted(readSymbols((layout as { symbols?: unknown }).symbols), floors);
-  const first = firstEntrance(symbolList.items, legacy ? legacy.position : null, legacyName), firstMark = symbolList.items[first];
+  // On a site with floors, only an entrance landmark on the legacy entrance's floor can be that entrance.
+  const firstFloor = levels?.[0]?.id, entranceFloor = legacy?.level ?? firstFloor;
+  const first = firstEntrance(symbolList.items, legacy ? legacy.position : null, legacyName, symbol => (symbol.level ?? firstFloor) === entranceFloor), firstMark = symbolList.items[first];
   const entrance: PlanEntrance | null = firstMark ? { ...(legacy ?? { label: firstMark.item.label ?? "", position: [...firstMark.item.position] as Point, ...(firstMark.item.level ? { level: firstMark.item.level } : {}) }), ...entranceParts(firstMark.item, firstMark.index) } : legacy;
   const labels = labelList.items.map(({ item }) => item), symbols = symbolList.items.filter((_, index) => index !== first).map(({ item }) => item);
   const colours = Object.fromEntries(Object.entries(isRecord(layout.boardColours) ? layout.boardColours : {}).filter(([, value]) => typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)));
@@ -458,12 +467,16 @@ export function resizeCanvas(plan: FloorPlan, width: number, height: number): Fl
  * the first entrance is deleted, or a landmark is changed into an entrance. The same plan when nothing changes.
  */
 export function promoteEntrance(plan: FloorPlan): FloorPlan {
-  const symbols = plan.symbols ?? [], at = plan.entrance ? -1 : symbols.findIndex(item => item.kind === "entrance");
+  // One floor of several whose site has its main entrance on another floor keeps its entrances as landmarks.
+  const symbols = plan.symbols ?? [], at = hasMainEntrance(plan) ? -1 : symbols.findIndex(item => item.kind === "entrance");
   if (at < 0) return plan;
   const next = symbols[at]!, rest = symbols.filter((_, index) => index !== at);
   const { symbols: _old, ...without } = plan;
-  return { ...without, ...(rest.length ? { symbols: rest } : {}), entrance: { label: next.label ?? "", position: [...next.position] as Point, ...entranceParts(next, at) } };
+  // It stays on its floor.
+  return { ...without, ...(rest.length ? { symbols: rest } : {}), entrance: { label: next.label ?? "", position: [...next.position] as Point, ...(next.level ? { level: next.level } : {}), ...entranceParts(next, at) } };
 }
+/** Whether the site has its main entrance: on the plan, or (for one floor of several) on another floor. */
+export const hasMainEntrance = (plan: Pick<FloorPlan, "entrance" | "elsewhere">) => !!plan.entrance || !!plan.elsewhere?.entrance;
 export function removeSelection(plan: FloorPlan, selection: Selection): FloorPlan {
   if (selection.kind === "device") return { ...plan, devices: plan.devices.filter(item => item.meterId !== selection.key) };
   // Deleting the first entrance makes the next entrance (if any) the first.
@@ -583,6 +596,11 @@ export function referenceFromPlan(drawn: FloorPlan, projectId: string, previous:
   const listed = symbolItems.length + (carriedMarks?.symbols?.length ?? 0), entranceListed = !!plan.entrance && (plan.entrance.slot !== undefined || listed < MARK_LIMIT);
   // Only what the plan draws counts here: a saved list already longer than readers draw still saves as it was.
   if (labelItems.length > MARK_LIMIT || symbolItems.length + (entranceListed ? 1 : 0) > MARK_LIMIT) throw new Error(t("check.tooManyMarks", { max: MARK_LIMIT }));
+  // Doors, lines and shapes are counted over the whole site (every floor), as readers draw at most so many of each.
+  const roomKeys = new Set(plan.rooms.map(room => room.key));
+  if ((plan.lines?.length ?? 0) > MAX_LINES) throw new Error(t("check.tooManyLines", { max: MAX_LINES }));
+  if ((plan.openings ?? []).filter(item => roomKeys.has(item.room)).length > MAX_OPENINGS) throw new Error(t("check.tooManyOpenings", { max: MAX_OPENINGS }));
+  if ((plan.shapes?.length ?? 0) > MAX_SHAPES) throw new Error(t("check.tooManyShapes", { max: MAX_SHAPES }));
   const labelOut = carriedMarks?.labelList || labelItems.length || carriedMarks?.labels?.length ? { labels: withPlaced(labelItems.map(item => writeLabel(floorLowered(item))), carriedMarks?.labels ?? []) } : carriedMarks?.rawLabels ? { labels: carriedMarks.rawLabels.value } : {};
   const firstEntrance = plan.entrance && entranceListed && (carriedMarks?.symbolList || symbolItems.length || carriedMarks?.symbols?.length || entranceMarked(plan.entrance)) ? [{ index: plan.entrance.slot ?? 0, item: entranceSymbol(entranceFloored(plan.entrance), entranceLabel) }] : [];
   const symbolOut = carriedMarks?.symbolList || symbolItems.length || carriedMarks?.symbols?.length || firstEntrance.length ? { symbols: withPlaced(symbolItems.map(({ key: _key, ...item }) => writeSymbol(floorLowered(item))), [...firstEntrance, ...(carriedMarks?.symbols ?? [])]) } : carriedMarks?.rawSymbols ? { symbols: carriedMarks.rawSymbols.value } : {};

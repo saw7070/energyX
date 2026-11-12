@@ -9,7 +9,7 @@
  */
 import { freshCopy, type Carried } from "./floor-plan-carry";
 import { newRoomId, uniqueLabel, ROOM_NAME_MAX } from "./floor-plan-arrange";
-import { settleRooms, type Elsewhere, type FloorPlan, type PlanArea, type PlanLevel, type PlanRoom } from "./floor-plan-model";
+import { promoteEntrance, settleRooms, type Elsewhere, type FloorPlan, type PlanArea, type PlanEntrance, type PlanLevel, type PlanRoom, type PlanSymbol } from "./floor-plan-model";
 
 /** Most floors a layout can hold (the stored format's limit), and the longest floor name the editor offers. */
 export const MAX_LEVELS = 50, LEVEL_NAME_MAX = 40;
@@ -54,6 +54,15 @@ export function levelView(plan: FloorPlan, level: string): FloorPlan {
   const lists = Object.fromEntries(FIELDS.filter(({ field }) => hasField(plan, field)).map(({ field }) => [field, listOf(plan, field).filter(on)]));
   const here = new Set(plan.rooms.filter(on).map(item => item.key));
   const openings = (plan as { openings?: Opening[] }).openings ? { openings: openingsOf(plan).filter(item => here.has(item.room)) } : {};
+  // The other floors' drawing items: their keys and ids (a new door, line, shape, label or landmark here takes none of
+  // them), how many there are (the stored format's limits count the whole site), and their entrances.
+  const away = (field: string) => listOf(plan, field).filter(off) as Array<{ key?: unknown; id?: unknown; kind?: unknown; label?: unknown }>;
+  const openingsAway = openingsOf(plan).filter(item => !here.has(item.room));
+  const drawingIds = [...openingsAway.map(item => item.key), ...["lines", "shapes", "labels", "symbols"].flatMap(field => away(field).flatMap(item => [item.key, item.id].filter((value): value is string => typeof value === "string")))];
+  const mainAway = !!plan.entrance && off(plan.entrance);
+  if (mainAway && plan.entrance!.id) drawingIds.push(plan.entrance!.id);
+  const entrances = [...(mainAway ? [plan.entrance!.label] : []), ...away("symbols").filter(item => item.kind === "entrance" && typeof item.label === "string").map(item => item.label as string)];
+  Object.assign(elsewhere, { drawingIds, lines: away("lines").length, openings: openingsAway.length, shapes: away("shapes").length, labelCount: away("labels").length, symbols: away("symbols").length + (mainAway ? 1 : 0), entrances, ...(mainAway ? { entrance: true as const } : {}) });
   const view = { ...plan, ...lists, ...openings, entrance: plan.entrance && on(plan.entrance) ? plan.entrance : null, elsewhere } as FloorPlan;
   const byLevel = views.get(plan) ?? new Map<string, FloorPlan>();
   byLevel.set(level, view); views.set(plan, byLevel);
@@ -101,8 +110,24 @@ export function mergeView(plan: FloorPlan, level: string, next: FloorPlan): Floo
     (lists as Record<string, unknown>).openings = merged.length === before.length && merged.every((item, index) => item === before[index]) ? before : merged;
   }
   // The entrance: put on this floor when this floor has it; taken away when it was here and is gone; else left where it is.
+  // The site has one main entrance: one set here while the main entrance is on another floor (which the editor's own
+  // checks avoid) never replaces it, and is kept here as an entrance landmark instead.
+  if (next.entrance && plan.entrance && !view.entrance) {
+    const symbols = (lists.symbols ?? listOf(plan, "symbols")) as PlanSymbol[];
+    return { ...rest, ...lists, symbols: [...symbols, asEntranceSymbol(plan, next.entrance, level, symbols)], entrance: plan.entrance } as FloorPlan;
+  }
   const entrance = next.entrance ? tagged(plan, next.entrance, level) : view.entrance ? null : plan.entrance;
-  return { ...rest, ...lists, entrance } as FloorPlan;
+  const merged = { ...rest, ...lists, entrance } as FloorPlan;
+  // Deleting the main entrance makes the next entrance on any floor the main one, on its own floor.
+  return view.entrance && !entrance ? promoteEntrance(merged) : merged;
+}
+/** An entrance set on one floor kept as an entrance landmark there (a new key; what it carries comes along). */
+function asEntranceSymbol(plan: FloorPlan, entrance: PlanEntrance, level: string, symbols: PlanSymbol[]): PlanSymbol {
+  const keys = new Set(symbols.map(item => item.key));
+  let number = 1; while (keys.has(`symbol-entrance-${number}`)) number += 1;
+  const { mark, label, position, size, rotation, colour, locked, id } = entrance;
+  const symbol: PlanSymbol = { key: `symbol-entrance-${number}`, kind: "entrance", position: [...position] as PlanSymbol["position"], ...(label ? { label } : {}), ...(size !== undefined ? { size } : {}), ...(rotation ? { rotation } : {}), ...(colour ? { colour } : {}), ...(locked ? { locked } : {}), ...(id ? { id } : {}), ...(mark?.extra ? { extra: mark.extra } : {}), ...(mark?.order ? { order: mark.order } : {}) };
+  return tagged(plan, symbol, level);
 }
 /** After a move on one floor: each room there belongs to the area it now sits in on that floor. */
 export const settleLevel = (plan: FloorPlan, level: string) => mergeView(plan, level, settleRooms(levelView(plan, level)));
@@ -178,7 +203,8 @@ export function deleteLevel(plan: FloorPlan, level: string, moveTo: string | nul
   const spelled = spelledOut(plan);
   const moved = eachItem(spelled, item => item.level !== level ? item : moveTo ? { ...item, level: moveTo } : null);
   const kept = moveTo ? unclashed(moved, moveTo) : moved;
-  return single(tidied(settleRoomsEverywhere({ ...kept, levels: plan.levels.filter(item => item.id !== level) })));
+  // Deleting the main entrance with its floor makes the next entrance (on another floor) the main one.
+  return single(tidied(promoteEntrance(settleRoomsEverywhere({ ...kept, levels: plan.levels.filter(item => item.id !== level) }))));
 }
 /**
  * Rooms that came together on one floor and now show the same name: each one showing a short name shows its stored,

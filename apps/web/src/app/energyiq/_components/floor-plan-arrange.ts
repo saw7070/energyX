@@ -4,7 +4,7 @@
  */
 import { freshCopy, sameRect } from "./floor-plan-carry";
 import { clampDelta, within } from "./floor-plan-geometry";
-import { findLine, inside, lineBox, MAX_LINES, shiftLines, type PlanLine } from "./floor-plan-lines";
+import { findLine, inside, lineBox, lineCount, MAX_LINES, shiftLines, takenLineKeys, type PlanLine } from "./floor-plan-lines";
 import { shiftLabel, shiftSymbol, withoutRejected } from "./floor-plan-mark-data";
 import { boxFrame, frameBounds, hitsFrame, labelBounds, labelFrame, MARK_LIMIT, normaliseRotation, symbolBounds, symbolFrame, type Frame, type PlanLabel, type PlanSymbol } from "./floor-plan-marks";
 import { copiedOpenings, newRoomId, openingBox, type PlanOpening } from "./floor-plan-openings";
@@ -261,10 +261,10 @@ export const roomIds = (plan: FloorPlan) => [...plan.rooms.flatMap(room => room.
  */
 export const fitsLimits = (plan: FloorPlan, hidden: number, areas: number, rooms: number) => plan.areas.length + (plan.elsewhere?.areas ?? 0) + hidden + areas <= MAX_AREAS && plan.rooms.length + (plan.elsewhere?.rooms ?? 0) + rooms <= MAX_ROOMS;
 /** Whether adding `labels` text labels and `symbols` landmarks keeps the plan within what a saved layout can hold (entries kept aside count too). */
-export const fitsMarks = (plan: FloorPlan, labels: number, symbols: number) => (plan.labels?.length ?? 0) + (plan.carried?.labels?.length ?? 0) + labels <= MARK_LIMIT && (plan.symbols?.length ?? 0) + (plan.entrance ? 1 : 0) + (plan.carried?.symbols?.length ?? 0) + symbols <= MARK_LIMIT;
-/** A new id for a text label or landmark (letters, digits and -), unlike any other on the plan. */
+export const fitsMarks = (plan: FloorPlan, labels: number, symbols: number) => (plan.labels?.length ?? 0) + (plan.elsewhere?.labelCount ?? 0) + (plan.carried?.labels?.length ?? 0) + labels <= MARK_LIMIT && (plan.symbols?.length ?? 0) + (plan.entrance ? 1 : 0) + (plan.elsewhere?.symbols ?? 0) + (plan.carried?.symbols?.length ?? 0) + symbols <= MARK_LIMIT;
+/** A new id for a text label or landmark (letters, digits and -), unlike any other on the plan (on every floor). */
 export function newMarkId(plan: FloorPlan, prefix: "lb" | "sy"): string {
-  const used = new Set([...(plan.labels ?? []), ...(plan.symbols ?? []), ...(plan.entrance ? [plan.entrance] : [])].flatMap(item => item.id ? [item.id] : []));
+  const used = new Set([...[...(plan.labels ?? []), ...(plan.symbols ?? []), ...(plan.entrance ? [plan.entrance] : [])].flatMap(item => item.id ? [item.id] : []), ...(plan.elsewhere?.drawingIds ?? [])]);
   for (;;) { const id = `${prefix}-${Math.random().toString(36).slice(2, 10).padEnd(8, "0")}`; if (!used.has(id)) return id; }
 }
 
@@ -312,8 +312,8 @@ export function pasteClip(plan: FloorPlan, clip: Clip, offset: number, copyOf: (
   const newLabels = (clip.labels ?? []).map((source): PlanLabel => { const { locked: _locked, asSaved: _saved, ...copy } = freshCopy(source), key = markKey("label"), id = newMarkId(withIds, "lb"); labelKeys.set(source.key, key); const next = shiftLabel({ ...copy, key, id }, dx, dy, plan.viewBox); withIds = { ...withIds, labels: [...(withIds.labels ?? []), next] }; return next; });
   const newSymbols = (clip.symbols ?? []).map((source): PlanSymbol => { const { locked: _locked, asSaved: _saved, ...copy } = freshCopy(source), key = markKey("symbol"), id = newMarkId(withIds, "sy"); symbolKeys.set(source.key, key); const next = shiftSymbol({ ...copy, key, id }, dx, dy, plan.viewBox); withIds = { ...withIds, symbols: [...(withIds.symbols ?? []), next] }; return next; });
   // Lines get new keys and start unlocked; doors and windows come with the copies of their rooms.
-  const lineKeys = new Map<string, string>(), taken = new Set((plan.lines ?? []).map(item => item.key));
-  const lines = (clip.lines ?? []).slice(0, Math.max(0, MAX_LINES - taken.size)).map((source): PlanLine => {
+  const lineKeys = new Map<string, string>(), taken = takenLineKeys(plan);
+  const lines = (clip.lines ?? []).slice(0, Math.max(0, MAX_LINES - lineCount(plan))).map((source): PlanLine => {
     const { locked: _locked, savedPoints: _saved, ...copy } = freshCopy(source);
     let number = 1; while (taken.has(`ln-copy-${number}`)) number += 1;
     const key = `ln-copy-${number}`; taken.add(key); lineKeys.set(source.key, key);

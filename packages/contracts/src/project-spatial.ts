@@ -122,19 +122,23 @@ export function spatialLabels(layout: unknown): SpatialLabel[] {
  * entrance (layouts saved before symbols existed have only that): when an entrance symbol sits where it is, that symbol
  * is the same entrance (its label is the legacy one), and so is an entrance symbol elsewhere that carries its name (the
  * legacy entrance was moved alone); otherwise the legacy entrance comes first as an entrance symbol.
- * `legacy` marks the entry that stands for `layout.entrance`.
+ * `legacy` marks the entry that stands for `layout.entrance`. On a site with floors, only an entrance symbol on the legacy
+ * entrance's own floor can stand for it (another floor's entrance at the same spot, or with the same name, never does).
  */
 export function spatialSymbols(layout: unknown): Array<SpatialSymbol & { legacy?: true }> {
   const list = record(layout) && Array.isArray(layout.symbols) ? layout.symbols.slice(0, SPATIAL_MARK_LIMIT) : [];
-  const symbols: Array<SpatialSymbol & { legacy?: true }> = list.flatMap(item => { const symbol = readSpatialSymbol(item); return symbol ? [symbol] : []; });
+  const read = list.flatMap(item => { const symbol = readSpatialSymbol(item); return symbol ? [{ symbol: symbol as SpatialSymbol & { legacy?: true }, raw: item as unknown }] : []; });
+  const symbols = read.map(item => item.symbol);
   const entrance = record(layout) && record(layout.entrance) && point(layout.entrance.position) ? layout.entrance : null;
   if (!entrance) return symbols;
+  const levels = spatialLevels(layout), floor = levels ? spatialLevelOf(entrance, levels) : null;
+  const sameFloor = (index: number) => !levels || spatialLevelOf(read[index]!.raw, levels) === floor;
   const label = typeof entrance.label === "string" && entrance.label.trim() ? { label: entrance.label.trim().slice(0, SPATIAL_TEXT_MAX) } : {};
-  const at = symbols.findIndex(item => item.kind === "entrance" && samePlace(item.position, entrance.position as [number, number]));
+  const at = symbols.findIndex((item, index) => item.kind === "entrance" && samePlace(item.position, entrance.position as [number, number]) && sameFloor(index));
   if (at >= 0) { symbols[at] = { ...symbols[at]!, ...label, legacy: true }; return symbols; }
   // Moved where only `layout.entrance` was changed (by an older build, a notes edit or the advisor): the entrance symbol
   // that carries its name is the same entrance, drawn where `layout.entrance` now is.
-  const named = label.label ? symbols.findIndex(item => item.kind === "entrance" && item.label === label.label) : -1;
+  const named = label.label ? symbols.findIndex((item, index) => item.kind === "entrance" && item.label === label.label && sameFloor(index)) : -1;
   if (named >= 0) { symbols[named] = { ...symbols[named]!, position: [...entrance.position as [number, number]], legacy: true }; return symbols; }
   return [{ kind: "entrance", position: [...entrance.position as [number, number]], ...label, legacy: true }, ...symbols];
 }
