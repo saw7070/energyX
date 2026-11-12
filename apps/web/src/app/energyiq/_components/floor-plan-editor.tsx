@@ -36,6 +36,7 @@ import { LinePanel, LinePreview, LineShape, OpeningPanel, OpeningShape, RoomDoor
 import { addLine, insertPoint, MAX_LINES, nearestSegment, setPoint } from "./floor-plan-lines";
 import { addOpening, MAX_OPENINGS, takesDoors, wallAt } from "./floor-plan-openings";
 import { EnergyIcon } from "./icons";
+import { EnlargeablePreview, PlanEnlargeDialog } from "./plan-enlarge";
 import { LockBadge } from "./plan-symbols";
 import { boardColours, boardlessColours, mapDevices, pinLabel, roomHasPins, SiteFloorMap } from "./site-floor-map";
 import {
@@ -71,15 +72,18 @@ export function FloorPlanView({ reference, meters, highlight, highlightDevices =
   const toggle = () => setOpen(current => { try { window.localStorage.setItem("energyiq.floorPlanOpen", String(!current)); } catch { /* per-browser convenience only */ } return !current; });
   const t = useMessages(floorPlanMessages);
   const placed = reference ? mapDevices(reference, meters) : [];
+  const [large, setLarge] = useState(false);
   return <section className={styles.embedded} aria-label={t("view.title")}>
     <header className={styles.embeddedHeader}>
       <div><h4>{t("view.title")}</h4><p>{reference ? t("view.summary", { placed: placed.length, total: meters.length }) : t("view.empty")}</p><p>{t("view.drawingOnly")}</p></div>
       <div className={styles.actions}>
         {canEdit && <button type="button" className={styles.secondary} onClick={onEdit}><EnergyIcon name="map" />{reference ? t("view.edit") : t("view.draw")}</button>}
+        {reference && open && <button type="button" className={styles.secondary} onClick={() => setLarge(true)}>⤢ {t("enlarge.open")}</button>}
         {reference && <button type="button" className={styles.secondary} aria-expanded={open} onClick={toggle}>{open ? t("view.hide") : t("view.show")}</button>}
       </div>
     </header>
     {reference && open && <div className={styles.mapFrame}><SiteFloorMap reference={reference} devices={placed} highlight={highlight} highlightDevices={highlightDevices} focusDevice={focusDevice} onSelectBoard={onSelectBoard} onOpenDevice={onSelectDevice} /></div>}
+    {reference && <PlanEnlargeDialog open={large} onClose={() => setLarge(false)}><SiteFloorMap reference={reference} devices={placed} highlight={highlight} highlightDevices={highlightDevices} focusDevice={focusDevice} onSelectBoard={onSelectBoard} onOpenDevice={onSelectDevice} /></PlanEnlargeDialog>}
   </section>;
 }
 
@@ -1345,7 +1349,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
             <span className={`${styles.styleSwatch} ${styles[`swatch_${look}`]}`} aria-hidden="true" />
             <span><strong>{t(`style.${look}`)}</strong><small>{t(`style.${look}Hint`)}</small></span>
           </button>; })}</div>
-          {previewMap && <><p className={styles.previewTitle}>{t("style.preview")}</p><div className={styles.previewFrame}>{previewMap}</div></>}
+          {previewMap && <><p className={styles.previewTitle}>{t("style.preview")}</p><div className={styles.previewFrame}><EnlargeablePreview>{previewMap}</EnlargeablePreview></div></>}
         </div>
         <div className={styles.panel}>
           <div className={styles.paletteHead}><h5>{t("panel.devices")}</h5><span>{t("panel.placedCount", { placed: plan.devices.filter(item => meterById.has(item.meterId)).length, total: meters.length })}</span></div>
