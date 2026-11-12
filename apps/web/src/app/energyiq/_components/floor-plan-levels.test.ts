@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readProjectSpatialReference, spatialLevelReference, spatialLevels } from "@datafoundry/contracts";
 import { commitPlan, showLevel, startHistory, undo } from "./floor-plan-history";
 import { sharedHidden, withSharedHidden, layerOf, layerInUse, PLAN_LAYERS } from "./floor-plan-layers";
-import { addLevel, deleteLevel, duplicateLevel, levelContents, levelOf, levelView, mergeView, moveLevel, renameLevel, renameRoom, settleLevel, suffixed } from "./floor-plan-levels";
+import { addLevel, deleteLevel, duplicateLevel, levelContents, levelOf, levelView, mergeView, moveLevel, nextAreaLabel, renameLevel, renameRoom, settleLevel, suffixed } from "./floor-plan-levels";
 import { insertTemplate, repeatItems } from "./floor-plan-templates";
 import { translatorFor } from "./energyiq-messages";
 import { floorPlanMessages } from "./floor-plan-messages";
@@ -128,7 +128,7 @@ describe("floors", () => {
     // The suffix is frozen: renaming the floor (or the floor copied) changes no room name.
     const renamed = renameLevel(renameLevel(plan, level, "Level 2"), "level-1", "Ground");
     expect(save(renamed, SMALL).layout.rooms.map(room => room.name)).toEqual(saved.layout.rooms.map(room => room.name));
-    expect(levelContents(plan, "level-1")).toEqual({ areas: 1, rooms: 2, devices: 1, others: 1 });
+    expect(levelContents(plan, "level-1")).toEqual({ areas: 1, rooms: 2, devices: 1, entrance: true, others: 0 });
   });
   it("keeps room names unique across floors when renaming, and still refuses two rooms with one name on one floor", () => {
     const { plan, level } = duplicateLevel(twoFloors(), "level-1", copyName, copyName)!;
@@ -158,6 +158,67 @@ describe("floors", () => {
     expect(gone.devices.map(device => device.meterId)).toEqual(["fan"]);
     expect(deleteLevel(settled, "level-2", "level-2")).toBe(settled);
     expect(JSON.stringify(save(gone, SMALL))).toBe(JSON.stringify(SMALL));
+  });
+  it("refuses a rename that makes two rooms on one floor show the same name", () => {
+    const { plan, level } = duplicateLevel(twoFloors(), "level-1", copyName, copyName)!;
+    const view = levelView(plan, level), lobby = view.rooms.find(room => room.displayName === "Lobby")!;
+    // "Store" is free nowhere: another floor has it, and this floor shows it ("Store (2)"). It is stored as typed, so saving says so.
+    const renamed = renameRoom(view, lobby.key, "Store");
+    expect(renamed.rooms.find(room => room.key === lobby.key)).toMatchObject({ name: "Store" });
+    expect(renamed.rooms.find(room => room.key === lobby.key)!.displayName).toBeUndefined();
+    expect(() => save(mergeView(plan, level, renamed), SMALL)).toThrow(/Store/);
+    // A short name that only hides a clash is refused on save too.
+    const hiding = mergeView(plan, level, { ...view, rooms: view.rooms.map(room => room.key === lobby.key ? { ...room, name: "Lobby (2)", displayName: "Store" } : room) });
+    expect(() => save(hiding, SMALL)).toThrow(/Store/);
+  });
+  it("shows the stored names again when a deleted floor's rooms move onto a floor that shows the same names", () => {
+    const { plan, level } = duplicateLevel(twoFloors(), "level-1", copyName, copyName)!;
+    const merged = deleteLevel(plan, level, "level-1");
+    expect(merged.rooms.map(room => [room.name, room.displayName])).toEqual([["Store", undefined], ["Lobby", undefined], ["Store (2)", undefined], ["Lobby (2)", undefined]]);
+    const saved = save(merged, SMALL);
+    expect(saved.layout.rooms.map(room => room.name)).toEqual(["Store", "Lobby", "Store (2)", "Lobby (2)"]);
+  });
+  it("never gives a new floor an id that items still name from saved data, so nothing moves floor after saving", () => {
+    // No floors, but rooms naming "level-2" (an old floor removed by hand or by the advisor).
+    const stale = { ...SMALL, layout: { ...SMALL.layout, rooms: SMALL.layout.rooms.map(room => ({ ...room, level: "level-2" })) } } as unknown as StoredSpatialReference;
+    const added = addLevel(planFromReference(stale), names)!;
+    expect(added.plan.levels!.map(item => item.id)).not.toContain("level-2");
+    const reloaded = planFromReference(save(added.plan, stale));
+    expect(reloaded.rooms.every(room => levelOf(reloaded, room) === reloaded.levels![0]!.id)).toBe(true);
+    // A floor list the editor cannot read (a blank name): its ids are not reused either.
+    const malformed = { ...stale, layout: { ...stale.layout, levels: [{ id: "level-1", name: "" }, { id: "level-2", name: "Upstairs" }] } } as unknown as StoredSpatialReference;
+    const plan = planFromReference(malformed);
+    expect(plan.levels).toBeUndefined();
+    const fresh = addLevel(plan, names)!;
+    expect(fresh.plan.levels!.map(item => item.id).some(id => id === "level-1" || id === "level-2")).toBe(false);
+    const again = planFromReference(save(fresh.plan, malformed));
+    expect(again.rooms.every(room => levelOf(again, room) === again.levels![0]!.id)).toBe(true);
+    // An existing list with a floor removed: Add floor skips the id rooms still name.
+    const removed = { ...SMALL, layout: { ...SMALL.layout, levels: [{ id: "level-1", name: "Ground" }, { id: "level-2", name: "Roof" }], rooms: [{ ...SMALL.layout.rooms[0]!, level: "level-3" }, SMALL.layout.rooms[1]] } } as unknown as StoredSpatialReference;
+    const third = addLevel(planFromReference(removed), names)!;
+    expect(third.level).not.toBe("level-3");
+    const back = planFromReference(save(third.plan, removed));
+    expect(levelOf(back, back.rooms[0]!)).toBe("level-1");
+  });
+  it("saves floor names exactly as read, and a blank one as the usual name", () => {
+    const spaced = { ...SMALL, layout: { ...SMALL.layout, levels: [{ id: "g", name: "Ground " }, { id: "l2", name: " Level 2" }] } } as unknown as StoredSpatialReference;
+    expect(JSON.stringify(save(planFromReference(spaced), spaced))).toBe(JSON.stringify(spaced));
+    const blank = renameLevel(twoFloors(), "level-2", "  ");
+    expect((save(blank, SMALL).layout as unknown as { levels: Array<{ name: string }> }).levels.map(item => item.name)).toEqual(["Floor 1", "Floor 2"]);
+  });
+  it("never gives two floors the same new area label once every letter is used", () => {
+    const letters = Array.from({ length: 25 }, (_, index) => String.fromCharCode(66 + index));
+    let plan = addLevel(twoFloors(), names)!.plan;
+    plan = { ...plan, areas: [...plan.areas, ...letters.map((label, index) => ({ key: `area-${label}`, label, board: "", rect: [600, 20 + index * 20, 10, 10] as Rect }))] };
+    const area = (n: number) => `Area ${n}`;
+    for (const level of ["level-2", "level-3"]) {
+      const view = levelView(plan, level), label = nextAreaLabel(view, [], area);
+      plan = mergeView(plan, level, { ...view, areas: [...view.areas, { key: `new-${level}`, label, board: "", rect: [20, 20, 200, 200] }] });
+    }
+    const added = plan.areas.filter(item => item.key.startsWith("new-")).map(item => item.label);
+    expect(added).toEqual(["Area 1", "Area 2"]);
+    expect(() => save(plan, SMALL)).not.toThrow();
+    expect(nextAreaLabel(levelView(plan, "level-2"), ["Area 3"], area)).toBe("Area 4");
   });
   it("puts a device placed on one floor there only (each meter is on the plan once)", () => {
     const plan = twoFloors();

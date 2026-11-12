@@ -6,7 +6,7 @@
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { spatialLevelReference, spatialLevels, spatialRoomTitle } from "@datafoundry/contracts";
+import { spatialHiddenLayers, spatialLevelReference, spatialLevels, spatialRoomTitle } from "@datafoundry/contracts";
 import { holidayName, joinText } from "./analysis-messages.js";
 import { shortDate } from "./analysis-model.js";
 import { forHoursMeaning, translatorFor, type EnergyIqLocale } from "./locale.js";
@@ -100,11 +100,13 @@ function FloorPlan({ report, level = null }: { report: SiteReport; level?: strin
   const categoryWord = (category: string) => t(`plan.category.${CATEGORIES.find(item => item === category) ?? "other"}`);
   const reference = report.reference!;
   const [vx, vy, vw, vh] = reference.layout.viewBox;
+  // Layers hidden on the shared map are hidden here too (only known layer names count; saved layouts are untrusted).
+  const hidden = spatialHiddenLayers(reference.layout);
   const areas = report.zones.filter(zone => !zone.subgroup && zone.rect);
-  const subgroups = report.zones.filter(zone => zone.subgroup);
+  const subgroups = hidden.has("equipment") ? [] : report.zones.filter(zone => zone.subgroup);
   const minX = Math.min(...areas.map(zone => zone.rect![0])) - 4, minY = Math.min(...areas.map(zone => zone.rect![1])) - 4;
   const maxX = Math.max(...areas.map(zone => zone.rect![0] + zone.rect![2])) + 4, maxY = Math.max(...areas.map(zone => zone.rect![1] + zone.rect![3])) + 4;
-  const entrance = reference.layout.entrance?.position ? reference.layout.entrance : null;
+  const entrance = reference.layout.entrance?.position && !hidden.has("symbols") ? reference.layout.entrance : null;
   const [ex = 0, ey = 0] = entrance?.position ?? [];
   const doorOnWall = !!entrance && Math.abs(ey - maxY) <= 10;
   const leftEdge = Math.max(...areas.filter(zone => zone.rect![0] + zone.rect![2] <= ex).map(zone => zone.rect![0] + zone.rect![2]), -Infinity);
@@ -125,7 +127,7 @@ function FloorPlan({ report, level = null }: { report: SiteReport; level?: strin
   const zonesText = (zones: ReportZone[]) => t(zones.length > 1 ? "plan.zones.other" : "plan.zones.one", { ids: zones.map(zoneId).join(" + ") });
   const property = reference.property;
   const note = [t("plan.schematic"), property?.level !== undefined ? t("plan.level", { level: property.level }) : null, property?.approximateAreaM2 ? `≈${whole(property.approximateAreaM2)} m²` : null].filter(Boolean).join(" · ");
-  const legend = [...areas.map(zone => ({ label: zone.area ? `${zone.label} · ${zone.area}` : zone.label, zone })), ...subgroups.map(zone => ({ label: `${zone.label} · ${t(zone.equipment ? "plan.displayScreens" : "plan.equipment")}`, zone }))];
+  const legend = [...(hidden.has("areas") ? [] : areas).map(zone => ({ label: zone.area ? `${zone.label} · ${zone.area}` : zone.label, zone })), ...subgroups.map(zone => ({ label: `${zone.label} · ${t(zone.equipment ? "plan.displayScreens" : "plan.equipment")}`, zone }))];
   let cursor = vx + 4;
   const legendItems = legend.map(item => { const x = cursor; cursor += 22 + textWidth(item.label, 11.5) + 26; return { ...item, x }; });
   const badgeX = cursor;
@@ -138,12 +140,12 @@ function FloorPlan({ report, level = null }: { report: SiteReport; level?: strin
     {doorOnWall
       ? <><path d={`M${minX} ${maxY} V${minY} H${maxX} V${maxY}`} fill="none" stroke={C.ink} strokeWidth={2.5} /><line x1={minX} y1={maxY} x2={ex - 32} y2={maxY} stroke={C.ink} strokeWidth={2.5} /><line x1={ex + 32} y1={maxY} x2={maxX} y2={maxY} stroke={C.ink} strokeWidth={2.5} /></>
       : <rect x={minX} y={minY} width={maxX - minX} height={maxY - minY} fill="none" stroke={C.ink} strokeWidth={2.5} />}
-    {areas.map(zone => { const [x, y, w, h] = zone.rect!; return <g key={zone.key}>
+    {!hidden.has("areas") && areas.map(zone => { const [x, y, w, h] = zone.rect!; return <g key={zone.key}>
       <rect x={x} y={y} width={w} height={h} fill={zone.colour} fillOpacity={0.065} stroke={zone.colour} strokeWidth={1.5} />
       <text className="svgt zone-title" x={x + 10} y={y + 24}>{zone.label}{zone.area ? ` · ${zone.area}` : ""}</text>
       <text className="svgt rsub" x={x + 10} y={y + 40}>{est(zone)}</text>
     </g>; })}
-    {reference.layout.rooms.map(room => {
+    {!hidden.has("rooms") && reference.layout.rooms.map(room => {
       const [x, y, w, h] = room.rect as [number, number, number, number];
       const lines = wrapLabel(spatialRoomTitle(room), Math.max(6, Math.floor((w - 8) / 6.8)));
       const host = subgroups.find(zone => zone.parentRoom === room.name);

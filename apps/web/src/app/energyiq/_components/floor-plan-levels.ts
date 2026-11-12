@@ -102,17 +102,36 @@ const tidied = (plan: FloorPlan) => eachItem(plan, item => { if (item.level === 
 /** With one floor left, the plan is a plain one-floor plan again, saved exactly as before floors existed. */
 const single = (plan: FloorPlan): FloorPlan => { if (hasLevels(plan)) return plan; const { levels: _levels, ...rest } = eachItem(plan, item => { if (item.level === undefined) return item; const { level: _level, ...other } = item; return other as typeof item; }); return rest as FloorPlan; };
 
-/** A floor id no floor has yet. */
-function newLevelId(plan: FloorPlan): string { const taken = new Set(plan.levels?.map(item => item.id)); let number = (plan.levels?.length ?? 0) + 1; while (taken.has(`level-${number}`)) number += 1; return `level-${number}`; }
+/**
+ * Floor ids already spoken for: the floors', and any floor an item still names in what it carries from the saved layout
+ * (a floor since removed, or a floor list the editor could not read). A new floor never takes one of those, so items the
+ * editor shows on the first floor never move onto a new floor after saving.
+ */
+function usedLevelIds(plan: FloorPlan): Set<string> {
+  const ids = new Set(plan.levels?.map(item => item.id));
+  const note = (value: unknown) => { if (typeof value === "string") ids.add(value); };
+  const carried = (item: unknown) => note((item as Carried | null)?.extra?.level);
+  for (const { field } of FIELDS) listOf(plan, field).forEach(carried);
+  carried(plan.entrance);
+  for (const { zone } of plan.carried?.zones ?? []) note(zone.level);
+  for (const { device } of plan.carried?.devices ?? []) note((device as { level?: unknown } | null)?.level);
+  const raw = plan.extra?.levels;
+  if (Array.isArray(raw)) for (const item of raw) note((item as { id?: unknown } | null)?.id);
+  return ids;
+}
+/** A floor id no floor (or stale item) has yet. */
+function newLevelId(plan: FloorPlan, taken = usedLevelIds(plan)): string { let number = (plan.levels?.length ?? 0) + 1; while (taken.has(`level-${number}`)) number += 1; return `level-${number}`; }
 /**
  * Adds a floor after the others (a plan without floors first becomes "Floor 1" with everything on it). `names` words a
  * floor's default name in the reader's language. Null when the plan holds as many floors as it can.
  */
 export function addLevel(plan: FloorPlan, names: (number: number) => string): { plan: FloorPlan; level: string } | null {
-  const levels: PlanLevel[] = plan.levels?.length ? plan.levels : [{ id: "level-1", name: names(1) }];
+  const taken = usedLevelIds(plan);
+  const levels: PlanLevel[] = plan.levels?.length ? plan.levels : [{ id: newLevelId({ ...plan, levels: [] }, taken), name: names(1) }];
   if (levels.length >= MAX_LEVELS) return null;
   const base = { ...plan, levels };
-  const id = newLevelId(base);
+  taken.add(levels[0]!.id);
+  const id = newLevelId(base, taken);
   let number = levels.length + 1; while (levels.some(item => item.name === names(number))) number += 1;
   return { plan: { ...base, levels: [...levels, { id, name: names(number) }] }, level: id };
 }
@@ -128,8 +147,11 @@ export function moveLevel(plan: FloorPlan, level: string, by: -1 | 1): FloorPlan
   const spelled = from === 0 || to === 0 ? spelledOut(plan) : plan;
   return from === 0 || to === 0 ? tidied({ ...spelled, levels: order }) : { ...plan, levels: order };
 }
-/** What is on a floor, for the question asked before deleting it. */
-export const levelContents = (plan: FloorPlan, level: string) => { const on = (item: Item) => levelOf(plan, item) === level; return { areas: plan.areas.filter(on).length, rooms: plan.rooms.filter(on).length, devices: plan.devices.filter(on).length, others: FIELDS.filter(({ field }) => !["areas", "rooms", "devices"].includes(field)).reduce((sum, { field }) => sum + listOf(plan, field).filter(on).length, 0) + (plan.entrance && on(plan.entrance) ? 1 : 0) }; };
+/** A floor's name as shown: its own, or the default ("Floor 2") when it is blank. */
+export const shownLevelName = (level: PlanLevel, index: number, fallback: (number: number) => string) => level.name.trim() || fallback(index + 1);
+/** What is on a floor, for the question asked before deleting it (`others`: later kinds, such as labels). */
+export type LevelContents = { areas: number; rooms: number; devices: number; entrance: boolean; others: number };
+export const levelContents = (plan: FloorPlan, level: string): LevelContents => { const on = (item: Item) => levelOf(plan, item) === level; return { areas: plan.areas.filter(on).length, rooms: plan.rooms.filter(on).length, devices: plan.devices.filter(on).length, entrance: !!plan.entrance && on(plan.entrance), others: FIELDS.filter(({ field }) => !["areas", "rooms", "devices"].includes(field)).reduce((sum, { field }) => sum + listOf(plan, field).filter(on).length, 0) }; };
 /**
  * Deletes a floor. Nothing on it goes silently: with `moveTo` its items move to that floor (where they keep their place
  * on the drawing); without, they are deleted with it, and its devices go back to the list of devices to place.
@@ -138,7 +160,18 @@ export function deleteLevel(plan: FloorPlan, level: string, moveTo: string | nul
   if (!plan.levels?.some(item => item.id === level) || plan.levels.length < 2 || moveTo === level || (moveTo && !plan.levels.some(item => item.id === moveTo))) return plan;
   const spelled = spelledOut(plan);
   const moved = eachItem(spelled, item => item.level !== level ? item : moveTo ? { ...item, level: moveTo } : null);
-  return single(tidied(settleRoomsEverywhere({ ...moved, levels: plan.levels.filter(item => item.id !== level) })));
+  const kept = moveTo ? unclashed(moved, moveTo) : moved;
+  return single(tidied(settleRoomsEverywhere({ ...kept, levels: plan.levels.filter(item => item.id !== level) })));
+}
+/**
+ * Rooms that came together on one floor and now show the same name: each one showing a short name shows its stored,
+ * unique one again ("Store (2)"), so no two rooms on that floor look alike. Items here name their floor outright.
+ */
+function unclashed(plan: FloorPlan, level: string): FloorPlan {
+  const here = plan.rooms.filter(room => room.level === level), count = new Map<string, number>();
+  for (const room of here) { const shown = (room.displayName ?? room.name).trim(); count.set(shown, (count.get(shown) ?? 0) + 1); }
+  if (![...count.values()].some(value => value > 1)) return plan;
+  return { ...plan, rooms: plan.rooms.map(room => { if (room.level !== level || room.displayName === undefined || (count.get(room.displayName.trim()) ?? 0) < 2) return room; const { displayName: _shown, ...rest } = room; return rest as PlanRoom; }) };
 }
 /** Each room belongs to an area on its own floor, on every floor. */
 function settleRoomsEverywhere(plan: FloorPlan): FloorPlan { return hasLevels(plan) ? plan.levels!.reduce((current, item) => settleLevel(current, item.id), plan) : settleRooms(plan); }
@@ -190,9 +223,21 @@ export function renameRoom(plan: FloorPlan, key: string, typed: string): FloorPl
   const room = plan.rooms.find(item => item.key === key);
   if (!room) return plan;
   const away = new Set(plan.elsewhere?.names ?? []), text = typed.trim();
-  if (!away.has(text)) { const { displayName: _shown, ...rest } = room; return { ...plan, rooms: plan.rooms.map(item => item.key === key ? { ...rest, name: typed } : item) }; }
+  // A name another room on this floor shows is stored as typed, so saving names the clash instead of hiding it.
+  const shownHere = plan.rooms.some(item => item.key !== key && (item.displayName ?? item.name).trim() === text);
+  if (!away.has(text) || shownHere) { const { displayName: _shown, ...rest } = room; return { ...plan, rooms: plan.rooms.map(item => item.key === key ? { ...rest, name: typed } : item) }; }
   const taken = new Set([...away, ...plan.rooms.filter(item => item.key !== key).map(item => item.name.trim())]);
   // The suffix chosen once stays while the same name is typed (so it never changes under the reader).
   const name = room.displayName?.trim() === text && !taken.has(room.name.trim()) ? room.name : suffixed(text, taken);
   return { ...plan, rooms: plan.rooms.map(item => item.key === key ? { ...item, name, displayName: typed } : item) };
+}
+
+/**
+ * The label a new area gets: the first free letter, else "Area 4", "Area 5"… Free means not used by an area on this floor,
+ * on any other floor (`elsewhere`), or by an area not on the drawing (`reserved`), so no two floors ever get the same one.
+ */
+export function nextAreaLabel(plan: FloorPlan, reserved: string[], numbered: (number: number) => string): string {
+  const taken = new Set([...plan.areas.map(item => item.label.trim()), ...(plan.elsewhere?.labels ?? []), ...reserved]);
+  for (let index = 0; index < 26; index += 1) { const label = String.fromCharCode(65 + index); if (!taken.has(label)) return label; }
+  for (let number = plan.areas.length + 1; ; number += 1) { const label = numbered(number); if (!taken.has(label.trim())) return label; }
 }

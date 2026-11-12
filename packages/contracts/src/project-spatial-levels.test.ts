@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { spatialLevelOf, spatialLevelReference, spatialLevels, spatialRoomTitle, type ProjectSpatialReference } from "./project-spatial.js";
+import { spatialHiddenLayers, spatialLevelOf, spatialLevelReference, spatialLevels, spatialRoomTitle, spatialZoneLevel, type ProjectSpatialReference } from "./project-spatial.js";
 
 const reference = {
   schemaVersion: 1, projectId: "site", provenance: { file: "plan", status: "drawn" },
@@ -36,5 +36,18 @@ describe("floors in a stored layout", () => {
     expect(spatialRoomTitle({ name: "Store (2)", displayName: "Store" })).toBe("Store");
     expect(spatialRoomTitle({ name: "Store (2)", displayName: 3 })).toBe("Store (2)");
     expect(spatialRoomTitle({ name: "Store (2)", displayName: "  " })).toBe("Store (2)");
+  });
+  it("puts equipment on its room's floor, whatever its own entry says", () => {
+    const levels = spatialLevels(reference.layout)!;
+    const layout = { ...reference.layout, zones: [...reference.layout.zones, { id: "C", referenceBoard: "DB3", independentSpace: false, physicalParentRoom: "Store (2)" }, { id: "D", referenceBoard: "DB4", independentSpace: false, physicalParentRoom: "Store", level: "l2" }] };
+    expect(spatialZoneLevel(layout.zones[2]!, layout, levels)).toBe("l2");
+    expect(spatialZoneLevel(layout.zones[3]!, layout, levels)).toBe("g");
+    const withEquipment = { ...reference, layout } as ProjectSpatialReference;
+    expect(spatialLevelReference(withEquipment, "l2").layout.zones.map(zone => zone.id)).toEqual(["B", "C"]);
+    expect(spatialLevelReference(withEquipment, "g").layout.zones.map(zone => zone.id)).toEqual(["A", "D"]);
+  });
+  it("reads only known layer names as hidden", () => {
+    expect([...spatialHiddenLayers({ layers: { hidden: ["rooms", "nope", 3, "devices"] } })]).toEqual(["rooms", "devices"]);
+    for (const layout of [{}, { layers: "x" }, { layers: { hidden: "rooms" } }, null]) expect(spatialHiddenLayers(layout).size).toBe(0);
   });
 });

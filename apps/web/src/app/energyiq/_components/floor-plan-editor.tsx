@@ -14,9 +14,9 @@ import { boxOf, copyItems, everything, fitsLimits, inBox, isIn, isLocked, lockIt
 import { boxBetween, centredBox, isClick, snappedBox } from "./floor-plan-geometry";
 import { floorPlanMessages } from "./floor-plan-messages";
 import { canRedo, canUndo, commitPlan, endTyping, finishChange, redo, selectIn, showLevel, showPlan, startHistory, undo, type HistoryEntry, type PlanHistory } from "./floor-plan-history";
-import { ALL_SHOWN, layerInUse, layerOf, PLAN_LAYERS, sharedHidden, toggleLayer, withSharedHidden, type LayerView } from "./floor-plan-layers";
+import { ALL_SHOWN, layerInUse, layerOf, PLAN_LAYERS, sharedHidden, toggleLayer, withSharedHidden, type LayerKey, type LayerView } from "./floor-plan-layers";
 import { LayersPanel, LevelPanel, LevelTabs, RepeatForm, TemplateMenu } from "./floor-plan-level-ui";
-import { addLevel, currentLevel, deleteLevel, duplicateLevel, hasLevels, levelBelow, levelContents, levelOf, levelView, MAX_LEVELS, mergeView, moveLevel, renameLevel, renameRoom, settleLevel } from "./floor-plan-levels";
+import { addLevel, currentLevel, deleteLevel, duplicateLevel, hasLevels, levelBelow, levelContents, levelOf, levelView, MAX_LEVELS, mergeView, moveLevel, nextAreaLabel, renameLevel, renameRoom, settleLevel } from "./floor-plan-levels";
 import { insertTemplate, repeatItems, type TemplateKind } from "./floor-plan-templates";
 import { isTextEntry, planShortcut } from "./floor-plan-keys";
 import { PositionFields } from "./floor-plan-position";
@@ -226,6 +226,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     // A device locked on any floor stays where it is.
     if (historyRef.current.present.plan.devices.some(item => item.meterId === meterId && item.locked)) { setNotice(t("editor.locked")); return; }
     const plan = view;
+    reveal(["devices"]);
     commit({ ...plan, devices: [...plan.devices.filter(item => item.meterId !== meterId), { meterId, position: clampPoint([snap(at[0], step), snap(at[1], step)], plan.viewBox) }] }, { selection: [{ kind: "device", key: meterId }] });
     say(next => countText(t, next, [{ kind: "device", key: meterId }], meterName, "a11y.added", "a11y.addedMany"));
     focusCanvas();
@@ -242,7 +243,11 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   const hidden = hiddenZones(plan);
   const reserved = hidden.map(item => item.id);
   const copyName = (name: string) => t("name.copy", { name });
-  const nextLabel = () => { for (let index = 0; index < 26; index += 1) { const label = String.fromCharCode(65 + index); if (!plan.areas.some(item => item.label === label) && !hidden.some(item => item.id === label) && !plan.elsewhere?.labels.includes(label)) return label; } return t("name.area", { id: plan.areas.length + 1 }); };
+  const nextLabel = () => nextAreaLabel(plan, reserved, id => t("name.area", { id }));
+  /** A layer hidden or locked while editing is shown and unlocked again when something is added to it, so the new item is seen. */
+  const reveal = (keys: LayerKey[]) => setLayerView(view => keys.some(key => view.hidden.includes(key) || view.locked.includes(key)) ? { hidden: view.hidden.filter(key => !keys.includes(key)), locked: view.locked.filter(key => !keys.includes(key)) } : view);
+  /** Shows the layers of everything `next` adds to the floor shown (areas, equipment, rooms). */
+  const revealAdded = (next: FloorPlan) => { const areas = new Set(plan.areas.map(item => item.key)), rooms = new Set(plan.rooms.map(item => item.key)); reveal([...next.areas.filter(item => !areas.has(item.key)).map(item => item.insideRoom ? "equipment" as const : "areas" as const), ...(next.rooms.some(item => !rooms.has(item.key)) ? ["rooms" as const] : [])]); };
   const chooseTool = (next: Tool) => { setPlacing(null); setNotice(""); setTool(current => current === next ? null : next); focusCanvas(); };
   /**
    * Adds what the tool draws: in the box dragged on the plan, at its usual size where the plan was clicked (`at`), or,
@@ -252,7 +257,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     // A saved layout holds at most so many areas and rooms: say so instead of adding one that cannot be saved.
     if (!fitsLimits(plan, hidden.length, kind === "room" ? 0 : 1, kind === "room" ? 1 : 0)) { setNotice(tooMany()); return; }
     const box = drawn && !isClick(drawn) ? clampRect(drawn, plan.viewBox) : null;
-    const done = (next: FloorPlan, item: Selection) => { say(placed => countText(t, placed, [item], meterName, "a11y.added", "a11y.addedMany")); commit(next, { selection: [item] }); setTool(null); focusCanvas(); };
+    const done = (next: FloorPlan, item: Selection) => { revealAdded(next); say(placed => countText(t, placed, [item], meterName, "a11y.added", "a11y.addedMany")); commit(next, { selection: [item] }); setTool(null); focusCanvas(); };
     if (kind === "area") {
       const key = `area-${Date.now()}`, size: Point = [snap(vw * 0.35, grid), snap(vh * 0.55, grid)];
       const rect = box ?? (at ? centredBox(at, size, plan.viewBox, step) : clampRect([vx + 20, vy + 20, size[0], size[1]], plan.viewBox));
@@ -285,7 +290,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     const rect = box ?? clampRect([rx + 12, ry + rh - height - 12, Math.max(20, rw - 24), height], plan.viewBox);
     done({ ...plan, areas: [...plan.areas, { key, label: nextLabel(), board, insideRoom: room.key, equipment: "", rect }] }, { kind: "area", key });
   };
-  const addEntrance = () => { say(placed => countText(t, placed, [{ kind: "entrance", key: "entrance" }], meterName, "a11y.added", "a11y.addedMany")); commit({ ...plan, entrance: { label: t("name.mainEntrance"), position: [vx + vw / 2, vy + vh - 40] } }, { selection: [{ kind: "entrance", key: "entrance" }] }); focusCanvas(); };
+  const addEntrance = () => { reveal(["symbols"]); say(placed => countText(t, placed, [{ kind: "entrance", key: "entrance" }], meterName, "a11y.added", "a11y.addedMany")); commit({ ...plan, entrance: { label: t("name.mainEntrance"), position: [vx + vw / 2, vy + vh - 40] } }, { selection: [{ kind: "entrance", key: "entrance" }] }); focusCanvas(); };
   const updateArea = (key: string, patch: Partial<PlanArea>, merge?: string) => commit({ ...plan, areas: plan.areas.map(item => item.key === key ? { ...item, ...patch } : item) }, merge ? { merge } : undefined);
 
   // Duplicate, copy and paste: areas and rooms come with what is inside them; devices are placed once, so never copied.
@@ -297,6 +302,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   const putCopy = (clip: Clip, offset: number) => {
     if (!fits(clip)) { setNotice(tooMany()); return false; }
     const result = pasteClip(plan, clip, offset, copyName, reserved);
+    revealAdded(result.plan);
     say(placed => countText(t, placed, result.selection, meterName, "a11y.added", "a11y.addedMany"));
     commit(result.plan, { selection: result.selection }); focusCanvas(); return true;
   };
@@ -309,6 +315,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   const repeat = (count: number, direction: "across" | "down", gap: number) => {
     const result = repeatItems(plan, selection, count, direction, gap, copyName, reserved);
     if ("failure" in result) { setNotice(result.failure === "tooMany" ? tooMany() : result.failure === "noSpace" ? t("repeat.noSpace") : t("editor.notCopied")); return; }
+    revealAdded(result.plan);
     say(placed => countText(t, placed, result.selection, meterName, "a11y.added", "a11y.addedMany"));
     commit(result.plan, { selection: result.selection }); focusCanvas();
   };
@@ -316,6 +323,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   const insert = (kind: TemplateKind, count: number) => {
     const result = insertTemplate(plan, kind, count, (key, values) => t(key as Parameters<typeof t>[0], values), nextLabel(), reserved);
     if ("failure" in result) { setNotice(result.failure === "tooMany" ? tooMany() : t("template.noSpace")); return; }
+    revealAdded(result.plan);
     say(placed => countText(t, placed, result.selection, meterName, "a11y.added", "a11y.addedMany"));
     commit(result.plan, { selection: result.selection }); setTool(null); setPlacing(null); focusCanvas();
   };
@@ -335,9 +343,18 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     commitShowing(result.plan, result.level); setNotice(t("level.added", { name: levelNameOf(result.plan, result.level) })); focusCanvas();
   };
   const duplicateFloor = () => {
+    // The copy must still fit in a layout that can be saved: say so now, not when Save fails later.
+    const copied = levelContents(full, level);
+    if (full.areas.length + hiddenZones(full).length + copied.areas > MAX_AREAS || full.rooms.length + copied.rooms > MAX_ROOMS) { setNotice(tooMany()); return; }
     const result = duplicateLevel(full, level, name => t("level.copy", { name }), copyName);
     if (!result) { setNotice(t("level.full", { max: MAX_LEVELS })); return; }
     commitShowing(result.plan, result.level); setNotice(t("level.added", { name: levelNameOf(result.plan, result.level) }));
+  };
+  /** Typing a floor's name ends: outer spaces go, and a blank name becomes the usual one ("Floor 2"), in the same undo step. */
+  const finishLevelName = () => {
+    const index = full.levels?.findIndex(item => item.id === level) ?? -1, typed = levelNameOf(full, level), tidy = typed.trim() || t("level.default", { number: index + 1 });
+    if (index >= 0 && tidy !== typed) commitFull(renameLevel(full, level, tidy), { merge: `level-name:${level}` });
+    setHistory(endTyping);
   };
   const deleteFloor = (moveTo: string | null) => {
     const name = levelNameOf(full, level), index = full.levels?.findIndex(item => item.id === level) ?? 0;
@@ -740,7 +757,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   const fronted = reorderItems(plan, selection, "front"), backed = reorderItems(plan, selection, "back");
   const copyable = !!copyItems(plan, selection);
   const actions = lockable.length > 0 ? <><ArrangeActions onDuplicate={copyable ? duplicate : undefined} duplicateKey={keyName("D")} locked={allLocked} many={lockable.length > 1} onLock={() => commit(lockItems(plan, lockable, !allLocked))} order onFront={fronted !== plan ? () => commit(fronted) : undefined} onBack={backed !== plan ? () => commit(backed) : undefined} />
-    {copyable && <RepeatForm key={selectionKey} onRepeat={repeat} />}</> : null;
+    {copyable && <RepeatForm key={selectionKey} grid={grid} onRepeat={repeat} />}</> : null;
   const deletable = selection.some(item => !isLocked(plan, item));
   /** Line-up results: one undo step, and a short note when locked items were left where they are. */
   const arrange = (result: Arranged) => { if (result.plan !== plan) commit(settleRooms(result.plan)); if (result.skipped) setNotice(t("align.lockedSkipped")); };
@@ -817,6 +834,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     {error && <p role="alert" className={styles.error}>{error}</p>}
 
     {hasLevels(full) && <LevelTabs levels={full.levels!} current={level} onPick={pickLevel} />}
+    {layerView.hidden.length > 0 && <p className={styles.placing} role="status" data-hidden-layers="">{t("layers.hiddenNote", { layers: layerView.hidden.map(key => t(`layers.${key}`)).join(t("level.comma")) })} <button type="button" onClick={() => setLayerView(view => ({ ...view, hidden: [] }))}>{t("layers.showAll")}</button></p>}
     <div className={styles.editorBody}>
       <div className={styles.canvasFrame}>
         {/* The drawing space; pull its right or bottom edge (or the corner) to make it bigger or smaller. */}
@@ -908,7 +926,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
           <p className={styles.hint}>{t("hidden.hint")}</p>
           <ul className={styles.hiddenList}>{hidden.map((item, index) => <li key={index}>{areaName(item.id)}{item.board ? <small> · {item.board}</small> : null}</li>)}</ul>
         </div>}
-        {hasLevels(full) && <LevelPanel key={level} levels={full.levels!} current={level} contents={levelContents(full, level)} ghost={ghost} onGhost={setGhost} onRename={name => commitFull(renameLevel(full, level, name), { merge: `level-name:${level}` })} onDone={() => setHistory(endTyping)} onMove={by => commitFull(moveLevel(full, level, by))} onDuplicate={duplicateFloor} onDelete={deleteFloor} />}
+        {hasLevels(full) && <LevelPanel key={level} levels={full.levels!} current={level} contents={levelContents(full, level)} ghost={ghost} onGhost={setGhost} onRename={name => commitFull(renameLevel(full, level, name), { merge: `level-name:${level}` })} onDone={finishLevelName} onMove={by => commitFull(moveLevel(full, level, by))} onDuplicate={duplicateFloor} onDelete={deleteFloor} />}
         <LayersPanel layers={PLAN_LAYERS.filter(layer => layerInUse(full, layer)).map(layer => layer.key)} view={layerView} shared={sharedHidden(full.layers)} onToggle={(part, key) => setLayerView(current => toggleLayer(current, part, key))} onShared={(key, hide) => commitFull(withSharedHidden(full, key, hide))} />
         <div className={styles.panel} role="radiogroup" aria-label={t("style.title")}>
           <h5>{t("style.title")}</h5>
@@ -921,7 +939,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
         </div>
         <div className={styles.panel}>
           <div className={styles.paletteHead}><h5>{t("panel.devices")}</h5><span>{t("panel.placedCount", { placed: plan.devices.filter(item => meterById.has(item.meterId)).length, total: meters.length })}</span></div>
-          {waiting.length > 0 && <button type="button" className={styles.tool} onClick={() => commit(autoPlace(plan, waiting))}>{t("panel.placeRest")}</button>}
+          {waiting.length > 0 && <button type="button" className={styles.tool} onClick={() => { reveal(["devices"]); commit(autoPlace(plan, waiting)); }}>{t("panel.placeRest")}</button>}
           <p className={styles.hint}>{t("panel.hint")}</p>
           {palette}
         </div>

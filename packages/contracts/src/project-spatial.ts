@@ -73,6 +73,19 @@ export function spatialLevels(layout: unknown): SpatialLevel[] | null {
 }
 /** The floor an item is on: the one it names when that floor exists, else the first. */
 export const spatialLevelOf = (item: unknown, levels: SpatialLevel[]): string => { const value = isObject(item) ? item.level : undefined; return typeof value === "string" && levels.some(level => level.id === value) ? value : levels[0]!.id; };
+/**
+ * The floor a zone is on. Equipment inside a room (independentSpace false) is always on its room's floor, whatever its own
+ * `level` says (the editor works the same way), so it is never split from the room it sits in.
+ */
+export const spatialZoneLevel = (zone: { independentSpace?: boolean; physicalParentRoom?: string; level?: string }, layout: { rooms: Array<{ name: string; level?: string }> }, levels: SpatialLevel[]): string =>
+  spatialLevelOf(zone.independentSpace === false ? layout.rooms.find(room => room.name === zone.physicalParentRoom) ?? zone : zone, levels);
+/** Layers the shared map (and the report) can hide, as saved in `layout.layers.hidden`. */
+export const SPATIAL_LAYERS = ["areas", "rooms", "equipment", "devices", "labels", "symbols", "lines", "shapes"] as const;
+/** The layers hidden for everyone who views the plan. Saved layouts are untrusted: only known layer names count. */
+export function spatialHiddenLayers(layout: unknown): Set<typeof SPATIAL_LAYERS[number]> {
+  const layers = isObject(layout) ? layout.layers : undefined, hidden = isObject(layers) ? layers.hidden : undefined;
+  return new Set(Array.isArray(hidden) ? hidden.filter((item): item is typeof SPATIAL_LAYERS[number] => (SPATIAL_LAYERS as readonly unknown[]).includes(item)) : []);
+}
 /** A room's name as shown: its short `displayName` when it has a usable one, else its name. */
 export const spatialRoomTitle = (room: { name: string; displayName?: unknown }): string => typeof room.displayName === "string" && room.displayName.trim() && room.displayName.length <= 120 ? room.displayName.trim() : room.name;
 /**
@@ -84,7 +97,7 @@ export function spatialLevelReference<T extends ProjectSpatialReference>(referen
   if (!levels || levels.length < 2) return reference;
   const on = (item: unknown) => spatialLevelOf(item, levels) === level;
   const layout = reference.layout as T["layout"] & { devices?: unknown; entrance?: unknown; boardMarkers?: unknown };
-  const zones = layout.zones.filter(on), boards = new Set(zones.map(zone => zone.referenceBoard).filter(Boolean));
+  const zones = layout.zones.filter(zone => spatialZoneLevel(zone, layout, levels) === level), boards = new Set(zones.map(zone => zone.referenceBoard).filter(Boolean));
   const next: Record<string, unknown> = { ...layout, zones, rooms: layout.rooms.filter(on) };
   if (Array.isArray(layout.devices)) next.devices = layout.devices.filter(on);
   if (layout.entrance !== undefined && !on(layout.entrance)) delete next.entrance;

@@ -417,6 +417,10 @@ export function referenceFromPlan(plan: FloorPlan, projectId: string, previous: 
   if (names.some(name => !name)) throw new Error(t("check.roomName"));
   const duplicateName = names.find((name, index) => names.indexOf(name) !== index);
   if (duplicateName) throw new Error(t("check.duplicateRoom", { name: duplicateName }));
+  // Two rooms on one floor may not show the same name either (a short name can hide a stored "Store (2)").
+  const firstFloor = plan.levels?.[0]?.id ?? "", shownOn = plan.rooms.map(room => `${room.level && plan.levels?.some(item => item.id === room.level) ? room.level : firstFloor}\n${(room.displayName ?? room.name).trim()}`);
+  const duplicateShown = shownOn.find((entry, index) => shownOn.indexOf(entry) !== index);
+  if (duplicateShown) throw new Error(t("check.duplicateRoom", { name: duplicateShown.slice(duplicateShown.indexOf("\n") + 1) }));
   const roomName = new Map(plan.rooms.map(room => [room.key, room.name.trim()]));
   // Each item names its floor when it is not on the first; a floor no longer there (a stale value) is dropped.
   const floors = new Set(plan.levels?.map(item => item.id) ?? []);
@@ -468,7 +472,7 @@ export function referenceFromPlan(plan: FloorPlan, projectId: string, previous: 
     ...(boardColours && Object.keys(boardColours).length ? { boardColours } : {}),
     ...(plan.style ? { style: plan.style } : {}),
     ...(plan.editor ? { editor: plan.editor } : {}),
-    ...(plan.levels ? { levels: plan.levels.map(item => withCarried({ id: item.id, name: item.name.trim() || item.id }, item)) } : {}),
+    ...(plan.levels ? { levels: plan.levels.map((item, index) => withCarried({ id: item.id, name: item.name.trim() ? item.name : t("level.default", { number: index + 1 }) }, item)) } : {}),
     ...(plan.layers ? { layers: plan.layers } : {}),
   }, { ...(extra ? { extra } : {}), ...(plan.carried?.order ? { order: plan.carried.order } : {}) }, (key, value) => key === "boardMarkers" && !isRecord(value)) as StoredSpatialReference["layout"];
   const reference: StoredSpatialReference = {

@@ -1,6 +1,6 @@
 "use client";
 import { useId, useState, type CSSProperties, type KeyboardEvent } from "react";
-import { spatialLevelOf, spatialLevelReference, spatialLevels, spatialRoomTitle, type ProjectSpatialReference } from "@datafoundry/contracts";
+import { spatialLevelOf, spatialLevelReference, spatialLevels, spatialRoomTitle, spatialZoneLevel, type ProjectSpatialReference } from "@datafoundry/contracts";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { translatorFor, type EnergyIqLocale } from "./energyiq-messages";
 import { floorMapMessages } from "./site-floor-map-messages";
@@ -139,7 +139,7 @@ export function SiteFloorMap(props: MapProps & { level?: string | null }) {
   const deviceLevel = new Map(((reference as Saved).layout.devices ?? []).flatMap(item => item && typeof item.meterId === "string" ? [[item.meterId, spatialLevelOf(item, levels)] as const] : []));
   const most = (found: string[]) => { const counts = new Map<string, number>(); for (const id of found) counts.set(id, (counts.get(id) ?? 0) + 1); return [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null; };
   const wanted = focusDevice && deviceLevel.has(focusDevice) ? deviceLevel.get(focusDevice)!
-    : most((highlightDevices ?? []).flatMap(id => deviceLevel.has(id) ? [deviceLevel.get(id)!] : [])) ?? (highlight ? most(reference.layout.zones.filter(zone => zone.referenceBoard && highlight.includes(zone.referenceBoard)).map(zone => spatialLevelOf(zone, levels))) : null);
+    : most((highlightDevices ?? []).flatMap(id => deviceLevel.has(id) ? [deviceLevel.get(id)!] : [])) ?? (highlight ? most(reference.layout.zones.filter(zone => zone.referenceBoard && highlight.includes(zone.referenceBoard)).map(zone => spatialZoneLevel(zone, reference.layout, levels))) : null);
   // A tab picked by the reader holds until the highlight changes; then the map turns to the highlighted floor.
   const key = JSON.stringify([focusDevice, highlightDevices, highlight]);
   const shown = has(fixed) ? fixed : picked && picked.key === key && has(picked.level) ? picked.level : wanted ?? (has(picked?.level) ? picked!.level : levels[0]!.id);
@@ -147,7 +147,7 @@ export function SiteFloorMap(props: MapProps & { level?: string | null }) {
   const sheet = <MapSheet {...rest} reference={floor} colourSource={reference} devices={devices.filter(device => onFloor.has(device.id))} hidden={hidden} />;
   if (has(fixed)) return sheet;
   return <div className={styles.levelMap}>
-    <div className={styles.levelTabs} role="tablist" aria-label={t("levels")}>{levels.map(item => <button key={item.id} type="button" role="tab" aria-selected={item.id === shown} className={styles.levelTab} onClick={() => setPicked({ level: item.id, key })}>{item.name}</button>)}</div>
+    <div className={styles.levelTabs} role="group" aria-label={t("levels")} data-level-tabs="">{levels.map(item => <button key={item.id} type="button" aria-pressed={item.id === shown} className={styles.levelTab} onClick={() => setPicked({ level: item.id, key })}>{item.name}</button>)}</div>
     {sheet}
   </div>;
 }
@@ -288,11 +288,13 @@ export function BoardLegend({ reference }: { reference: ProjectSpatialReference 
   const zones = [...reference.layout.zones].sort((a, b) => a.referenceBoard.localeCompare(b.referenceBoard, undefined, { numeric: true }));
   return <ul className={styles.legend} aria-label={t("legendAria")}>{zones.map(zone => {
     const rooms = reference.layout.rooms.filter(room => room.zone === zone.id).map(spatialRoomTitle);
+    // The room equipment sits in, by its shown name (the stored one can carry a floor suffix, "Store (2)").
+    const parent = reference.layout.rooms.find(room => room.name === zone.physicalParentRoom), parentName = parent ? spatialRoomTitle(parent) : zone.physicalParentRoom;
     return <li key={zone.id}>
       <span className={styles.swatch} style={{ background: colours.get(zone.id) }} aria-hidden="true" />
       <div>
-        <strong>{zone.referenceBoard}<span>{zone.referenceBoard ? " · " : ""}{zone.independentSpace === false ? t("inside", { room: zone.physicalParentRoom ?? t("aRoom") }) : areaLabel(zone.id, locale)}</span></strong>
-        {zone.independentSpace === false ? <p>{t("subgroup", { equipment: zone.equipment ?? t("subgroupDefault"), room: zone.physicalParentRoom ?? t("roomAbove") })}</p> : <p className={styles.chips}>{rooms.map(room => <span key={room}>{room}</span>)}</p>}
+        <strong>{zone.referenceBoard}<span>{zone.referenceBoard ? " · " : ""}{zone.independentSpace === false ? t("inside", { room: parentName ?? t("aRoom") }) : areaLabel(zone.id, locale)}</span></strong>
+        {zone.independentSpace === false ? <p>{t("subgroup", { equipment: zone.equipment ?? t("subgroupDefault"), room: parentName ?? t("roomAbove") })}</p> : <p className={styles.chips}>{rooms.map(room => <span key={room}>{room}</span>)}</p>}
       </div>
     </li>;
   })}</ul>;

@@ -4,10 +4,11 @@
  * landmarks, walls and doors, shapes) is already listed here; it shows in the Layers panel once the plan has some, and
  * its own items say which layer they are on through `LAYER_OF_KIND`.
  */
+import { SPATIAL_LAYERS, spatialHiddenLayers } from "@datafoundry/contracts";
 import { isRecord, type Json } from "./floor-plan-carry";
 import type { FloorPlan, Selection } from "./floor-plan-model";
 
-export const LAYER_KEYS = ["areas", "rooms", "equipment", "devices", "labels", "symbols", "lines", "shapes"] as const;
+export const LAYER_KEYS = SPATIAL_LAYERS;
 export type LayerKey = typeof LAYER_KEYS[number];
 /** `fields` are the plan lists a later kind keeps its items in; the layer shows in the panel once one of them has items. */
 export type PlanLayer = { key: LayerKey; fields?: string[]; core?: true };
@@ -17,7 +18,6 @@ export const PLAN_LAYERS: PlanLayer[] = [
 ];
 /** Which layer each kind of selected item is on; a later kind adds its own (for example label → labels). */
 export const LAYER_OF_KIND: Record<string, LayerKey> = { room: "rooms", device: "devices", entrance: "symbols" };
-const isLayer = (value: unknown): value is LayerKey => (LAYER_KEYS as readonly unknown[]).includes(value);
 
 /** The layer an item on the plan is on: equipment and areas are both areas in the plan, told apart by `insideRoom`. */
 export function layerOf(plan: FloorPlan, item: Selection): LayerKey {
@@ -40,10 +40,7 @@ export const toggleLayer = (view: LayerView, part: keyof LayerView, key: LayerKe
  * The layers the shared map hides, from the saved block. Saved layouts are untrusted: only known layer names count, and
  * anything else there is ignored (and kept as saved).
  */
-export function sharedHidden(layers: unknown): Set<LayerKey> {
-  const hidden = isRecord(layers) ? layers.hidden : undefined;
-  return new Set(Array.isArray(hidden) ? hidden.filter(isLayer) : []);
-}
+export const sharedHidden = (layers: unknown): Set<LayerKey> => spatialHiddenLayers({ layers });
 /**
  * The plan with one layer hidden on (or shown again on) the shared map. Entries the editor does not know stay; with
  * nothing left hidden the list goes, and with nothing else in the block the block goes too.

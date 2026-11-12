@@ -43,7 +43,7 @@ async function editor(saved: StoredSpatialReference = ONE) {
   const { host } = view;
   const canvas = () => host.querySelector('svg[role="application"]') as SVGSVGElement;
   const button = (label: string, within: ParentNode = host) => [...within.querySelectorAll("button")].find(item => item.textContent === label) as HTMLButtonElement;
-  const tabs = () => [...host.querySelectorAll('[role="tablist"] [role="tab"]')].map(tab => `${tab.textContent}${tab.getAttribute("aria-selected") === "true" ? "*" : ""}`);
+  const tabs = () => [...host.querySelectorAll('[data-level-tabs] button')].map(tab => `${tab.textContent}${tab.getAttribute("aria-pressed") === "true" ? "*" : ""}`);
   const roomNames = () => [...canvas().querySelectorAll("g")].filter(item => item.querySelector('rect[class*="room"]')).map(item => item.querySelector("text")?.textContent);
   const layerRow = (layer: string) => host.querySelector(`[data-layer="${layer}"]`)!;
   const click = async (element: Element) => { await act(async () => (element as HTMLElement).click()); };
@@ -54,7 +54,7 @@ async function editor(saved: StoredSpatialReference = ONE) {
 describe("floors in the editor", () => {
   it("hides the floor tabs until a second floor is added, then shows one floor at a time", async () => {
     const view = await editor();
-    expect(view.host.querySelector('[role="tablist"]')).toBeNull();
+    expect(view.host.querySelector('[data-level-tabs]')).toBeNull();
     expect(view.host.querySelector('[data-panel="level"]')).toBeNull();
     await view.click(view.button("+ Add floor"));
     expect(view.tabs()).toEqual(["Floor 1", "Floor 2*"]);
@@ -72,7 +72,7 @@ describe("floors in the editor", () => {
     // Switching floors is not a change: Undo takes back adding the floor (and shows the floor it was added from).
     await view.click(view.button("Floor 2"));
     await view.click(view.button("Undo"));
-    expect(view.host.querySelector('[role="tablist"]')).toBeNull();
+    expect(view.host.querySelector('[data-level-tabs]')).toBeNull();
     expect(view.roomNames()).toEqual(["Showroom", "Pantry"]);
     await view.unmount();
   });
@@ -104,13 +104,21 @@ describe("floors in the editor", () => {
     expect(view.roomNames()).toEqual(["Plant room"]);
     await view.click(view.button("Delete floor"));
     const dialog = view.host.querySelector('[role="alertdialog"]')!;
-    expect(dialog.textContent).toContain("Roof has 1 areas, 1 rooms and 1 devices on it.");
+    expect(dialog.textContent).toContain("Roof has 1 area, 1 room and 1 device on it.");
+    // Focus goes into the question, and back to Delete floor when it is put away (Keep, or Escape).
+    expect(document.activeElement?.textContent).toBe("Move them and delete the floor");
+    expect(dialog.getAttribute("aria-describedby")).toBe(dialog.querySelector("p")!.id);
     await view.click(view.button("Keep the floor", dialog));
     expect(view.host.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(document.activeElement?.textContent).toBe("Delete floor");
+    await view.click(view.button("Delete floor"));
+    await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect(view.host.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(document.activeElement?.textContent).toBe("Delete floor");
     expect(view.tabs()).toEqual(["Ground", "Roof*"]);
     await view.click(view.button("Delete floor"));
     await view.click(view.button("Move them and delete the floor"));
-    expect(view.host.querySelector('[role="tablist"]')).toBeNull();
+    expect(view.host.querySelector('[data-level-tabs]')).toBeNull();
     const saved = await view.saveLayout();
     expect((saved.layout as unknown as { levels?: unknown }).levels).toBeUndefined();
     expect(saved.layout.rooms.map(room => room.name)).toEqual(["Showroom", "Pantry", "Plant room"]);
@@ -133,6 +141,48 @@ describe("floors in the editor", () => {
     await view.click(view.button("Hide", view.layerRow("areas")));
     const again = await view.saveLayout();
     expect((again.layout as unknown as { layers: unknown }).layers).toEqual({ hidden: ["devices"] });
+    await view.unmount();
+  });
+
+  it("shows a hidden or locked layer again when something is added to it, and says while a layer is hidden", async () => {
+    const view = await editor();
+    expect(view.host.querySelector("[data-hidden-layers]")).toBeNull();
+    await view.click(view.button("Hide", view.layerRow("rooms")));
+    await view.click(view.button("Lock", view.layerRow("areas")));
+    expect(view.host.querySelector("[data-hidden-layers]")?.textContent).toContain("Hidden while you edit: Rooms.");
+    await view.click(view.button("Insert template"));
+    await view.click(view.button("Office suite"));
+    // The new rooms are drawn, and their layers are shown and unlocked again.
+    expect(view.roomNames()).toEqual(["Showroom", "Pantry", "Open office", "Reception", "Meeting room", "Pantry 2"]);
+    expect(view.button("Hide", view.layerRow("rooms")).getAttribute("aria-pressed")).toBe("false");
+    expect(view.button("Lock", view.layerRow("areas")).getAttribute("aria-pressed")).toBe("false");
+    expect(view.host.querySelector("[data-hidden-layers]")).toBeNull();
+    // Show all, from the note.
+    await view.click(view.button("Hide", view.layerRow("devices")));
+    await view.click(view.button("Show all", view.host.querySelector("[data-hidden-layers]")!));
+    expect(view.host.querySelector("[data-hidden-layers]")).toBeNull();
+    await view.unmount();
+  });
+
+  it("refuses to duplicate a floor whose copy would not fit in a layout that can be saved", async () => {
+    const many = { ...ONE, layout: { ...ONE.layout, zones: [{ id: "A", referenceBoard: "DB1", rect: [0, 0, 1000, 640] }], devices: [],
+      rooms: Array.from({ length: 105 }, (_, index) => ({ name: `Room ${index + 1}`, zone: "A", rect: [10 + (index % 15) * 60, 10 + Math.floor(index / 15) * 60, 50, 50] })) } } as unknown as StoredSpatialReference;
+    const view = await editor(many);
+    await view.click(view.button("+ Add floor"));
+    await view.click(view.button("Floor 1"));
+    await view.click(view.button("Duplicate floor"));
+    expect(view.host.querySelector('[role="status"]:not([data-hidden-layers])')?.textContent ?? "").toContain("A plan can hold up to 100 areas and 200 rooms.");
+    expect(view.tabs()).toEqual(["Floor 1*", "Floor 2"]);
+    await view.unmount();
+  });
+
+  it("names only what is on a floor before deleting it, the entrance too", async () => {
+    const withGate = { ...TWO, layout: { ...TWO.layout, entrance: { label: "Gate", position: [240, 600], level: "roof" },
+      zones: TWO.layout.zones.filter(zone => zone.id !== "B"), rooms: TWO.layout.rooms.filter(room => room.zone !== "B"), devices: (ONE.layout as unknown as { devices: unknown[] }).devices } } as unknown as StoredSpatialReference;
+    const view = await editor(withGate);
+    await view.click(view.button("Roof"));
+    await view.click(view.button("Delete floor"));
+    expect(view.host.querySelector('[role="alertdialog"] p')?.textContent).toBe("Roof has the entrance on it. Move them to another floor, or delete them with the floor?");
     await view.unmount();
   });
 
@@ -172,20 +222,20 @@ describe("floors on the shared map", () => {
   const titles = (host: HTMLElement) => [...host.querySelectorAll("svg title")].map(title => title.textContent ?? "");
   it("looks exactly as before for a one-floor site", async () => {
     const view = await mount(<SiteFloorMap reference={ONE} devices={mapDevices(ONE, meters)} />);
-    expect(view.host.querySelector('[role="tablist"]')).toBeNull();
+    expect(view.host.querySelector('[data-level-tabs]')).toBeNull();
     expect(view.host.firstElementChild?.tagName.toLowerCase()).toBe("svg");
     await view.unmount();
   });
   for (const style of ["drawing", "blueprint", "blocks"] as const) it(`shows a tab per floor and one floor at a time (${style})`, async () => {
     const reference = { ...TWO, layout: { ...TWO.layout, style } } as StoredSpatialReference;
     const view = await mount(<SiteFloorMap reference={reference} devices={mapDevices(reference, meters)} />);
-    const tabs = () => [...view.host.querySelectorAll('[role="tab"]')].map(tab => `${tab.textContent}${tab.getAttribute("aria-selected") === "true" ? "*" : ""}`);
+    const tabs = () => [...view.host.querySelectorAll('[data-level-tabs] button')].map(tab => `${tab.textContent}${tab.getAttribute("aria-pressed") === "true" ? "*" : ""}`);
     expect(view.host.querySelector("svg")?.getAttribute("data-look")).toBe(style);
     expect(tabs()).toEqual(["Ground*", "Roof"]);
     expect(view.host.textContent).toContain("Showroom");
     expect(view.host.textContent).not.toContain("Plant room");
     expect(titles(view.host).some(title => title.includes("Roof pump"))).toBe(false);
-    await act(async () => (view.host.querySelectorAll('[role="tab"]')[1] as HTMLElement).click());
+    await act(async () => (view.host.querySelectorAll('[data-level-tabs] button')[1] as HTMLElement).click());
     expect(tabs()).toEqual(["Ground", "Roof*"]);
     expect(view.host.textContent).toContain("Plant room");
     expect(view.host.textContent).not.toContain("Showroom");
@@ -194,14 +244,21 @@ describe("floors on the shared map", () => {
   });
   it("turns to the floor of the highlighted devices, so a highlight never lands on another floor", async () => {
     const view = await mount(<SiteFloorMap reference={TWO} devices={mapDevices(TWO, meters)} highlight={["DB2"]} highlightDevices={["pump"]} />);
-    expect(view.host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("Roof");
+    expect(view.host.querySelector('[data-level-tabs] button[aria-pressed="true"]')?.textContent).toBe("Roof");
     await view.unmount();
     const ground = await mount(<SiteFloorMap reference={TWO} devices={mapDevices(TWO, meters)} highlight={["DB1"]} highlightDevices={["tv"]} />);
-    expect(ground.host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("Ground");
+    expect(ground.host.querySelector('[data-level-tabs] button[aria-pressed="true"]')?.textContent).toBe("Ground");
     await ground.unmount();
     const focused = await mount(<SiteFloorMap reference={TWO} devices={mapDevices(TWO, meters)} focusDevice="pump" />);
-    expect(focused.host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("Roof");
+    expect(focused.host.querySelector('[data-level-tabs] button[aria-pressed="true"]')?.textContent).toBe("Roof");
     await focused.unmount();
+  });
+  it("puts equipment that names no floor on its room's floor, and turns there when it is highlighted", async () => {
+    const reference = { ...TWO, layout: { ...TWO.layout, zones: [...TWO.layout.zones, { id: "C", referenceBoard: "DB3", independentSpace: false, physicalParentRoom: "Plant room", equipment: "Chillers" }] } } as unknown as StoredSpatialReference;
+    const view = await mount(<SiteFloorMap reference={reference} highlight={["DB3"]} />);
+    expect(view.host.querySelector('[data-level-tabs] button[aria-pressed="true"]')?.textContent).toBe("Roof");
+    expect(view.host.querySelector("svg")?.textContent).toContain("Chillers");
+    await view.unmount();
   });
   it("leaves out the layers the layout hides on the shared map", async () => {
     const reference = { ...ONE, layout: { ...ONE.layout, layers: { hidden: ["devices", "rooms", "bogus"] } } } as unknown as StoredSpatialReference;
