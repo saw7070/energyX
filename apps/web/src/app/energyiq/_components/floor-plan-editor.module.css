@@ -281,3 +281,21 @@
 :global(:where(html[data-energyiq-theme="dark"])) .landmarkChoice[aria-pressed="true"] { border-color:#8bc3b9; background:#1c2a22; }
 :global(:where(html[data-energyiq-theme="dark"])) .turnLine, :global(:where(html[data-energyiq-theme="dark"])) .turnBox { stroke:#8bc3b9; }
 :global(:where(html[data-energyiq-theme="dark"])) .turnHandle { fill:#191919; stroke:#8bc3b9; }
+/* Doors, windows and lines (floor-plan-drawing-ui): a wide see-through stroke to press, the wall gap under a door, the line being drawn and its points. */
+.hit { fill:none; stroke:transparent; pointer-events:stroke; }
+.openingGap { stroke:#ffffff; }
+.linePreview { fill:none; stroke:#2a78d6; stroke-width:2; stroke-dasharray:6 4; vector-effect:non-scaling-stroke; }
+.vertex { fill:white; stroke:#1d513a; stroke-width:2; vector-effect:non-scaling-stroke; cursor:move; }
+.vertexPicked { fill:#1d513a; stroke:#1d513a; stroke-width:2; vector-effect:non-scaling-stroke; }
+.doorsField { display:grid; gap:6px; border:0; padding:0; margin:0; min-width:0; }
+.doorsField legend { font-size:12px; font-weight:600; color:#4f5f55; padding:0; margin-bottom:4px; }
+.doorList { display:flex; flex-wrap:wrap; gap:6px; list-style:none; padding:0; margin:0; }
+.doorList button { padding:3px 9px; border:1px solid #d0dbd2; border-radius:999px; background:white; color:#1d513a; font-size:12px; font-weight:600; }
+.doorList button:hover { background:#eef4ef; }
+:global(:where(html[data-energyiq-theme="dark"])) .openingGap { stroke:#1d2022; }
+:global(:where(html[data-energyiq-theme="dark"])) .linePreview { stroke:#7aaef0; }
+:global(:where(html[data-energyiq-theme="dark"])) .vertex { fill:#191919; stroke:#8bc3b9; }
+:global(:where(html[data-energyiq-theme="dark"])) .vertexPicked { fill:#8bc3b9; stroke:#8bc3b9; }
+:global(:where(html[data-energyiq-theme="dark"])) .doorsField legend { color:#b9c5be; }
+:global(:where(html[data-energyiq-theme="dark"])) .doorList button { background:#191919; border-color:#32363b; color:#8bc3b9; }
+:global(:where(html[data-energyiq-theme="dark"])) .doorList button:hover { background:#232826; }

@@ -66,6 +66,12 @@
 .planDoor { stroke:var(--plan-partition); }
 .planDoorSwing { fill:none; stroke:var(--plan-partition); opacity:.7; }
 .planRoomLabel { fill:var(--plan-ink); font-weight:600; letter-spacing:.015em; }
+/* Doors and windows the site drew, and its walls, partitions, fences and road edges (see plan-openings). */
+.planWindow { stroke:var(--plan-partition); }
+.planLineWall { stroke:var(--plan-wall); }
+.planLinePartition { stroke:var(--plan-partition); }
+.planLineFence { stroke:var(--plan-ink-muted); }
+.planLineRoad { stroke:var(--plan-ink-muted); opacity:.8; }
 .planEquip { fill:color-mix(in srgb, var(--area) 7%, transparent); stroke:var(--area); }
 .planEquipActive { fill:color-mix(in srgb, var(--area) 16%, transparent); }
 .planEquipLabel { fill:var(--plan-ink); font-weight:600; }

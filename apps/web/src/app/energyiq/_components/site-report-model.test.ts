@@ -258,3 +258,16 @@ describe("site report by group", () => {
     expect(html).not.toContain("kWh per 30 days</text>");
   });
 });
+
+it("draws the site's own doors as gaps in the room walls and its walls as lines on the report plan", () => {
+  const drawn = { ...REFERENCE, layout: { ...REFERENCE.layout, openings: [{ id: "op-1", room: "Pantry", wall: "s", offset: 0.5, width: 40, kind: "door" }, { id: "bad", room: "Nowhere", wall: "s", offset: 0.5, width: 40, kind: "door" }, { id: "op-2", room: "Showroom", wall: "x", offset: 0.5, width: 40, kind: "door" }], lines: [{ id: "ln-1", points: [[40, 460], [300, 460]], style: "fence" }, { id: "ln-2", points: [[40, 470]], style: "wall" }] } } as unknown as ProjectSpatialReference;
+  const html = renderSiteReportMarkup(buildSiteReport(DATA, drawn, "2026-09-22T10:00:00Z"));
+  // The Pantry's door is a gap on its bottom wall; the door of a missing room and a malformed door are left out.
+  expect(html).toContain('<line x1="296" y1="140" x2="336" y2="140" stroke="#fff" stroke-width="3"></line>');
+  expect(html.match(/stroke="#fff" stroke-width="3"/g)).toHaveLength(1);
+  expect(html).toContain('<polyline points="40,460 300,460" fill="none"');
+  expect(html).toContain('stroke-dasharray="6,4"');
+  expect(html).not.toContain("40,470");
+  // A layout without them prints no extra marks.
+  expect(renderSiteReportMarkup(buildSiteReport(DATA, REFERENCE, "2026-09-22T10:00:00Z"))).not.toContain('stroke="#fff" stroke-width="3"');
+});

@@ -4,8 +4,10 @@
  */
 import { freshCopy, sameRect } from "./floor-plan-carry";
 import { clampDelta, within } from "./floor-plan-geometry";
+import { findLine, inside, lineBox, MAX_LINES, shiftLines, type PlanLine } from "./floor-plan-lines";
 import { shiftLabel, shiftSymbol, withoutRejected } from "./floor-plan-mark-data";
 import { boxFrame, frameBounds, hitsFrame, labelBounds, labelFrame, MARK_LIMIT, normaliseRotation, symbolBounds, symbolFrame, type Frame, type PlanLabel, type PlanSymbol } from "./floor-plan-marks";
+import { copiedOpenings, newRoomId, openingBox, type PlanOpening } from "./floor-plan-openings";
 import { asOwnArea, clampPoint, clampRect, deviceRect, devicePosition, MAX_AREAS, MAX_ROOMS, moveSelection, NO_PASSENGERS, passengers, promoteEntrance, removeSelection, roomOwner, settleRooms, type FloorPlan, type PlanArea, type PlanRoom, type Point, type Rect, type Selection } from "./floor-plan-model";
 
 export type Riders = ReturnType<typeof NO_PASSENGERS>;
@@ -20,6 +22,9 @@ function find(plan: FloorPlan, item: Selection): { locked?: true } | null | unde
   if (item.kind === "device") return plan.devices.find(entry => entry.meterId === item.key);
   if (item.kind === "label") return plan.labels?.find(entry => entry.key === item.key);
   if (item.kind === "symbol") return plan.symbols?.find(entry => entry.key === item.key);
+  if (item.kind === "line") return findLine(plan, item.key);
+  // A door or window is locked with its room: locking a room keeps its doors where they are too.
+  if (item.kind === "opening") { const opening = plan.openings?.find(entry => entry.key === item.key); return opening ? (plan.rooms.find(room => room.key === opening.room)?.locked ? { locked: true } : {}) : undefined; }
   return plan.entrance as { locked?: true } | null;
 }
 export const exists = (plan: FloorPlan, item: Selection) => !!find(plan, item);
@@ -38,6 +43,8 @@ export function boxOf(plan: FloorPlan, item: Selection): Rect | null {
   if (item.kind === "label") { const label = plan.labels?.find(entry => entry.key === item.key); return label ? labelBounds(label, unit) : null; }
   if (item.kind === "symbol") { const symbol = plan.symbols?.find(entry => entry.key === item.key); return symbol ? symbolBounds(symbol, unit) : null; }
   if (item.kind === "device") { const device = plan.devices.find(entry => entry.meterId === item.key); return device ? deviceRect(device) ?? [device.position[0], device.position[1], 0, 0] : null; }
+  if (item.kind === "line") { const line = findLine(plan, item.key); return line ? lineBox(line) : null; }
+  if (item.kind === "opening") { const opening = plan.openings?.find(entry => entry.key === item.key); return opening ? openingBox(plan, opening) : null; }
   return plan.entrance ? [plan.entrance.position[0], plan.entrance.position[1], 0, 0] : null;
 }
 
@@ -60,11 +67,14 @@ export function extentOf(plan: FloorPlan, item: Selection): Rect | null {
   if (item.kind === "device") { const device = plan.devices.find(entry => entry.meterId === item.key); if (device?.size && device.rotation) return frameBounds(boxFrame(device.position, device.size, device.rotation)); }
   return boxOf(plan, item);
 }
-/** Everything on the drawing, in the order it is drawn; `shown` says which devices the editor draws (those with a meter). */
+/**
+ * Everything on the drawing, in the order it is drawn; `shown` says which devices the editor draws (those with a meter).
+ * Doors and windows are not listed: they belong to their room (select one by clicking it, or from its room's panel).
+ */
 export function everything(plan: FloorPlan, shown: (meterId: string) => boolean = () => true): Selection[] {
   return [
     ...plan.areas.filter(item => !item.insideRoom).map(item => ({ kind: "area" as const, key: item.key })), ...plan.rooms.map(item => ({ kind: "room" as const, key: item.key })),
-    ...plan.areas.filter(item => item.insideRoom).map(item => ({ kind: "area" as const, key: item.key })), ...(plan.labels ?? []).map(item => ({ kind: "label" as const, key: item.key })),
+    ...plan.areas.filter(item => item.insideRoom).map(item => ({ kind: "area" as const, key: item.key })), ...(plan.lines ?? []).map(item => ({ kind: "line" as const, key: item.key })), ...(plan.labels ?? []).map(item => ({ kind: "label" as const, key: item.key })),
     ...(plan.symbols ?? []).map(item => ({ kind: "symbol" as const, key: item.key })), ...(plan.entrance ? [{ kind: "entrance" as const, key: "entrance" }] : []),
     ...plan.devices.filter(item => shown(item.meterId)).map(item => ({ kind: "device" as const, key: item.meterId })),
   ];
@@ -73,15 +83,15 @@ export function everything(plan: FloorPlan, shown: (meterId: string) => boolean 
 export const inBox = (plan: FloorPlan, box: Rect, shown?: (meterId: string) => boolean) => everything(plan, shown).filter(item => { const at = extentOf(plan, item); return !!at && within(at, box); });
 
 /**
- * What rides along when the selection moves: the rooms, equipment and devices inside each selected area or room. A
+ * What rides along when the selection moves: the rooms, equipment, devices and lines inside each selected area or room. A
  * locked item still rides with the area it is in; only moving it on its own is blocked.
  */
 export function ridersOf(plan: FloorPlan, list: Selection[]): Riders {
   const riders = NO_PASSENGERS();
   for (const item of list) {
     if (isLocked(plan, item)) continue;
-    const { rooms, areas, devices } = passengers(plan, item);
-    rooms.forEach(key => riders.rooms.add(key)); areas.forEach(key => riders.areas.add(key)); devices.forEach(key => riders.devices.add(key));
+    const { rooms, areas, devices, lines } = passengers(plan, item);
+    rooms.forEach(key => riders.rooms.add(key)); areas.forEach(key => riders.areas.add(key)); devices.forEach(key => riders.devices.add(key)); lines.forEach(key => riders.lines.add(key));
   }
   return riders;
 }
@@ -91,7 +101,9 @@ export function ridersOf(plan: FloorPlan, list: Selection[]): Riders {
  * when it is both selected and inside another selected item, and the group stops together at the edge of the plan.
  */
 export function moveItems(plan: FloorPlan, list: Selection[], dx: number, dy: number, riders: Riders = ridersOf(plan, list)): FloorPlan {
-  const hosts = list.filter(item => exists(plan, item) && !isLocked(plan, item));
+  // A door or window only slides along its wall on its own; with other items it stays with its room.
+  const movable = list.filter(item => exists(plan, item) && !isLocked(plan, item));
+  const hosts = movable.length > 1 ? movable.filter(item => item.kind !== "opening") : movable;
   if (!hosts.length) return plan;
   if (hosts.length === 1) return moveSelection(plan, hosts[0]!, dx, dy, riders);
   const [mx, my] = clampDelta(hosts.map(item => extentOf(plan, item)!), [dx, dy], plan.viewBox);
@@ -108,6 +120,7 @@ export function moveItems(plan: FloorPlan, list: Selection[], dx: number, dy: nu
     entrance: plan.entrance && hosts.some(item => item.kind === "entrance") ? { ...plan.entrance, position: step(plan.entrance.position) } : plan.entrance,
     ...(plan.labels ? { labels: plan.labels.map(item => labels.has(item.key) ? shiftLabel(item, mx, my, plan.viewBox) : item) } : {}),
     ...(plan.symbols ? { symbols: plan.symbols.map(item => symbols.has(item.key) ? shiftSymbol(item, mx, my, plan.viewBox) : item) } : {}),
+    ...(plan.lines ? { lines: shiftLines(plan, keys("line", riders.lines), mx, my).lines } : {}),
   };
 }
 
@@ -133,7 +146,7 @@ export function turnItem(plan: FloorPlan, item: Selection, deg: number): FloorPl
  */
 export const removeItems = (plan: FloorPlan, list: Selection[]) => [...list.filter(item => item.kind !== "entrance"), ...list.filter(item => item.kind === "entrance")].filter(item => !isLocked(plan, item)).reduce((current, item) => exists(current, item) ? removeSelection(current, item) : current, plan);
 
-/** Locks or unlocks the selected areas, rooms, equipment, devices, text labels, landmarks and entrance. */
+/** Locks or unlocks the selected areas, rooms, equipment, devices, lines, text labels, landmarks and entrance (doors and windows lock with their room). */
 export function lockItems(plan: FloorPlan, list: Selection[], lock: boolean): FloorPlan {
   let changed = false;
   const set = <T extends { locked?: true }>(item: T, picked: boolean): T => {
@@ -145,7 +158,8 @@ export function lockItems(plan: FloorPlan, list: Selection[], lock: boolean): Fl
   };
   const next = { ...plan, areas: plan.areas.map(item => set(item, isIn(list, { kind: "area", key: item.key }))), rooms: plan.rooms.map(item => set(item, isIn(list, { kind: "room", key: item.key }))), devices: plan.devices.map(item => set(item, isIn(list, { kind: "device", key: item.meterId }))),
     entrance: plan.entrance ? set(plan.entrance, isIn(list, { kind: "entrance", key: "entrance" })) : null,
-    ...(plan.labels ? { labels: plan.labels.map(item => set(item, isIn(list, { kind: "label", key: item.key }))) } : {}), ...(plan.symbols ? { symbols: plan.symbols.map(item => set(item, isIn(list, { kind: "symbol", key: item.key }))) } : {}) };
+    ...(plan.labels ? { labels: plan.labels.map(item => set(item, isIn(list, { kind: "label", key: item.key }))) } : {}), ...(plan.symbols ? { symbols: plan.symbols.map(item => set(item, isIn(list, { kind: "symbol", key: item.key }))) } : {}),
+    ...(plan.lines ? { lines: plan.lines.map(item => set(item, isIn(list, { kind: "line", key: item.key }))) } : {}) };
   return changed ? next : plan;
 }
 
@@ -172,11 +186,15 @@ export function reorderItems(plan: FloorPlan, list: Selection[], where: "front" 
   const rooms = bump(plan.rooms, () => true, item => isIn(list, { kind: "room", key: item.key }));
   const devices = bump(plan.devices, () => true, item => isIn(list, { kind: "device", key: item.meterId }));
   const labels = plan.labels && bump(plan.labels, () => true, item => isIn(list, { kind: "label", key: item.key })), symbols = plan.symbols && bump(plan.symbols, () => true, item => isIn(list, { kind: "symbol", key: item.key }));
-  return changed ? { ...plan, areas, rooms, devices, ...(labels ? { labels } : {}), ...(symbols ? { symbols } : {}) } : plan;
+  const lines = plan.lines ? bump(plan.lines, () => true, item => isIn(list, { kind: "line", key: item.key })) : undefined;
+  return changed ? { ...plan, areas, rooms, devices, ...(labels ? { labels } : {}), ...(symbols ? { symbols } : {}), ...(lines ? { lines } : {}) } : plan;
 }
 
-/** What Copy holds: the areas and rooms picked, the rooms and equipment inside them, the text labels and landmarks picked, and which ones were picked. */
-export type Clip = { areas: PlanArea[]; rooms: PlanRoom[]; labels?: PlanLabel[]; symbols?: PlanSymbol[]; roots: Selection[] };
+/**
+ * What Copy holds: the areas, rooms and lines picked, the rooms and equipment inside them, the doors and windows of
+ * those rooms, the text labels and landmarks picked, and which ones were picked.
+ */
+export type Clip = { areas: PlanArea[]; rooms: PlanRoom[]; labels?: PlanLabel[]; symbols?: PlanSymbol[]; roots: Selection[]; lines?: PlanLine[]; openings?: PlanOpening[] };
 /**
  * Copies the selected areas, rooms and equipment, with the rooms and equipment inside them. Devices and the entrance
  * are not copied: each meter is placed on the plan once, and a site has one main entrance. Null when nothing can be copied.
@@ -192,10 +210,12 @@ export function copyItems(plan: FloorPlan, list: Selection[]): Clip | null {
     }
     if (item.kind === "room" && plan.rooms.some(entry => entry.key === item.key)) { roomKeys.add(item.key); roots.push(item); }
     if ((item.kind === "label" || item.kind === "symbol") && exists(plan, item)) roots.push(item);
+    if (item.kind === "line" && findLine(plan, item.key)) roots.push(item);
   }
   for (const item of plan.areas) if (item.insideRoom && roomKeys.has(item.insideRoom)) areaKeys.add(item.key);
   const labels = (plan.labels ?? []).filter(item => isIn(roots, { kind: "label", key: item.key })), symbols = (plan.symbols ?? []).filter(item => isIn(roots, { kind: "symbol", key: item.key }));
-  return roots.length ? { areas: plan.areas.filter(item => areaKeys.has(item.key)), rooms: plan.rooms.filter(item => roomKeys.has(item.key)), ...(labels.length ? { labels } : {}), ...(symbols.length ? { symbols } : {}), roots } : null;
+  const lines = (plan.lines ?? []).filter(line => isIn(roots, { kind: "line", key: line.key })), openings = (plan.openings ?? []).filter(opening => roomKeys.has(opening.room));
+  return roots.length ? { areas: plan.areas.filter(item => areaKeys.has(item.key)), rooms: plan.rooms.filter(item => roomKeys.has(item.key)), ...(labels.length ? { labels } : {}), ...(symbols.length ? { symbols } : {}), roots, ...(lines.length ? { lines } : {}), ...(openings.length ? { openings } : {}) } : null;
 }
 
 const LETTERS = Array.from({ length: 26 }, (_, index) => String.fromCharCode(65 + index));
@@ -227,11 +247,7 @@ export function uniqueRoomName(name: string, taken: Set<string>, max = ROOM_NAME
     if (!taken.has(candidate)) return candidate;
   }
 }
-/** A new stable room id no other room has. */
-export function newRoomId(taken: Iterable<string>): string {
-  const used = new Set(taken);
-  for (;;) { const id = `rm-${Math.random().toString(36).slice(2, 10).padEnd(8, "0")}`; if (!used.has(id)) return id; }
-}
+export { newRoomId };
 export const roomIds = (plan: FloorPlan) => plan.rooms.flatMap(room => room.id ? [room.id] : []);
 /**
  * Whether adding `areas` areas and `rooms` rooms keeps the plan within what a saved layout can hold. `hidden` is how
@@ -257,7 +273,7 @@ export function newMarkId(plan: FloorPlan, prefix: "lb" | "sy"): string {
  */
 export function pasteClip(plan: FloorPlan, clip: Clip, offset: number, copyOf: (name: string) => string, reserved: string[] = []): { plan: FloorPlan; selection: Selection[] } {
   const unit = plan.viewBox[2] / 100;
-  const [dx, dy] = clampDelta([...clip.areas.map(item => item.rect), ...clip.rooms.map(item => item.rect), ...(clip.labels ?? []).map(item => labelBounds(item, unit)), ...(clip.symbols ?? []).map(item => symbolBounds(item, unit))], [offset, offset], plan.viewBox);
+  const [dx, dy] = clampDelta([...clip.areas.map(item => item.rect), ...clip.rooms.map(item => item.rect), ...(clip.labels ?? []).map(item => labelBounds(item, unit)), ...(clip.symbols ?? []).map(item => symbolBounds(item, unit)), ...(clip.lines ?? []).map(lineBox)], [offset, offset], plan.viewBox);
   const shift = (rect: Rect): Rect => clampRect([rect[0] + dx, rect[1] + dy, rect[2], rect[3]], plan.viewBox);
   const keys = new Set([...plan.areas.map(item => item.key), ...plan.rooms.map(item => item.key)]);
   const fresh = (prefix: string) => { let number = 1; while (keys.has(`${prefix}-copy-${number}`)) number += 1; const key = `${prefix}-copy-${number}`; keys.add(key); return key; };
@@ -287,10 +303,19 @@ export function pasteClip(plan: FloorPlan, clip: Clip, offset: number, copyOf: (
   let withIds: FloorPlan = plan;
   const newLabels = (clip.labels ?? []).map((source): PlanLabel => { const { locked: _locked, asSaved: _saved, ...copy } = freshCopy(source), key = markKey("label"), id = newMarkId(withIds, "lb"); labelKeys.set(source.key, key); const next = shiftLabel({ ...copy, key, id }, dx, dy, plan.viewBox); withIds = { ...withIds, labels: [...(withIds.labels ?? []), next] }; return next; });
   const newSymbols = (clip.symbols ?? []).map((source): PlanSymbol => { const { locked: _locked, asSaved: _saved, ...copy } = freshCopy(source), key = markKey("symbol"), id = newMarkId(withIds, "sy"); symbolKeys.set(source.key, key); const next = shiftSymbol({ ...copy, key, id }, dx, dy, plan.viewBox); withIds = { ...withIds, symbols: [...(withIds.symbols ?? []), next] }; return next; });
-  const keyMaps: Partial<Record<Selection["kind"], Map<string, string>>> = { area: areaKeys, room: roomKeys, label: labelKeys, symbol: symbolKeys };
+  // Lines get new keys and start unlocked; doors and windows come with the copies of their rooms.
+  const lineKeys = new Map<string, string>(), taken = new Set((plan.lines ?? []).map(item => item.key));
+  const lines = (clip.lines ?? []).slice(0, Math.max(0, MAX_LINES - taken.size)).map((source): PlanLine => {
+    const { locked: _locked, savedPoints: _saved, ...copy } = freshCopy(source);
+    let number = 1; while (taken.has(`ln-copy-${number}`)) number += 1;
+    const key = `ln-copy-${number}`; taken.add(key); lineKeys.set(source.key, key);
+    return { ...copy, key, points: source.points.map(([x, y]) => inside([x + dx, y + dy], plan.viewBox)) };
+  });
+  const openings = copiedOpenings(plan, clip.openings ?? [], roomKeys);
+  const keyMaps: Partial<Record<Selection["kind"], Map<string, string>>> = { area: areaKeys, room: roomKeys, label: labelKeys, symbol: symbolKeys, line: lineKeys };
   const selection = clip.roots.flatMap((root): Selection[] => { const key = keyMaps[root.kind]?.get(root.key); return key ? [{ kind: root.kind, key }] : []; });
   // A plan left with no main entrance takes the first pasted entrance as it (so `layout.entrance` is written from it).
-  const pasted = settleRooms({ ...plan, areas: [...plan.areas, ...areas], rooms: [...plan.rooms, ...rooms], ...(newLabels.length ? { labels: [...(plan.labels ?? []), ...newLabels] } : {}), ...(newSymbols.length ? { symbols: [...(plan.symbols ?? []), ...newSymbols] } : {}) });
+  const pasted = settleRooms({ ...plan, areas: [...plan.areas, ...areas], rooms: [...plan.rooms, ...rooms], ...(newLabels.length ? { labels: [...(plan.labels ?? []), ...newLabels] } : {}), ...(newSymbols.length ? { symbols: [...(plan.symbols ?? []), ...newSymbols] } : {}), ...(lines.length ? { lines: [...(plan.lines ?? []), ...lines] } : {}), ...(openings.length ? { openings: [...(plan.openings ?? []), ...openings] } : {}) });
   const next = promoteEntrance(pasted);
   if (next === pasted) return { plan: next, selection };
   const left = new Set((next.symbols ?? []).map(entry => entry.key));

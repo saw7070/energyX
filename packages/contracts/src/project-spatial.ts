@@ -1,3 +1,5 @@
+import { lineWidth, spatialLines, type SpatialLine, type SpatialOpening } from "./project-spatial-drawing.js";
+
 /** Project-owned reference geometry. It never establishes electrical aggregation. */
 export type SpatialRect = [number, number, number, number];
 export interface ProjectSpatialReference {
@@ -6,7 +8,8 @@ export interface ProjectSpatialReference {
   provenance: { file: string; status: string };
   layout: {
     viewBox: SpatialRect;
-    rooms: Array<{ name: string; zone: string; rect: SpatialRect }>;
+    /** `autoDoor: false` leaves out the door drawn for a room automatically (see project-spatial-drawing). */
+    rooms: Array<{ name: string; zone: string; rect: SpatialRect; id?: string; autoDoor?: false }>;
     /**
      * `referenceBoard` is the panel an electrician looks for on the plan, or ""
      * when none is named: the plan is a drawing only, so a panel is optional.
@@ -16,6 +19,9 @@ export interface ProjectSpatialReference {
      * one does not quietly empty the zone.
      */
     zones: Array<{ id: string; referenceBoard: string; meterLocations?: string[]; rect?: SpatialRect; independentSpace?: boolean; physicalParentRoom?: string; equipment?: string }>;
+    /** Drawing only, optional and untrusted: read them through spatialOpenings and spatialLines. */
+    openings?: SpatialOpening[];
+    lines?: SpatialLine[];
   };
 }
 const text = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= 300;
@@ -129,6 +135,8 @@ export function renderProjectSpatialSvg(ref: ProjectSpatialReference): string {
     const subgroup = ref.layout.zones.filter(z => z.independentSpace === false && z.physicalParentRoom === r.name);
     return box(r.rect, "#ffffff") + lines.map((s, i) => label(s, rx + rw / 2, ry + rh / 2 + (i - (lines.length - 1) / 2) * 17)).join("") + subgroup.map((z, i) => label([z.referenceBoard, "subgroup"].filter(Boolean).join(" · "), rx + rw / 2, ry + rh - 13 - i * 16, 11)).join("");
   }).join("");
+  // Walls, fences and road edges drawn on the layout, as plain lines (fences dashed).
+  const lines = spatialLines(ref.layout).map(line => `<polyline points="${line.points.map(point => point.join(",")).join(" ")}" fill="none" stroke="${line.style === "partition" ? "#7d8f90" : "#203b42"}" stroke-width="${+(lineWidth(line.style, line.thickness) * w / 100).toFixed(2)}" stroke-linecap="round" stroke-linejoin="round"${line.style === "fence" ? ` stroke-dasharray="${+(w / 100).toFixed(2)} ${+(w / 160).toFixed(2)}"` : ""}/>`).join("");
   // Text labels and landmarks are drawing only: text as written (turned when it is turned), an entrance as an arrow, and
   // every other landmark as a small ring with its caption.
   const turn = (deg: number | undefined, px: number, py: number) => deg ? ` transform="rotate(${deg} ${px} ${py})"` : "";
@@ -140,5 +148,5 @@ export function renderProjectSpatialSvg(ref: ProjectSpatialReference): string {
     if (item.kind === "entrance") return `<path d="M${px - 12} ${py + 18} L${px} ${py} L${px + 12} ${py + 18} Z" fill="${colour}"${turn(item.rotation, px, py)}/>` + (caption ? `<text x="${px}" y="${py + 34}" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="${colour}">${caption}</text>` : "");
     return `<circle cx="${px}" cy="${py}" r="8" fill="white" stroke="${colour}" stroke-width="2"/><circle cx="${px}" cy="${py}" r="2.5" fill="${colour}"/>` + (caption ? `<text x="${px}" y="${py + 22}" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="${colour}">${caption}</text>` : "");
   }).join("");
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${x} ${y} ${w} ${h}" role="img" aria-label="Project spatial reference"><title>Spaces and meter distribution</title><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="white"/>${zones}${rooms}${texts}${marks}${label("Illustrative schematic · not to scale · reference-derived", x + w / 2, y + h - 16, 12)}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${x} ${y} ${w} ${h}" role="img" aria-label="Project spatial reference"><title>Spaces and meter distribution</title><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="white"/>${zones}${rooms}${lines}${texts}${marks}${label("Illustrative schematic · not to scale · reference-derived", x + w / 2, y + h - 16, 12)}</svg>`;
 }
