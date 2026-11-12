@@ -12,6 +12,28 @@ const lightCount = (presentation: EnergyIqMeterPresentation | undefined): number
   return Number.isSafeInteger(count) && count > 0 ? count : null;
 };
 
+type GroupNode = { id: string; name: string; node_type?: string | null; parent_id?: string | null };
+type GroupMeter = { scope_id: string; navigation_scope_id?: string | null; display_name?: string; source_label?: string; presentation?: EnergyIqMeterPresentation };
+const sameName = (left: string | undefined | null, right: string | undefined | null) => !!left && !!right && left.trim().toLocaleLowerCase() === right.trim().toLocaleLowerCase();
+
+/**
+ * Circuit nodes that are really groups people made. A circuit node used to stand for one meter (named after it), and
+ * reports file that meter under the node's parent. Groups made in Facility → Floor layout can carry the circuit tier
+ * too ("Ground floor", "Block lighting" inside a block), so a circuit node counts as a group when it holds more than one
+ * meter, has groups inside it, or is named differently from the one meter it holds.
+ */
+export function circuitGroupIds(nodes: GroupNode[], meters: GroupMeter[]): Set<string> {
+  const groups = new Set<string>();
+  for (const node of nodes) {
+    if (node.node_type !== "circuit") continue;
+    const inside = meters.filter(meter => (meter.navigation_scope_id ?? meter.scope_id) === node.id);
+    const hasChildren = nodes.some(other => other.parent_id === node.id);
+    const namedAfterItsMeter = inside.length === 1 && [inside[0]!.presentation?.device_name, inside[0]!.presentation?.circuit_name, inside[0]!.presentation?.short_name, inside[0]!.display_name, inside[0]!.source_label].some(name => sameName(name, node.name));
+    if (inside.length > 1 || hasChildren || (inside.length === 1 && !namedAfterItsMeter)) groups.add(node.id);
+  }
+  return groups;
+}
+
 /** Published customer information only; do not return setup documents or policy catalogs. */
 export function readEnergyProjectInformation(metadata: MetadataStore, userId: string, workspaceId: string, projectId: string) {
   if (!resolveEnergyProjectCapabilities({ metadataStore: metadata, userId, workspaceId, projectId }).readProjectInformation) throw Error("ENERGYIQ_PROJECT_FORBIDDEN");
@@ -24,7 +46,9 @@ export function readEnergyProjectInformation(metadata: MetadataStore, userId: st
   const document = JSON.parse(revision.snapshot_json) as EnergyIqProjectSetupDocument;
   const rows = document.meter_mapping?.rows ?? [];
   const byId = new Map(nodes.map(node => [node.id, node]));
-  const locationId = (id: string) => byId.get(id)?.node_type === "circuit" ? byId.get(id)?.parent_id ?? project.root_scope_id : id;
+  const groupCircuits = circuitGroupIds(nodes, rows);
+  const isLocation = (node: { id: string; node_type?: string | null }) => node.node_type !== "circuit" || groupCircuits.has(node.id);
+  const locationId = (id: string) => { const node = byId.get(id); return node && !isLocation(node) ? node.parent_id ?? project.root_scope_id : id; };
   const names = new Map(nodes.map(node => [node.id, node.name]));
   const calendarVersion = published ? published.business_calendar_version : project.business_calendar_version;
   const tariffVersion = published ? published.tariff_schedule_version : project.tariff_schedule_version;
@@ -42,7 +66,7 @@ export function readEnergyProjectInformation(metadata: MetadataStore, userId: st
   return {
     projectId, name: document.project.name, timezone: document.project.timezone, basis: "published" as const,
     // `sortOrder`: the order someone saved among the groups beside it, so reports list groups the same way.
-    locations: nodes.filter(node => node.node_type !== "circuit").map(node => ({ id: node.id, name: node.name, parentId: node.parent_id ?? null, sortOrder: node.sort_order })),
+    locations: nodes.filter(isLocation).map(node => ({ id: node.id, name: node.name, parentId: node.parent_id ?? null, sortOrder: node.sort_order })),
     meters: rows.map(meter => ({ id: meter.id, name: meter.presentation?.short_name?.trim() || meter.presentation?.device_name?.trim() || meter.presentation?.circuit_name?.trim() || meter.display_name || meter.source_label,
       ...(meter.presentation?.short_name?.trim() ? { fullName: meter.presentation?.device_name?.trim() || meter.presentation?.circuit_name?.trim() || meter.display_name || meter.source_label } : {}),
       ...(meter.presentation?.panel?.trim() ? { panel: meter.presentation.panel.trim() } : {}),

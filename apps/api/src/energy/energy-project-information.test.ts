@@ -78,3 +78,19 @@ it("gives each location the order it was saved in", () => {
   expect(locations.length).toBeGreaterThan(1);
   expect(locations.every(location => typeof location.sortOrder === "number")).toBe(true);
 });
+
+it("keeps groups made inside a block as groups, while a circuit named after its one meter still files under its parent", async () => {
+  const { circuitGroupIds } = await import("./energy-project-information.js");
+  const nodes = [
+    { id: "block", name: "Block A", node_type: "location", parent_id: null },
+    { id: "gf", name: "Ground floor", node_type: "circuit", parent_id: "block" },
+    { id: "emergency", name: "Emergency lights", node_type: "circuit", parent_id: "block" },
+    { id: "old-circuit", name: "Lobby lights", node_type: "circuit", parent_id: "block" },
+    { id: "nested", name: "Upper floors", node_type: "circuit", parent_id: "block" },
+    { id: "nested-child", name: "Level 2", node_type: "circuit", parent_id: "nested" },
+  ];
+  const meter = (scope: string, name: string) => ({ scope_id: scope, display_name: name, source_label: name, presentation: { device_name: name } });
+  const meters = [meter("gf", "Lobby A"), meter("gf", "Lobby B"), meter("emergency", "Block A Emergency Lighting"), meter("old-circuit", "Lobby lights"), meter("nested-child", "Stair lights")];
+  // Two meters, one meter under a group name, and a group with a group inside it are groups; a circuit named after its meter is not.
+  expect([...circuitGroupIds(nodes, meters)].sort()).toEqual(["emergency", "gf", "nested", "nested-child"]);
+});
