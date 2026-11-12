@@ -254,12 +254,12 @@ export function uniqueRoomName(name: string, taken: Set<string>, max = ROOM_NAME
   }
 }
 export { newRoomId };
-export const roomIds = (plan: FloorPlan) => plan.rooms.flatMap(room => room.id ? [room.id] : []);
+export const roomIds = (plan: FloorPlan) => [...plan.rooms.flatMap(room => room.id ? [room.id] : []), ...(plan.elsewhere?.ids ?? [])];
 /**
  * Whether adding `areas` areas and `rooms` rooms keeps the plan within what a saved layout can hold. `hidden` is how
  * many areas the layout holds that are not on the drawing: they count too.
  */
-export const fitsLimits = (plan: FloorPlan, hidden: number, areas: number, rooms: number) => plan.areas.length + hidden + areas <= MAX_AREAS && plan.rooms.length + rooms <= MAX_ROOMS;
+export const fitsLimits = (plan: FloorPlan, hidden: number, areas: number, rooms: number) => plan.areas.length + (plan.elsewhere?.areas ?? 0) + hidden + areas <= MAX_AREAS && plan.rooms.length + (plan.elsewhere?.rooms ?? 0) + rooms <= MAX_ROOMS;
 /** Whether adding `labels` text labels and `symbols` landmarks keeps the plan within what a saved layout can hold (entries kept aside count too). */
 export const fitsMarks = (plan: FloorPlan, labels: number, symbols: number) => (plan.labels?.length ?? 0) + (plan.carried?.labels?.length ?? 0) + labels <= MARK_LIMIT && (plan.symbols?.length ?? 0) + (plan.entrance ? 1 : 0) + (plan.carried?.symbols?.length ?? 0) + symbols <= MARK_LIMIT;
 /** A new id for a text label or landmark (letters, digits and -), unlike any other on the plan. */
@@ -281,11 +281,12 @@ export function pasteClip(plan: FloorPlan, clip: Clip, offset: number, copyOf: (
   const unit = plan.viewBox[2] / 100;
   const [dx, dy] = clampDelta([...clip.areas.map(item => item.rect), ...clip.rooms.map(item => item.rect), ...(clip.labels ?? []).map(item => labelBounds(item, unit)), ...(clip.symbols ?? []).map(item => symbolBounds(item, unit)), ...(clip.lines ?? []).map(lineBox), ...(clip.shapes ?? []).map(item => item.rect)], [offset, offset], plan.viewBox);
   const shift = (rect: Rect): Rect => clampRect([rect[0] + dx, rect[1] + dy, rect[2], rect[3]], plan.viewBox);
-  const keys = new Set([...plan.areas.map(item => item.key), ...plan.rooms.map(item => item.key)]);
+  // Keys, labels and names on other floors are taken too (see floor-plan-levels).
+  const keys = new Set([...plan.areas.map(item => item.key), ...plan.rooms.map(item => item.key), ...(plan.elsewhere?.keys ?? [])]);
   const fresh = (prefix: string) => { let number = 1; while (keys.has(`${prefix}-copy-${number}`)) number += 1; const key = `${prefix}-copy-${number}`; keys.add(key); return key; };
   const areaKeys = new Map(clip.areas.map(item => [item.key, fresh(item.insideRoom ? "group" : "area")]));
   const roomKeys = new Map(clip.rooms.map(item => [item.key, fresh("room")]));
-  const labels = new Set([...plan.areas.map(item => item.label.trim()), ...reserved]), names = new Set(plan.rooms.map(item => item.name.trim())), ids = new Set(roomIds(plan));
+  const labels = new Set([...plan.areas.map(item => item.label.trim()), ...reserved, ...(plan.elsewhere?.labels ?? [])]), names = new Set([...plan.rooms.map(item => item.name.trim()), ...(plan.elsewhere?.names ?? [])]), ids = new Set(roomIds(plan));
   const areas = clip.areas.map((source): PlanArea => {
     const { locked: _locked, boardFilled: _filled, ...copy } = freshCopy(source);
     const label = uniqueLabel(source.label, labels, copyOf); labels.add(label);
@@ -295,8 +296,9 @@ export function pasteClip(plan: FloorPlan, clip: Clip, offset: number, copyOf: (
     return room ? { ...next, insideRoom: room } : asOwnArea(next);
   });
   const rooms = clip.rooms.map((source): PlanRoom => {
-    const { locked: _locked, zone: _zone, zoneRect: _zoneRect, area: from, ...copy } = freshCopy(source);
-    const name = uniqueRoomName(source.name, names); names.add(name);
+    // A copy is named from the name shown ("Store" for "Store (2)"), and needs no short name of its own.
+    const { locked: _locked, zone: _zone, zoneRect: _zoneRect, area: from, displayName: _shown, ...copy } = freshCopy(source);
+    const name = uniqueRoomName(source.displayName ?? source.name, names); names.add(name);
     const id = newRoomId(ids); ids.add(id);
     const area = from === undefined ? undefined : areaKeys.get(from) ?? from, rect = shift(source.rect);
     // Filed under an area not on the drawing (and not moved out of it): the copy is filed there too.

@@ -35,7 +35,7 @@ export const AreaShape = memo(function AreaShape({ item, colour, name, unit, lab
 export const RoomShape = memo(function RoomShape({ room, colour, pinned, unit, label, onDown }: Common & { room: PlanRoom; colour: string | undefined; pinned: boolean }) {
   // A free-shape room is drawn as its outline, its name in its largest part.
   const corners = cornersOf(room), [x, y, w, h] = corners ? insideBox(room) : room.rect;
-  const size = Math.min(unit * 1.75, w / 7), lines = wrapLabel(room.name, Math.max(6, Math.floor(w / (size * 0.56))));
+  const size = Math.min(unit * 1.75, w / 7), lines = wrapLabel(room.displayName ?? room.name, Math.max(6, Math.floor(w / (size * 0.56))));
   const top = pinned ? y + size * 1.5 : y + h / 2 + size * 0.35 - (lines.length - 1) * size * 0.6;
   const look = { className: `${mapStyles.room} ${colour ? "" : styles.orphan}`, style: room.colour ? { stroke: room.colour, fill: `color-mix(in srgb, ${room.colour} 12%, white)` } : colour ? { stroke: colour } : undefined };
   return <g className={itemClass(room.locked)} {...focusable(`room:${room.key}`, label)} onPointerDown={event => onDown(event, { kind: "room", key: room.key })}>

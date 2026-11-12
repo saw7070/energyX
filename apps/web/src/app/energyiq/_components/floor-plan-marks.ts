@@ -19,7 +19,7 @@ export const LABEL_SIZES: LabelSize[] = ["s", "m", "l"];
  * A free text label. `position` is the middle of the text; `rotation` is in degrees, clockwise (missing = 0). `key` is the
  * editor's own; `id` is the saved one (new labels get one; a label saved without one keeps working without it).
  */
-export type PlanLabel = { key: string; text: string; position: Point; size?: LabelSize; rotation?: number; colour?: string; bold?: true; locked?: true; id?: string; asSaved?: AsSaved } & Carried;
+export type PlanLabel = { key: string; text: string; position: Point; size?: LabelSize; rotation?: number; colour?: string; bold?: true; locked?: true; id?: string; asSaved?: AsSaved; level?: string } & Carried;
 /**
  * Saved values the checks tidied before drawing (text trimmed or cut to 80 characters, a turn of -15 read as 345, a size
  * or position with decimals), by key: `raw` as written, `read` as the editor first held it. While the item still holds
@@ -30,7 +30,7 @@ export type AsSaved = Record<string, { raw: unknown; read: unknown }>;
  * A landmark: an icon of `kind` (a kind this version does not know is kept and drawn as a dot) with an optional caption
  * under it. `position` is its middle (an entrance's is the tip of its arrow); `size` its width in plan units.
  */
-export type PlanSymbol = { key: string; kind: string; position: Point; size?: number; rotation?: number; label?: string; colour?: string; locked?: true; id?: string; asSaved?: AsSaved } & Carried;
+export type PlanSymbol = { key: string; kind: string; position: Point; size?: number; rotation?: number; label?: string; colour?: string; locked?: true; id?: string; asSaved?: AsSaved; level?: string } & Carried;
 /** Turning offered by the buttons and the handle (hold ⌘/Ctrl on the handle to turn freely). */
 export const ROTATION_STEP = 15;
 /** Whole degrees, 0-359. */

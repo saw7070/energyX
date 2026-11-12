@@ -19,7 +19,7 @@ export const SHAPE_OUTLINE_STYLES = SHAPE_OUTLINES;
  * A polygon holds its corners as `outline`, fractions of `rect` (see floor-plan-polygon), so moving or resizing its box
  * moves and stretches it.
  */
-export type PlanShape = { key: string; id: string; kind: ShapeKind; rect: Rect; outline?: Point[]; fill?: string; stroke?: ShapeOutline; label?: string; locked?: true } & Carried;
+export type PlanShape = { key: string; id: string; kind: ShapeKind; rect: Rect; outline?: Point[]; fill?: string; stroke?: ShapeOutline; label?: string; locked?: true; level?: string } & Carried;
 /** Fill for a new shape: a soft green, like grass on a site plan. */
 export const DEFAULT_SHAPE_FILL = "#9cc5a1";
 const SHAPE_KEYS = ["id", "kind", "rect"];

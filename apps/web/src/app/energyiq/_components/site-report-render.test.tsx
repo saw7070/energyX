@@ -157,3 +157,54 @@ describe("free shapes in the report's floor plan", () => {
     expect(file).not.toContain("<polygon"); expect(file).not.toContain("data-shape");
   });
 });
+
+describe("a site with floors", () => {
+  // The Tuya Office with its block A moved to a second floor.
+  const FLOORS = { ...REFERENCE, layout: { ...REFERENCE.layout, levels: [{ id: "g", name: "Ground" }, { id: "l2", name: "Level 2" }],
+    zones: REFERENCE.layout.zones.map(zone => zone.id === "A" ? { ...zone, level: "l2" } : zone),
+    rooms: REFERENCE.layout.rooms.map(room => room.zone === "A" ? { ...room, level: "l2", ...(room.name === "Open office" ? { name: "Open office (2)", displayName: "Open office" } : {}) } : room) } } as unknown as ProjectSpatialReference;
+  it("draws each floor as its own plan, with only that floor's areas and rooms", () => {
+    const file = renderSiteReportHtml(buildSiteReport(DATA, FLOORS, GENERATED, "en"));
+    const plans = file.split('<svg class="plan"').slice(1).map(part => part.slice(0, part.indexOf("</svg>")));
+    expect(plans).toHaveLength(2);
+    expect(file).toContain('<h3 class="plan-level">Ground</h3>');
+    expect(file).toContain('<h3 class="plan-level">Level 2</h3>');
+    expect(plans[0]).toContain("Showroom");
+    expect(plans[0]).not.toContain("Director room");
+    // The short name is shown; the stored name stays unique.
+    expect(plans[1]).toContain("Open office");
+    expect(plans[1]).not.toContain("Open office (2)");
+    expect(plans[1]).not.toContain("Showroom");
+    expect(plans[1]).toContain('aria-label="Simplified floor plan of Tuya Office, Level 2"');
+  });
+  it("keeps equipment that names no floor with its room, on that room's floor, and names rooms by their short name", () => {
+    // Block A on Level 2 lists no rooms of its own, and the LED panels (naming no floor) sit in the Director room there.
+    const layout = FLOORS.layout as unknown as { zones: Array<Record<string, unknown>> };
+    const moved = { ...FLOORS, layout: { ...FLOORS.layout, zones: layout.zones.map(zone => zone.id === "A" ? (({ rooms: _rooms, ...rest }) => rest)(zone) : zone.id === "C" ? { ...zone, physicalParentRoom: "Director room" } : zone) } } as unknown as ProjectSpatialReference;
+    const file = renderSiteReportHtml(buildSiteReport(DATA, moved, GENERATED, "en"));
+    const plans = file.split('<svg class="plan"').slice(1).map(part => part.slice(0, part.indexOf("</svg>")));
+    expect(plans).toHaveLength(2);
+    expect(plans[0]).not.toContain("Three large LED panels");
+    expect(plans[1]).toContain("Three large LED panels");
+    expect(file).not.toContain("Open office (2)");
+  });
+  it("hides on the plan the layers hidden on the shared map", () => {
+    const hidden = { ...REFERENCE, layout: { ...REFERENCE.layout, layers: { hidden: ["rooms", "equipment", "symbols", "unknown"] } } } as unknown as ProjectSpatialReference;
+    const planOf = (reference: ProjectSpatialReference) => { const file = renderSiteReportHtml(buildSiteReport(DATA, reference, GENERATED, "en")); const part = file.split('<svg class="plan"')[1]!; return part.slice(0, part.indexOf("</svg>")); };
+    expect(planOf(REFERENCE)).toContain("Pantry");
+    expect(planOf(REFERENCE)).toContain("Main entrance gate");
+    const plan = planOf(hidden);
+    expect(plan).not.toContain("Pantry");
+    expect(plan).not.toContain("Three large LED panels");
+    expect(plan).not.toContain("Main entrance gate");
+  });
+  it("draws a one-floor site exactly as before: one plan, no floor heading", () => {
+    const file = renderSiteReportHtml(buildSiteReport(DATA, REFERENCE, GENERATED, "en"));
+    expect(file.split('<svg class="plan"')).toHaveLength(2);
+    expect(file).not.toContain(`class="plan-level"`);
+  });
+  it("is the same document on the page and in the saved file", async () => {
+    const report = buildSiteReport(DATA, FLOORS, GENERATED, "zh-Hans");
+    expect(canonicalStyles(asParsed(articleOf(renderSiteReportHtml(report))))).toBe(canonicalStyles(await onThePage(report)));
+  });
+});

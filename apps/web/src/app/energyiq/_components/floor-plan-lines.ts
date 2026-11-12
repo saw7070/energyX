@@ -12,7 +12,7 @@ import { carriedOf, withCarried, type Carried } from "./floor-plan-carry";
 import type { FloorPlan, Point, Rect } from "./floor-plan-model";
 
 /** `savedPoints` holds the points as saved while `points` is still the list read with them (any change makes a new list). */
-export type PlanLine = { key: string; points: Point[]; style: SpatialLineStyle; thickness?: SpatialLineThickness; locked?: true; savedPoints?: { read: Point[]; value: Array<[number, number]> } } & Carried;
+export type PlanLine = { key: string; points: Point[]; style: SpatialLineStyle; thickness?: SpatialLineThickness; locked?: true; savedPoints?: { read: Point[]; value: Array<[number, number]> }; level?: string } & Carried;
 export { MAX_LINE_POINTS, MAX_LINES };
 
 /** A point kept inside the plan, and never past what a saved line may hold (0 to MAX_LINE_COORD). */

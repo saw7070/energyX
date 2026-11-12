@@ -6,7 +6,7 @@
  * 1 property profile & circuit map, 2 30-day estimate & bill, 3 weekday / weekend / base-load benchmark,
  * 4 weekday hour-by-hour pattern, 5 abnormality screening by circuit.
  */
-import { polygonOf, type ProjectSpatialReference } from "@datafoundry/contracts";
+import { polygonOf, spatialRoomTitle, type ProjectSpatialReference } from "@datafoundry/contracts";
 import type { AnalysisData, ScopeData, ScopeMeter, TrendSeries } from "./analysis-types.js";
 import { alwaysOnKw, effectiveHours, hoursRangeLabel, isOvernight, localDayType, openWindowStart, quietHours, scopeDays, shortDate, timeBuckets, weekdayShort, type AnalysisCategory, type AnalysisDay, type HoursMeaning } from "./analysis-model.js";
 import { listText } from "./analysis-messages.js";
@@ -406,13 +406,15 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
     ])
     : groupsIntro ?? t("profile.grouped", { boards: boardsText, zones: zonesText });
   const meteredAs = (zone: ReportZone) => zone.circuitKeys.length ? list(zone.circuitKeys.map(key => { const item = circuits.find(circuit => circuit.key === key)!; return t("metered.item", { name: inl(item.name), code: item.code }); })) : t("metered.none");
+  // A room by its shown name: the stored one can carry a floor suffix ("Store (2)") that the reader never typed.
+  const roomShown = (name: string) => { const room = reference?.layout.rooms.find(item => item.name === name); return room ? spatialRoomTitle(room) : name; };
   const direction = (value: string) => value === "left" || value === "right" ? t(`direction.${value}`) : value;
   const profileZones = groupTree ? groupProfile(groupTree, { t, list, paragraph, inl }) : zones.map(zone => zone.subgroup
     ? { heading: t("zone.subHeading", { zone: zone.label, board: zone.board }), text: t(zone.parentRoom ? "zone.subText" : "zone.subTextNoRoom", {
       equipment: zone.equipment ? en ? zone.equipment.charAt(0).toLowerCase() + zone.equipment.slice(1) : zone.equipment : t("zone.equipment"),
-      room: zone.parentRoom ? en ? zone.parentRoom.toLowerCase() : zone.parentRoom : "", metered: meteredAs(zone), board: zone.board, zone: zone.label }) }
+      room: zone.parentRoom ? en ? roomShown(zone.parentRoom).toLowerCase() : roomShown(zone.parentRoom) : "", metered: meteredAs(zone), board: zone.board, zone: zone.label }) }
     : { heading: t(zone.direction ? "zone.headingDirection" : "zone.heading", { zone: zone.label, direction: zone.direction ? direction(zone.direction) : "", board: zone.board }),
-      text: t(zone.rooms.length ? "zone.textRooms" : "zone.text", { rooms: list(zone.rooms), metered: meteredAs(zone) }) });
+      text: t(zone.rooms.length ? "zone.textRooms" : "zone.text", { rooms: list(zone.rooms.map(roomShown)), metered: meteredAs(zone) }) });
   const hasMap = !!reference && zones.some(zone => !zone.subgroup && zone.rect);
   const captionPlace = [data.projectName, place].filter(Boolean).join(", ");
   const profileCaption = t("profile.caption", { where: property?.occupancyExtent || property?.approximateAreaM2
