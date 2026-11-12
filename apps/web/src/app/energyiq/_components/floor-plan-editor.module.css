@@ -353,3 +353,11 @@
 :global(:where(html[data-energyiq-theme="dark"])) .layerList li, :global(:where(html[data-energyiq-theme="dark"])) .repeatGrid label { color:#e6ede9; }
 :global(:where(html[data-energyiq-theme="dark"])) .layerOff { color:#6f7a74; }
 :global(:where(html[data-energyiq-theme="dark"])) .templateRow input { background:#191919; border-color:#32363b; color:#e6ede9; }
+
+/* The editor's keys and tips, folded away under one line so the header stays short. */
+.tips { margin-top:6px; font-size:12.5px; color:#58645d; }
+.tips summary { cursor:pointer; width:max-content; font-weight:600; color:#1f6a48; }
+.tips summary:focus-visible { outline:2px solid #1f7a52; outline-offset:2px; border-radius:4px; }
+.tips ul { margin:6px 0 0; padding-left:18px; display:grid; gap:3px; max-width:80ch; }
+:global(:where(html[data-energyiq-theme="dark"])) .tips { color:#9aa8a0; }
+:global(:where(html[data-energyiq-theme="dark"])) .tips summary { color:#7fcfa6; }

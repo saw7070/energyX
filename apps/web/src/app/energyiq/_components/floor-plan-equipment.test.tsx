@@ -114,9 +114,10 @@ it("tells people how to pick several items, copy them, and nudge an area without
   const root = createRoot(host);
   try {
     await act(async () => root.render(<EnergyIqLocaleProvider><FloorPlanEditor projectId="office" notes="" block={null} previous={previous} meters={meters} boards={["DB2", "DB3"]} onCancel={() => undefined} onSaved={() => undefined} /></EnergyIqLocaleProvider>));
-    const help = host.querySelector("header p")?.textContent;
-    expect(help).toContain("Shift-click to pick several");
-    expect(help).toContain("hold Alt (⌥) to nudge an area on its own");
+    // The how-to lives under "Keys and tips" in the editor header.
+    const help = host.querySelector("header details")?.textContent;
+    expect(help).toContain("Select several: Shift-click");
+    expect(help).toContain("hold Alt (⌥) to move an area on its own");
     expect(help).toContain("holding Alt (⌥) while dragging drags out a copy");
   } finally {
     await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals();

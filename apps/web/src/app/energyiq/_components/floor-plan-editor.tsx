@@ -1196,7 +1196,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   const toolButton = (kind: Tool, label: string, hint: string, disabled = false) => <button type="button" className={styles.tool} aria-pressed={tool === kind} disabled={disabled} title={hint} onClick={() => chooseTool(kind)}>{label}</button>;
   return <section ref={sectionRef} className={`${styles.card} ${styles.editing} ${narrowScreen ? styles.narrow : ""}`} data-layout={narrowScreen ? "narrow" : "wide"} aria-label={t("editor.title")} tabIndex={-1} onKeyDown={onKeyDown} onKeyUp={viewport.keyUp}>
     <header className={styles.cardHeader}>
-      <div><h4>{t("editor.title")}</h4><p>{t("editor.help", { undoKey: keyName("Z"), redoKey, copyKey: keyName("C"), pasteKey: keyName("V"), duplicateKey: keyName("D"), commandKey: mac ? "⌘" : "Ctrl" })}</p><p>{t("editor.drawingOnly")}</p></div>
+      <div><h4>{t("editor.title")}</h4><p>{t("editor.intro")}</p><p>{t("editor.drawingOnly")}</p><details className={styles.tips}><summary>{t("editor.tipsLabel")}</summary><ul>{(["editor.tip1", "editor.tip2", "editor.tip3", "editor.tip4", "editor.tip5", "editor.tip6"] as const).map(key => <li key={key}>{t(key, { undoKey: keyName("Z"), redoKey, copyKey: keyName("C"), pasteKey: keyName("V"), duplicateKey: keyName("D"), commandKey: mac ? "⌘" : "Ctrl" })}</li>)}</ul></details></div>
       <div className={styles.actions}>
         <button type="button" className={styles.secondary} disabled={saving} onClick={cancel}>{t("editor.cancel")}</button>
         <button type="button" className={styles.primary} disabled={saving} onClick={() => void save()}>{saving ? t("editor.saving") : t("editor.save")}</button>
