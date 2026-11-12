@@ -472,7 +472,16 @@ export function referenceFromPlan(plan: FloorPlan, projectId: string, previous: 
 
 /** Replaces the existing layout block in the notes, or adds one at the end. */
 export function notesWithReference(notes: string, block: string | null, reference: StoredSpatialReference): string {
-  const next = "```json\n" + JSON.stringify(reference, null, 2) + "\n```";
+  const next = "```json\n" + compactPoints(JSON.stringify(reference, null, 2)) + "\n```";
   if (block && notes.includes(block)) return notes.replace(block, () => next);
   return `${notes.trimEnd()}${notes.trim() ? "\n\n" : ""}## Floor layout\n\n${next}\n`;
 }
+const NUMBER = String.raw`-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?`;
+const PAIR = new RegExp(String.raw`\[\s*(${NUMBER}),\s*(${NUMBER})\s*\]`, "g");
+const POINTS_LIST = new RegExp(String.raw`"points": \[\s*(?:\[\s*${NUMBER},\s*${NUMBER}\s*\],?\s*)+\]`, "g");
+/**
+ * Shape corners (`points`) on one line each, as [[x,y],[x,y],...]: indented, every corner takes four lines, so a few
+ * drawn shapes would fill the notes. Only a `points` list of number pairs is folded; every other value (and so any
+ * layout saved before free shapes) is written exactly as before.
+ */
+export const compactPoints = (json: string) => json.replace(POINTS_LIST, list => `"points": [${[...list.slice(list.indexOf("[") + 1).matchAll(PAIR)].map(([, x, y]) => `[${x},${y}]`).join(",")}]`);

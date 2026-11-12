@@ -90,8 +90,21 @@ export function insideSpatial(item: { rect: unknown; points?: unknown }, point: 
   if (!isBox(item.rect)) return false;
   const [x, y, w, h] = item.rect;
   if (point[0] < x || point[0] > x + w || point[1] < y || point[1] > y + h) return false;
-  const polygon = polygonOf(item.points, item.rect);
+  const polygon = cachedPolygon(item.points, item.rect);
   return !polygon || pointInPolygon(point, polygon);
+}
+/**
+ * polygonOf, remembered per saved points list: the map tests every device against every area and room on each render,
+ * and polygonOf's crossing check is slow for shapes with many corners. Keyed on the list itself and the box it sits in.
+ */
+const checked = new WeakMap<object, { box: string; polygon: SpatialPoint[] | null }>();
+function cachedPolygon(points: unknown, rect: SpatialRect): SpatialPoint[] | null {
+  if (!Array.isArray(points)) return null;
+  const box = rect.join(","), hit = checked.get(points);
+  if (hit && hit.box === box) return hit.polygon;
+  const polygon = polygonOf(points, rect);
+  checked.set(points, { box, polygon });
+  return polygon;
 }
 /** SVG `points` attribute text. */
 export const pointsAttribute = (points: SpatialPoint[]) => points.map(([x, y]) => `${x},${y}`).join(" ");
@@ -134,24 +147,28 @@ export function innerBox(points: SpatialPoint[]): SpatialRect {
   return best ?? polygonBounds(points);
 }
 
+/** A plain shape id the editor writes (or could have): short letters, digits, - and _. */
+export const SHAPE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 /**
- * The plain shapes a layout holds that can be drawn, each checked: a known kind, a box, a usable outline for a polygon
- * (a polygon without one is drawn as its box), a #rrggbb fill, a known outline style and a short caption. Anything
- * else is left out. The editor keeps the saved entries it cannot draw as they were (see the web floor plan editor).
+ * The plain shapes a layout holds that can be drawn, each checked: a well-formed id, a known kind, a box at least 1
+ * unit across inside the layout's `viewBox`, a usable outline for a polygon (a polygon without one is drawn as its box),
+ * a #rrggbb fill, a known outline style and a short caption. Anything else is left out, and at most MAX_SHAPES are
+ * read. The web floor plan editor reads shapes through `readShape` too, so a shape is drawn and editable everywhere or
+ * nowhere; it keeps the saved entries it cannot draw as they were.
  */
 export function spatialShapes(layout: unknown): SpatialShape[] {
-  const list = (layout as { shapes?: unknown } | null)?.shapes;
+  const list = (layout as { shapes?: unknown } | null)?.shapes, viewBox = (layout as { viewBox?: unknown } | null)?.viewBox;
   if (!Array.isArray(list)) return [];
-  return list.slice(0, MAX_SHAPES).flatMap((raw): SpatialShape[] => {
-    const shape = readShape(raw);
-    return shape ? [shape] : [];
-  });
+  const shapes: SpatialShape[] = [];
+  for (const raw of list) { if (shapes.length >= MAX_SHAPES) break; const shape = readShape(raw, viewBox); if (shape) shapes.push(shape); }
+  return shapes;
 }
-/** One saved plain shape, checked, or null when it cannot be drawn. */
-export function readShape(raw: unknown): SpatialShape | null {
+/** One saved plain shape, checked, or null when it cannot be drawn. With a `viewBox`, a shape must sit wholly inside it. */
+export function readShape(raw: unknown, viewBox?: unknown): SpatialShape | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const v = raw as Record<string, unknown>;
-  if (typeof v.id !== "string" || !v.id || v.id.length > 64 || !(SHAPE_KINDS as readonly unknown[]).includes(v.kind) || !isBox(v.rect) || !v.rect.every(n => n >= 0 && n <= 10000)) return null;
+  if (typeof v.id !== "string" || !SHAPE_ID.test(v.id) || !(SHAPE_KINDS as readonly unknown[]).includes(v.kind) || !isBox(v.rect) || !v.rect.every(n => n >= 0 && n <= 10000) || v.rect[2] < 1 || v.rect[3] < 1) return null;
+  if (isBox(viewBox)) { const [vx, vy, vw, vh] = viewBox, [x, y, w, h] = v.rect; if (x < vx || y < vy || x + w > vx + vw || y + h > vy + vh) return null; }
   const points = v.kind === "polygon" ? polygonOf(v.points, v.rect) : null;
   return {
     id: v.id, kind: v.kind as SpatialShape["kind"], rect: [...v.rect] as SpatialRect, ...(points ? { points } : {}),

@@ -48,8 +48,10 @@ export function shapeProblem(corners: Point[]): "few" | "many" | "crossing" | "s
 }
 /** The saved points read as a shape in the item's box (null when malformed: the item stays a box). */
 export function outlineFromSaved(points: unknown, rect: Rect): Point[] | null {
+  // Every outline the readers (the Facility map, the site report) draw is read, however small, so the editor shows what
+  // they show; the MIN_SIZE check is only for new drawing.
   const polygon = polygonOf(points, rect);
-  if (!polygon || !fromCorners(polygon)) return null;
+  if (!polygon) return null;
   // Corners are held as fractions of the item's own saved box, so they stay exactly where they were saved. Writers
   // always save that box as the one around the corners; a hand-edited box larger than the shape is tightened to it
   // on the next save.

@@ -271,6 +271,7 @@
 .presetIcon { width:16px; height:16px; margin-right:5px; vertical-align:-3px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linejoin:round; }
 .corner { fill:white; stroke:#2a78d6; stroke-width:2; vector-effect:non-scaling-stroke; cursor:move; }
 .cornerPicked { fill:#2a78d6; }
+.corner:focus-visible { outline:none; stroke:#b58531; stroke-width:3.5; }
 .side { stroke:transparent; fill:none; vector-effect:non-scaling-stroke; cursor:copy; }
 .side:hover { stroke:rgba(42,120,214,.35); }
 .drawLine { fill:rgba(42,120,214,.08); stroke:#2a78d6; stroke-width:2; stroke-dasharray:6 4; vector-effect:non-scaling-stroke; pointer-events:none; }
@@ -281,6 +282,7 @@
 :global(:where(html[data-energyiq-theme="dark"])) .presets { border-color:#32363b; color:#8bc3b9; }
 :global(:where(html[data-energyiq-theme="dark"])) .corner { fill:#191919; stroke:#7aaef0; }
 :global(:where(html[data-energyiq-theme="dark"])) .cornerPicked { fill:#7aaef0; }
+:global(:where(html[data-energyiq-theme="dark"])) .corner:focus-visible { stroke:#e0b458; }
 :global(:where(html[data-energyiq-theme="dark"])) .side:hover { stroke:rgba(122,174,240,.35); }
 :global(:where(html[data-energyiq-theme="dark"])) .drawLine { fill:rgba(122,174,240,.10); stroke:#7aaef0; }
 :global(:where(html[data-energyiq-theme="dark"])) .drawCorner { fill:#7aaef0; stroke:#191919; }

@@ -185,3 +185,41 @@ describe("plain shapes", () => {
     expect(svg).toContain(`<rect x="230" y="260" width="60" height="60"`);
   });
 });
+
+describe("review fixes", () => {
+  it("reads every outline the map draws, however small, so a moved room never keeps stale points", () => {
+    expect(outlineFromSaved([[0, 0], [10, 0], [0, 10]], [0, 0, 10, 10])).toEqual([[0, 0], [1, 0], [0, 1]]);
+    const stored = lPlan();
+    (stored.layout.rooms[0] as { points?: unknown }).points = [[110, 250], [125, 250], [110, 265]];
+    (stored.layout.rooms[0] as { rect: number[] }).rect = [110, 250, 15, 15];
+    const plan = planFromReference(stored);
+    expect(plan.rooms[0]!.outline).toBeDefined();
+    const moved = moveSelection(plan, { kind: "room", key: plan.rooms[0]!.key }, 10, 0);
+    const room = referenceFromPlan(moved, "p", stored).layout.rooms[0] as { rect: number[]; points: number[][] };
+    // The saved points move (and stretch) with the box: readers draw what the editor showed.
+    const xs = room.points.map(p => p[0]!), ys = room.points.map(p => p[1]!);
+    expect(room.points[0]).toEqual([120, 250]); expect(room.rect).toEqual([120, 250, Math.max(...xs) - 120, Math.max(...ys) - 250]);
+  });
+
+  it("writes shape corners on one line, and still re-saves an older layout byte for byte", () => {
+    const notes = notesWithReference("", null, lPlan());
+    expect(notes).toContain(`"points": [[100,100],[300,100],[300,200],[200,200],[200,400],[100,400]]`);
+    expect(notes).toContain(`"rect": [\n`);
+    const loaded = readProjectSpatialReference(notes, "p")!;
+    expect(JSON.stringify(loaded.reference)).toBe(JSON.stringify(lPlan()));
+    expect(notesWithReference("", loaded.block, referenceFromPlan(planFromReference(loaded.reference as StoredSpatialReference), "p", loaded.reference as StoredSpatialReference))).toBe(notes);
+    // Values that only look like corners elsewhere are left as they were.
+    const odd = lPlan(); (odd.layout as { extra?: unknown }).extra = { points: [1, 2], note: "\"points\": [[1,2]]" };
+    expect(notesWithReference("", null, odd)).toContain(`"points": [\n        1,\n        2\n      ]`);
+  });
+
+  it("uses one rule for plain shapes in the editor and every reader", () => {
+    const shapes = [{ id: "lawn 1", kind: "rect", rect: [20, 20, 40, 40] }, { id: "half", kind: "rect", rect: [580, 20, 40, 40] }, { id: "thin", kind: "rect", rect: [20, 100, 0.5, 40] }, { id: "ok", kind: "rect", rect: [20, 200, 40, 40] }];
+    const stored = lPlan(); (stored.layout as { shapes?: unknown }).shapes = shapes;
+    expect(spatialShapes(stored.layout).map(shape => shape.id)).toEqual(["ok"]);
+    const plan = planFromReference(stored);
+    expect(plan.shapes!.map(shape => shape.id)).toEqual(["ok"]);
+    expect(JSON.stringify(referenceFromPlan(plan, "p", stored))).toBe(JSON.stringify(stored));
+    expect(renderProjectSpatialSvg(stored)).not.toContain(`x="580"`);
+  });
+});

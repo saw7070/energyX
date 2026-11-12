@@ -132,7 +132,7 @@ function FloorPlan({ report }: { report: SiteReport }) {
       <text className="svgt rsub" x={tx + 10} y={ty + 40}>{est(zone)}</text>
     </g>; })}
     {/* Plain shapes (a lawn, a driveway): part of the drawing only, under the rooms. */}
-    {spatialShapes(reference.layout).map(shape => { const [x, y, w, h] = shape.rect, fill = shape.fill ?? "#e4ebe6", line = shape.stroke === "none" ? { stroke: "none" } : { stroke: C.line, ...(shape.stroke === "dashed" ? { strokeDasharray: "6 4" } : {}) }, [lx, ly, lw, lh] = shape.points ? innerBox(shape.points) : shape.rect; return <g key={shape.id} data-shape={shape.kind}>
+    {spatialShapes(reference.layout).map((shape, index) => { const [x, y, w, h] = shape.rect, fill = shape.fill ?? "#e4ebe6", line = shape.stroke === "none" ? { stroke: "none" } : { stroke: C.line, ...(shape.stroke === "dashed" ? { strokeDasharray: "6 4" } : {}) }, [lx, ly, lw, lh] = shape.points ? innerBox(shape.points) : shape.rect; return <g key={`${index}:${shape.id}`} data-shape={shape.kind}>
       {shape.kind === "ellipse" ? <ellipse cx={x + w / 2} cy={y + h / 2} rx={w / 2} ry={h / 2} fill={fill} fillOpacity={0.5} {...line} /> : shape.points ? <polygon points={pointsAttribute(shape.points)} fill={fill} fillOpacity={0.5} strokeLinejoin="round" {...line} /> : <rect x={x} y={y} width={w} height={h} fill={fill} fillOpacity={0.5} {...line} />}
       {shape.label && <text className="svgt rsub" x={lx + lw / 2} y={ly + lh / 2 + 4} textAnchor="middle">{shape.label}</text>}
     </g>; })}

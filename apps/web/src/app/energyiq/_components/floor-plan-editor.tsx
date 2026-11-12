@@ -19,7 +19,7 @@ import { PositionFields } from "./floor-plan-position";
 import { boundsOf, editorPrefs, gridSpacing, guideFor, guideTargets, samePrefs, snapToLines, withPrefs, type EditorPrefs, type Guide, type GuideTargets } from "./floor-plan-snap";
 import { AreaShape, DeviceShape, EntranceShape, GroupShape, PlainShapeItem, RoomShape, type ItemDown } from "./floor-plan-shapes";
 import { DEFAULT_SHAPE_FILL, MAX_SHAPES, newShape, type PlanShape } from "./floor-plan-plain-shapes";
-import { addCorner, asRectangle, boxCorners, MAX_POLYGON_POINTS, cornersOf, fromCorners, holds, middleOf, moveCorner, nearestOnSide, placeCorner, presetOutline, removeCorner, shapeProblem, withPreset, type Outlined, type ShapePreset } from "./floor-plan-polygon";
+import { addCorner, asRectangle, boxCorners, MAX_POLYGON_POINTS, cornersOf, fromCorners, holds, insideBox, middleOf, moveCorner, nearestOnSide, placeCorner, presetOutline, removeCorner, shapeProblem, withPreset, type Outlined, type ShapePreset } from "./floor-plan-polygon";
 import { CornerGrips, CornerPanel, DrawPreview, outlinedItem, PlainShapePanel, ShapeChoices, ShapeSelect, withOutlined, type ShapePick } from "./floor-plan-shape-tools";
 import { shapeMessages } from "./floor-plan-shape-messages";
 import { DraftOffer, ZoomControls } from "./floor-plan-view-controls";
@@ -270,11 +270,13 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     }
     if (kind === "room") {
       const host = (single?.kind === "area" ? plan.areas.find(item => item.key === single.key && !item.insideRoom) : undefined) ?? plan.areas.find(item => !item.insideRoom);
-      const [hx, hy] = host ? host.rect : [vx + 20, vy + 20];
+      // From the keyboard, the room goes in the host's largest part (never the notch of an L or U).
+      const inner = host ? insideBox(host) : null, [hx, hy] = inner ?? [vx + 20, vy + 20];
       const key = `room-${Date.now()}`;
       const roomName = (number: number) => t("name.newRoom", { number });
       let number = plan.rooms.length + 1; while (plan.rooms.some(room => room.name === roomName(number))) number += 1;
-      const rect = box ?? (at ? centredBox(at, [180, 110], plan.viewBox, step) : clampRect([hx + 20, hy + 50, 180, 110], plan.viewBox));
+      const usual = clampRect([hx + 20, hy + 50, 180, 110], plan.viewBox), [ix, iy] = inner ? centre(inner) : [0, 0];
+      const rect = box ?? (at ? centredBox(at, [180, 110], plan.viewBox, step) : host && !holds(host, centre(usual)) ? clampRect([ix - 90, iy - 55, 180, 110], plan.viewBox) : usual);
       // A new room gets a stable id, so later things can point at it even after it is renamed.
       const next = settleRooms({ ...plan, rooms: [...plan.rooms, { key, name: roomName(number), rect, ...shapeOf, ...(host && !box && !at ? { area: host.key } : {}), id: newRoomId(roomIds(plan)) }] });
       // A room belongs to an area: one drawn outside every area is not added (the tool stays on), as for equipment.
@@ -638,13 +640,27 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     if (placing && event.key === "Enter" && !event.metaKey && !event.ctrlKey && !event.altKey && svgRef.current?.contains(event.target as Node)) {
       event.preventDefault();
       const item = parseItemId((event.target as Element | null)?.getAttribute?.("data-item")), box = item ? boxOf(plan, item) : null;
-      place(placing, box ? (box[2] ? centre(box) : [box[0], box[1]]) : [wx + ww / 2, wy + wh / 2]);
+      // In a shaped room or area, a point surely inside its shape (the middle of an L's box is in its notch).
+      const shaped = item && (item.kind === "room" || item.kind === "area") ? outlinedItem(plan, item) : null;
+      place(placing, shaped ? middleOf(shaped) : box ? (box[2] ? centre(box) : [box[0], box[1]]) : [wx + ww / 2, wy + wh / 2]);
       return;
     }
-    // Drawing a shape: Enter finishes it, Backspace (or Delete) takes back the last corner.
-    if (drawMode && svgRef.current?.contains(event.target as Node) && !event.metaKey && !event.ctrlKey) {
-      if (event.key === "Enter") { event.preventDefault(); finishDraw(); return; }
-      if ((event.key === "Backspace" || event.key === "Delete") && drawing?.corners.length) { event.preventDefault(); setDrawing({ corners: drawing.corners.slice(0, -1), hover: drawing.hover }); return; }
+    // Drawing a shape: Enter finishes it; Backspace, Delete or Undo takes back the last corner. Backspace and Delete never
+    // reach what is selected while drawing, even with no corners left; Undo undoes the plan only when nothing is drawn.
+    if (drawMode && svgRef.current?.contains(event.target as Node)) {
+      const takeBack = () => { if (drawing?.corners.length) setDrawing({ corners: drawing.corners.slice(0, -1), hover: drawing.hover }); };
+      if (event.key === "Enter" && !event.metaKey && !event.ctrlKey) { event.preventDefault(); finishDraw(); return; }
+      if (event.key === "Backspace" || event.key === "Delete") { event.preventDefault(); takeBack(); return; }
+      if (drawing?.corners.length && planShortcut(event, grid)?.kind === "undo") { event.preventDefault(); takeBack(); return; }
+    }
+    // A corner grip with focus: Enter or Space picks it, the arrows move it a grid step (one undo step while held), and
+    // Delete or Backspace removes it.
+    const gripIndex = Number((event.target as Element | null)?.getAttribute?.("data-corner") ?? NaN);
+    if (cornerGrips && Number.isInteger(gripIndex) && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      const by = (grid || 1) * (event.shiftKey ? 5 : 1), arrows: Record<string, Point> = { ArrowLeft: [-by, 0], ArrowRight: [by, 0], ArrowUp: [0, -by], ArrowDown: [0, by] };
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); pickCorner(gripIndex); return; }
+      if (event.key === "Delete" || event.key === "Backspace") { event.preventDefault(); deleteCorner(gripIndex); return; }
+      if (arrows[event.key]) { event.preventDefault(); nudgeCorner(gripIndex, arrows[event.key]!, event.repeat); return; }
     }
     // With a tool chosen, Enter on the plan adds the item at its usual place, for keyboard users.
     if (tool && event.key === "Enter" && event.target === svgRef.current) { event.preventDefault(); create(tool, null, null); return; }
@@ -664,7 +680,8 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     if (!selection.length) return;
     if (shortcut.kind === "copy") { if (!textPicked() && copy()) event.preventDefault(); return; }
     event.preventDefault();
-    if (shortcut.kind === "delete") { remove(); return; }
+    // With a corner picked, Delete removes that corner, not the whole area, room or shape.
+    if (shortcut.kind === "delete") { if (picked !== null && cornerGrips) deleteCorner(); else remove(); return; }
     if (!event.repeat) nudgeRun.current += 1;
     if (shortcut.kind === "resize") { resizeByKey(shortcut.by); return; }
     const moved = moveItems(plan, selection, shortcut.by[0], shortcut.by[1], shortcut.alone ? NO_PASSENGERS() : ridersOf(plan, selection));
@@ -725,7 +742,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   }, [history]);
 
   // An unsaved draft is kept in this browser while editing, and one left from before is offered back (floor-plan-draft).
-  const draft = usePlanDraft({ projectId, userId, block, previous, locale, opened, plan, prefs, changed, busy: () => !!drag.current || !!sweep.current || !!edgeDrag.current, onReplaced: () => setNotice(t("draft.replaced")) });
+  const draft = usePlanDraft({ projectId, userId, block, previous, locale, opened, plan, prefs, changed, busy: () => !!drag.current || !!sweep.current || !!edgeDrag.current || !!cornerDrag.current, onReplaced: () => setNotice(t("draft.replaced")) });
   // The grid choices that came with a restored draft go with its undo step: Undo back to the saved plan puts the saved
   // choices back too (so a plan put back as it was saves exactly as it was), and Redo brings the draft's back.
   const restoredPrefs = useRef<{ plan: FloorPlan; before: EditorPrefs; after: EditorPrefs } | null>(null);
@@ -789,7 +806,26 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   const picked = single && pickedCorner?.key === itemId(single) && shapeCorners && pickedCorner.index < shapeCorners.length ? pickedCorner.index : null;
   /** One change to the selected item's shape: one undo step, and rooms then belong to the area they now sit in. */
   const reshape = (next: FloorPlan) => { if (next !== plan) commit(settleRooms(next)); };
-  const deleteCorner = () => { if (!single || picked === null || !shapeCorners) return; const next = withOutlined(plan, single, entry => removeCorner(entry, picked)); if (next === plan) { setNotice(shapeCorners.length <= 3 ? ts("problem.few") : ts("problem.crossing")); return; } reshape(next); setPickedCorner(null); };
+  const deleteCorner = (index: number | null = picked) => { if (!single || index === null || !shapeCorners || singleLocked) return; const next = withOutlined(plan, single, entry => removeCorner(entry, index)); if (next === plan) { setNotice(shapeCorners.length <= 3 ? ts("problem.few") : ts("problem.crossing")); return; } reshape(next); setPickedCorner(null); focusCanvas(); };
+  const pickCorner = (index: number) => { if (single) setPickedCorner({ key: itemId(single), index }); };
+  /** "Add corner": a new corner in the middle of the side after the picked corner (or after the last one), picked. */
+  const addCornerMid = () => {
+    if (!single || singleLocked || !shapeCorners) return;
+    const index = picked ?? shapeCorners.length - 1, a = shapeCorners[index]!, b = shapeCorners[(index + 1) % shapeCorners.length]!;
+    const next = withOutlined(plan, single, entry => addCorner(entry, index, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]));
+    if (next === plan) { setNotice(shapeCorners.length >= MAX_POLYGON_POINTS ? ts("problem.many", { max: MAX_POLYGON_POINTS }) : ts("problem.crossing")); return; }
+    commit(next);
+    pickCorner(index + 1);
+  };
+  /** Arrow keys on a corner grip: the corner moves a grid step; holding the arrow down is one undo step. */
+  const nudgeCorner = (index: number, by: Point, repeat: boolean) => {
+    if (!single || singleLocked || !shapeCorners?.[index]) return;
+    const [cx, cy] = shapeCorners[index]!, next = withOutlined(plan, single, entry => moveCorner(entry, index, clampPoint([cx + by[0], cy + by[1]], plan.viewBox)));
+    pickCorner(index);
+    if (next === plan) { setNotice(ts("problem.crossing")); return; }
+    if (!repeat) nudgeRun.current += 1;
+    commit(settleRooms(next), { merge: `corner:${itemId(single)}:${index}:${nudgeRun.current}` });
+  };
   /** "Make rectangle": the shape becomes a plain box again, in the box around it (a plain outline becomes a rectangle). */
   const makeRectangle = () => { if (!single) return; reshape(single.kind === "shape" ? { ...plan, shapes: (plan.shapes ?? []).map(item => item.key === single.key ? { ...asRectangle(item), kind: "rect" as const } : item) } : withOutlined(plan, single, entry => asRectangle(entry))); setPickedCorner(null); };
   /** Which shape choice an item shows: a preset whose corners it still has, else its own outline. */
@@ -800,7 +836,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     if (pick !== "ellipse") reshape(withOutlined(plan, single, entry => withPreset(entry, pick)));
     setPickedCorner(null);
   };
-  const cornerPanel = shapeCorners && single ? <CornerPanel count={shapeCorners.length} picked={picked} disabled={singleLocked} onDelete={deleteCorner} onRectangle={makeRectangle} /> : null;
+  const cornerPanel = shapeCorners && single ? <CornerPanel count={shapeCorners.length} picked={picked} disabled={singleLocked} onAdd={addCornerMid} onDelete={() => deleteCorner()} onRectangle={makeRectangle} /> : null;
   const updateShape = (key: string, patch: (shape: PlanShape) => PlanShape, merge?: string) => commit({ ...plan, shapes: (plan.shapes ?? []).map(item => item.key === key ? patch(item) : item) }, merge ? { merge } : undefined);
   const setDeviceShape = (meterId: string, box: boolean) => commit({ ...plan, devices: plan.devices.map(item => { if (item.meterId !== meterId) return item; const { size: _size, ...dot } = item; return box ? { ...dot, size: item.size ?? defaultDeviceSize(plan.viewBox) } : dot; }) });
   const roomColour = (room: Outlined) => { const host = plan.areas.filter(item => !item.insideRoom && holds(item, middleOf(room))).sort((a, b) => a.rect[2] * a.rect[3] - b.rect[2] * b.rect[3])[0]; return host ? (host.board ? colours.get(host.board) : noBoardColours.get(host.key)) : undefined; };
@@ -918,7 +954,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
             return <g>
             {handles.map(handle => <rect key={handle} data-handle={handle} x={spot[handle][0] - size / 2} y={spot[handle][1] - size / 2} width={size} height={size} rx={size * 0.2} className={`${styles.handle} ${styles[handle]}`} onPointerDown={event => startDrag(event, single!, "resize", handle)} />)}
           </g>; })()}
-          {cornerGrips && <CornerGrips corners={cornerGrips} picked={picked} size={perPx * (coarse ? TOUCH_GRIP_PX : GRIP_PX)} onCorner={startCorner} onSide={addCornerAt} onSideDown={event => single && startDrag(event, single)} />}
+          {cornerGrips && <CornerGrips corners={cornerGrips} picked={picked} size={perPx * (coarse ? TOUCH_GRIP_PX : GRIP_PX)} onCorner={startCorner} onPick={pickCorner} onSide={addCornerAt} onSideDown={event => single && startDrag(event, single)} />}
           {drawing && drawMode && <DrawPreview corners={drawing.corners} hover={drawing.hover} size={perPx * GRIP_PX} />}
           {guides.map(guide => { const pad = screen; return guide.axis === "x" ? <line key={`x${guide.at}`} data-guide="x" x1={guide.at} x2={guide.at} y1={guide.from - pad} y2={guide.to + pad} className={styles.guide} /> : <line key={`y${guide.at}`} data-guide="y" x1={guide.from - pad} x2={guide.to + pad} y1={guide.at} y2={guide.at} className={styles.guide} />; })}
           {sweepBox && <rect x={sweepBox.rect[0]} y={sweepBox.rect[1]} width={sweepBox.rect[2]} height={sweepBox.rect[3]} className={sweepBox.kind === "draw" ? styles.drawBox : styles.marquee} />}

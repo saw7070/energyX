@@ -5,9 +5,9 @@
  * the contracts package). Saved shapes are untrusted: only values the editor understands are read, and the rest of
  * each entry (and entries it cannot draw at all) ride along and are written back as saved.
  */
-import { isHexColour, SHAPE_KINDS, SHAPE_LABEL_MAX, SHAPE_OUTLINES, MAX_SHAPES } from "@datafoundry/contracts";
-import { carriedOf, isRecord, withCarried, type Carried, type Json } from "./floor-plan-carry";
-import { isRect, MIN_SIZE, type Point, type Rect } from "./floor-plan-model";
+import { readShape, SHAPE_KINDS, SHAPE_LABEL_MAX, SHAPE_OUTLINES, MAX_SHAPES } from "@datafoundry/contracts";
+import { carriedOf, withCarried, type Carried, type Json } from "./floor-plan-carry";
+import { MIN_SIZE, type Point, type Rect } from "./floor-plan-model";
 import { outlineFromSaved, savedShape } from "./floor-plan-polygon";
 
 export { MAX_SHAPES, SHAPE_LABEL_MAX };
@@ -23,31 +23,30 @@ export type PlanShape = { key: string; id: string; kind: ShapeKind; rect: Rect; 
 /** Fill for a new shape: a soft green, like grass on a site plan. */
 export const DEFAULT_SHAPE_FILL = "#9cc5a1";
 const SHAPE_KEYS = ["id", "kind", "rect"];
-const ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 /**
  * Reads `layout.shapes`. Entries the editor cannot draw (no id, an unknown kind, no box) are kept aside as saved, at
  * their place in the list. Null when the layout has no list of shapes (anything else there rides along with the layout).
+ * Each entry is checked by the contracts' `readShape`, the same check the Facility map and the site report draw through,
+ * so a shape is shown and editable everywhere or nowhere.
  */
 export function shapesFromLayout(raw: unknown, viewBox: Rect): { shapes: PlanShape[]; skipped: Array<{ index: number; shape: unknown }> } | null {
   if (!Array.isArray(raw)) return null;
   const keys = new Set<string>(), skipped: Array<{ index: number; shape: unknown }> = [], shapes: PlanShape[] = [];
-  const [vx, vy, vw, vh] = viewBox;
   raw.forEach((item, index) => {
     // A shape is drawn where it was saved, never moved or resized on opening: one outside the plan rides along as saved.
-    if (!isRecord(item) || typeof item.id !== "string" || !ID.test(item.id) || !(SHAPE_KINDS as readonly unknown[]).includes(item.kind) || !isRect(item.rect) || item.rect[2] < 1 || item.rect[3] < 1 || shapes.length >= MAX_SHAPES
-      || item.rect[0] < vx || item.rect[1] < vy || item.rect[0] + item.rect[2] > vx + vw || item.rect[1] + item.rect[3] > vy + vh) { skipped.push({ index, shape: item }); return; }
-    const rect = [...item.rect] as Rect, kind = item.kind as ShapeKind;
+    const checked = shapes.length < MAX_SHAPES ? readShape(item, viewBox) : null;
+    if (!checked) { skipped.push({ index, shape: item }); return; }
+    const rect = [...checked.rect] as Rect, kind = checked.kind;
     // A polygon's corners are read only when usable; otherwise it is drawn as its box and its saved points ride along.
-    const outline = kind === "polygon" ? outlineFromSaved(item.points, rect) : null;
-    const own = [...SHAPE_KEYS, ...(outline ? ["points"] : []), ...(isHexColour(item.fill) ? ["fill"] : []), ...((SHAPE_OUTLINES as readonly unknown[]).includes(item.stroke) ? ["stroke"] : []), ...(typeof item.label === "string" && item.label.trim() && item.label.length <= SHAPE_LABEL_MAX ? ["label"] : []), ...(item.locked === true ? ["locked"] : [])];
-    let key = item.id, n = 2; while (keys.has(key)) key = `${item.id}-${n++}`;
+    const outline = kind === "polygon" && checked.points ? outlineFromSaved(checked.points, rect) : null;
+    const own = [...SHAPE_KEYS, ...(outline ? ["points"] : []), ...(["fill", "stroke", "label", "locked"] as const).filter(name => checked[name] !== undefined)];
+    let key = checked.id, n = 2; while (keys.has(key)) key = `${checked.id}-${n++}`;
     keys.add(key);
-    shapes.push({ key, id: item.id, kind, rect, ...(outline ? { outline } : {}), ...(own.includes("fill") ? { fill: item.fill as string } : {}), ...(own.includes("stroke") ? { stroke: item.stroke as ShapeOutline } : {}), ...(own.includes("label") ? { label: item.label as string } : {}), ...(own.includes("locked") ? { locked: true as const } : {}), ...carriedOf(item, own) });
+    shapes.push({ key, id: checked.id, kind, rect, ...(outline ? { outline } : {}), ...(checked.fill ? { fill: checked.fill } : {}), ...(checked.stroke ? { stroke: checked.stroke } : {}), ...(checked.label ? { label: checked.label } : {}), ...(checked.locked ? { locked: true as const } : {}), ...carriedOf(item, own) });
   });
   return { shapes, skipped };
 }
-
 /** One shape as saved: a polygon's box is always the box around its corners, so older readers draw the right box. */
 export function shapeForLayout(shape: PlanShape): Json {
   const polygon = shape.kind === "polygon" ? savedShape(shape) : null;

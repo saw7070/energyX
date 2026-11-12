@@ -8,7 +8,7 @@ import { join } from "node:path";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readProjectSpatialReference } from "@datafoundry/contracts";
+import { insideSpatial, readProjectSpatialReference } from "@datafoundry/contracts";
 import { configApi } from "../../../lib/config-api";
 import { EnergyIqLocaleProvider } from "./energyiq-locale";
 import { LANGUAGE_STORAGE_KEY } from "./energyiq-messages";
@@ -31,17 +31,18 @@ const previous = {
 const notes = notesWithReference("Office notes.", null, previous);
 const pointer = (type: string, x: number, y: number, extra: PointerEventInit = {}) => new PointerEvent(type, { bubbles: true, button: 0, clientX: x, clientY: y, pointerId: 1, ...extra });
 
-async function render() {
+async function render(prev: StoredSpatialReference = previous) {
+  const notes = notesWithReference("Office notes.", null, prev);
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); vi.stubGlobal("React", React);
   const sent: string[] = [];
   vi.spyOn(configApi, "reportAgentRequest").mockImplementation(async (_project, path, options) => { if (!path) return { settings: { contextNotes: notes } } as never; sent.push(String(options?.body)); return {} as never; });
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host);
   const block = readProjectSpatialReference(notes, "office")!.block;
-  await act(async () => root.render(<EnergyIqLocaleProvider><FloorPlanEditor projectId="office" notes={notes} block={block} previous={previous} meters={meters} boards={["DB1", "DB2"]} onCancel={() => undefined} onSaved={() => undefined} /></EnergyIqLocaleProvider>));
+  await act(async () => root.render(<EnergyIqLocaleProvider><FloorPlanEditor projectId="office" notes={notes} block={block} previous={prev} meters={meters} boards={["DB1", "DB2"]} onCancel={() => undefined} onSaved={() => undefined} /></EnergyIqLocaleProvider>));
   const canvas = () => host.querySelector('svg[role="application"]') as SVGSVGElement;
   const button = (label: string) => [...host.querySelectorAll("button")].find(item => item.textContent?.trim() === label) as HTMLButtonElement;
-  const press = async (key: string, target: EventTarget = canvas()) => { await act(async () => { target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })); }); };
+  const press = async (key: string, target: EventTarget = canvas(), init: KeyboardEventInit = {}) => { await act(async () => { target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init })); }); };
   const click = async (at: [number, number], target: Element = canvas()) => { await act(async () => { target.dispatchEvent(pointer("pointerdown", ...at)); canvas().dispatchEvent(pointer("pointerup", ...at)); }); };
   const drag = async (target: Element, from: [number, number], to: [number, number]) => {
     await act(async () => { target.dispatchEvent(pointer("pointerdown", ...from)); });
@@ -218,5 +219,107 @@ describe("the map and the site report draw free shapes", () => {
     for (const rule of [".planShape {", ".lookBlueprint .planShape", ".lookBlocks .planShape", 'data-energyiq-theme="dark"])) .planShape']) expect(css).toContain(rule);
     const editorCss = readFileSync(join(__dirname, "floor-plan-editor.module.css"), "utf8");
     for (const rule of [".plainShape {", ".corner {", ".drawLine {", 'data-energyiq-theme="dark"])) .corner']) expect(editorCss).toContain(rule);
+  });
+});
+
+describe("free-shape keys and placing (review fixes)", () => {
+  const item = (view: Awaited<ReturnType<typeof render>>, id: string) => view.canvas().querySelector(`[data-item="${id}"]`) as SVGElement;
+
+  it("never deletes the selection with Backspace while drawing, even with no corners left, and Undo takes back a corner", async () => {
+    const view = await render();
+    await view.press("Enter", item(view, "area:Block 264E"));
+    expect(view.host.querySelector("aside h5")?.textContent).toBeTruthy();
+    await act(async () => view.button("+ Add room").click());
+    await act(async () => view.button("Draw shape").click());
+    await view.click([600, 300]); await view.click([700, 300]);
+    await view.press("z", view.canvas(), { ctrlKey: true });
+    expect(view.host.textContent).toContain("1 corners so far.");
+    for (let i = 0; i < 3; i += 1) await view.press("Backspace");
+    expect(view.canvas().querySelector("[data-drawing]")?.getAttribute("data-drawing") ?? "0").toBe("0");
+    expect(item(view, "area:Block 264E")).not.toBeNull();
+    await view.press("Escape");
+    const saved = await view.save();
+    expect(saved.layout.zones).toEqual(previous.layout.zones);
+    await view.unmount();
+  });
+
+  it("deletes the picked corner with the Delete key, not the whole area", async () => {
+    const view = await render();
+    await act(async () => view.button("+ Add area").click());
+    await act(async () => view.button("L-shape").click());
+    await view.sweep([40, 540], [300, 620]);
+    await view.click([40, 540], view.corners()[0]!);
+    expect(view.host.textContent).toContain("Corner 1 of 6 picked.");
+    await view.press("Delete");
+    expect(view.polygons()).toHaveLength(1);
+    expect(view.corners()).toHaveLength(5);
+    await view.unmount();
+  });
+
+  it("picks, moves and deletes corners from the keyboard, and adds one with Add corner", async () => {
+    const view = await render();
+    await act(async () => view.button("+ Add area").click());
+    await act(async () => view.button("L-shape").click());
+    await view.sweep([40, 540], [300, 620]);
+    const grip = view.corners()[0]! as SVGCircleElement;
+    expect(grip.getAttribute("role")).toBe("button"); expect(grip.getAttribute("tabindex")).toBe("0");
+    await act(async () => { grip.dispatchEvent(new FocusEvent("focusin", { bubbles: true })); });
+    expect(view.host.textContent).toContain("Corner 1 of 6 picked.");
+    await view.press("ArrowRight", grip);
+    const [x, y] = view.polygons()[0]!.getAttribute("points")!.split(" ")[0]!.split(",").map(Number);
+    expect(x).toBeGreaterThan(40); expect(y).toBe(540);
+    await act(async () => view.button("Add corner").click());
+    expect(view.corners()).toHaveLength(7);
+    expect(view.host.textContent).toContain("Corner 2 of 7 picked.");
+    await view.press("Delete", view.corners()[1]!);
+    expect(view.corners()).toHaveLength(6);
+    expect(view.polygons()).toHaveLength(1);
+    await view.unmount();
+  });
+
+  it("places a device with Enter inside an L-shaped room, never in its notch", async () => {
+    const lRoom = { ...previous, layout: { ...previous.layout,
+      rooms: [{ name: "Showroom", zone: "Block 264E", rect: [40, 80, 260, 200], points: [[40, 80], [157, 80], [157, 190], [300, 190], [300, 280], [40, 280]] }, previous.layout.rooms[1]],
+      devices: [{ meterId: "desk", position: [600, 120] }] } } as unknown as StoredSpatialReference;
+    const view = await render(lRoom);
+    const place = [...view.host.querySelectorAll("aside li")].find(row => row.textContent?.includes("Showroom TV"))!.querySelector("button")!;
+    await act(async () => place.click());
+    await view.press("Enter", item(view, "room:room-1"));
+    const saved = await view.save(), tv = saved.layout.devices.find(device => device.meterId === "tv")!;
+    expect(insideSpatial(saved.layout.rooms[0]!, tv.position as [number, number])).toBe(true);
+    await view.unmount();
+  });
+
+  it("adds a room with Enter inside a selected shaped area whose top-left is a notch", async () => {
+    const notched = { ...previous, layout: { ...previous.layout,
+      zones: [{ id: "Block 264E", referenceBoard: "DB1", rect: [20, 20, 460, 500], points: [[260, 20], [480, 20], [480, 520], [20, 520], [20, 300], [260, 300]] }, previous.layout.zones[1]],
+      rooms: [previous.layout.rooms[1]], devices: [{ meterId: "desk", position: [600, 120] }] } } as unknown as StoredSpatialReference;
+    const view = await render(notched);
+    await view.press("Enter", item(view, "area:Block 264E"));
+    await act(async () => view.button("+ Add room").click());
+    await view.press("Enter");
+    expect(view.host.textContent).not.toContain("Rooms go inside an area.");
+    const saved = await view.save();
+    expect(saved.layout.rooms).toHaveLength(2);
+    expect(saved.layout.rooms[1]!.zone).toBe("Block 264E");
+    expect(insideSpatial(saved.layout.zones[0]!, [saved.layout.rooms[1]!.rect[0] + saved.layout.rooms[1]!.rect[2] / 2, saved.layout.rooms[1]!.rect[1] + saved.layout.rooms[1]!.rect[3] / 2])).toBe(true);
+    await view.unmount();
+  });
+
+  it("shows a plain shape in the editor exactly when the map draws it", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); vi.stubGlobal("React", React);
+    const shapes = [{ id: "lawn 1", kind: "rect", rect: [560, 540, 80, 40] }, { id: "half", kind: "rect", rect: [960, 540, 80, 40] }, { id: "pond", kind: "ellipse", rect: [700, 540, 80, 40] }, { id: "pond", kind: "rect", rect: [800, 540, 60, 40] }];
+    const withShapes = { ...previous, layout: { ...previous.layout, shapes } } as unknown as StoredSpatialReference;
+    const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await act(async () => root.render(<SiteFloorMap reference={withShapes} devices={mapDevices(withShapes, meters)} />));
+    expect(host.querySelectorAll("svg [data-shape]:not([data-shape=outline])")).toHaveLength(2);
+    expect(errors.mock.calls.some(call => String(call[0]).includes("same key"))).toBe(false);
+    await act(async () => root.unmount()); host.remove();
+    const view = await render(withShapes);
+    expect(view.canvas().querySelectorAll('[data-item^="shape:"]')).toHaveLength(2);
+    const saved = await view.save();
+    expect((saved.layout as { shapes?: unknown }).shapes).toEqual(shapes);
+    await view.unmount();
   });
 });

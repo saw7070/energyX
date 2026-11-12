@@ -51,13 +51,14 @@ export function ShapeChoices({ tool, value, onChange }: { tool: ShapedTool; valu
 
 /**
  * Grips on each corner of the selected shape, and a wide invisible line along each side: drag a grip to move that
- * corner, double-click a side to add a corner there. `size` is a grip's width in plan units.
+ * corner, double-click a side to add a corner there. Each grip also takes keyboard focus (focusing it picks it; the
+ * editor moves it with the arrow keys and removes it with Delete). `size` is a grip's width in plan units.
  */
-export function CornerGrips({ corners, picked, size, onCorner, onSide, onSideDown }: { corners: Point[]; picked: number | null; size: number; onCorner: (event: ReactPointerEvent, index: number) => void; onSide: (index: number, at: { clientX: number; clientY: number }) => void; onSideDown: (event: ReactPointerEvent) => void }) {
+export function CornerGrips({ corners, picked, size, onCorner, onPick, onSide, onSideDown }: { corners: Point[]; picked: number | null; size: number; onCorner: (event: ReactPointerEvent, index: number) => void; onPick: (index: number) => void; onSide: (index: number, at: { clientX: number; clientY: number }) => void; onSideDown: (event: ReactPointerEvent) => void }) {
   const s = useMessages(shapeMessages);
   return <g data-corners={corners.length}>
     {corners.map((corner, index) => { const next = corners[(index + 1) % corners.length]!; return <line key={`side${index}`} data-side={index} x1={corner[0]} y1={corner[1]} x2={next[0]} y2={next[1]} className={styles.side} style={{ strokeWidth: size }} onPointerDown={onSideDown} onDoubleClick={event => { event.stopPropagation(); onSide(index, event); }} />; })}
-    {corners.map((corner, index) => <circle key={`corner${index}`} data-corner={index} role="img" aria-label={s("corners.corner", { number: index + 1 })} cx={corner[0]} cy={corner[1]} r={size / 2} className={`${styles.corner} ${picked === index ? styles.cornerPicked : ""}`} onPointerDown={event => onCorner(event, index)} />)}
+    {corners.map((corner, index) => <circle key={`corner${index}`} data-corner={index} role="button" tabIndex={0} aria-pressed={picked === index} aria-label={s("corners.corner", { number: index + 1 })} onFocus={() => onPick(index)} cx={corner[0]} cy={corner[1]} r={size / 2} className={`${styles.corner} ${picked === index ? styles.cornerPicked : ""}`} onPointerDown={event => onCorner(event, index)} />)}
   </g>;
 }
 /** A shape being drawn: the corners so far and a line to the pointer, closed back to the first corner. */
@@ -69,12 +70,13 @@ export function DrawPreview({ corners, hover, size }: { corners: Point[]; hover:
   </g>;
 }
 
-/** The Corners part of the side panel: which corner is picked, Delete corner and Make rectangle. */
-export function CornerPanel({ count, picked, disabled, onDelete, onRectangle }: { count: number; picked: number | null; disabled: boolean; onDelete: () => void; onRectangle: () => void }) {
+/** The Corners part of the side panel: which corner is picked, Add corner, Delete corner and Make rectangle. */
+export function CornerPanel({ count, picked, disabled, onAdd, onDelete, onRectangle }: { count: number; picked: number | null; disabled: boolean; onAdd: () => void; onDelete: () => void; onRectangle: () => void }) {
   const s = useMessages(shapeMessages);
   return <div className={styles.cornerPanel} role="group" aria-label={s("corners.title")}>
     <p className={styles.hint}><strong>{s("corners.title")}.</strong> {s("corners.hint")} {picked !== null && picked < count ? s("corners.picked", { number: picked + 1, count }) : s("corners.pick")}</p>
     <div className={styles.cornerActions}>
+      <button type="button" className={styles.tool} disabled={disabled} onClick={onAdd}>{s("corners.add")}</button>
       <button type="button" className={styles.tool} disabled={disabled || picked === null || picked >= count} onClick={onDelete}>{s("corners.delete")}</button>
       <button type="button" className={styles.tool} disabled={disabled} onClick={onRectangle}>{s("corners.makeRectangle")}</button>
     </div>
