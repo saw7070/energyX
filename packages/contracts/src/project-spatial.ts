@@ -97,7 +97,8 @@ export function spatialLabels(layout: unknown): SpatialLabel[] {
 /**
  * The symbols a layout holds that can be drawn, with its entrance among them. The legacy `entrance` is the first
  * entrance (layouts saved before symbols existed have only that): when an entrance symbol sits where it is, that symbol
- * is the same entrance (its label is the legacy one); otherwise the legacy entrance comes first as an entrance symbol.
+ * is the same entrance (its label is the legacy one), and so is an entrance symbol elsewhere that carries its name (the
+ * legacy entrance was moved alone); otherwise the legacy entrance comes first as an entrance symbol.
  * `legacy` marks the entry that stands for `layout.entrance`.
  */
 export function spatialSymbols(layout: unknown): Array<SpatialSymbol & { legacy?: true }> {
@@ -108,6 +109,10 @@ export function spatialSymbols(layout: unknown): Array<SpatialSymbol & { legacy?
   const label = typeof entrance.label === "string" && entrance.label.trim() ? { label: entrance.label.trim().slice(0, SPATIAL_TEXT_MAX) } : {};
   const at = symbols.findIndex(item => item.kind === "entrance" && samePlace(item.position, entrance.position as [number, number]));
   if (at >= 0) { symbols[at] = { ...symbols[at]!, ...label, legacy: true }; return symbols; }
+  // Moved where only `layout.entrance` was changed (by an older build, a notes edit or the advisor): the entrance symbol
+  // that carries its name is the same entrance, drawn where `layout.entrance` now is.
+  const named = label.label ? symbols.findIndex(item => item.kind === "entrance" && item.label === label.label) : -1;
+  if (named >= 0) { symbols[named] = { ...symbols[named]!, position: [...entrance.position as [number, number]], legacy: true }; return symbols; }
   return [{ kind: "entrance", position: [...entrance.position as [number, number]], ...label, legacy: true }, ...symbols];
 }
 

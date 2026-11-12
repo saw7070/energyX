@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { readProjectSpatialReference } from "@datafoundry/contracts";
 import { alignItems, placeTyped } from "./floor-plan-align";
 import { boxOf, copyItems, extentOf, inBox, lockItems, markAt, moveItems, pasteClip, removeItems, turnItem } from "./floor-plan-arrange";
+import { spatialSymbols } from "@datafoundry/contracts";
+import { nextEntranceName, nextEntranceSpot } from "./floor-plan-mark-data";
 import { frameBounds, hitsFrame, labelBounds, labelFrame, normaliseRotation, symbolBounds, type PlanLabel, type PlanSymbol } from "./floor-plan-marks";
 import { contentExtent, notesWithReference, planFromReference, referenceFromPlan, removeSelection, type FloorPlan, type Rect, type StoredSpatialReference } from "./floor-plan-model";
 
@@ -232,5 +234,85 @@ describe("everyday tools on text labels and landmarks", () => {
     expect(turnItem(locked, { kind: "label", key: "b" }, 90)).toBe(locked);
     expect(removeItems(locked, [{ kind: "label", key: "b" }])).toBe(locked);
     expect(lockItems(locked, [{ kind: "label", key: "b" }], false).labels![1]!.locked).toBeUndefined();
+  });
+});
+
+describe("saving marks written elsewhere", () => {
+  it("writes text, captions, turns, sizes and places back exactly as written while nobody changed them", () => {
+    const long = `Car park entrance via ${"Jalan Besar ".repeat(9)}`.slice(0, 120);
+    const saved = withLayout({ labels: [{ text: long, position: [100.5, 880], rotation: -15 }, { text: "  Bus stop  ", position: [300, 880] }], symbols: [{ kind: "entrance", position: [540, 860], label: "Main gate" }, { kind: "tree", position: [700.4, 850], label: "  Rain tree", size: 12.5, rotation: 400 }] });
+    const plan = planFromReference(saved);
+    // Drawn as the checks read them…
+    expect([plan.labels![0]!.text.length, plan.labels![0]!.rotation, plan.labels![1]!.text, plan.symbols![0]!.label, plan.symbols![0]!.rotation]).toEqual([80, 345, "Bus stop", "Rain tree", 40]);
+    // …but an unrelated change saves them byte for byte.
+    const moved = save(moveItems(plan, [{ kind: "area", key: "Carpark" }], 0, 10), saved);
+    expect(JSON.stringify(layoutOf(moved).labels)).toBe(JSON.stringify(layoutOf(saved).labels));
+    expect(JSON.stringify(layoutOf(moved).symbols)).toBe(JSON.stringify(layoutOf(saved).symbols));
+    // What is changed is written as the editor holds it; what is not stays as written.
+    const edited = save({ ...plan, labels: plan.labels!.map((item, index) => index ? { ...item, text: "Bus stop B" } : item) }, saved);
+    expect(layoutOf(edited).labels).toEqual([{ text: long, position: [100.5, 880], rotation: -15 }, { text: "Bus stop B", position: [300, 880] }]);
+    const turned = save(turnItem(plan, { kind: "symbol", key: plan.symbols![0]!.key }, 0), saved);
+    expect(layoutOf(turned).symbols![1]).toEqual({ kind: "tree", position: [700.4, 850], label: "  Rain tree", size: 12.5 });
+  });
+
+  it("turning back to 0° drops a saved turn the checks turned down", () => {
+    const saved = withLayout({ labels: [{ text: "Gate", position: [300, 500], rotation: "90" }] }), plan = planFromReference(saved), key = plan.labels![0]!.key;
+    expect(plan.labels![0]!.rotation).toBeUndefined();
+    expect(layoutOf(save(plan, saved)).labels![0]).toEqual({ text: "Gate", position: [300, 500], rotation: "90" });
+    const back = turnItem(turnItem(plan, { kind: "label", key }, 45), { kind: "label", key }, 0);
+    expect(layoutOf(save(back, saved)).labels![0]).toEqual({ text: "Gate", position: [300, 500] });
+  });
+
+  it("reads a device box's turn as the map does, and turning it to 0 leaves no turn behind", () => {
+    const saved = withLayout({ devices: [{ meterId: "a", position: [200, 300], size: [100, 40], rotation: -30 }, { meterId: "b", position: [600, 300], size: [100, 40], rotation: 45.5 }, { meterId: "c", position: [900, 300], size: [100, 40], rotation: 360 }] });
+    const plan = planFromReference(saved);
+    expect(plan.devices.map(item => item.rotation ?? 0)).toEqual([330, 46, 0]);
+    const straight = save(turnItem(turnItem(turnItem(plan, { kind: "device", key: "a" }, 0), { kind: "device", key: "c" }, 90), { kind: "device", key: "c" }, 0), saved);
+    expect((layoutOf(straight).devices as Array<Record<string, unknown>>).map(item => item.rotation)).toEqual([undefined, 46, undefined]);
+  });
+
+  it("follows the main entrance when only layout.entrance was moved, drawing it once, where it now is", () => {
+    const layout = { ...sktcLike().layout, entrance: { label: "Main gate", position: [800, 860], referenceBoard: "DB-E" }, symbols: [{ kind: "entrance", position: [540, 860], label: "Main gate", rotation: 90 }, { kind: "entrance", position: [100, 860], label: "Side gate" }] };
+    const drawn = spatialSymbols(layout).filter(item => item.kind === "entrance");
+    expect(drawn.map(item => [item.label, item.position, item.legacy ?? false])).toEqual([["Main gate", [800, 860], true], ["Side gate", [100, 860], false]]);
+    const saved = withLayout(layout), plan = planFromReference(saved);
+    expect(plan.entrance).toMatchObject({ label: "Main gate", position: [800, 860], rotation: 90, slot: 0 });
+    expect(plan.symbols!.map(item => item.label)).toEqual(["Side gate"]);
+    expect(layoutOf(save(plan, saved)).symbols).toEqual([{ kind: "entrance", position: [800, 860], rotation: 90, label: "Main gate" }, { kind: "entrance", position: [100, 860], label: "Side gate" }]);
+  });
+
+  it("saves a full symbol list written elsewhere with a legacy entrance, without refusing, hiding or repeating anything", () => {
+    const trees = Array.from({ length: 300 }, (_, index) => ({ kind: "tree", position: [10 + index * 5, 880] }));
+    const full = withLayout({ symbols: trees }), plan = planFromReference(full);
+    const moved = save(moveItems(plan, [{ kind: "area", key: "Carpark" }], 0, 10), full);
+    expect(layoutOf(moved).symbols).toEqual(layoutOf(full).symbols);
+    expect(layoutOf(moved).entrance).toEqual(layoutOf(full).entrance);
+    // The matching entrance sits past what readers draw: it is never added a second time.
+    const past = withLayout({ symbols: [...trees, { kind: "entrance", position: [540, 860], label: "Main gate" }] });
+    expect(layoutOf(save(planFromReference(past), past)).symbols).toEqual(layoutOf(past).symbols);
+  });
+
+  it("makes a pasted entrance the main entrance when the plan has none", () => {
+    const saved = withLayout({ symbols: [{ kind: "entrance", position: [540, 860], label: "Main gate" }, { kind: "entrance", position: [100, 700], label: "Side gate" }] }), plan = planFromReference(saved);
+    const side = { kind: "symbol" as const, key: plan.symbols![0]!.key };
+    const clip = copyItems(plan, [side])!, empty = removeItems(plan, [{ kind: "entrance", key: "entrance" }, side]);
+    expect([empty.entrance, empty.symbols]).toEqual([null, undefined]);
+    const pasted = pasteClip(empty, clip, 0, name => `${name} copy`);
+    expect(pasted.plan.entrance).toMatchObject({ label: "Side gate", position: [100, 700] });
+    expect(pasted.selection).toEqual([{ kind: "entrance", key: "entrance" }]);
+    expect(layoutOf(save(pasted.plan, saved)).entrance).toEqual({ label: "Side gate", position: [100, 700] });
+    // A plan left that way some other way still writes layout.entrance from its first entrance.
+    const stray = { ...empty, symbols: clip.symbols };
+    expect(layoutOf(save(stray, saved)).entrance).toEqual({ label: "Side gate", position: [100, 700] });
+  });
+
+  it("names and places another entrance on the next free spot", () => {
+    const name = (number: number) => `Entrance ${number}`;
+    expect(nextEntranceName(["Main gate", "Entrance 3"], name)).toBe("Entrance 2");
+    expect(nextEntranceName(["Main gate", "Entrance 2", "Entrance 3"], name)).toBe("Entrance 4");
+    const place = (point: [number, number]) => [Math.round(point[0] / 10) * 10, Math.round(point[1] / 10) * 10] as [number, number], fits = ([x, y]: [number, number]) => x <= 960 && y <= 600;
+    expect(nextEntranceSpot([[500, 600], [700, 600]], [0, 0, 1000, 640], 80, place, fits)).toEqual([780, 600]);
+    // A taken spot is skipped, and the end of the row goes on in the row above.
+    expect(nextEntranceSpot([[500, 600], [580, 600]], [0, 0, 1000, 640], 80, place, ([x, y]) => fits([x, y]) && x < 600)).toEqual([40, 520]);
   });
 });

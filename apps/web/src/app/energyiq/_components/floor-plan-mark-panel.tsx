@@ -61,12 +61,20 @@ function SymbolSize({ symbol, unit, disabled, onSize }: { symbol: Pick<PlanSymbo
 /** What the panels share: the colour picker, the position fields and the shared actions are built by the editor. */
 type PanelParts = { colour: ReactNode; position?: ReactNode; actions: ReactNode; locked: boolean; typing: Typing; commandKey: string; unit: number; onRotate: (deg: number) => void; onDelete: () => void };
 
-/** A text label: its text (up to 80 characters), size, bold, colour, turn and place. */
-export function LabelPanel({ label, onText, onSize, onBold, colour, position, actions, locked, typing, commandKey, onRotate, onDelete }: PanelParts & { label: PlanLabel; onText: (text: string) => void; onSize: (size: LabelSize) => void; onBold: (bold: boolean) => void }) {
+/**
+ * A text label: its text (up to 80 characters), size, bold, colour, turn and place. `selectText` (a label just added)
+ * puts focus in the Text field with its text selected, so typing replaces it. A label left with no text could not be
+ * seen or clicked on the plan: leaving the field (or Enter) puts its last text back, in the same undo step.
+ */
+export function LabelPanel({ label, selectText = false, onTextSelected, onText, onSize, onBold, colour, position, actions, locked, typing, commandKey, onRotate, onDelete }: PanelParts & { label: PlanLabel; selectText?: boolean; onTextSelected?: () => void; onText: (text: string) => void; onSize: (size: LabelSize) => void; onBold: (bold: boolean) => void }) {
   const t = useMessages(floorPlanMessages);
+  const input = useRef<HTMLInputElement>(null), lastText = useRef(label.text.trim() ? label.text : t("name.text"));
+  useEffect(() => { if (label.text.trim()) lastText.current = label.text; }, [label.text, label.key]);
+  useEffect(() => { if (!selectText) return; input.current?.focus(); input.current?.select(); onTextSelected?.(); }, [selectText, label.key]); // eslint-disable-line react-hooks/exhaustive-deps
+  const restore = () => { if (!label.text.trim()) onText(lastText.current); };
   return <div className={styles.panel}>
     <h5>{t("panel.text")}</h5>
-    <label>{t("panel.textField")}<input value={label.text} maxLength={TEXT_MAX} disabled={locked} {...typing} onChange={event => onText(event.target.value)} /></label>
+    <label>{t("panel.textField")}<input ref={input} value={label.text} maxLength={TEXT_MAX} disabled={locked} onBlur={() => { restore(); typing.onBlur(); }} onKeyDown={event => { if (event.key === "Enter") restore(); typing.onKeyDown(event); }} onChange={event => onText(event.target.value)} /></label>
     <label>{t("panel.textSize")}<select value={label.size ?? "m"} disabled={locked} onChange={event => onSize(event.target.value as LabelSize)}>{LABEL_SIZES.map(size => <option key={size} value={size}>{t(SIZE_WORD[size])}</option>)}</select></label>
     <label className={styles.check}><input type="checkbox" checked={!!label.bold} disabled={locked} onChange={event => onBold(event.target.checked)} />{t("panel.bold")}</label>
     {colour}

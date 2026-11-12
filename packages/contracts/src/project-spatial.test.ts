@@ -51,4 +51,11 @@ describe("drawing marks: text labels and landmarks", () => {
     const both = spatialSymbols({ entrance: { label: "Gate", position: [10, 20] }, symbols: [{ kind: "lift", position: [5, 5] }, { kind: "entrance", position: [10.2, 19.8], rotation: 90 }] });
     expect(both).toEqual([{ kind: "lift", position: [5, 5] }, { kind: "entrance", position: [10.2, 19.8], rotation: 90, label: "Gate", legacy: true }]);
   });
+
+  it("follows the main entrance when only layout.entrance was moved, so it is never drawn twice", () => {
+    const moved = spatialSymbols({ entrance: { label: "Gate", position: [300, 20] }, symbols: [{ kind: "entrance", position: [80, 20], label: "Side door" }, { kind: "entrance", position: [10, 20], label: "Gate", rotation: 90 }] });
+    expect(moved).toEqual([{ kind: "entrance", position: [80, 20], label: "Side door" }, { kind: "entrance", position: [300, 20], label: "Gate", rotation: 90, legacy: true }]);
+    // An entrance symbol with another name is a different entrance: the legacy one is added in front, as before.
+    expect(spatialSymbols({ entrance: { label: "Gate", position: [300, 20] }, symbols: [{ kind: "entrance", position: [80, 20], label: "Side door" }] })).toHaveLength(2);
+  });
 });

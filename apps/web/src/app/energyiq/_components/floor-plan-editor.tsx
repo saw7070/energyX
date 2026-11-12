@@ -12,7 +12,7 @@ import { ColourPicker, withBoardColour } from "./floor-plan-colour";
 import { clearPlanDraft, usePlanDraft } from "./floor-plan-draft";
 import { boxOf, copyItems, everything, fitsLimits, fitsMarks, frameOf, inBox, isIn, isLocked, lockItems, markAt, moveItems, newMarkId, newRoomId, pasteClip, removeItems, reorderItems, ridersOf, roomIds, stillThere, toggled, turnItem, type Clip, type Riders } from "./floor-plan-arrange";
 import { LabelPanel, LandmarkPicker, RotationField, SymbolPanel, useKindName } from "./floor-plan-mark-panel";
-import { shiftLabel, shiftSymbol } from "./floor-plan-mark-data";
+import { nextEntranceName, nextEntranceSpot, shiftLabel, shiftSymbol, withoutRejected } from "./floor-plan-mark-data";
 import { angleFrom, frameCorners, handleSpot, MARK_LIMIT, normaliseRotation, ROTATION_STEP, type Frame, type PlanLabel, type PlanSymbol } from "./floor-plan-marks";
 import { boxBetween, centredBox, isClick, snappedBox } from "./floor-plan-geometry";
 import { floorPlanMessages } from "./floor-plan-messages";
@@ -139,6 +139,8 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   const [landmark, setLandmark] = useState<string | null>(null);
   const kindName = useKindName();
   const [error, setError] = useState("");
+  /** A text label just added: its Text field takes focus with its text selected, so typing replaces "Text" at once. */
+  const [freshLabel, setFreshLabel] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
   const [leaving, setLeaving] = useState(false);
@@ -191,7 +193,8 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   /** An area's colour: its own, else its panel's, else (no panel) the next colour after the panels. */
   const areaColour = (item: PlanArea) => item.colour ?? (item.board ? colours.get(item.board) : noBoardColours.get(item.key)) ?? "var(--zone-6)";
   /** Each area, equipment box, room and device can have its own colour; without one it follows its panel (a room, its area). */
-  const recolour = <T extends { colour?: string }>(item: T, hex: string | null): T => { const { colour: _old, ...rest } = item; return (hex ? { ...rest, colour: hex } : rest) as T; };
+  // A saved colour the checks turned down (riding along as written) goes too, so the automatic colour never brings it back.
+  const recolour = <T extends { colour?: string; extra?: Record<string, unknown>; mark?: { extra?: Record<string, unknown> } }>(item: T, hex: string | null, entrance = false): T => { const { colour: _old, ...rest } = withoutRejected(item, "colour", entrance); return (hex ? { ...rest, colour: hex } : rest) as T; };
   /** One colour choice is one undo step, however long the colour picker is dragged (`target` names what is coloured). */
   const pickColour = (target: string, apply: (hex: string | null) => FloorPlan) => (hex: string | null, live?: boolean) => commit(apply(hex), live ? { merge: `colour:${target}` } : undefined);
   const colourPicker = (target: string, value: string | undefined, autoLabel: string, apply: (hex: string | null) => FloorPlan) => <ColourPicker key={`colour:${target}`} legend={t("panel.colour")} hint={t("panel.colourHint")} value={value} autoLabel={autoLabel} onPick={pickColour(target, apply)} onDone={() => setHistory(endTyping)} />;
@@ -286,29 +289,34 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
    * Puts a text label or a landmark at `at` (on the grid), or from the keyboard (no point) in the middle of what is shown.
    * An entrance becomes the first entrance when the plan has none yet. One undo step; the new item comes back selected.
    */
-  const addMark = (kind: "text" | "landmark", at: Point | null, symbolKind = landmark ?? "entrance") => {
+  const addMark = (kind: "text" | "landmark", at: Point | null, symbolKind = landmark ?? "entrance", spot?: Point) => {
     const isText = kind === "text", firstEntrance = !isText && symbolKind === "entrance" && !plan.entrance;
     if (!firstEntrance && !fitsMarks(plan, isText ? 1 : 0, isText ? 0 : 1)) { setNotice(t("editor.tooManyMarks", { max: MARK_LIMIT })); return; }
-    const point = clampPoint(at ? [snap(at[0], step), snap(at[1], step)] : [wx + ww / 2, wy + wh / 2], plan.viewBox);
+    const point = spot ?? clampPoint(at ? [snap(at[0], step), snap(at[1], step)] : [wx + ww / 2, wy + wh / 2], plan.viewBox);
     let next: FloorPlan, item: Selection;
     if (isText) {
       const key = `label-${Date.now()}`, label = shiftLabel({ key, id: newMarkId(plan, "lb"), text: t("name.text"), position: point }, 0, 0, plan.viewBox);
-      next = { ...plan, labels: [...(plan.labels ?? []), label] }; item = { kind: "label", key };
+      next = { ...plan, labels: [...(plan.labels ?? []), label] }; item = { kind: "label", key }; setFreshLabel(key);
     } else if (firstEntrance) {
       next = { ...plan, entrance: { label: t("name.mainEntrance"), position: point } }; item = { kind: "entrance", key: "entrance" };
     } else {
-      const key = `symbol-${Date.now()}`, count = (plan.symbols ?? []).filter(entry => entry.kind === "entrance").length + 2;
-      const symbol = shiftSymbol({ key, id: newMarkId(plan, "sy"), kind: symbolKind, position: point, ...(symbolKind === "entrance" ? { label: t("name.otherEntrance", { number: count }) } : {}) }, 0, 0, plan.viewBox);
+      const key = `symbol-${Date.now()}`, caption = symbolKind === "entrance" ? { label: entranceName() } : {};
+      const symbol = shiftSymbol({ key, id: newMarkId(plan, "sy"), kind: symbolKind, position: point, ...caption }, 0, 0, plan.viewBox);
       next = { ...plan, symbols: [...(plan.symbols ?? []), symbol] }; item = { kind: "symbol", key };
     }
     say(placed => countText(t, placed, [item], meterName, "a11y.added", "a11y.addedMany", kindName));
     commit(next, { selection: [item] }); stopTool(); focusCanvas();
   };
-  /** + Add entrance: the main entrance at the bottom of the plan, or another entrance beside the last one. */
+  /** Another entrance's name: the lowest number no entrance uses yet, so deleting "Entrance 2" never makes two "Entrance 3". */
+  const entranceName = () => nextEntranceName([plan.entrance?.label, ...(plan.symbols ?? []).filter(entry => entry.kind === "entrance").map(entry => entry.label)], number => t("name.otherEntrance", { number }));
+  /** + Add entrance: the main entrance at the bottom of the plan, or another entrance beside the last one, on a free spot. */
   const addEntrance = () => {
     setPlacing(null); stopTool();
-    const others = (plan.symbols ?? []).filter(entry => entry.kind === "entrance").length;
-    addMark("landmark", plan.entrance ? [plan.entrance.position[0] + unit * 8 * (others + 1), plan.entrance.position[1]] : [vx + vw / 2, vy + vh - 40], "entrance");
+    if (!plan.entrance) { addMark("landmark", [vx + vw / 2, vy + vh - 40], "entrance"); return; }
+    const place = (point: Point) => clampPoint([snap(point[0], step), snap(point[1], step)], plan.viewBox), label = entranceName();
+    const fits = (point: Point) => { const shown = shiftSymbol({ key: "", kind: "entrance", position: point, label }, 0, 0, plan.viewBox).position; return shown[0] === point[0] && shown[1] === point[1]; };
+    const entrances = [plan.entrance.position, ...(plan.symbols ?? []).filter(entry => entry.kind === "entrance").map(entry => entry.position)];
+    addMark("landmark", null, "entrance", nextEntranceSpot(entrances, plan.viewBox, unit * 8, place, fits));
   };
   const updateArea = (key: string, patch: Partial<PlanArea>, merge?: string) => commit({ ...plan, areas: plan.areas.map(item => item.key === key ? { ...item, ...patch } : item) }, merge ? { merge } : undefined);
 
@@ -704,6 +712,9 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
 
   const save = async () => {
     setError(""); setLeaving(false);
+    // A label with no text cannot be seen on the plan: select it, so its panel opens where its text can be typed.
+    const blank = plan.labels?.find(item => !item.text.trim());
+    if (blank) { setSelection([{ kind: "label", key: blank.key }]); setError(t("check.labelText")); return; }
     let reference: StoredSpatialReference;
     try { reference = referenceFromPlan(withPrefs(plan, prefs), projectId, previous, locale); } catch (reason) { setError(reason instanceof Error ? reason.message : t("editor.checkLayout")); return; }
     // The plan is saved inside Project notes, which have a size limit: say so plainly instead of failing.
@@ -921,8 +932,8 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
         </div>}
         {single?.kind === "entrance" && plan.entrance && <SymbolPanel symbol={{ key: "entrance", kind: "entrance", label: plan.entrance.label, ...(plan.entrance.size !== undefined ? { size: plan.entrance.size } : {}), ...(plan.entrance.rotation ? { rotation: plan.entrance.rotation } : {}) }} entrance
           onCaption={text => commit({ ...plan, entrance: { ...plan.entrance!, label: text } }, { merge: "entrance:label" })} onSize={size => commit({ ...plan, entrance: { ...plan.entrance!, size } })}
-          colour={markColour("entrance", plan.entrance.colour, hex => ({ ...plan, entrance: recolour(plan.entrance!, hex) }))} actions={actions} locked={singleLocked} typing={typing} commandKey={mac ? "⌘" : "Ctrl"} unit={unit} onRotate={deg => turn(single, deg)} onDelete={remove} />}
-        {selectedLabel && <LabelPanel label={selectedLabel} onText={text => updateLabel(selectedLabel.key, item => ({ ...item, text }), `text:${selectedLabel.key}`)} onSize={size => updateLabel(selectedLabel.key, item => without(item, "size", size === "m" ? undefined : size))} onBold={bold => updateLabel(selectedLabel.key, item => without(item, "bold", bold || undefined))}
+          colour={markColour("entrance", plan.entrance.colour, hex => ({ ...plan, entrance: recolour(plan.entrance!, hex, true) }))} actions={actions} locked={singleLocked} typing={typing} commandKey={mac ? "⌘" : "Ctrl"} unit={unit} onRotate={deg => turn(single, deg)} onDelete={remove} />}
+        {selectedLabel && <LabelPanel label={selectedLabel} selectText={freshLabel === selectedLabel.key} onTextSelected={() => setFreshLabel(null)} onText={text => updateLabel(selectedLabel.key, item => ({ ...item, text }), `text:${selectedLabel.key}`)} onSize={size => updateLabel(selectedLabel.key, item => without(item, "size", size === "m" ? undefined : size))} onBold={bold => updateLabel(selectedLabel.key, item => without(item, "bold", bold || undefined))}
           colour={markColour(`label:${selectedLabel.key}`, selectedLabel.colour, hex => ({ ...plan, labels: (plan.labels ?? []).map(item => item.key === selectedLabel.key ? recolour(item, hex) : item) }))} position={positionFields(single!, boxOf(plan, single!)!, ["x", "y"])} actions={actions} locked={singleLocked} typing={typing} commandKey={mac ? "⌘" : "Ctrl"} unit={unit} onRotate={deg => turn(single!, deg)} onDelete={remove} />}
         {selectedSymbol && <SymbolPanel symbol={selectedSymbol} onKind={kind => changeKind(selectedSymbol.key, kind)} onCaption={text => updateSymbol(selectedSymbol.key, item => without(item, "label", text || undefined), `caption:${selectedSymbol.key}`)} onSize={size => updateSymbol(selectedSymbol.key, item => ({ ...item, size }))}
           colour={markColour(`symbol:${selectedSymbol.key}`, selectedSymbol.colour, hex => ({ ...plan, symbols: (plan.symbols ?? []).map(item => item.key === selectedSymbol.key ? recolour(item, hex) : item) }))} position={positionFields(single!, boxOf(plan, single!)!, ["x", "y"])} actions={actions} locked={singleLocked} typing={typing} commandKey={mac ? "⌘" : "Ctrl"} unit={unit} onRotate={deg => turn(single!, deg)} onDelete={remove} />}

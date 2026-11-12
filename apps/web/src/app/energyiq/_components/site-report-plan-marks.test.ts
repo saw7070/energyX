@@ -70,6 +70,18 @@ describe("the site report's floor plan", () => {
     expect(plan.match(/Main entrance gate/g)).toHaveLength(1);
   });
 
+  it("puts the legend below labels and landmarks drawn under the building, inside the plan", () => {
+    const reference = withMarks({ labels: [{ text: "Car park", position: [200, 560], size: "l" }], symbols: [{ kind: "entrance", position: [430, 420], label: "Main gate" }, { kind: "busStop", position: [700, 600], label: "Bus stop" }] });
+    const plan = planOf(renderSiteReportHtml(buildSiteReport(DATA, reference, GENERATED, "en")));
+    const legendY = Number(/<rect x="[^"]+" y="([^"]+)" width="14" height="14"/.exec(plan)![1]);
+    const height = Number(/viewBox="[^ ]+ [^ ]+ [^ ]+ ([^"]+)"/.exec(plan)![1]);
+    // The bus stop's caption sits at 622; the large label's text reaches about 576.
+    expect(legendY).toBeGreaterThan(626);
+    expect(height).toBeGreaterThan(legendY + 14);
+    const before = planOf(renderSiteReportHtml(buildSiteReport(DATA, REFERENCE, GENERATED, "en")));
+    expect(Number(/<rect x="[^"]+" y="([^"]+)" width="14" height="14"/.exec(before)![1])).toBe(470);
+  });
+
   it("draws a layout without labels or landmarks exactly as before", () => {
     const before = renderSiteReportHtml(buildSiteReport(DATA, REFERENCE, GENERATED, "en"));
     const listed = renderSiteReportHtml(buildSiteReport(DATA, withMarks({ labels: [], symbols: [{ kind: "entrance", position: [430, 420], label: "Main entrance gate" }] }), GENERATED, "en"));

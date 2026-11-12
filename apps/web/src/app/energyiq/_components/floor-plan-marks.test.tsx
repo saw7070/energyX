@@ -7,7 +7,7 @@ import { configApi } from "../../../lib/config-api";
 import { EnergyIqLocaleProvider } from "./energyiq-locale";
 import { LANGUAGE_STORAGE_KEY } from "./energyiq-messages";
 import { FloorPlanEditor } from "./floor-plan-editor";
-import { notesWithReference, type StoredSpatialReference } from "./floor-plan-model";
+import { notesWithReference, planFromReference, type StoredSpatialReference } from "./floor-plan-model";
 import { mapDevices, SiteFloorMap } from "./site-floor-map";
 
 afterEach(() => { localStorage.clear(); vi.unstubAllGlobals(); vi.restoreAllMocks(); delete document.documentElement.dataset.energyiqTheme; });
@@ -104,6 +104,34 @@ describe("+ Text", () => {
   });
 });
 
+describe("+ Text, made simple", () => {
+  it("puts focus in the Text field with its text selected, so typing replaces it at once", async () => {
+    const view = await render();
+    await act(async () => view.button("+ Text").click());
+    await view.click(view.canvas(), [700, 300]);
+    const field = view.field("Text") as HTMLInputElement;
+    expect(document.activeElement).toBe(field);
+    expect([field.selectionStart, field.selectionEnd]).toEqual([0, "Text".length]);
+    await view.unmount();
+  });
+
+  it("puts the last text back when the field is left empty, and points at an empty label when saving", async () => {
+    const view = await render();
+    await act(async () => view.button("+ Text").click());
+    await view.click(view.canvas(), [700, 300]);
+    await view.type(view.field("Text") as HTMLInputElement, "To MRT");
+    await view.type(view.field("Text") as HTMLInputElement, "  ");
+    expect(view.items("label")[0]!.textContent).toBe("To MRT");
+    // Emptied and saved straight away (the field never left): saving stops, says why and keeps that label's panel open.
+    const field = view.field("Text") as HTMLInputElement;
+    await act(async () => { setValue(field, ""); field.dispatchEvent(new Event("input", { bubbles: true })); });
+    await act(async () => view.button("Save layout").click());
+    expect(view.host.textContent).toContain("A text label is empty");
+    expect([view.heading(), view.sent.length]).toEqual(["Text label", 0]);
+    await view.unmount();
+  });
+});
+
 describe("+ Landmark", () => {
   it("offers each landmark in plain words and puts the one picked where the plan is clicked", async () => {
     const view = await render();
@@ -153,6 +181,20 @@ describe("several entrances", () => {
     await view.unmount();
   });
 
+  it("puts each new entrance on a free spot and names it with the lowest number not in use", async () => {
+    const view = await render();
+    for (let count = 0; count < 3; count += 1) await act(async () => view.button("+ Add entrance").click());
+    const spots = view.items("symbol").map(item => item.querySelector("path")?.getAttribute("d"));
+    expect(new Set(spots).size).toBe(3);
+    const names = () => view.items("symbol").map(item => item.textContent);
+    expect(names()).toEqual(["Entrance 2", "Entrance 3", "Entrance 4"]);
+    await view.click(view.items("symbol")[0]!.querySelector("path")!, [0, 0]);
+    await act(async () => view.button("Delete landmark").click());
+    await act(async () => view.button("+ Add entrance").click());
+    expect(names()).toEqual(["Entrance 3", "Entrance 4", "Entrance 2"]);
+    await view.unmount();
+  });
+
   it("turns the main entrance with the round handle, in 15° steps, as one undo step", async () => {
     const view = await render();
     await view.click(view.item("entrance:entrance")!, [500, 600]);
@@ -172,6 +214,12 @@ describe("several entrances", () => {
 });
 
 describe("turning a device box", () => {
+  it("reads a turn written elsewhere the same way in the editor and on the map", () => {
+    const turned = { ...previous, layout: { ...previous.layout, devices: [{ meterId: "tv", position: [100, 150], size: [120, 40], rotation: -30 }] } } as unknown as StoredSpatialReference;
+    expect(planFromReference(turned).devices[0]!.rotation).toBe(330);
+    expect(mapDevices(turned, meters)[0]!.rotation).toBe(330);
+  });
+
   it("turns a device box from its panel and saves devices[].rotation; a dot drops it", async () => {
     const view = await render();
     await view.click(view.item("device:tv")!, [100, 150]);

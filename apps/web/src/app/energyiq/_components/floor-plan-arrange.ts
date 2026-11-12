@@ -4,9 +4,9 @@
  */
 import { freshCopy, sameRect } from "./floor-plan-carry";
 import { clampDelta, within } from "./floor-plan-geometry";
-import { shiftLabel, shiftSymbol } from "./floor-plan-mark-data";
+import { shiftLabel, shiftSymbol, withoutRejected } from "./floor-plan-mark-data";
 import { boxFrame, frameBounds, hitsFrame, labelBounds, labelFrame, MARK_LIMIT, normaliseRotation, symbolBounds, symbolFrame, type Frame, type PlanLabel, type PlanSymbol } from "./floor-plan-marks";
-import { asOwnArea, clampPoint, clampRect, deviceRect, devicePosition, MAX_AREAS, MAX_ROOMS, moveSelection, NO_PASSENGERS, passengers, removeSelection, roomOwner, settleRooms, type FloorPlan, type PlanArea, type PlanRoom, type Point, type Rect, type Selection } from "./floor-plan-model";
+import { asOwnArea, clampPoint, clampRect, deviceRect, devicePosition, MAX_AREAS, MAX_ROOMS, moveSelection, NO_PASSENGERS, passengers, promoteEntrance, removeSelection, roomOwner, settleRooms, type FloorPlan, type PlanArea, type PlanRoom, type Point, type Rect, type Selection } from "./floor-plan-model";
 
 export type Riders = ReturnType<typeof NO_PASSENGERS>;
 export const sameItem = (a: Selection, b: Selection) => a.kind === b.kind && a.key === b.key;
@@ -117,7 +117,8 @@ export function moveItems(plan: FloorPlan, list: Selection[], dx: number, dy: nu
  */
 export function turnItem(plan: FloorPlan, item: Selection, deg: number): FloorPlan {
   if (isLocked(plan, item)) return plan;
-  const rotation = normaliseRotation(deg), turned = <T extends { rotation?: number }>(entry: T): T => { const { rotation: _old, ...rest } = entry; return (rotation ? { ...rest, rotation } : rest) as T; };
+  // A saved turn the checks turned down (riding along as written) goes, so turning back to 0° never brings it back.
+  const rotation = normaliseRotation(deg), turned = <T extends { rotation?: number; extra?: Record<string, unknown>; mark?: { extra?: Record<string, unknown> } }>(entry: T): T => { const { rotation: _old, ...rest } = withoutRejected(entry, "rotation", item.kind === "entrance"); return (rotation ? { ...rest, rotation } : rest) as T; };
   const same = (entry: { rotation?: number }) => (entry.rotation ?? 0) === rotation;
   if (item.kind === "label") { const label = plan.labels?.find(entry => entry.key === item.key); return !label || same(label) ? plan : { ...plan, labels: plan.labels!.map(entry => entry === label ? shiftLabel(turned(entry), 0, 0, plan.viewBox) : entry) }; }
   if (item.kind === "symbol") { const symbol = plan.symbols?.find(entry => entry.key === item.key); return !symbol || same(symbol) ? plan : { ...plan, symbols: plan.symbols!.map(entry => entry === symbol ? shiftSymbol(turned(entry), 0, 0, plan.viewBox) : entry) }; }
@@ -284,9 +285,14 @@ export function pasteClip(plan: FloorPlan, clip: Clip, offset: number, copyOf: (
   const markKeys = new Set([...(plan.labels ?? []), ...(plan.symbols ?? [])].map(item => item.key)), markKey = (prefix: string) => { let number = 1; while (markKeys.has(`${prefix}-copy-${number}`)) number += 1; const key = `${prefix}-copy-${number}`; markKeys.add(key); return key; };
   const labelKeys = new Map<string, string>(), symbolKeys = new Map<string, string>();
   let withIds: FloorPlan = plan;
-  const newLabels = (clip.labels ?? []).map((source): PlanLabel => { const { locked: _locked, ...copy } = freshCopy(source), key = markKey("label"), id = newMarkId(withIds, "lb"); labelKeys.set(source.key, key); const next = shiftLabel({ ...copy, key, id }, dx, dy, plan.viewBox); withIds = { ...withIds, labels: [...(withIds.labels ?? []), next] }; return next; });
-  const newSymbols = (clip.symbols ?? []).map((source): PlanSymbol => { const { locked: _locked, ...copy } = freshCopy(source), key = markKey("symbol"), id = newMarkId(withIds, "sy"); symbolKeys.set(source.key, key); const next = shiftSymbol({ ...copy, key, id }, dx, dy, plan.viewBox); withIds = { ...withIds, symbols: [...(withIds.symbols ?? []), next] }; return next; });
+  const newLabels = (clip.labels ?? []).map((source): PlanLabel => { const { locked: _locked, asSaved: _saved, ...copy } = freshCopy(source), key = markKey("label"), id = newMarkId(withIds, "lb"); labelKeys.set(source.key, key); const next = shiftLabel({ ...copy, key, id }, dx, dy, plan.viewBox); withIds = { ...withIds, labels: [...(withIds.labels ?? []), next] }; return next; });
+  const newSymbols = (clip.symbols ?? []).map((source): PlanSymbol => { const { locked: _locked, asSaved: _saved, ...copy } = freshCopy(source), key = markKey("symbol"), id = newMarkId(withIds, "sy"); symbolKeys.set(source.key, key); const next = shiftSymbol({ ...copy, key, id }, dx, dy, plan.viewBox); withIds = { ...withIds, symbols: [...(withIds.symbols ?? []), next] }; return next; });
   const keyMaps: Partial<Record<Selection["kind"], Map<string, string>>> = { area: areaKeys, room: roomKeys, label: labelKeys, symbol: symbolKeys };
   const selection = clip.roots.flatMap((root): Selection[] => { const key = keyMaps[root.kind]?.get(root.key); return key ? [{ kind: root.kind, key }] : []; });
-  return { plan: settleRooms({ ...plan, areas: [...plan.areas, ...areas], rooms: [...plan.rooms, ...rooms], ...(newLabels.length ? { labels: [...(plan.labels ?? []), ...newLabels] } : {}), ...(newSymbols.length ? { symbols: [...(plan.symbols ?? []), ...newSymbols] } : {}) }), selection };
+  // A plan left with no main entrance takes the first pasted entrance as it (so `layout.entrance` is written from it).
+  const pasted = settleRooms({ ...plan, areas: [...plan.areas, ...areas], rooms: [...plan.rooms, ...rooms], ...(newLabels.length ? { labels: [...(plan.labels ?? []), ...newLabels] } : {}), ...(newSymbols.length ? { symbols: [...(plan.symbols ?? []), ...newSymbols] } : {}) });
+  const next = promoteEntrance(pasted);
+  if (next === pasted) return { plan: next, selection };
+  const left = new Set((next.symbols ?? []).map(entry => entry.key));
+  return { plan: next, selection: selection.map(entry => entry.kind === "symbol" && !left.has(entry.key) ? { kind: "entrance", key: "entrance" } : entry) };
 }

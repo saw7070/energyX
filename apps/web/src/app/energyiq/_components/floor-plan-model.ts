@@ -1,8 +1,8 @@
-import { readProjectSpatialReference, type ProjectSpatialReference } from "@datafoundry/contracts";
+import { readProjectSpatialReference, spatialRotation, type ProjectSpatialReference } from "@datafoundry/contracts";
 import { translatorFor, type EnergyIqLocale } from "./energyiq-messages";
 import { floorPlanMessages } from "./floor-plan-messages";
 import { entranceMarked, entranceParts, entranceSymbol, firstEntrance, readLabels, readSymbols, shiftLabel, shiftSymbol, keepBoxInside, withPlaced, writeLabel, writeSymbol, type EntranceMarkParts, type MarkSkip } from "./floor-plan-mark-data";
-import { boxFrame, frameBounds, labelBounds, MARK_LIMIT, symbolBounds, symbolFrame, unionBox, type PlanLabel, type PlanSymbol } from "./floor-plan-marks";
+import { boxFrame, frameBounds, labelBounds, MARK_LIMIT, symbolBounds, symbolFrame, TEXT_MAX as MARK_TEXT_MAX, unionBox, type PlanLabel, type PlanSymbol } from "./floor-plan-marks";
 import { boardFilledIn, carriedOf, DEVICE_KEYS, ENTRANCE_KEYS, GROUP_KEYS, isRecord, LAYOUT_KEYS, ROLE_KEYS, ROOM_KEYS, sameNames, samePoint, sameRect, STANDALONE_ZONE_KEYS, withCarried, withoutCarried, withoutFilledBoard, ZONE_KEYS, type AreaBaseline, type Carried, type Json } from "./floor-plan-carry";
 
 /** [x, y, width, height] in plan units. */
@@ -99,8 +99,12 @@ const roomIdOf = (room: unknown): { id?: string } => { const value = (room as { 
  * for a room `id` when `roomId` holds it (a well-formed id no earlier room uses).
  */
 const owned = (raw: unknown, keys: readonly string[], roomId: { id?: string } = {}) => [...keys, ...("id" in roomId ? ["id"] : []), ...("locked" in lockedOf(raw) ? ["locked"] : [])];
-/** A turn the editor wrote (whole degrees, 1-359); anything else rides along as saved. */
-const rotationOf = (item: unknown): { rotation?: number } => { const value = (item as { rotation?: unknown } | null)?.rotation; return typeof value === "number" && Number.isInteger(value) && value > 0 && value < 360 ? { rotation: value } : {}; };
+/**
+ * A device box's turn, read as the map reads it (spatialRotation: any finite number, in whole degrees 0-359), so the
+ * editor draws, hits and keeps inside exactly the box the map draws. Owned (and written back in whole degrees) while it
+ * turns the box; anything else rides along as saved.
+ */
+const rotationOf = (item: unknown): { rotation?: number } => { const value = spatialRotation((item as { rotation?: unknown } | null)?.rotation); return value ? { rotation: value } : {}; };
 export const isPoint = (value: unknown): value is Point => Array.isArray(value) && value.length === 2 && value.every(n => typeof n === "number" && Number.isFinite(n));
 export const isRect = (value: unknown): value is Rect => Array.isArray(value) && value.length === 4 && value.every(n => typeof n === "number" && Number.isFinite(n));
 
@@ -184,11 +188,12 @@ export function planFromReference(reference: StoredSpatialReference, locale: Ene
     return [{ meterId: item.meterId, position: clampPoint(item.position, layout.viewBox), ...(isSize(item.size) ? { size: [...item.size] as Point } : {}), ...rotationOf(item), ...colourOf(item), ...lockedOf(item), ...carriedOf(item, [...owned(item, DEVICE_KEYS), ...("rotation" in rotationOf(item) ? ["rotation"] : [])]) }];
   });
   const rawEntrance: unknown = (layout as { entrance?: unknown }).entrance;
+  const legacyName = isRecord(rawEntrance) && typeof rawEntrance.label === "string" && rawEntrance.label.trim() ? rawEntrance.label.trim().slice(0, MARK_TEXT_MAX) : undefined;
   const legacy = isRecord(rawEntrance) && isPoint(rawEntrance.position) ? { label: typeof rawEntrance.label === "string" && rawEntrance.label ? rawEntrance.label : translatorFor(floorPlanMessages, locale)("name.entrance"), position: [...rawEntrance.position] as Point, ...carriedOf(rawEntrance, ENTRANCE_KEYS) } : null;
   // Text labels and landmarks. The first entrance is the legacy one (taking the entrance symbol at its place, if any),
   // else the first entrance symbol: either way it is drawn once, and `layout.entrance` is written from it.
   const labelList = readLabels((layout as { labels?: unknown }).labels), symbolList = readSymbols((layout as { symbols?: unknown }).symbols);
-  const first = firstEntrance(symbolList.items, legacy ? legacy.position : null), firstMark = symbolList.items[first];
+  const first = firstEntrance(symbolList.items, legacy ? legacy.position : null, legacyName), firstMark = symbolList.items[first];
   const entrance: PlanEntrance | null = firstMark ? { ...(legacy ?? { label: firstMark.item.label ?? "", position: [...firstMark.item.position] as Point }), ...entranceParts(firstMark.item, firstMark.index) } : legacy;
   const labels = labelList.items.map(({ item }) => item), symbols = symbolList.items.filter((_, index) => index !== first).map(({ item }) => item);
   const colours = Object.fromEntries(Object.entries(isRecord(layout.boardColours) ? layout.boardColours : {}).filter(([, value]) => typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)));
@@ -413,8 +418,10 @@ export const NOTES_LIMIT = 100_000;
  * from the entrance while neither moved, a board marker while that board's areas stay put, and the entrance's board
  * while that board is still on the plan.
  */
-export function referenceFromPlan(plan: FloorPlan, projectId: string, previous: StoredSpatialReference | null, locale: EnergyIqLocale = "en"): StoredSpatialReference {
+export function referenceFromPlan(drawn: FloorPlan, projectId: string, previous: StoredSpatialReference | null, locale: EnergyIqLocale = "en"): StoredSpatialReference {
   const t = translatorFor(floorPlanMessages, locale);
+  // The first entrance always drives `layout.entrance`, however the plan was left (a paste, an undo, a draft).
+  const plan = promoteEntrance(drawn);
   const own = plan.areas.filter(item => !item.insideRoom);
   if (!own.length) throw new Error(t("check.noArea"));
   if (!plan.rooms.length) throw new Error(t("check.noRoom"));
@@ -476,10 +483,14 @@ export function referenceFromPlan(plan: FloorPlan, projectId: string, previous: 
   // main entrance gets it (once) on its first save here.
   const labelItems = plan.labels ?? [], symbolItems = plan.symbols ?? [], carriedMarks = plan.carried;
   if (labelItems.some(item => !item.text.trim())) throw new Error(t("check.labelText"));
+  // A main entrance with no entry of its own in the list joins it only while the list has room for it: a list written
+  // elsewhere that already holds as many entries as readers draw keeps it in `layout.entrance` alone, so a save never
+  // refuses, hides or repeats anything that was there (readers add `layout.entrance` when no entry stands for it).
+  const listed = symbolItems.length + (carriedMarks?.symbols?.length ?? 0), entranceListed = !!plan.entrance && (plan.entrance.slot !== undefined || listed < MARK_LIMIT);
   // Only what the plan draws counts here: a saved list already longer than readers draw still saves as it was.
-  if (labelItems.length > MARK_LIMIT || symbolItems.length + (plan.entrance ? 1 : 0) > MARK_LIMIT) throw new Error(t("check.tooManyMarks", { max: MARK_LIMIT }));
+  if (labelItems.length > MARK_LIMIT || symbolItems.length + (entranceListed ? 1 : 0) > MARK_LIMIT) throw new Error(t("check.tooManyMarks", { max: MARK_LIMIT }));
   const labelOut = carriedMarks?.labelList || labelItems.length || carriedMarks?.labels?.length ? { labels: withPlaced(labelItems.map(writeLabel), carriedMarks?.labels ?? []) } : carriedMarks?.rawLabels ? { labels: carriedMarks.rawLabels.value } : {};
-  const firstEntrance = plan.entrance && (carriedMarks?.symbolList || symbolItems.length || carriedMarks?.symbols?.length || entranceMarked(plan.entrance)) ? [{ index: plan.entrance.slot ?? 0, item: entranceSymbol(plan.entrance, entranceLabel) }] : [];
+  const firstEntrance = plan.entrance && entranceListed && (carriedMarks?.symbolList || symbolItems.length || carriedMarks?.symbols?.length || entranceMarked(plan.entrance)) ? [{ index: plan.entrance.slot ?? 0, item: entranceSymbol(plan.entrance, entranceLabel) }] : [];
   const symbolOut = carriedMarks?.symbolList || symbolItems.length || carriedMarks?.symbols?.length || firstEntrance.length ? { symbols: withPlaced(symbolItems.map(({ key: _key, ...item }) => writeSymbol(item)), [...firstEntrance, ...(carriedMarks?.symbols ?? [])]) } : carriedMarks?.rawSymbols ? { symbols: carriedMarks.rawSymbols.value } : {};
   // Device entries the plan could not draw go back in their place; a device "list" that was not a list stays until devices are placed.
   const devices: unknown[] = plan.devices.map(item => withCarried({ meterId: item.meterId, position: item.position.map(Math.round) as Point, ...(item.size ? { size: item.size.map(Math.round) as Point } : {}), ...colourOf(item), ...lockedOf(item), ...rotationOf(item) }, item));

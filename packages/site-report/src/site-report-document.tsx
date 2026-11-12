@@ -119,7 +119,15 @@ function FloorPlan({ report }: { report: SiteReport }) {
   const panelLabel = t("plan.panel");
   cursor += 38 + textWidth(panelLabel, 11.5) + 26;
   const noteOnOwnLine = cursor + textWidth(note, 10.5) > vx + vw - 4;
-  const legendY = maxY + (entrance ? 50 : 24);
+  // Text labels and landmarks often sit outside the building (a car park, a bus stop, a side gate): the legend goes below
+  // the lowest of them too, so it is never drawn over them and the plan is tall enough to show them.
+  const marks = { labels: spatialLabels(reference.layout), symbols: spatialSymbols(reference.layout).filter(item => !item.legacy) };
+  const labelFont = (size: "s" | "m" | "l" | undefined) => vw / 100 * { s: 1.3, m: 1.9, l: 2.8 }[size ?? "m"];
+  const turnedBottom = (halfWidth: number, halfHeight: number, rotation = 0) => { const a = rotation * Math.PI / 180; return Math.abs(Math.sin(a)) * halfWidth + Math.abs(Math.cos(a)) * halfHeight; };
+  const marksBottom = Math.max(-Infinity,
+    ...marks.labels.map(item => { const font = labelFont(item.size); return item.position[1] + turnedBottom(textWidth(item.text, font) * (item.bold ? 0.55 : 0.5), font * 0.65, item.rotation); }),
+    ...marks.symbols.map(item => item.position[1] + (item.label ? (item.kind === "entrance" ? 38 : 26) : item.kind === "entrance" ? (item.rotation ? 22 : 18) : 9)));
+  const legendY = Math.max(maxY + (entrance ? 50 : 24), marksBottom + 16);
   const height = Math.max(vh, legendY + (noteOnOwnLine ? 40 : 20)) - vy;
   return <svg className="plan" viewBox={`${vx} ${vy} ${vw} ${height}`} role="img" aria-label={t("plan.aria", { name: report.projectName })}>
     {doorOnWall
@@ -164,9 +172,9 @@ function FloorPlan({ report }: { report: SiteReport }) {
     {hasCorridor && <><rect x={leftEdge} y={minY + 4} width={rightEdge - leftEdge} height={maxY - minY - 8} fill="#fff" /><line x1={leftEdge} y1={minY + 4} x2={leftEdge} y2={maxY - 4} stroke={C.line} /><line x1={rightEdge} y1={minY + 4} x2={rightEdge} y2={maxY - 4} stroke={C.line} /></>}
     {/* Text labels and landmarks are drawing only: text as written (turned where it is turned), further entrances as an
         arrow, and every other landmark as a small ring with its caption. The main entrance is drawn below as always. */}
-    {spatialLabels(reference.layout).map((item, index) => { const [px, py] = item.position, size = vw / 100 * { s: 1.3, m: 1.9, l: 2.8 }[item.size ?? "m"];
+    {marks.labels.map((item, index) => { const [px, py] = item.position, size = labelFont(item.size);
       return <text key={`label-${index}`} className="svgt halo" x={px} y={py} textAnchor="middle" dominantBaseline="central" fontSize={size} fontWeight={item.bold ? 700 : 500} fill={item.colour ?? C.ink} {...(item.rotation ? { transform: `rotate(${item.rotation} ${px} ${py})` } : {})}>{item.text}</text>; })}
-    {spatialSymbols(reference.layout).filter(item => !item.legacy).map((item, index) => { const [px, py] = item.position, colour = item.colour ?? C.ink, turn = item.rotation ? { transform: `rotate(${item.rotation} ${px} ${py})` } : {};
+    {marks.symbols.map((item, index) => { const [px, py] = item.position, colour = item.colour ?? C.ink, turn = item.rotation ? { transform: `rotate(${item.rotation} ${px} ${py})` } : {};
       return <g key={`symbol-${index}`} data-symbol={item.kind === "entrance" ? "entrance" : "other"}>
         {item.kind === "entrance" ? <path d={`M${px - 12} ${py + 18} L${px} ${py} L${px + 12} ${py + 18} Z`} fill={colour} {...turn} /> : <><circle cx={px} cy={py} r={8} fill="#fff" stroke={colour} strokeWidth={2} /><circle cx={px} cy={py} r={2.5} fill={colour} /></>}
         {item.label && <text className="svgt rsub halo" x={px} y={py + (item.kind === "entrance" ? 34 : 22)} textAnchor="middle">{item.label}</text>}
