@@ -1,0 +1,26 @@
+/* Large view of a floor plan: a dialog filling most of the screen, with zoom; the plan scrolls when zoomed in. */
+.dialog { width:min(1400px, calc(100vw - 32px)); max-width:none; height:calc(100vh - 48px); max-height:none; padding:0; border:1px solid #d0dbd2; border-radius:14px; background:white; color:#1f2d25; box-shadow:0 24px 64px rgba(15,30,22,.28); }
+.dialog::backdrop { background:rgba(12,22,17,.55); }
+.panel { display:flex; flex-direction:column; height:100%; }
+.bar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; padding:12px 16px; border-bottom:1px solid #e6ebe6; }
+.bar h4 { font-size:16px; font-weight:650; }
+.tools { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.tools button { min-width:34px; height:32px; padding:0 10px; border:1px solid #d0dbd2; border-radius:8px; background:white; color:#1f2d25; font-size:13px; font-weight:600; cursor:pointer; }
+.tools button:disabled { opacity:.45; cursor:default; }
+.tools button:focus-visible, .trigger:focus-visible { outline:2px solid #1f7a52; outline-offset:2px; }
+.tools output { min-width:48px; text-align:center; font-size:13px; font-variant-numeric:tabular-nums; color:#58645d; }
+.tools .close { background:#1f2d25; border-color:#1f2d25; color:white; }
+.body { flex:1; min-height:0; overflow:auto; padding:16px; background:#fbfcfb; }
+.sheet { min-width:100%; margin:0 auto; }
+.sheet svg { width:100%; height:auto; display:block; }
+.trigger { position:relative; display:block; width:100%; padding:0; border:0; background:none; text-align:inherit; cursor:zoom-in; border-radius:6px; }
+.triggerPlan { display:block; pointer-events:none; }
+.hint { position:absolute; right:6px; bottom:6px; padding:3px 8px; border-radius:999px; background:rgba(31,45,37,.82); color:white; font-size:11px; font-weight:600; opacity:.9; transition:opacity .15s; }
+.trigger:hover .hint, .trigger:focus-visible .hint { opacity:1; }
+:global(:where(html[data-energyiq-theme="dark"])) .dialog { background:#1b1d1f; color:#e6ebe8; border-color:#32363b; }
+:global(:where(html[data-energyiq-theme="dark"])) .bar { border-color:#2c3033; }
+:global(:where(html[data-energyiq-theme="dark"])) .tools button { background:#232629; color:#e6ebe8; border-color:#3a3f44; }
+:global(:where(html[data-energyiq-theme="dark"])) .tools .close { background:#e6ebe8; color:#1b1d1f; border-color:#e6ebe8; }
+:global(:where(html[data-energyiq-theme="dark"])) .tools output { color:#9aa8a0; }
+:global(:where(html[data-energyiq-theme="dark"])) .body { background:#161718; }
+@media (max-width: 600px) { .dialog { width:calc(100vw - 16px); height:calc(100vh - 16px); } .body { padding:8px; } }
