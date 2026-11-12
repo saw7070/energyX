@@ -1,11 +1,12 @@
 "use client";
-import { useId, type CSSProperties, type KeyboardEvent } from "react";
-import type { ProjectSpatialReference } from "@datafoundry/contracts";
+import { useId, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { spatialLevelOf, spatialLevelReference, spatialLevels, spatialRoomTitle, type ProjectSpatialReference } from "@datafoundry/contracts";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { translatorFor, type EnergyIqLocale } from "./energyiq-messages";
 import { floorMapMessages } from "./site-floor-map-messages";
 import styles from "./site-floor-map.module.css";
 import { planStyleOf } from "./floor-plan-model";
+import { sharedHidden } from "./floor-plan-layers";
 
 const mapText = (locale: EnergyIqLocale) => translatorFor(floorMapMessages, locale);
 
@@ -114,22 +115,56 @@ export function roomDoor([rx, ry, rw, rh]: Rect, unit: number, obstacles: Rect[]
   return spot ? { ...spot, size } : null;
 }
 
+type MapProps = { reference: ProjectSpatialReference; large?: boolean; devices?: MapDevice[]; onOpenDevice?: (id: string) => void; highlight?: string[] | null; highlightDevices?: string[] | null; onSelectBoard?: (board: string, deviceId?: string) => void; focusDevice?: string | null };
+type Saved = ProjectSpatialReference & { layout: { devices?: Array<{ meterId: string }>; layers?: unknown } };
+
 /**
  * `highlight` names the boards to emphasise (others fade); `highlightDevices` says exactly which pins those are, for
  * when different groups share a name; `onSelectBoard` makes each area clickable, saying which pin it holds if any;
  * `onOpenDevice` makes each pin clickable; `focusDevice` rings one pin.
+ *
+ * A site with two floors or more gets a tab per floor above the plan, and the plan shows one floor at a time; it turns
+ * to the floor of the pin in focus, or of most of the highlighted pins or areas, so a highlight never lands on another
+ * floor. `level` shows one floor without tabs (the editor's preview of the floor being edited). A one-floor site looks
+ * exactly as before floors existed. Layers the layout hides on the shared map are not drawn.
  */
-export function SiteFloorMap({ reference, large = false, devices = [], onOpenDevice, highlight = null, highlightDevices = null, onSelectBoard, focusDevice = null }: { reference: ProjectSpatialReference; large?: boolean; devices?: MapDevice[]; onOpenDevice?: (id: string) => void; highlight?: string[] | null; highlightDevices?: string[] | null; onSelectBoard?: (board: string, deviceId?: string) => void; focusDevice?: string | null }) {
+export function SiteFloorMap(props: MapProps & { level?: string | null }) {
+  const { reference, level: fixed = null, devices = [], highlight = null, highlightDevices = null, focusDevice = null } = props;
   const t = useMessages(floorMapMessages);
+  const [picked, setPicked] = useState<{ level: string; key: string } | null>(null);
+  const levels = spatialLevels(reference.layout), hidden = sharedHidden((reference as Saved).layout.layers);
+  const { level: _level, ...rest } = props;
+  if (!levels || levels.length < 2) return <MapSheet {...rest} hidden={hidden} />;
+  const has = (id: string | null | undefined): id is string => !!id && levels.some(item => item.id === id);
+  const deviceLevel = new Map(((reference as Saved).layout.devices ?? []).flatMap(item => item && typeof item.meterId === "string" ? [[item.meterId, spatialLevelOf(item, levels)] as const] : []));
+  const most = (found: string[]) => { const counts = new Map<string, number>(); for (const id of found) counts.set(id, (counts.get(id) ?? 0) + 1); return [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null; };
+  const wanted = focusDevice && deviceLevel.has(focusDevice) ? deviceLevel.get(focusDevice)!
+    : most((highlightDevices ?? []).flatMap(id => deviceLevel.has(id) ? [deviceLevel.get(id)!] : [])) ?? (highlight ? most(reference.layout.zones.filter(zone => zone.referenceBoard && highlight.includes(zone.referenceBoard)).map(zone => spatialLevelOf(zone, levels))) : null);
+  // A tab picked by the reader holds until the highlight changes; then the map turns to the highlighted floor.
+  const key = JSON.stringify([focusDevice, highlightDevices, highlight]);
+  const shown = has(fixed) ? fixed : picked && picked.key === key && has(picked.level) ? picked.level : wanted ?? (has(picked?.level) ? picked!.level : levels[0]!.id);
+  const floor = spatialLevelReference(reference, shown), onFloor = new Set(((floor as Saved).layout.devices ?? []).map(item => item?.meterId));
+  const sheet = <MapSheet {...rest} reference={floor} colourSource={reference} devices={devices.filter(device => onFloor.has(device.id))} hidden={hidden} />;
+  if (has(fixed)) return sheet;
+  return <div className={styles.levelMap}>
+    <div className={styles.levelTabs} role="tablist" aria-label={t("levels")}>{levels.map(item => <button key={item.id} type="button" role="tab" aria-selected={item.id === shown} className={styles.levelTab} onClick={() => setPicked({ level: item.id, key })}>{item.name}</button>)}</div>
+    {sheet}
+  </div>;
+}
+
+/** One sheet of the plan. `colourSource` is the whole layout, so a board keeps its colour on every floor. */
+function MapSheet({ reference, large = false, devices: allDevices = [], onOpenDevice, highlight = null, highlightDevices = null, onSelectBoard, focusDevice = null, colourSource = reference, hidden = new Set() }: MapProps & { colourSource?: ProjectSpatialReference; hidden?: Set<string> }) {
+  const t = useMessages(floorMapMessages);
+  const devices = hidden.has("devices") ? [] : allDevices;
   // Pattern ids must be unique per map on the page (the plan and its enlarged copy) and safe inside url(#…).
   const gridId = useId().replace(/[^a-zA-Z0-9]/g, "");
   const { locale } = useEnergyIqLocale();
   const [x, y, w, h] = reference.layout.viewBox;
   const unit = w / 100;
-  const colours = zoneColours(reference.layout.zones, chosenColours(reference));
+  const colours = zoneColours(colourSource.layout.zones, chosenColours(colourSource));
   const zoneOf = new Map(reference.layout.zones.map(zone => [zone.id, zone]));
   const entrance = (reference as ProjectSpatialReference & Extras).layout.entrance;
-  const areas = reference.layout.zones.filter(zone => zone.rect && zone.independentSpace !== false);
+  const areas = hidden.has("areas") ? [] : reference.layout.zones.filter(zone => zone.rect && zone.independentSpace !== false);
   const subgroups = reference.layout.zones.flatMap(zone => {
     if (zone.independentSpace !== false) return [];
     if (zone.rect) return [{ zone, box: zone.rect as Rect }];
@@ -139,7 +174,7 @@ export function SiteFloorMap({ reference, large = false, devices = [], onOpenDev
     return [{ zone, box: [rx + pad, ry + rh - bh - pad, rw - pad * 2, bh] as Rect }];
   });
   const groupBoxes = subgroups.map(({ zone, box }) => ({ rect: box, ...(zone.equipment ? { equipment: zone.equipment } : {}) }));
-  const byBoard = boardColours(reference.layout.zones.map(zone => zone.referenceBoard), chosenColours(reference));
+  const byBoard = boardColours(colourSource.layout.zones.map(zone => zone.referenceBoard), chosenColours(colourSource));
   const positions = devices.map(device => device.position);
   const text = (lines: string[], cx: number, cy: number, size: number, className: string) => <text x={cx} y={cy - (lines.length - 1) * size * 0.6} textAnchor="middle" className={className} style={{ fontSize: size }}>{lines.map((line, index) => <tspan key={index} x={cx} dy={index ? size * 1.2 : 0}>{line}</tspan>)}</text>;
   const interactive = (!!onOpenDevice && devices.length > 0) || !!onSelectBoard;
@@ -184,14 +219,14 @@ export function SiteFloorMap({ reference, large = false, devices = [], onOpenDev
       <rect x={zx + unit * 1.4} y={zy + unit * 1.75} width={unit * 1.3} height={unit * 1.3} rx={unit * 0.2} className={styles.planSwatch} />
       <text x={zx + unit * 3.4} y={zy + unit * 2.95} className={styles.planZoneLabel} style={{ fontSize: unit * 1.8 }}>{zone.referenceBoard ? <>{zone.referenceBoard}<tspan className={styles.planZoneSub} dx={unit * 0.8}>{areaLabel(zone.id, locale)}</tspan></> : areaLabel(zone.id, locale)}</text>
     </g>; })}
-    {reference.layout.rooms.map(room => { const [rx, ry, rw, rh] = room.rect as Rect; const colour = colours.get(room.zone); const size = Math.min(unit * 1.45, rw / 8); const board = reference.layout.zones.find(zone => zone.id === room.zone)?.referenceBoard ?? ""; const own = (room as { colour?: unknown }).colour;
-      const lines = wrapLabel(room.name, Math.max(6, Math.floor(rw / (size * 0.58))));
+    {!hidden.has("rooms") && reference.layout.rooms.map(room => { const [rx, ry, rw, rh] = room.rect as Rect; const colour = colours.get(room.zone); const size = Math.min(unit * 1.45, rw / 8); const board = reference.layout.zones.find(zone => zone.id === room.zone)?.referenceBoard ?? ""; const own = (room as { colour?: unknown }).colour;
+      const lines = wrapLabel(spatialRoomTitle(room), Math.max(6, Math.floor(rw / (size * 0.58))));
       const labelY = roomHasPins(room.rect, positions) ? ry + size * 1.6 + (lines.length - 1) * size * 0.6 : ry + rh / 2 + size * 0.35;
       // Clear of the room's name (drawn from its first line, above the centre), its meters and any equipment inside it.
       const obstacles = [labelBox(lines, rx + rw / 2, labelY - (lines.length - 1) * size * 0.6, size), ...pinBoxes.filter(item => inside(room.rect, item.at)).flatMap(item => item.boxes),
         ...subgroups.map(item => item.box).filter(box => overlaps(box, room.rect as Rect)), ...devices.flatMap(device => device.size && inside(room.rect, device.position) ? [[device.position[0] - device.size[0] / 2, device.position[1] - device.size[1] / 2, device.size[0], device.size[1]] as Rect] : [])];
       const door = drawn ? roomDoor(room.rect as Rect, unit, obstacles) : null;
-      return <g key={room.name} style={area(isColour(own) ? own : colour)} {...clickable(board, t("selectRoom", { board, room: room.name }), room.rect)}>
+      return <g key={room.name} style={area(isColour(own) ? own : colour)} {...clickable(board, t("selectRoom", { board, room: spatialRoomTitle(room) }), room.rect)}>
       <rect x={rx} y={ry} width={rw} height={rh} rx={drawn ? 0 : unit * 0.8} className={`${styles.planRoom} ${isColour(own) ? styles.planRoomOwn : ""}`} strokeWidth={unit * (drawn ? 0.2 : 0.14)} />
       {door && <>
         <line x1={door.x} y1={door.y} x2={door.x + door.along * door.size} y2={door.y} className={styles.planDoorGap} strokeWidth={unit * 0.34} />
@@ -200,7 +235,7 @@ export function SiteFloorMap({ reference, large = false, devices = [], onOpenDev
       </>}
       {text(lines, rx + rw / 2, labelY, size, styles.planRoomLabel)}
     </g>; })}
-    {subgroups.map(({ zone, box }) => {
+    {!hidden.has("equipment") && subgroups.map(({ zone, box }) => {
       const colour = colours.get(zone.id)!;
       const [gx, gy, gw, gh] = box;
       const pinned = roomHasPins(box, positions);
@@ -209,7 +244,7 @@ export function SiteFloorMap({ reference, large = false, devices = [], onOpenDev
         <text x={pinned ? gx + unit * 0.8 : gx + gw / 2} y={pinned ? gy + unit * 1.6 : gy + gh / 2 + unit * 0.6} textAnchor={pinned ? "start" : "middle"} className={styles.planEquipLabel} style={{ fontSize: unit * (pinned ? 1.1 : 1.4) }}>{zone.referenceBoard ? `${zone.referenceBoard} · ` : ""}{zone.equipment ?? t("equipmentInRoom")}</text>
       </g>;
     })}
-    {entrance?.position && <g>
+    {entrance?.position && !hidden.has("symbols") && <g>
       <path d={`M${entrance.position[0] - unit * 1.4},${entrance.position[1] + unit * 2.2} L${entrance.position[0]},${entrance.position[1]} L${entrance.position[0] + unit * 1.4},${entrance.position[1] + unit * 2.2} Z`} className={styles.planEntrance} />
       <text x={entrance.position[0]} y={entrance.position[1] + unit * 4.4} textAnchor="middle" className={styles.planEntranceLabel} style={{ fontSize: unit * 1.3 }}>{entrance.label ?? t("entrance")}</text>
     </g>}
@@ -252,7 +287,7 @@ export function BoardLegend({ reference }: { reference: ProjectSpatialReference 
   const colours = zoneColours(reference.layout.zones, chosenColours(reference));
   const zones = [...reference.layout.zones].sort((a, b) => a.referenceBoard.localeCompare(b.referenceBoard, undefined, { numeric: true }));
   return <ul className={styles.legend} aria-label={t("legendAria")}>{zones.map(zone => {
-    const rooms = reference.layout.rooms.filter(room => room.zone === zone.id).map(room => room.name);
+    const rooms = reference.layout.rooms.filter(room => room.zone === zone.id).map(spatialRoomTitle);
     return <li key={zone.id}>
       <span className={styles.swatch} style={{ background: colours.get(zone.id) }} aria-hidden="true" />
       <div>

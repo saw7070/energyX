@@ -28,7 +28,7 @@ export const AreaShape = memo(function AreaShape({ item, colour, name, unit, lab
 /** `colour` is the room's own colour, else its area's; a room in no area has none and is drawn dashed red. */
 export const RoomShape = memo(function RoomShape({ room, colour, pinned, unit, label, onDown }: Common & { room: PlanRoom; colour: string | undefined; pinned: boolean }) {
   const [x, y, w, h] = room.rect;
-  const size = Math.min(unit * 1.75, w / 7), lines = wrapLabel(room.name, Math.max(6, Math.floor(w / (size * 0.56))));
+  const size = Math.min(unit * 1.75, w / 7), lines = wrapLabel(room.displayName ?? room.name, Math.max(6, Math.floor(w / (size * 0.56))));
   const top = pinned ? y + size * 1.5 : y + h / 2 + size * 0.35 - (lines.length - 1) * size * 0.6;
   return <g className={itemClass(room.locked)} {...focusable(`room:${room.key}`, label)} onPointerDown={event => onDown(event, { kind: "room", key: room.key })}>
     <rect x={x} y={y} width={w} height={h} rx={unit * 0.8} className={`${mapStyles.room} ${colour ? "" : styles.orphan}`} style={room.colour ? { stroke: room.colour, fill: `color-mix(in srgb, ${room.colour} 12%, white)` } : colour ? { stroke: colour } : undefined} />

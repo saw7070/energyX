@@ -6,6 +6,7 @@
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { spatialLevelReference, spatialLevels, spatialRoomTitle } from "@datafoundry/contracts";
 import { holidayName, joinText } from "./analysis-messages.js";
 import { shortDate } from "./analysis-model.js";
 import { forHoursMeaning, translatorFor, type EnergyIqLocale } from "./locale.js";
@@ -81,7 +82,20 @@ const Tip = ({ x, y, children }: { x: number; y: number; children: ReactNode }) 
 
 // ---------- 1. floor plan ----------
 const CATEGORIES = ["light", "load", "aircon", "it", "kitchen", "plug", "other"] as const;
-function FloorPlan({ report }: { report: SiteReport }) {
+/**
+ * The plan's sheets: one for a one-floor site (exactly as before floors existed), else one per floor that has an area
+ * drawn, each showing only that floor's areas, rooms, equipment, panels and entrance. Area ids are unique across the
+ * site, so each area's figures stay with it.
+ */
+export function planSheets(report: SiteReport): Array<{ level: string | null; report: SiteReport }> {
+  const levels = report.reference ? spatialLevels(report.reference.layout) : null;
+  if (!report.reference || !levels || levels.length < 2) return [{ level: null, report }];
+  return levels.map(level => {
+    const reference = spatialLevelReference(report.reference!, level.id), ids = new Set(reference.layout.zones.map(zone => zone.id));
+    return { level: level.name, report: { ...report, reference, zones: report.zones.filter(zone => ids.has(zone.key)) } };
+  }).filter(sheet => sheet.report.zones.some(zone => !zone.subgroup && zone.rect));
+}
+function FloorPlan({ report, level = null }: { report: SiteReport; level?: string | null }) {
   const t = reportText(report.locale);
   const categoryWord = (category: string) => t(`plan.category.${CATEGORIES.find(item => item === category) ?? "other"}`);
   const reference = report.reference!;
@@ -120,7 +134,7 @@ function FloorPlan({ report }: { report: SiteReport }) {
   const noteOnOwnLine = cursor + textWidth(note, 10.5) > vx + vw - 4;
   const legendY = maxY + (entrance ? 50 : 24);
   const height = Math.max(vh, legendY + (noteOnOwnLine ? 40 : 20)) - vy;
-  return <svg className="plan" viewBox={`${vx} ${vy} ${vw} ${height}`} role="img" aria-label={t("plan.aria", { name: report.projectName })}>
+  return <svg className="plan" viewBox={`${vx} ${vy} ${vw} ${height}`} role="img" aria-label={level ? t("plan.levelAria", { name: report.projectName, level }) : t("plan.aria", { name: report.projectName })}>
     {doorOnWall
       ? <><path d={`M${minX} ${maxY} V${minY} H${maxX} V${maxY}`} fill="none" stroke={C.ink} strokeWidth={2.5} /><line x1={minX} y1={maxY} x2={ex - 32} y2={maxY} stroke={C.ink} strokeWidth={2.5} /><line x1={ex + 32} y1={maxY} x2={maxX} y2={maxY} stroke={C.ink} strokeWidth={2.5} /></>
       : <rect x={minX} y={minY} width={maxX - minX} height={maxY - minY} fill="none" stroke={C.ink} strokeWidth={2.5} />}
@@ -131,7 +145,7 @@ function FloorPlan({ report }: { report: SiteReport }) {
     </g>; })}
     {reference.layout.rooms.map(room => {
       const [x, y, w, h] = room.rect as [number, number, number, number];
-      const lines = wrapLabel(room.name, Math.max(6, Math.floor((w - 8) / 6.8)));
+      const lines = wrapLabel(spatialRoomTitle(room), Math.max(6, Math.floor((w - 8) / 6.8)));
       const host = subgroups.find(zone => zone.parentRoom === room.name);
       const cy = y + h / 2 + (host ? 12 : 4) - (lines.length - 1) * 8;
       return <g key={room.name}>
@@ -397,7 +411,7 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
         <p><Rich text={report.profile.intro} /></p>
         <div className="zones">{report.profile.zones.map(zone => <p key={zone.heading}><strong>{zone.heading}</strong>{t("doc.zoneSeparator")}<Rich text={zone.text} /></p>)}</div>
         {report.groups && <GroupTable report={report} />}
-        {report.reference ? <div className="figure"><div className="plan-wrap"><FloorPlan report={report} /></div><div className="caption">{report.profile.caption}</div></div>
+        {report.reference ? planSheets(report).map((sheet, index) => <div key={index} className="figure">{sheet.level && <h3 className="plan-level">{sheet.level}</h3>}<div className="plan-wrap"><FloorPlan report={sheet.report} level={sheet.level} /></div><div className="caption">{report.profile.caption}</div></div>)
           : report.groups ? null : <div className="table-wrap"><table><thead><tr><th>{t("doc.col.zone")}</th><th>{t("doc.col.board")}</th><th>{t("doc.col.circuits")}</th><th className="r">{t("doc.col.zoneEstimate")}</th></tr></thead>
             <tbody>{report.zones.map(zone => <tr key={zone.key}><td>{zone.label}</td><td>{zone.board}</td><td>{joinText(zone.circuitKeys.map(key => report.circuits.find(circuit => circuit.key === key)?.name ?? ""), locale)}</td><td className="r">{whole(zone.monthKwh)}</td></tr>)}</tbody></table></div>}
       </section>

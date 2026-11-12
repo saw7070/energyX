@@ -23,6 +23,7 @@ export const floorMapMessages = defineMessages({
   roomAbove: "the room above",
   level: "Level {level}",
   about: "about {m2} m²",
+  levels: "Floors",
 }, {
   "zh-Hans": {
     aria: "楼层布局：按配电箱分组的房间。仅为示意，未按比例绘制。",
@@ -46,6 +47,7 @@ export const floorMapMessages = defineMessages({
     roomAbove: "上述房间",
     level: "{level} 楼",
     about: "约 {m2} m²",
+    levels: "楼层",
   },
   ms: {
     aria: "Susun atur lantai: bilik dikumpulkan mengikut papan agihan. Ilustrasi, tidak mengikut skala.",
@@ -69,5 +71,6 @@ export const floorMapMessages = defineMessages({
     roomAbove: "bilik di atas",
     level: "Aras {level}",
     about: "kira-kira {m2} m²",
+    levels: "Tingkat",
   },
 });

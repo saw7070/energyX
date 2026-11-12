@@ -131,3 +131,33 @@ describe("the saved report and the report on the page", () => {
     expect(renderSiteReportHtml(report)).toBe(renderSiteReportHtml(buildSiteReport(DATA, REFERENCE, GENERATED, "en")));
   });
 });
+
+describe("a site with floors", () => {
+  // The Tuya Office with its block A moved to a second floor.
+  const FLOORS = { ...REFERENCE, layout: { ...REFERENCE.layout, levels: [{ id: "g", name: "Ground" }, { id: "l2", name: "Level 2" }],
+    zones: REFERENCE.layout.zones.map(zone => zone.id === "A" ? { ...zone, level: "l2" } : zone),
+    rooms: REFERENCE.layout.rooms.map(room => room.zone === "A" ? { ...room, level: "l2", ...(room.name === "Open office" ? { name: "Open office (2)", displayName: "Open office" } : {}) } : room) } } as unknown as ProjectSpatialReference;
+  it("draws each floor as its own plan, with only that floor's areas and rooms", () => {
+    const file = renderSiteReportHtml(buildSiteReport(DATA, FLOORS, GENERATED, "en"));
+    const plans = file.split('<svg class="plan"').slice(1).map(part => part.slice(0, part.indexOf("</svg>")));
+    expect(plans).toHaveLength(2);
+    expect(file).toContain('<h3 class="plan-level">Ground</h3>');
+    expect(file).toContain('<h3 class="plan-level">Level 2</h3>');
+    expect(plans[0]).toContain("Showroom");
+    expect(plans[0]).not.toContain("Director room");
+    // The short name is shown; the stored name stays unique.
+    expect(plans[1]).toContain("Open office");
+    expect(plans[1]).not.toContain("Open office (2)");
+    expect(plans[1]).not.toContain("Showroom");
+    expect(plans[1]).toContain('aria-label="Simplified floor plan of Tuya Office, Level 2"');
+  });
+  it("draws a one-floor site exactly as before: one plan, no floor heading", () => {
+    const file = renderSiteReportHtml(buildSiteReport(DATA, REFERENCE, GENERATED, "en"));
+    expect(file.split('<svg class="plan"')).toHaveLength(2);
+    expect(file).not.toContain(`class="plan-level"`);
+  });
+  it("is the same document on the page and in the saved file", async () => {
+    const report = buildSiteReport(DATA, FLOORS, GENERATED, "zh-Hans");
+    expect(canonicalStyles(asParsed(articleOf(renderSiteReportHtml(report))))).toBe(canonicalStyles(await onThePage(report)));
+  });
+});

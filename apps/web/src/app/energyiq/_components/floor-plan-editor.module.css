@@ -261,3 +261,31 @@
 :global(:where(html[data-energyiq-theme="dark"])) .draft { background:#1b2430; color:#a9c8ea; }
 :global(:where(html[data-energyiq-theme="dark"])) .draft button { background:#1d2022; border-color:#32363b; color:#8bc3b9; }
 :global(:where(html[data-energyiq-theme="dark"])) .draft .leave { border-color:#5a2f2d; color:#f3908b; }
+/* Floors: tabs above the plan, the floor panel and its delete question; layers; repeat and templates. */
+.levelTabs { display:flex; flex-wrap:wrap; gap:4px; margin-top:12px; border-bottom:1px solid #e1e7e1; }
+.levelTab { min-height:32px; padding:5px 14px; border:1px solid transparent; border-bottom:0; border-radius:8px 8px 0 0; background:transparent; color:#4f5f55; font-size:13px; font-weight:600; }
+.levelTab:hover { background:#eef3ed; }
+.levelTab[aria-selected="true"] { border-color:#e1e7e1; background:#fbfcfb; color:#1d513a; box-shadow:inset 0 2px 0 #1d513a; }
+.levelTab:focus-visible { outline:2px solid #3b8a63; outline-offset:-2px; }
+.confirm { display:grid; gap:8px; padding:10px 12px; border:1px solid #e3b4b1; border-radius:10px; background:#fff8f7; }
+.layerList { display:grid; gap:8px; margin:0; padding:0; list-style:none; }
+.layerList li { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:4px 8px; font-size:13px; color:#1f2d25; }
+.layerList li .check { grid-column:1 / -1; font-size:12px !important; }
+.layerList .tool { min-height:28px; padding:3px 9px; font-size:12px; }
+.layerOff { color:#8a948e; text-decoration:line-through; }
+.repeatGrid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:6px; }
+.repeatGrid label { display:grid; gap:4px; font-size:12px; font-weight:600; color:#4f5f55; }
+.repeatGrid input, .repeatGrid select { width:100%; min-width:0; padding:5px 6px !important; }
+.templateRow { display:flex; align-items:flex-end; gap:8px; }
+.templateRow input { width:70px; min-height:32px; padding:4px 8px; border:1px solid #d0dbd2; border-radius:7px; background:white; color:#1f2d25; font-size:13px; }
+/* The floor below, drawn faintly for lining things up; it takes no clicks. Plan tokens keep it right in every look. */
+.ghost { fill:none; stroke:var(--plan-ink-muted, #6a7570); stroke-width:1.5; stroke-dasharray:6 4; opacity:.45; pointer-events:none; vector-effect:non-scaling-stroke; }
+.ghostLabel { fill:var(--plan-ink-muted, #6a7570); opacity:.5; pointer-events:none; }
+:global(:where(html[data-energyiq-theme="dark"])) .levelTabs { border-color:#32363b; }
+:global(:where(html[data-energyiq-theme="dark"])) .levelTab { color:#b9c5be; }
+:global(:where(html[data-energyiq-theme="dark"])) .levelTab:hover { background:#232826; }
+:global(:where(html[data-energyiq-theme="dark"])) .levelTab[aria-selected="true"] { border-color:#32363b; background:#161718; color:#8bc3b9; box-shadow:inset 0 2px 0 #8bc3b9; }
+:global(:where(html[data-energyiq-theme="dark"])) .confirm { background:#271c1c; border-color:#5a3431; }
+:global(:where(html[data-energyiq-theme="dark"])) .layerList li, :global(:where(html[data-energyiq-theme="dark"])) .repeatGrid label { color:#e6ede9; }
+:global(:where(html[data-energyiq-theme="dark"])) .layerOff { color:#6f7a74; }
+:global(:where(html[data-energyiq-theme="dark"])) .templateRow input { background:#191919; border-color:#32363b; color:#e6ede9; }
