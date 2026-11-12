@@ -18,7 +18,7 @@ export const parseItemId = (value: string | null | undefined): Selection | null 
   const at = value ? value.indexOf(":") : -1;
   if (!value || at < 1) return null;
   const kind = value.slice(0, at), key = value.slice(at + 1);
-  return kind === "area" || kind === "room" || kind === "device" || kind === "entrance" ? { kind, key } : null;
+  return kind === "area" || kind === "room" || kind === "device" || kind === "entrance" || kind === "opening" || kind === "line" ? { kind, key } : null;
 };
 
 /** "Area DB1 · Block 264E", or for equipment inside a room "Equipment DB3 · LED screens". */
@@ -27,6 +27,8 @@ export function itemName(t: T, plan: FloorPlan, item: Selection, meterName: (id:
   if (item.kind === "area") { const area = plan.areas.find(entry => entry.key === item.key); return area ? areaItemName(t, area) : ""; }
   if (item.kind === "room") { const room = plan.rooms.find(entry => entry.key === item.key); return room ? t("a11y.room", { name: room.name }) : ""; }
   if (item.kind === "device") return t("a11y.device", { name: meterName(item.key) ?? item.key });
+  if (item.kind === "line") { const line = plan.lines?.find(entry => entry.key === item.key); return line ? t("a11y.line", { style: t(`line.${line.style}`) }) : ""; }
+  if (item.kind === "opening") { const opening = plan.openings?.find(entry => entry.key === item.key), room = opening && plan.rooms.find(entry => entry.key === opening.room); return opening ? t("a11y.opening", { kind: t(`opening.${opening.kind}`), room: room?.name ?? "" }) : ""; }
   return plan.entrance ? t("a11y.entrance", { name: plan.entrance.label }) : "";
 }
 export function selectionText(t: T, plan: FloorPlan, list: Selection[], meterName: (id: string) => string | undefined): string {

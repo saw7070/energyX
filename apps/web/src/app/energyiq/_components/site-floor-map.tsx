@@ -1,11 +1,16 @@
 "use client";
 import { useId, type CSSProperties, type KeyboardEvent } from "react";
-import type { ProjectSpatialReference } from "@datafoundry/contracts";
+import { openingRoom, spatialLines, spatialOpenings, type ProjectSpatialReference } from "@datafoundry/contracts";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { translatorFor, type EnergyIqLocale } from "./energyiq-messages";
 import { floorMapMessages } from "./site-floor-map-messages";
 import styles from "./site-floor-map.module.css";
 import { planStyleOf } from "./floor-plan-model";
+import { LineSymbol, OpeningSymbol, type LineClasses, type OpeningClasses } from "./plan-openings";
+
+/** Stylesheet classes for doors, windows and walls on the map (see plan-openings). */
+const OPENING_CLASSES: OpeningClasses = { gap: styles.planDoorGap!, leaf: styles.planDoor!, swing: styles.planDoorSwing!, window: styles.planWindow! };
+const LINE_CLASSES: LineClasses = { wall: styles.planLineWall!, partition: styles.planLinePartition!, fence: styles.planLineFence!, road: styles.planLineRoad! };
 
 const mapText = (locale: EnergyIqLocale) => translatorFor(floorMapMessages, locale);
 
@@ -168,6 +173,11 @@ export function SiteFloorMap({ reference, large = false, devices = [], onOpenDev
   const look = planStyleOf((reference as ProjectSpatialReference & { layout: { style?: unknown } }).layout), drawn = look !== "blocks";
   const lookClass = look === "blueprint" ? styles.lookBlueprint : look === "blocks" ? styles.lookBlocks : styles.lookDrawing;
   const ids = { minor: `plan-grid-${gridId}`, major: `plan-grid-major-${gridId}` };
+  // Doors, windows and walls the site drew (checked: the layout is untrusted). A room with a door of its own, or with its
+  // automatic door switched off, gets no automatic door; every other room keeps the one worked out below.
+  const openings = spatialOpenings(reference.layout).flatMap(opening => { const room = openingRoom(reference.layout.rooms, opening); return room ? [{ opening, room }] : []; });
+  const ownDoor = new Set(openings.filter(item => item.opening.kind !== "window").map(item => item.room));
+  const walls = spatialLines(reference.layout);
   return <svg viewBox={`${x} ${y} ${w} ${h + unit * 4}`} className={`${styles.map} ${lookClass} ${large ? styles.large : ""}`} data-look={look} role={interactive ? "group" : "img"} aria-label={devices.length ? t("ariaDevices", { count: devices.length }) : t("aria")}>
     {/* The sheet: drafting paper with a fine and a coarse grid, inside a drawing border. */}
     {drawn && <defs>
@@ -190,7 +200,7 @@ export function SiteFloorMap({ reference, large = false, devices = [], onOpenDev
       // Clear of the room's name (drawn from its first line, above the centre), its meters and any equipment inside it.
       const obstacles = [labelBox(lines, rx + rw / 2, labelY - (lines.length - 1) * size * 0.6, size), ...pinBoxes.filter(item => inside(room.rect, item.at)).flatMap(item => item.boxes),
         ...subgroups.map(item => item.box).filter(box => overlaps(box, room.rect as Rect)), ...devices.flatMap(device => device.size && inside(room.rect, device.position) ? [[device.position[0] - device.size[0] / 2, device.position[1] - device.size[1] / 2, device.size[0], device.size[1]] as Rect] : [])];
-      const door = drawn ? roomDoor(room.rect as Rect, unit, obstacles) : null;
+      const door = drawn && (room as { autoDoor?: unknown }).autoDoor !== false && !ownDoor.has(room) ? roomDoor(room.rect as Rect, unit, obstacles) : null;
       return <g key={room.name} style={area(isColour(own) ? own : colour)} {...clickable(board, t("selectRoom", { board, room: room.name }), room.rect)}>
       <rect x={rx} y={ry} width={rw} height={rh} rx={drawn ? 0 : unit * 0.8} className={`${styles.planRoom} ${isColour(own) ? styles.planRoomOwn : ""}`} strokeWidth={unit * (drawn ? 0.2 : 0.14)} />
       {door && <>
@@ -200,6 +210,7 @@ export function SiteFloorMap({ reference, large = false, devices = [], onOpenDev
       </>}
       {text(lines, rx + rw / 2, labelY, size, styles.planRoomLabel)}
     </g>; })}
+    {openings.length > 0 && <g pointerEvents="none">{openings.map(({ opening, room }) => <OpeningSymbol key={opening.id} rect={room.rect as Rect} opening={opening} unit={unit} swings={drawn} classes={OPENING_CLASSES} gapWidth={unit * (drawn ? 0.34 : 0.3)} />)}</g>}
     {subgroups.map(({ zone, box }) => {
       const colour = colours.get(zone.id)!;
       const [gx, gy, gw, gh] = box;
@@ -209,6 +220,7 @@ export function SiteFloorMap({ reference, large = false, devices = [], onOpenDev
         <text x={pinned ? gx + unit * 0.8 : gx + gw / 2} y={pinned ? gy + unit * 1.6 : gy + gh / 2 + unit * 0.6} textAnchor={pinned ? "start" : "middle"} className={styles.planEquipLabel} style={{ fontSize: unit * (pinned ? 1.1 : 1.4) }}>{zone.referenceBoard ? `${zone.referenceBoard} · ` : ""}{zone.equipment ?? t("equipmentInRoom")}</text>
       </g>;
     })}
+    {walls.length > 0 && <g pointerEvents="none">{walls.map(line => <LineSymbol key={line.id} points={line.points} style={line.style} thickness={line.thickness} unit={unit} classes={LINE_CLASSES} />)}</g>}
     {entrance?.position && <g>
       <path d={`M${entrance.position[0] - unit * 1.4},${entrance.position[1] + unit * 2.2} L${entrance.position[0]},${entrance.position[1]} L${entrance.position[0] + unit * 1.4},${entrance.position[1] + unit * 2.2} Z`} className={styles.planEntrance} />
       <text x={entrance.position[0]} y={entrance.position[1] + unit * 4.4} textAnchor="middle" className={styles.planEntranceLabel} style={{ fontSize: unit * 1.3 }}>{entrance.label ?? t("entrance")}</text>
