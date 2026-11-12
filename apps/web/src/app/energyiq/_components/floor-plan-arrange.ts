@@ -4,6 +4,7 @@
  */
 import { freshCopy, sameRect } from "./floor-plan-carry";
 import { clampDelta, within } from "./floor-plan-geometry";
+import { newShapeKey, type PlanShape } from "./floor-plan-plain-shapes";
 import { asOwnArea, clampPoint, clampRect, deviceRect, MAX_AREAS, MAX_ROOMS, moveSelection, NO_PASSENGERS, passengers, removeSelection, roomOwner, settleRooms, type FloorPlan, type PlanArea, type PlanRoom, type Point, type Rect, type Selection } from "./floor-plan-model";
 
 export type Riders = ReturnType<typeof NO_PASSENGERS>;
@@ -16,6 +17,7 @@ function find(plan: FloorPlan, item: Selection): { locked?: true } | null | unde
   if (item.kind === "area") return plan.areas.find(entry => entry.key === item.key);
   if (item.kind === "room") return plan.rooms.find(entry => entry.key === item.key);
   if (item.kind === "device") return plan.devices.find(entry => entry.meterId === item.key);
+  if (item.kind === "shape") return (plan.shapes ?? []).find(entry => entry.key === item.key);
   return plan.entrance as { locked?: true } | null;
 }
 export const exists = (plan: FloorPlan, item: Selection) => !!find(plan, item);
@@ -25,7 +27,7 @@ export const stillThere = (plan: FloorPlan, list: Selection[]) => list.every(ite
 
 /** Where an item is drawn: its box, or a point (a box with no size) for a dot or the entrance. */
 export function boxOf(plan: FloorPlan, item: Selection): Rect | null {
-  if (item.kind === "area" || item.kind === "room") return (find(plan, item) as { rect: Rect } | undefined)?.rect ?? null;
+  if (item.kind === "area" || item.kind === "room" || item.kind === "shape") return (find(plan, item) as { rect: Rect } | undefined)?.rect ?? null;
   if (item.kind === "device") { const device = plan.devices.find(entry => entry.meterId === item.key); return device ? deviceRect(device) ?? [device.position[0], device.position[1], 0, 0] : null; }
   return plan.entrance ? [plan.entrance.position[0], plan.entrance.position[1], 0, 0] : null;
 }
@@ -33,7 +35,7 @@ export function boxOf(plan: FloorPlan, item: Selection): Rect | null {
 /** Everything on the drawing, in the order it is drawn; `shown` says which devices the editor draws (those with a meter). */
 export function everything(plan: FloorPlan, shown: (meterId: string) => boolean = () => true): Selection[] {
   return [
-    ...plan.areas.filter(item => !item.insideRoom).map(item => ({ kind: "area" as const, key: item.key })), ...plan.rooms.map(item => ({ kind: "room" as const, key: item.key })),
+    ...plan.areas.filter(item => !item.insideRoom).map(item => ({ kind: "area" as const, key: item.key })), ...(plan.shapes ?? []).map(item => ({ kind: "shape" as const, key: item.key })), ...plan.rooms.map(item => ({ kind: "room" as const, key: item.key })),
     ...plan.areas.filter(item => item.insideRoom).map(item => ({ kind: "area" as const, key: item.key })), ...(plan.entrance ? [{ kind: "entrance" as const, key: "entrance" }] : []),
     ...plan.devices.filter(item => shown(item.meterId)).map(item => ({ kind: "device" as const, key: item.meterId })),
   ];
@@ -66,7 +68,7 @@ export function moveItems(plan: FloorPlan, list: Selection[], dx: number, dy: nu
   const [mx, my] = clampDelta(hosts.map(item => boxOf(plan, item)!), [dx, dy], plan.viewBox);
   if (!mx && !my) return plan;
   const keys = (kind: Selection["kind"], extra: Set<string>) => new Set([...hosts.filter(item => item.kind === kind).map(item => item.key), ...extra]);
-  const areas = keys("area", riders.areas), rooms = keys("room", riders.rooms), devices = keys("device", riders.devices);
+  const areas = keys("area", riders.areas), rooms = keys("room", riders.rooms), devices = keys("device", riders.devices), shapes = keys("shape", new Set());
   const shift = (rect: Rect): Rect => clampRect([rect[0] + mx, rect[1] + my, rect[2], rect[3]], plan.viewBox);
   const step = (point: Point): Point => clampPoint([point[0] + mx, point[1] + my], plan.viewBox);
   return {
@@ -74,6 +76,7 @@ export function moveItems(plan: FloorPlan, list: Selection[], dx: number, dy: nu
     areas: plan.areas.map(item => areas.has(item.key) ? { ...item, rect: shift(item.rect) } : item),
     rooms: plan.rooms.map(item => rooms.has(item.key) ? { ...item, rect: shift(item.rect) } : item),
     devices: plan.devices.map(item => devices.has(item.meterId) ? { ...item, position: step(item.position) } : item),
+    ...(plan.shapes ? { shapes: plan.shapes.map(item => shapes.has(item.key) ? { ...item, rect: shift(item.rect) } : item) } : {}),
     entrance: plan.entrance && hosts.some(item => item.kind === "entrance") ? { ...plan.entrance, position: step(plan.entrance.position) } : plan.entrance,
   };
 }
@@ -91,7 +94,7 @@ export function lockItems(plan: FloorPlan, list: Selection[], lock: boolean): Fl
     const { locked: _locked, ...rest } = item;
     return rest as T;
   };
-  const next = { ...plan, areas: plan.areas.map(item => set(item, isIn(list, { kind: "area", key: item.key }))), rooms: plan.rooms.map(item => set(item, isIn(list, { kind: "room", key: item.key }))), devices: plan.devices.map(item => set(item, isIn(list, { kind: "device", key: item.meterId }))) };
+  const next = { ...plan, areas: plan.areas.map(item => set(item, isIn(list, { kind: "area", key: item.key }))), rooms: plan.rooms.map(item => set(item, isIn(list, { kind: "room", key: item.key }))), devices: plan.devices.map(item => set(item, isIn(list, { kind: "device", key: item.meterId }))), ...(plan.shapes ? { shapes: plan.shapes.map(item => set(item, isIn(list, { kind: "shape", key: item.key }))) } : {}) };
   return changed ? next : plan;
 }
 
@@ -117,11 +120,12 @@ export function reorderItems(plan: FloorPlan, list: Selection[], where: "front" 
   areas = bump(areas, item => !!item.insideRoom, area);
   const rooms = bump(plan.rooms, () => true, item => isIn(list, { kind: "room", key: item.key }));
   const devices = bump(plan.devices, () => true, item => isIn(list, { kind: "device", key: item.meterId }));
-  return changed ? { ...plan, areas, rooms, devices } : plan;
+  const shapes = plan.shapes ? bump(plan.shapes, () => true, item => isIn(list, { kind: "shape", key: item.key })) : undefined;
+  return changed ? { ...plan, areas, rooms, devices, ...(shapes ? { shapes } : {}) } : plan;
 }
 
 /** What Copy holds: the areas and rooms picked, the rooms and equipment inside them, and which ones were picked. */
-export type Clip = { areas: PlanArea[]; rooms: PlanRoom[]; roots: Selection[] };
+export type Clip = { areas: PlanArea[]; rooms: PlanRoom[]; roots: Selection[]; shapes?: PlanShape[] };
 /**
  * Copies the selected areas, rooms and equipment, with the rooms and equipment inside them. Devices and the entrance
  * are not copied: each meter is placed on the plan once, and a site has one main entrance. Null when nothing can be copied.
@@ -136,9 +140,11 @@ export function copyItems(plan: FloorPlan, list: Selection[]): Clip | null {
       if (!host.insideRoom) for (const room of plan.rooms) if (roomOwner(plan, room)?.key === host.key) roomKeys.add(room.key);
     }
     if (item.kind === "room" && plan.rooms.some(entry => entry.key === item.key)) { roomKeys.add(item.key); roots.push(item); }
+    if (item.kind === "shape" && plan.shapes?.some(entry => entry.key === item.key)) roots.push(item);
   }
+  const shapes = (plan.shapes ?? []).filter(entry => isIn(roots, { kind: "shape", key: entry.key }));
   for (const item of plan.areas) if (item.insideRoom && roomKeys.has(item.insideRoom)) areaKeys.add(item.key);
-  return roots.length ? { areas: plan.areas.filter(item => areaKeys.has(item.key)), rooms: plan.rooms.filter(item => roomKeys.has(item.key)), roots } : null;
+  return roots.length ? { areas: plan.areas.filter(item => areaKeys.has(item.key)), rooms: plan.rooms.filter(item => roomKeys.has(item.key)), roots, ...(shapes.length ? { shapes } : {}) } : null;
 }
 
 const LETTERS = Array.from({ length: 26 }, (_, index) => String.fromCharCode(65 + index));
@@ -192,7 +198,7 @@ export const fitsLimits = (plan: FloorPlan, hidden: number, areas: number, rooms
  * areas that are not on the drawing. The copies of what was picked come back selected.
  */
 export function pasteClip(plan: FloorPlan, clip: Clip, offset: number, copyOf: (name: string) => string, reserved: string[] = []): { plan: FloorPlan; selection: Selection[] } {
-  const [dx, dy] = clampDelta([...clip.areas, ...clip.rooms].map(item => item.rect), [offset, offset], plan.viewBox);
+  const [dx, dy] = clampDelta([...clip.areas, ...clip.rooms, ...(clip.shapes ?? [])].map(item => item.rect), [offset, offset], plan.viewBox);
   const shift = (rect: Rect): Rect => clampRect([rect[0] + dx, rect[1] + dy, rect[2], rect[3]], plan.viewBox);
   const keys = new Set([...plan.areas.map(item => item.key), ...plan.rooms.map(item => item.key)]);
   const fresh = (prefix: string) => { let number = 1; while (keys.has(`${prefix}-copy-${number}`)) number += 1; const key = `${prefix}-copy-${number}`; keys.add(key); return key; };
@@ -216,6 +222,9 @@ export function pasteClip(plan: FloorPlan, clip: Clip, offset: number, copyOf: (
     const filed = source.zone !== undefined && (!roomOwner(plan, source) || sameRect(source.zoneRect, source.rect)) ? { zone: source.zone, zoneRect: [...rect] as Rect } : {};
     return { ...copy, key: roomKeys.get(source.key)!, name, rect, ...(area ? { area } : {}), ...filed, id };
   });
-  const selection = clip.roots.flatMap((root): Selection[] => { const key = (root.kind === "area" ? areaKeys : roomKeys).get(root.key); return key ? [{ kind: root.kind, key }] : []; });
-  return { plan: settleRooms({ ...plan, areas: [...plan.areas, ...areas], rooms: [...plan.rooms, ...rooms] }), selection };
+  // Plain shapes are copied as they look (fill, outline, caption), with a new id; nothing carried comes along.
+  const shapeKeys = new Map<string, string>(), shapes: PlanShape[] = [...(plan.shapes ?? [])];
+  for (const source of clip.shapes ?? []) { const { locked: _locked, ...copy } = freshCopy(source), key = newShapeKey(shapes); shapeKeys.set(source.key, key); shapes.push({ ...copy, key, id: key, rect: shift(source.rect) }); }
+  const selection = clip.roots.flatMap((root): Selection[] => { const key = (root.kind === "area" ? areaKeys : root.kind === "shape" ? shapeKeys : roomKeys).get(root.key); return key ? [{ kind: root.kind, key }] : []; });
+  return { plan: settleRooms({ ...plan, areas: [...plan.areas, ...areas], rooms: [...plan.rooms, ...rooms], ...(shapeKeys.size ? { shapes } : {}) }), selection };
 }

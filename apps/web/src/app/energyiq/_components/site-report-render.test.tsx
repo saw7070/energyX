@@ -131,3 +131,29 @@ describe("the saved report and the report on the page", () => {
     expect(renderSiteReportHtml(report)).toBe(renderSiteReportHtml(buildSiteReport(DATA, REFERENCE, GENERATED, "en")));
   });
 });
+
+describe("free shapes in the report's floor plan", () => {
+  // Area B drawn as an L (its notch at the bottom right), the Showroom as an L, a lawn, and a room with broken points.
+  const shaped = { ...REFERENCE, layout: { ...REFERENCE.layout,
+    zones: REFERENCE.layout.zones.map(zone => zone.id === "B" ? { ...zone, points: [[24, 20], [390, 20], [390, 240], [200, 240], [200, 416], [24, 416]] } : zone),
+    rooms: REFERENCE.layout.rooms.map(room => room.name === "Showroom" ? { ...room, points: [[32, 70], [242, 70], [242, 140], [120, 140], [120, 220], [32, 220]] } : room.name === "Pantry" ? { ...room, points: [[1, 2], "x"] } : room),
+    shapes: [{ id: "lawn", kind: "polygon", rect: [250, 300, 100, 100], points: [[250, 300], [350, 300], [250, 400]], fill: "#77bb77", label: "Lawn" }, { id: "x", kind: "hexagon", rect: [0, 0, 5, 5] }],
+  } } as unknown as ProjectSpatialReference;
+
+  it("draws shaped areas and rooms as outlines, plain shapes, and boxes where points are malformed, the same on the page and in the file", async () => {
+    const report = buildSiteReport(DATA, shaped, GENERATED, "en");
+    expect(report.zones.find(zone => zone.key === "B")?.points).toHaveLength(6);
+    expect(report.zones.find(zone => zone.key === "A")?.points).toBeUndefined();
+    const file = renderSiteReportHtml(report);
+    expect(file).toContain('<polygon points="24,20 390,20 390,240 200,240 200,416 24,416"');
+    expect(file).toContain('class="room" points="32,70 242,70 242,140 120,140 120,220 32,220"');
+    expect(file).toContain('<rect class="room" x="250" y="70" width="132" height="70"');
+    expect(file).toContain('data-shape="polygon"'); expect(file).toContain(">Lawn<"); expect(file).not.toContain("hexagon");
+    expect(canonicalStyles(asParsed(articleOf(file)))).toBe(canonicalStyles(await onThePage(report)));
+  });
+
+  it("draws exactly as before for a layout without free shapes", () => {
+    const file = renderSiteReportHtml(buildSiteReport(DATA, REFERENCE, GENERATED, "en"));
+    expect(file).not.toContain("<polygon"); expect(file).not.toContain("data-shape");
+  });
+});

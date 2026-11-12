@@ -6,7 +6,7 @@
  * 1 property profile & circuit map, 2 30-day estimate & bill, 3 weekday / weekend / base-load benchmark,
  * 4 weekday hour-by-hour pattern, 5 abnormality screening by circuit.
  */
-import type { ProjectSpatialReference } from "@datafoundry/contracts";
+import { polygonOf, type ProjectSpatialReference } from "@datafoundry/contracts";
 import type { AnalysisData, ScopeData, ScopeMeter, TrendSeries } from "./analysis-types.js";
 import { alwaysOnKw, effectiveHours, hoursRangeLabel, isOvernight, localDayType, openWindowStart, quietHours, scopeDays, shortDate, timeBuckets, weekdayShort, type AnalysisCategory, type AnalysisDay, type HoursMeaning } from "./analysis-model.js";
 import { listText } from "./analysis-messages.js";
@@ -99,8 +99,11 @@ export type SpatialExtras = ProjectSpatialReference & {
 
 // ---------- report shape ----------
 export type ReportDay = { date: string; dow: string; kwh: number; dayType: AnalysisDay["dayType"]; holidayName?: string | undefined; complete: boolean };
-/** `area` is the plain place name ("Office Area") when the zone matches a space. */
-export type ReportZone = { key: string; label: string; area: string | null; board: string; rect: Rect | null; subgroup: boolean; parentRoom: string | null; equipment: string | null; direction: string | null; rooms: string[]; circuitKeys: string[]; monthKwh: number; periodKwh: number; share: number; alwaysOn: boolean; colour: string };
+/**
+ * `area` is the plain place name ("Office Area") when the zone matches a space. `points` is the zone's outline when the
+ * layout draws it as a free shape (an L-shaped block) and the saved points are usable; `rect` is then its bounding box.
+ */
+export type ReportZone = { key: string; label: string; area: string | null; board: string; rect: Rect | null; points?: Array<[number, number]>; subgroup: boolean; parentRoom: string | null; equipment: string | null; direction: string | null; rooms: string[]; circuitKeys: string[]; monthKwh: number; periodKwh: number; share: number; alwaysOn: boolean; colour: string };
 export type ReportCircuit = {
   /** Plain name for readers ("Office area lights"); `code` is the panel's own name ("DB1 L1 Light"), shown only as detail. */
   key: string; name: string; code: string; codes: string[]; label: string; board: string; zone: string | null; category: AnalysisCategory | "overall"; meterIds: string[];
@@ -358,7 +361,7 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
     const own = circuits.filter(circuit => circuit.zone === zone.id);
     const rooms = zone.rooms?.length ? zone.rooms : reference.layout.rooms.filter(room => room.zone === zone.id).map(room => room.name);
     const areas = [...new Set(raw.filter(circuit => circuit.zone === zone.id).map(circuit => areaName(circuit.space)))];
-    return { key: zone.id, label: zoneName(zone.id), area: zone.independentSpace === false ? zone.equipment ?? null : areas.length === 1 && data.current.spaces.length > 1 ? areas[0]! : null, board: zone.referenceBoard, rect: (zone.rect as Rect | undefined) ?? null, subgroup: zone.independentSpace === false, parentRoom: zone.physicalParentRoom ?? null, equipment: zone.equipment ?? null,
+    return { key: zone.id, label: zoneName(zone.id), area: zone.independentSpace === false ? zone.equipment ?? null : areas.length === 1 && data.current.spaces.length > 1 ? areas[0]! : null, board: zone.referenceBoard, rect: (zone.rect as Rect | undefined) ?? null, ...(zone.rect && polygonOf(zone.points, zone.rect) ? { points: polygonOf(zone.points, zone.rect)! } : {}), subgroup: zone.independentSpace === false, parentRoom: zone.physicalParentRoom ?? null, equipment: zone.equipment ?? null,
       direction: zone.directionFromEntrance ?? null, rooms, circuitKeys: own.map(circuit => circuit.key), monthKwh: own.reduce((sum, circuit) => sum + circuit.monthKwh, 0), periodKwh: own.reduce((sum, circuit) => sum + circuit.periodKwh, 0),
       share: 0, alwaysOn: own.length > 0 && own.every(circuit => circuit.flat), colour: validColour((zone as { colour?: unknown }).colour) ?? chosenColour(zone.referenceBoard) ?? ZONE_PALETTE[index % ZONE_PALETTE.length]! };
   }) : spacesAsZones(raw.map((circuit, index) => ({ space: circuit.space, circuit: circuits[index]! })));

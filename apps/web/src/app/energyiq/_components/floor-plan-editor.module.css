@@ -261,3 +261,27 @@
 :global(:where(html[data-energyiq-theme="dark"])) .draft { background:#1b2430; color:#a9c8ea; }
 :global(:where(html[data-energyiq-theme="dark"])) .draft button { background:#1d2022; border-color:#32363b; color:#8bc3b9; }
 :global(:where(html[data-energyiq-theme="dark"])) .draft .leave { border-color:#5a2f2d; color:#f3908b; }
+
+/* Free shapes: plain shapes on the canvas, the shape choices when adding, corner grips, and a shape being drawn. */
+.plainShape { fill:color-mix(in srgb, var(--shape) 40%, white); stroke:color-mix(in srgb, var(--shape) 65%, #2f3b35); fill-opacity:.85; }
+.plainShape[data-outline="none"] { stroke:none; }
+.plainShapeLabel { fill:#24312a; font-weight:600; font-style:italic; pointer-events:none; }
+.presets { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin-top:8px; padding:6px 8px; border:1px dashed #d0dbd2; border-radius:8px; font-size:13px; color:#1d513a; }
+.presets > span { font-weight:600; margin-right:4px; }
+.presetIcon { width:16px; height:16px; margin-right:5px; vertical-align:-3px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linejoin:round; }
+.corner { fill:white; stroke:#2a78d6; stroke-width:2; vector-effect:non-scaling-stroke; cursor:move; }
+.cornerPicked { fill:#2a78d6; }
+.side { stroke:transparent; fill:none; vector-effect:non-scaling-stroke; cursor:copy; }
+.side:hover { stroke:rgba(42,120,214,.35); }
+.drawLine { fill:rgba(42,120,214,.08); stroke:#2a78d6; stroke-width:2; stroke-dasharray:6 4; vector-effect:non-scaling-stroke; pointer-events:none; }
+.drawCorner { fill:#2a78d6; stroke:white; stroke-width:1.5; vector-effect:non-scaling-stroke; pointer-events:none; }
+.cornerActions { display:flex; flex-wrap:wrap; gap:6px; }
+:global(:where(html[data-energyiq-theme="dark"])) .plainShape { fill:color-mix(in srgb, var(--shape) 32%, #161718); stroke:color-mix(in srgb, var(--shape) 60%, #c4cdc7); }
+:global(:where(html[data-energyiq-theme="dark"])) .plainShapeLabel { fill:#e6ede9; }
+:global(:where(html[data-energyiq-theme="dark"])) .presets { border-color:#32363b; color:#8bc3b9; }
+:global(:where(html[data-energyiq-theme="dark"])) .corner { fill:#191919; stroke:#7aaef0; }
+:global(:where(html[data-energyiq-theme="dark"])) .cornerPicked { fill:#7aaef0; }
+:global(:where(html[data-energyiq-theme="dark"])) .side:hover { stroke:rgba(122,174,240,.35); }
+:global(:where(html[data-energyiq-theme="dark"])) .drawLine { fill:rgba(122,174,240,.10); stroke:#7aaef0; }
+:global(:where(html[data-energyiq-theme="dark"])) .drawCorner { fill:#7aaef0; stroke:#191919; }
+.cornerPanel { display:grid; gap:6px; }

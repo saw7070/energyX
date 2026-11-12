@@ -23,8 +23,8 @@ export function canShift(plan: FloorPlan): boolean {
   const { boardMarkers, ...rest } = plan.extra ?? {};
   if (Object.keys(rest).length) return false;
   if (boardMarkers !== undefined && !(isRecord(boardMarkers) && Object.values(boardMarkers).every(isPoint))) return false;
-  if (plan.carried?.devices?.length || plan.carried?.rawDevices) return false;
-  if (![...plan.areas, ...plan.rooms, ...plan.devices].every(item => plain(item.extra)) || (plan.entrance && !plain(plan.entrance.extra))) return false;
+  if (plan.carried?.devices?.length || plan.carried?.rawDevices || plan.carried?.shapes?.length) return false;
+  if (![...plan.areas, ...plan.rooms, ...plan.devices, ...(plan.shapes ?? [])].every(item => plain(item.extra)) || (plan.entrance && !plain(plan.entrance.extra))) return false;
   return (plan.carried?.zones ?? []).every(({ zone }) => Object.keys(zone).every(key => key === "rect" || NO_POSITION.has(key)));
 }
 
@@ -40,6 +40,7 @@ export function shiftPlan(plan: FloorPlan, dx: number, dy: number): FloorPlan {
     areas: plan.areas.map(item => ({ ...item, rect: rect(item.rect), ...(item.saved ? { saved: { ...item.saved, rect: rect(item.saved.rect) } } : {}) })),
     rooms: plan.rooms.map(item => ({ ...item, rect: rect(item.rect), ...(item.zoneRect ? { zoneRect: rect(item.zoneRect) } : {}) })),
     devices: plan.devices.map(item => ({ ...item, position: point(item.position) })),
+    ...(plan.shapes ? { shapes: plan.shapes.map(item => ({ ...item, rect: rect(item.rect) })) } : {}),
     entrance: plan.entrance ? { ...plan.entrance, position: point(plan.entrance.position) } : null,
     ...(markers ? { extra: markers } : {}),
     ...(carried ? { carried: { ...carried, ...(carried.entrance ? { entrance: point(carried.entrance) } : {}), ...(carried.zones ? { zones: carried.zones.map(item => isRect(item.zone.rect) ? { ...item, zone: { ...item.zone, rect: rect(item.zone.rect) } } : item) } : {}) } } : {}),

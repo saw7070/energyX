@@ -94,3 +94,16 @@
 .lookBlocks .planZone { fill:color-mix(in srgb, var(--area) 8%, var(--plan-floor)); stroke:color-mix(in srgb, var(--area) 60%, transparent); }
 .lookBlocks .planZoneActive { fill:color-mix(in srgb, var(--area) 14%, var(--plan-floor)); stroke:var(--area); }
 .lookBlocks .planRoom { stroke:color-mix(in srgb, var(--area, var(--plan-partition)) 45%, transparent); }
+
+/* Plain shapes (a lawn, a driveway, a pond): a drawing only. The fill is the shape's own colour (`--shape`), softened
+   into the paper so captions and rooms on top stay readable; the outline style comes from data-outline. */
+.planShape { fill:color-mix(in srgb, var(--shape) 38%, var(--plan-paper)); stroke:color-mix(in srgb, var(--shape) 55%, var(--plan-wall)); }
+.planShape[data-outline="none"] { stroke:none; }
+.planShapeLabel { fill:var(--plan-ink); font-weight:600; font-style:italic; letter-spacing:.02em; paint-order:stroke; stroke:color-mix(in srgb, var(--shape) 38%, var(--plan-paper)); stroke-width:.25em; stroke-linejoin:round; }
+.lookBlueprint .planShape { fill:color-mix(in srgb, var(--shape) 22%, var(--plan-floor)); stroke:var(--plan-partition); }
+.lookBlueprint .planShapeLabel { stroke:color-mix(in srgb, var(--shape) 22%, var(--plan-floor)); }
+.lookBlocks .planShape { fill:color-mix(in srgb, var(--shape) 30%, var(--plan-floor)); stroke:color-mix(in srgb, var(--shape) 70%, transparent); }
+.lookBlocks .planShapeLabel { stroke:color-mix(in srgb, var(--shape) 30%, var(--plan-floor)); }
+:global(:where(html[data-energyiq-theme="dark"])) .planShape { fill:color-mix(in srgb, var(--shape) 30%, var(--plan-paper)); stroke:color-mix(in srgb, var(--shape) 60%, var(--plan-wall)); }
+:global(:where(html[data-energyiq-theme="dark"])) .planShapeLabel { stroke:color-mix(in srgb, var(--shape) 30%, var(--plan-paper)); }
+:global(:where(html[data-energyiq-theme="dark"])) .lookBlocks .planShape { fill:color-mix(in srgb, var(--shape) 26%, var(--plan-floor)); }
