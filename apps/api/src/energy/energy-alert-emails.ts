@@ -10,7 +10,7 @@ import { withEnergyProjectPublicationReadLock } from "./energy-project-materiali
 import { resolveEnergyPublishedMeterPoints } from "./energy-query-context.js";
 import { readSiteAlerts } from "./energy-site-alerts.js";
 import { readLiveSiteReadings } from "./energy-live-readings.js";
-import { readIdleWhenQuietMeters } from "./energy-idle-meters.js";
+import { quietMeters, readIdleWhenQuietMeters } from "./energy-idle-meters.js";
 import { siteAlertRecipients } from "./energy-recipients.js";
 
 /**
@@ -27,9 +27,6 @@ import { siteAlertRecipients } from "./energy-recipients.js";
  */
 const CHECK_INTERVAL_MS = 15 * 60_000;
 const log = logger.child({ component: "alert-email" });
-/** Mirrors STALE_METER_REPORTING_MS in energy-analysis.ts and the web's stoppedMeters(). */
-const STOPPED_AFTER_MS = 12 * 60 * 60_000;
-
 export type AlertEmail = { key: string; subject: string; text: string };
 /**
  * `idleWhenQuiet`: the 15-minute live check found the meter online and it can rightly use nothing (see
@@ -130,14 +127,7 @@ const formatKw = (value: number): string => `${new Intl.NumberFormat("en-SG", { 
  * idle (online, and able to rightly use nothing: never lighting on a lights-on-hours site nor a meter always on by
  * design) is left out.
  */
-export const stoppedMeters = (meters: MeterHealthRow[]): MeterHealthRow[] => {
-  const sending = meters.filter((meter) => meter.status === "usable" && meter.lastReadingAt);
-  const newest = sending.reduce((latest, meter) => Math.max(latest, Date.parse(meter.lastReadingAt!)), 0);
-  if (!newest) return [];
-  return sending
-    .filter((meter) => newest - Date.parse(meter.lastReadingAt!) >= STOPPED_AFTER_MS && !meter.idleWhenQuiet)
-    .sort((left, right) => left.lastReadingAt!.localeCompare(right.lastReadingAt!));
-};
+export const stoppedMeters = (meters: MeterHealthRow[]): MeterHealthRow[] => quietMeters(meters).filter((meter) => !meter.idleWhenQuiet);
 
 /** The same people as every other site alert: the site's chosen list, or the people who run it. */
 export const alertRecipients = (metadataStore: MetadataStore, projectId: string): string[] => siteAlertRecipients(metadataStore, projectId);
@@ -255,7 +245,8 @@ const alertProjectIds = (metadataStore: MetadataStore, env: NodeJS.ProcessEnv): 
   return [...ids].sort();
 };
 
-const readProjectMeterHealth = async (metadataStore: MetadataStore, projectId: string): Promise<MeterHealthRow[]> => {
+/** Each meter's latest reading and whether the live check finds it idle, as the meter health page has them. */
+export const readProjectMeterHealth = async (metadataStore: MetadataStore, projectId: string): Promise<MeterHealthRow[]> => {
   const project = metadataStore.energyIq.getProject(projectId);
   return withEnergyProjectPublicationReadLock({ metadataStore, workspaceId: project.workspace_id, projectId }, async () => {
     const snapshot = metadataStore.energyIq.findCurrentDataSnapshot(projectId);

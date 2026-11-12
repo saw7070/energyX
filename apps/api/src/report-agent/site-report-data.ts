@@ -20,7 +20,9 @@ import {
 } from "@datafoundry/site-report";
 import { executeEnergyScopeAnalysisWithLatestAvailable } from "../energy/energy-analysis.js";
 import { readEnergyProjectInformation } from "../energy/energy-project-information.js";
-import { readIdleWhenQuietMeters } from "../energy/energy-idle-meters.js";
+import { readProjectMeterHealth } from "../energy/energy-alert-emails.js";
+import { localDayStartMs } from "../energy/energy-data-availability.js";
+import { idleThroughPeriodEnd } from "../energy/energy-idle-meters.js";
 import {
   resolveAllAvailableProjectAnalysisIdentity,
   resolvePublishedEnergyQueryContext,
@@ -73,9 +75,11 @@ export async function loadSiteReportData(input: SiteReportDataInput): Promise<Si
 
   const information = safely(() => readEnergyProjectInformation(input.metadata, input.actorUserId, input.workspaceId, input.projectId));
   const actions = safely(() => readProjectActions(input)) ?? [];
-  // Meters quiet only because they are using nothing right now, so the management review does not call them stopped.
-  const idle = [...(safely(() => readIdleWhenQuietMeters({ metadataStore: input.metadata, projectId: input.projectId })) ?? [])].sort();
   const data = assembleAnalysisData({ projectId: input.projectId, project, spaces, spaceCurrent, previousProject, spacePrevious, history, information, actions });
+  // Meters quiet now only because they are using nothing, and silent since before these dates ended, so the reports do
+  // not call them stopped. One that has sent anything since, or is sending now, is not among them (idleThroughPeriodEnd).
+  const health = await settle(readProjectMeterHealth(input.metadata, input.projectId));
+  const idle = health ? idleThroughPeriodEnd(health, localDayStartMs(input.period.toExclusive, data.timezone)) : [];
   return {
     data: idle.length ? { ...data, idleWhenQuiet: idle } : data,
     dataSnapshotId: dataSnapshotId ?? null,

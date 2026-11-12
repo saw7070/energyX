@@ -23,6 +23,40 @@ export const idleWhenQuietMeters = (online: ReadonlySet<string>, rows: readonly 
   return new Set([...online].filter((id) => !mustRun.has(id)));
 };
 
+/**
+ * How far behind the site's newest reading a meter may fall before it is quiet: half a day, above a normal night.
+ * Mirrors STALE_METER_REPORTING_MS in energy-analysis.ts and the web's stoppedMeters().
+ */
+const QUIET_AFTER_MS = 12 * 60 * 60_000;
+
+/** A meter's health as the meter health page has it: its latest reading, and whether the live check finds it idle. */
+export type QuietMeterRow = { meterPointId: string; status: string; lastReadingAt?: string; idleWhenQuiet?: boolean };
+
+/**
+ * The meters that were sending and are now at least half a day behind the site's newest reading, furthest behind
+ * first: quiet now. The rule of the Overview notice, meter health and the alert emails.
+ */
+export const quietMeters = <T extends QuietMeterRow>(meters: readonly T[]): T[] => {
+  const sending = meters.filter((meter) => meter.status === "usable" && meter.lastReadingAt);
+  const newest = sending.reduce((latest, meter) => Math.max(latest, Date.parse(meter.lastReadingAt!)), 0);
+  if (!newest) return [];
+  return sending
+    .filter((meter) => newest - Date.parse(meter.lastReadingAt!) >= QUIET_AFTER_MS)
+    .sort((left, right) => left.lastReadingAt!.localeCompare(right.lastReadingAt!));
+};
+
+/**
+ * The meters a report on dates that have ended may call idle rather than stopped, sorted: quiet now (quietMeters),
+ * idle at the latest live check, and with no reading since the dates ended. The live check speaks only for now: a
+ * meter that has sent anything since the dates ended came back, so a stop inside them was a real stop, and one that is
+ * sending now is not quiet at all. Either way the report says it stopped, as Data availability does for those dates.
+ */
+export const idleThroughPeriodEnd = (meters: readonly QuietMeterRow[], periodEndMs: number): string[] =>
+  quietMeters(meters)
+    .filter((meter) => meter.idleWhenQuiet && Date.parse(meter.lastReadingAt!) <= periodEndMs)
+    .map((meter) => meter.meterPointId)
+    .sort();
+
 /** The site-local date (YYYY-MM-DD) at an instant. */
 const localDate = (instant: number, timezone: string) =>
   new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(instant));
