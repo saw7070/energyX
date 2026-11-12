@@ -89,7 +89,7 @@
 .arrangeRow { display:flex; flex-wrap:wrap; gap:6px; }
 /* Grid menu in the toolbar, line-up buttons, typed position and size, custom colour. */
 .gridMenu { position:relative; }
-.gridPopover { position:absolute; top:calc(100% + 6px); left:0; z-index:5; display:grid; gap:10px; width:260px; padding:12px 14px; border:1px solid #d0dbd2; border-radius:10px; background:white; box-shadow:0 6px 20px rgba(31,45,37,.14); }
+.gridPopover { position:absolute; top:calc(100% + 6px); right:0; z-index:5; display:grid; gap:10px; width:260px; padding:12px 14px; border:1px solid #d0dbd2; border-radius:10px; background:white; box-shadow:0 6px 20px rgba(31,45,37,.14); }
 .gridPopover label { display:grid; gap:4px; font-size:12px; font-weight:600; color:#4f5f55; }
 .gridPopover select { min-height:32px; padding:4px 8px; border:1px solid #d0dbd2; border-radius:7px; background:white; color:#1f2d25; font-size:13px; }
 .gridPopover .check, .check { display:flex !important; align-items:center; gap:8px; font-size:13px !important; color:#1f2d25 !important; }
@@ -155,6 +155,7 @@
 .narrow .side { max-height:none; overflow:visible; }
 .narrow .canvasFrame { padding:10px; }
 .gridPopover { max-width:calc(100vw - 32px); }
+.gridPopoverLeft { right:auto; left:0; }
 .zoom { display:inline-flex; flex-wrap:wrap; align-items:center; gap:2px; padding:1px; border:1px solid #d0dbd2; border-radius:8px; background:white; }
 .zoom .tool { min-width:32px; border-color:transparent; }
 .zoom .tool[aria-pressed="true"] { border-color:#1d513a; }

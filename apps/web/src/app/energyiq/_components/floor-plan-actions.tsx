@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useMessages } from "./energyiq-locale";
 import type { AlignHow } from "./floor-plan-align";
 import { floorPlanMessages } from "./floor-plan-messages";
@@ -59,6 +59,15 @@ export function GridMenu({ prefs, onChange, commandKey }: { prefs: EditorPrefs; 
   const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const popover = useId();
+  const panel = useRef<HTMLDivElement>(null);
+  // The menu opens leftwards from the Grid button (the last tool, at the right end of the toolbar). When the toolbar
+  // wraps on a narrow screen and the button lands near the left edge, it opens rightwards instead, so it is never cut off.
+  const [edge, setEdge] = useState<"right" | "left">("right");
+  useLayoutEffect(() => {
+    if (!open) { setEdge("right"); return; }
+    const box = panel.current?.getBoundingClientRect();
+    if (box && box.left < 8) setEdge("left");
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     const away = (event: PointerEvent) => { if (root.current && !root.current.contains(event.target as Node)) setOpen(false); };
@@ -68,7 +77,7 @@ export function GridMenu({ prefs, onChange, commandKey }: { prefs: EditorPrefs; 
   return <div className={styles.gridMenu} ref={root} onKeyDown={event => { if (event.key === "Escape" && open) { event.stopPropagation(); setOpen(false); button.current?.focus(); } }}>
     {/* Esc puts focus back on the Grid button, so it never falls out of the editor (and its keys keep working). */}
     <button ref={button} type="button" className={styles.tool} aria-expanded={open} aria-controls={open ? popover : undefined} title={t("grid.title")} onClick={() => setOpen(current => !current)}>{t("grid.menu")}</button>
-    {open && <div id={popover} className={styles.gridPopover} role="group" aria-label={t("grid.title")}>
+    {open && <div id={popover} ref={panel} className={edge === "left" ? `${styles.gridPopover} ${styles.gridPopoverLeft}` : styles.gridPopover} data-edge={edge} role="group" aria-label={t("grid.title")}>
       <label className={styles.check}><input type="checkbox" checked={prefs.snap} onChange={event => onChange({ ...prefs, snap: event.target.checked })} />{t("grid.snap")}</label>
       <label>{t("grid.size")}<select value={prefs.grid} onChange={event => onChange({ ...prefs, grid: Number(event.target.value) as GridSize })}>{GRID_SIZES.map(size => <option key={size} value={size}>{t(`grid.size${size}`)}</option>)}</select></label>
       <label className={styles.check}><input type="checkbox" checked={prefs.showGrid} onChange={event => onChange({ ...prefs, showGrid: event.target.checked })} />{t("grid.show")}</label>

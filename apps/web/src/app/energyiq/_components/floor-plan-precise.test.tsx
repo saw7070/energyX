@@ -394,3 +394,20 @@ describe("a bigger drawing space", () => {
     await view.unmount();
   });
 });
+
+describe("grid menu placement", () => {
+  it("opens leftwards from the Grid button, and rightwards when that would leave the screen", async () => {
+    // Where the open menu would sit: on a wide screen the Grid button is at the right end of the toolbar, so the
+    // leftward menu has room; when the toolbar wraps and the button lands at the left edge, it would start off screen.
+    let left = 600;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(() => ({ left, right: left + 260, top: 0, bottom: 200, width: 260, height: 200, x: left, y: 0, toJSON: () => ({}) }) as DOMRect);
+    const view = await render();
+    const menu = await openGrid(view);
+    expect(menu.getAttribute("data-edge")).toBe("right");
+    await act(async () => view.button("Grid").click());
+    left = -120;
+    const flipped = await openGrid(view);
+    expect(flipped.getAttribute("data-edge")).toBe("left");
+    await view.unmount();
+  });
+});
