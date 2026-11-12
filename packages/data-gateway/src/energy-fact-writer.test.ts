@@ -775,6 +775,44 @@ describe("writeEnergyFactProjectMaterialization", () => {
     }
   });
 
+  it("reads a lighting meter that reports every 15 minutes as idle all day, with the evening's first reading in its own slot", async () => {
+    const databasePath = ":memory:";
+    const projectId = "project-tuya-idle-15-minutes";
+    const batch = eventBatch({
+      databasePath,
+      projectId,
+      importBatchId: "tuya-idle-15-minutes",
+      sourceSha256: "tuya-idle-15-minutes-sha",
+      readings: [
+        // Lights on overnight: about 0.16 kWh in each 15-minute report (0.64 kWh an hour).
+        ["2026-11-06T22:00:00.000Z", 20.00],
+        ["2026-11-06T22:15:00.000Z", 20.16],
+        ["2026-11-06T22:30:00.000Z", 20.32],
+        ["2026-11-06T22:45:00.000Z", 20.48],
+        // Lights going off: one half-hour report with only a little use.
+        ["2026-11-06T23:15:00.000Z", 20.53],
+        // The meter loses power with its lights and sends nothing all day; back on in the evening, its first report
+        // carries the lights' first quarter-hour.
+        ["2026-11-07T10:45:00.000Z", 20.69],
+        ["2026-11-07T11:00:00.000Z", 20.85],
+      ],
+    });
+
+    await writeProjectSnapshot(batch, [batch], "snapshot-tuya-idle-15-minutes", [batch.sourceSha256], "unavailable");
+
+    const facts = await readCanonicalIntervals(databasePath, projectId);
+    const between = (from: string, to: string) => facts.filter((fact) => {
+      const start = (fact.interval_start as Date).toISOString();
+      return start >= from && start < to;
+    });
+    // All real readings: the quiet day is no use, not an outage spread across it.
+    expect(facts.some((fact) => fact.quality_status !== "ok")).toBe(false);
+    expect(between("2026-11-06T23:15:00.000Z", "2026-11-07T10:30:00.000Z").reduce((sum, fact) => sum + Number(fact.usage_kwh), 0)).toBeCloseTo(0, 6);
+    // The evening's first 0.16 kWh sits in the meter's own 15-minute slot, not spread back over an hour.
+    expect(between("2026-11-07T10:30:00.000Z", "2026-11-07T10:45:00.000Z").reduce((sum, fact) => sum + Number(fact.usage_kwh), 0)).toBeCloseTo(0.16, 6);
+    expect(facts.reduce((sum, fact) => sum + Number(fact.usage_kwh), 0)).toBeCloseTo(20.85 - 20.00, 6);
+  });
+
   it("keeps a Tuya span whose total did not move as real readings of no use, however long", async () => {
     const databasePath = ":memory:";
     const projectId = "project-tuya-unchanged-total";
