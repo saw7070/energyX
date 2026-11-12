@@ -286,7 +286,15 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
   const noUseFinding = quiet.length === 1 ? t(toCheck ? "find.noUseCheck.one" : "find.noUse.one", { name: quiet[0]!.name, dates: list(dateRuns(noUse.get(quiet[0]!.id)!, locale)) })
     : quiet.length > 1 ? t(toCheck ? "find.noUseCheck.other" : "find.noUse.other", { count: quiet.length }) : "";
   const standoutFinding = standoutDates.length ? t(standoutDates.length === 1 ? "find.standout.one" : "find.standout.other", { count: standoutDates.length, dates: list(standoutDates) }) : "";
-  const findings = noReadings ? [t("day.find.none")] : [
+  // No readings at all on a daily report's day. A meter the live check found online and only using nothing had nothing
+  // to send: said so, as Data availability does, and never something to get reporting again. The rest are to fix.
+  const silentMeters = meterRows.filter(row => !notInUseList.some(item => item.id === row.id));
+  const idleSilent = noReadings ? silentMeters.filter(row => idleIds.has(row.id)) : [];
+  const lostMeters = silentMeters.filter(row => !idleIds.has(row.id));
+  const idleFinding = (all: boolean) => idleSilent.length === 1 ? t(all ? "day.find.noneIdle.one" : "day.find.idle.one", { name: idleSilent[0]!.name })
+    : t(all ? "day.find.noneIdle.other" : "day.find.idle.other", { count: idleSilent.length, names: list(idleSilent.map(row => row.name)) });
+  const noneFindings = !idleSilent.length ? [t("day.find.none")] : lostMeters.length ? [t("day.find.none"), idleFinding(false)] : [idleFinding(true)];
+  const findings = noReadings ? noneFindings : [
     partDay ? project.coverage != null && project.coverage < 100 ? t("day.find.missing", { pct: pctText(project.coverage / 100) }) : t("day.find.missingPlain") : "",
     readDays.length ? t("find.total", { kwh: kwhText(totalKwh), days: readDays.length, perDay: kwhText(perDayOf(totalKwh)), cost: rate != null ? t("find.totalCost", { cost: money(cost(perDayOf(totalKwh)), 2)! }) : "" }) : "",
     closedShare == null ? ""
@@ -305,11 +313,11 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
     toCheck ? "" : noUseFinding,
   ].filter(Boolean).slice(0, MAX_FINDINGS);
   const worth = (row: { kwhYear: number; costYear: number | null }) => row.costYear != null ? money(row.costYear) : kwhText(row.kwhYear);
-  // No readings at all on a daily report's day: the one thing to decide is getting the meters reporting again.
-  const silentMeters = meterRows.filter(row => !notInUseList.some(item => item.id === row.id));
-  const decisions: ReviewDecision[] = noReadings ? silentMeters.length === 1
-    ? [{ title: t("dec.fixMeter.one", { name: silentMeters[0]!.name }), why: t("dec.fixMeterWhy.one", { since: periodText }), worth: null }]
-    : silentMeters.length > 1 ? [{ title: t("dec.fixMeter.other", { count: silentMeters.length }), why: t("dec.fixMeterWhy.other", { names: list(silentMeters.map(row => row.name)) }), worth: null }] : []
+  // No readings at all on a daily report's day: the one thing to decide is getting the meters reporting again, leaving
+  // out the ones that were online and only using nothing.
+  const decisions: ReviewDecision[] = noReadings ? lostMeters.length === 1
+    ? [{ title: t("dec.fixMeter.one", { name: lostMeters[0]!.name }), why: t("dec.fixMeterWhy.one", { since: periodText }), worth: null }]
+    : lostMeters.length > 1 ? [{ title: t("dec.fixMeter.other", { count: lostMeters.length }), why: t("dec.fixMeterWhy.other", { names: list(lostMeters.map(row => row.name)) }), worth: null }] : []
     : [
     ...rows.slice(0, 2).map(row => ({ title: row.title, why: row.why, worth: worth(row) })),
     ...(stopped.length === 1 && firstStopped ? [{ title: t("dec.fixMeter.one", { name: firstStopped.name }), why: t("dec.fixMeterWhy.one", { since: firstStopped.last ? at(firstStopped.last.date, firstStopped.last.hour) : periodText }), worth: null }]
@@ -340,7 +348,7 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
       { label: t("met.row.complete"), value: t("met.completeValue", { count: complete.length, days: dates.length }) },
     ],
     meters: meterRows.map(({ id, name, group, perDay, note, stopped: quiet, last }) => ({ id, name, group, perDay,
-      note: quiet && idleIds.has(id) ? last ? t("met.note.idle", { since: at(last.date, last.hour) }) : t("met.note.idleAll") : note })),
+      note: (quiet || idleSilent.some(row => row.id === id)) && idleIds.has(id) ? last ? t("met.note.idle", { since: at(last.date, last.hour) }) : t("met.note.idleAll") : note })),
     notInUseNote: offCount ? t("met.notInUseText") : null,
   };
 

@@ -419,9 +419,10 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const monthCost = cost(monthKwh);
   // A month can only be estimated from meters with at least one full day of readings.
   const estimated = raw.some(circuit => circuit.weekdayPerDay != null || circuit.weekendPerDay != null);
-  // Meters that sent nothing at all on a daily report's day; meters marked not in use are meant to be silent.
+  // Meters that sent nothing at all on a daily report's day (every one, on a day with no readings); meters marked not
+  // in use are meant to be silent.
   const offIds = notInUseIds(data);
-  const quietMeters = partDay ? raw.flatMap(circuit => circuit.meters).filter(meter => !offIds.has(meter.id) && !meter.series?.cells.some(cell => dateSet.has(cell[0]) && (cell[2] != null || cell[3] > 0))) : [];
+  const quietMeters = partDay || noReadings ? raw.flatMap(circuit => circuit.meters).filter(meter => !offIds.has(meter.id) && !meter.series?.cells.some(cell => dateSet.has(cell[0]) && (cell[2] != null || cell[3] > 0))) : [];
   // A meter that was online and only using nothing when the readings were loaded (AnalysisData.idleWhenQuiet) sent
   // nothing because it had nothing to send: said so, in Data availability's words, rather than that it went silent.
   const idleIds = new Set(data.idleWhenQuiet ?? []);
@@ -475,7 +476,12 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const periodText = dates.length ? formatPeriod(dates[0]!, dates.at(-1)!, locale) : "";
   const circuitCount = circuits.reduce((sum, circuit) => sum + circuit.meterIds.length, 0);
   const coverage = project.coverage;
-  const lede = noReadings ? t("day.none.lede") : paragraph([
+  // No readings at all: meters online and only using nothing had nothing to send (said so, never "check them"); the
+  // rest, if any, are to check.
+  const noneLede = !idleNames.length ? t("day.none.lede")
+    : !silent.length ? t(idleNames.length === 1 ? "day.none.ledeIdle.one" : "day.none.ledeIdle.other", { names: list(idleNames), count: idleNames.length })
+    : paragraph([t("day.none.lede"), t(silent.length === 1 ? "day.missing.silent.one" : "day.missing.silent.other", { names: list(silent) }), t(idleNames.length === 1 ? "day.missing.idle.one" : "day.missing.idle.other", { names: list(idleNames) })]);
+  const lede = noReadings ? noneLede : paragraph([
     t(circuitCount === 1 ? "lede.drew.one" : "lede.drew.other", { days: dates.length, site, kwh: kwhText(totalKwh), count: circuitCount }),
     // Lights-on hours: night use is the point, so only notable daytime use is a finding.
     lighting ? closedShare == null ? "" : daytimeNotable ? t("lights.lede.daytime", { pct: pctText(closedShare) }) : t("lights.lede.night")

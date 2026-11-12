@@ -380,6 +380,35 @@ describe("a daily report", () => {
     expect(plain(renderStyledSiteReportHtml("management", data, null, GENERATED))).not.toMatch(/Total energy, by day|undefined|NaN/);
   });
 
+  it("on a day with no readings, says meters the live check found online used nothing, and gives no fix for them", () => {
+    // A made-up office on a public holiday: both meters online all day and using nothing, so nothing new was sent.
+    const office: Record<string, Def> = {
+      lights: { name: "Office lights", group: "office", category: "light", kwh: (_d, h) => h >= 9 && h < 18 ? 0.5 : 0 },
+      fan: { name: "Pantry fan", group: "office", category: "load", kwh: (_d, h) => h >= 9 && h < 18 ? 0.1 : 0 },
+    };
+    const hours = Object.fromEntries(["monday", "tuesday", "wednesday", "thursday", "friday"].map(day => [day, [{ from: "09:00", to: "18:00" }]]));
+    const holiday = oneDay(site(office, { groups: null, hours }), DAY, { until: 0 });
+    const idle = { ...holiday, idleWhenQuiet: ["fan", "lights"] };
+    const review = buildManagementReview(idle, null, GENERATED);
+    expect(review.summary.findings).toEqual(["No readings arrived for this day: all **2 meters** were online but used nothing, so they sent no new readings."]);
+    expect(review.summary.decisions).toEqual([]);
+    expect(buildSiteReport(idle, null, GENERATED).lede).toBe("No readings arrived for this day: all 2 meters were online but used nothing, so they sent no new readings.");
+    // Each meter in Data availability's words, in every language.
+    for (const locale of ["en", "zh-Hans", "ms"] as const) {
+      const notes = buildManagementReview(idle, null, GENERATED, locale).method.meters.map(meter => meter.note);
+      expect(notes).toEqual([translatorFor(dataAvailabilityMessages, locale)("status.idle"), translatorFor(dataAvailabilityMessages, locale)("status.idle")]);
+      for (const page of [renderStyledSiteReportHtml("full", idle, null, GENERATED, locale), renderStyledSiteReportHtml("management", idle, null, GENERATED, locale)]) expect(plain(page)).not.toMatch(/undefined|NaN|\{\w+\}/);
+    }
+    // One idle, one silent: only the silent one is to get reporting again.
+    const mixed = { ...holiday, idleWhenQuiet: ["fan"] };
+    const mixedReview = buildManagementReview(mixed, null, GENERATED);
+    expect(mixedReview.summary.findings).toEqual(["No readings arrived for this day. Check that the meters and their gateway are online.", "**Pantry fan** was online but used nothing, so it sent no new readings."]);
+    expect(mixedReview.summary.decisions.map(decision => decision.title)).toEqual(["Get Office lights reporting again"]);
+    expect(mixedReview.method.meters.map(meter => meter.note)).toEqual(["No readings in this period", "No use in this period"]);
+    expect(buildSiteReport(mixed, null, GENERATED).lede).toBe("No readings arrived for this day, so there is nothing to report yet. Check that the meters and their gateway are online. Office lights sent no readings at all. Pantry fan used nothing, so it sent no new readings.");
+    for (const locale of ["zh-Hans", "ms"] as const) for (const page of [renderStyledSiteReportHtml("full", mixed, null, GENERATED, locale), renderStyledSiteReportHtml("management", mixed, null, GENERATED, locale)]) expect(plain(page)).not.toMatch(/undefined|NaN|\{\w+\}/);
+  });
+
   it("works out no daytime share from part of a day, where the missing evening would make night use look like daytime use", () => {
     // The whole day: the lights ran at night as planned.
     expect(buildManagementReview(oneDay(LIT, DAY), null, GENERATED).summary.findings).toContain("The lights ran at night as planned: only **7%** of the energy was used in the daytime.");

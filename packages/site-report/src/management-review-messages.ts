@@ -216,6 +216,11 @@ export const managementReviewMessages = defineMessages({
   "day.find.missing": "Only **{pct}** of the expected readings for this day arrived, so these figures count only the readings received and may be lower than the real use.",
   "day.find.missingPlain": "Some readings for this day did not arrive, so these figures count only the readings received and may be lower than the real use.",
   "day.find.none": "No readings arrived for this day. Check that the meters and their gateway are online.",
+  // No readings, but the live check found the meters online and only using nothing: idle, as Data availability says.
+  "day.find.noneIdle.one": "No readings arrived for this day: **{name}** was online but used nothing, so it sent no new readings.",
+  "day.find.noneIdle.other": "No readings arrived for this day: all **{count} meters** were online but used nothing, so they sent no new readings.",
+  "day.find.idle.one": "**{name}** was online but used nothing, so it sent no new readings.",
+  "day.find.idle.other": "**{count} meters** were online but used nothing, so they sent no new readings: {names}.",
 }, {
   "zh-Hans": {
     "doc.aria": "{name}能耗回顾",
@@ -426,6 +431,10 @@ export const managementReviewMessages = defineMessages({
     "day.find.missing": "当天只收到预期读数的 **{pct}**，所以这些数字只计算了收到的读数，可能低于实际用电。",
     "day.find.missingPlain": "当天有部分读数没有收到，所以这些数字只计算了收到的读数，可能低于实际用电。",
     "day.find.none": "当天没有收到任何读数。请检查电表和网关是否在线。",
+    "day.find.noneIdle.one": "当天没有收到任何读数：**{name}**在线，但当天没有用电，所以没有发送新读数。",
+    "day.find.noneIdle.other": "当天没有收到任何读数：全部 **{count} 个电表**都在线，但当天没有用电，所以没有发送新读数。",
+    "day.find.idle.one": "**{name}**在线，但当天没有用电，所以没有发送新读数。",
+    "day.find.idle.other": "**{count} 个电表**在线，但当天没有用电，所以没有发送新读数：{names}。",
   },
   ms: {
     "doc.aria": "Semakan tenaga {name}",
@@ -636,6 +645,10 @@ export const managementReviewMessages = defineMessages({
     "day.find.missing": "Hanya **{pct}** daripada bacaan yang dijangka untuk hari itu telah diterima, jadi angka ini hanya mengira bacaan yang diterima dan mungkin lebih rendah daripada penggunaan sebenar.",
     "day.find.missingPlain": "Sebahagian bacaan untuk hari itu tidak diterima, jadi angka ini hanya mengira bacaan yang diterima dan mungkin lebih rendah daripada penggunaan sebenar.",
     "day.find.none": "Tiada bacaan diterima untuk hari itu. Semak sama ada meter dan get laluannya dalam talian.",
+    "day.find.noneIdle.one": "Tiada bacaan diterima untuk hari itu: **{name}** dalam talian tetapi tidak menggunakan apa-apa, jadi ia tidak menghantar bacaan baharu.",
+    "day.find.noneIdle.other": "Tiada bacaan diterima untuk hari itu: kesemua **{count} meter** dalam talian tetapi tidak menggunakan apa-apa, jadi meter itu tidak menghantar bacaan baharu.",
+    "day.find.idle.one": "**{name}** dalam talian tetapi tidak menggunakan apa-apa pada hari itu, jadi ia tidak menghantar bacaan baharu.",
+    "day.find.idle.other": "**{count} meter** dalam talian tetapi tidak menggunakan apa-apa pada hari itu, jadi meter itu tidak menghantar bacaan baharu: {names}.",
   },
 });
 

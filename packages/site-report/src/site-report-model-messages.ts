@@ -376,6 +376,9 @@ export const siteReportModelMessages = defineMessages({
   "day.none.title": "No readings arrived ",
   "day.none.titleEmphasis": "for this day",
   "day.none.lede": "No readings arrived for this day, so there is nothing to report yet. Check that the meters and their gateway are online.",
+  // No readings, but the live check found the meters online and only using nothing: idle, as Data availability says.
+  "day.none.ledeIdle.one": "No readings arrived for this day: {names} was online but used nothing, so it sent no new readings.",
+  "day.none.ledeIdle.other": "No readings arrived for this day: all {count} meters were online but used nothing, so they sent no new readings.",
 }, {
   "zh-Hans": {
     "clock.time": "{part}{hour}点",
@@ -726,6 +729,8 @@ export const siteReportModelMessages = defineMessages({
     "day.none.title": "当天",
     "day.none.titleEmphasis": "没有收到读数",
     "day.none.lede": "当天没有收到任何读数，所以暂时没有内容可报告。请检查电表和网关是否在线。",
+    "day.none.ledeIdle.one": "当天没有收到任何读数：{names}在线，但当天没有用电，所以没有发送新读数。",
+    "day.none.ledeIdle.other": "当天没有收到任何读数：全部 {count} 个电表都在线，但当天没有用电，所以没有发送新读数。",
   },
   ms: {
     "clock.time": "{hour} {part}",
@@ -1076,6 +1081,8 @@ export const siteReportModelMessages = defineMessages({
     "day.none.title": "Tiada bacaan diterima ",
     "day.none.titleEmphasis": "untuk hari itu",
     "day.none.lede": "Tiada bacaan diterima untuk hari itu, jadi belum ada apa-apa untuk dilaporkan. Semak sama ada meter dan get laluannya dalam talian.",
+    "day.none.ledeIdle.one": "Tiada bacaan diterima untuk hari itu: {names} dalam talian tetapi tidak menggunakan apa-apa, jadi ia tidak menghantar bacaan baharu.",
+    "day.none.ledeIdle.other": "Tiada bacaan diterima untuk hari itu: kesemua {count} meter dalam talian tetapi tidak menggunakan apa-apa, jadi meter itu tidak menghantar bacaan baharu.",
   },
 });
 export type SiteReportModelKey = keyof typeof siteReportModelMessages.en;

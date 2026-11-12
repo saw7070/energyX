@@ -33,8 +33,9 @@ export type AnalysisData = {
   hoursMeaning?: HoursMeaning | undefined;
   /**
    * Meters whose quiet spell meant they were using nothing when these readings were loaded: the live check found them
-   * online and they can rightly use nothing (never lighting on a lights-on-hours site, nor a meter always on by design).
-   * A meter sends its total only when it moves, so such a meter is idle, not stopped. Absent on older readings.
+   * online and they can rightly use nothing (never lighting on a lights-on-hours site, nor a meter always on by design),
+   * and they had sent nothing since these dates ended, so the same quiet spell reaches back into them. A meter sends
+   * its total only when it moves, so such a meter is idle, not stopped. Absent on older readings.
    */
   idleWhenQuiet?: string[] | undefined;
   /** Missing on readings saved before groups existed; everything then falls back to the old per-space view. */
