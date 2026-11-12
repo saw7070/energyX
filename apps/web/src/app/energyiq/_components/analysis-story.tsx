@@ -7,7 +7,8 @@ import {
   effectiveHours, openingLabel, percentChange, quietHours, savingsPlan, shortDate, statusFor, storyProfile, timeBuckets,
   type AnalysisAnomaly, type AnalysisDay, type HealthStatus, type HoursMeaning, type overnightFloor,
 } from "./analysis-model";
-import { forHoursMeaning } from "@datafoundry/site-report";
+import { alwaysOnByDesignIds, alwaysOnByDesignKw, buildSiteReport, daytimeUse, forHoursMeaning, ON_TIME_MARGIN_MINUTES, type SiteReport } from "@datafoundry/site-report";
+import { Rich } from "@datafoundry/site-report/rich";
 import type { AnalysisData } from "./analysis-data";
 import { analysisMessages, categoryLabel, confidenceLabel, effortLabel, holidayName, joinText, rich, timeBucketLabel } from "./analysis-messages";
 import { storyMessages } from "./analysis-story-messages";
@@ -24,10 +25,11 @@ import { TypeHint } from "./type-hint";
 import { siteBreakdown, UNMETERED_KEY } from "./site-total";
 import { analysisGroupTree } from "@datafoundry/site-report";
 import { MeterGroupTree } from "./meter-group-tree";
+import { GroupSplit, type GroupSplitLook } from "./group-split";
 import { withCurrency } from "./money";
 
 // The forecast's three colours: what really happened (green), next month's working days (blue) and its closed
-// days (pale blue, striped like the after-hours band in step 2), so past, working and closed never look alike.
+// days (pale blue, striped like the after-hours band in step 3), so past, working and closed never look alike.
 const FORECAST_USED = "#176b59", FORECAST_OPEN = "#2a78d6", FORECAST_CLOSED = "#cfe3fa", FORECAST_CLOSED_LINE = "#7aa9e0";
 const FORECAST_CLOSED_CSS = `repeating-linear-gradient(45deg, ${FORECAST_CLOSED} 0 4px, ${FORECAST_CLOSED_LINE} 4px 6px)`;
 // Always-on is a solid mid grey; closed hours are a pale striped band, so the two never read as the same thing.
@@ -51,6 +53,16 @@ const closedThresholds = (meaning: HoursMeaning) => meaning === "lights_on" ? { 
 type StoryInput = { data: AnalysisData; days: AnalysisDay[]; anomalies: AnalysisAnomaly[]; floor: ReturnType<typeof overnightFloor>; rate: number | null };
 type Story = ReturnType<typeof buildStory>;
 
+/**
+ * The site report for the same readings, so the summary follows the report and never disagrees with it: the average
+ * day and its cost, the split by group, the lights on in the daytime, the average day hour by hour and the days that
+ * stood out all come from it. No floor layout is passed: only the report's drawing of the site uses one. Null if the
+ * report cannot be built; the summary then works from its own figures as it used to.
+ */
+function siteReportFor(data: AnalysisData, locale: EnergyIqLocale): SiteReport | null {
+  try { return buildSiteReport(data, null, new Date().toISOString(), locale); } catch { return null; }
+}
+
 /** Every number the decision summary shows, from the same readings as the detailed analysis below it. */
 function buildStory({ data, days, anomalies, floor, rate }: StoryInput, locale: EnergyIqLocale = "en") {
   const project = data.current.project;
@@ -59,20 +71,35 @@ function buildStory({ data, days, anomalies, floor, rate }: StoryInput, locale: 
   // Lights-on hours: lighting that should run at night, so "closed" is the daytime and quiet hours come from it too.
   const meaning: HoursMeaning = data.hoursMeaning ?? "opening";
   const split = timeBuckets(project, days, hours, meaning);
+  // Lights-on hours: daytime use leaves out meters always on by design and allows 20 minutes either side of the hours,
+  // exactly as the site report counts it; its share is of all use, so the money matches the kWh.
+  const daytime = meaning === "lights_on" ? daytimeUse(data) : null;
+  const closedKwh = daytime ? daytime.kwh : split.closedKwh;
   const closedHoursPerYear = split.closedShareOfHours * 8760;
   const alwaysOn = alwaysOnKw(project, quietHours(hours, meaning));
+  const byDesignKw = alwaysOnByDesignKw(data, quietHours(hours, meaning));
   const benchmark = floor?.bestKw ?? alwaysOn;
-  const aboveBenchmark = benchmark != null ? aboveBenchmarkWhenClosed(project, days, hours, benchmark, meaning) : null;
-  const closedUse = closedUseBreakdown(project, data.current.spaces, data.holidays, hours, locale, meaning);
+  // Lights-on hours: never more than the daytime use the rules count, and each meter's daytime use by the same rules,
+  // so a light the report calls on time is not offered as a saving here.
+  const rawAbove = benchmark != null ? aboveBenchmarkWhenClosed(project, days, hours, benchmark, meaning) : null;
+  const aboveBenchmark = rawAbove != null && daytime ? Math.min(rawAbove, daytime.kwh) : rawAbove;
+  const closedUse = closedUseBreakdown(project, data.current.spaces, data.holidays, hours, locale, meaning, alwaysOnByDesignIds(data), daytime?.byMeter);
   const plan = savingsPlan({ projectName: data.projectName, closedUse, closedHoursPerYear, rate, currency, aboveBenchmarkKwh: aboveBenchmark, benchmarkKw: benchmark, periodDays: days.length, anomalies, actions: data.actions, meaning }, locale);
   const counted = plan.filter(item => item.counted);
   const periodCost = project.cost?.amount ?? null;
   const share = (kwh: number) => split.total > 0 ? kwh / split.total : 0;
+  const report = siteReportFor(data, locale);
+  // Complete days as the report judges them (a meter marked not in use does not make a day incomplete), so an
+  // average day hour by hour is the report's average day.
+  const completeDates = new Set((report?.benchmark.days ?? days).filter(day => day.complete).map(day => day.date));
   return {
-    project, currency, rate, hours, meaning, split, closedHoursPerYear, alwaysOn, benchmark, closedUse, plan, days,
-    periodCost, closedShare: share(split.closedKwh), closedCost: periodCost != null ? periodCost * share(split.closedKwh) : null,
+    project, currency, rate, hours, meaning, split, closedHoursPerYear, alwaysOn, benchmark, closedUse, plan, days, daytime, closedKwh, report, completeDates,
+    periodCost, closedShare: share(closedKwh), closedCost: periodCost != null ? periodCost * share(closedKwh) : null,
+    // Step 3's bar splits all use by the clock: always-on meters and the 20 minutes allowed at each end included.
+    timeSplitShare: share(split.closedKwh),
     yearlyCost: periodCost != null && days.length ? periodCost * 365 / days.length : null,
-    alwaysOnYearlyCost: alwaysOn != null && rate != null ? alwaysOn * 8760 * rate : null,
+    // What never switching off costs, without the meters always on by design: those are meant to run all year.
+    alwaysOnYearlyCost: alwaysOn != null && rate != null && alwaysOn - byDesignKw > 0.005 ? (alwaysOn - byDesignKw) * 8760 * rate : null,
     savingKwh: counted.reduce((sum, item) => sum + (item.annualKwh ?? 0), 0), savingCost: rate != null ? counted.reduce((sum, item) => sum + (item.annualCost ?? 0), 0) : null,
     provenKwh: counted.some(item => item.provenKwh != null) ? counted.reduce((sum, item) => sum + (item.provenKwh ?? 0), 0) : null,
     provenCost: rate != null && counted.some(item => item.provenCost != null) ? counted.reduce((sum, item) => sum + (item.provenCost ?? 0), 0) : null,
@@ -91,7 +118,7 @@ export function DecisionSummary(props: StoryInput) {
   const { data } = props;
   const money = (amount: number | null) => amount == null || !story.currency ? "—" : withCurrency(story.currency, Math.round(amount).toLocaleString("en-SG"));
   const first = story.plan.find(item => item.counted);
-  // Health check can send the reader to one day, hour by hour, in step 2.
+  // The days that stood out and the health check can send the reader to one day, hour by hour, in step 3.
   const [inspectDay, setInspectDay] = useState<{ date: string; at: number } | null>(null);
   // Scroll only the page area; scrollIntoView would also shift the fixed app shell around it.
   const jump = (id: string) => {
@@ -101,15 +128,24 @@ export function DecisionSummary(props: StoryInput) {
     scroller.scrollTo({ top: scroller.scrollTop + target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 16, behavior: "smooth" });
   };
   const dates = story.project.dates;
+  const openDay = (date: string) => { setInspectDay({ date, at: Date.now() }); jump("story-when"); };
+  // Like the report and the Overview, the summary leads with the site's average day and its cost; what the dates cost
+  // in all, and how much of it went outside the hours, follows.
+  const averageDay = story.report?.averageDay ?? null;
+  const headline = story.periodCost != null
+    ? rich(t(lightsOk ? "lights.summary.headlineCostOk" : "summary.headlineCost", { days: dates.length }), { name: data.projectName, cost: <Strong>{money(story.periodCost)}</Strong>, closed: <Strong tone="amber">{money(story.closedCost)} ({num(story.closedShare * 100, 0)}%)</Strong> })
+    : rich(t(lightsOk ? "lights.summary.headlineKwhOk" : "summary.headlineKwh", { days: dates.length }), { name: data.projectName, kwh: <Strong>{num(story.split.total, 0)} kWh</Strong>, share: <Strong tone="amber">{num(story.closedShare * 100, 0)}%</Strong> });
+  // The steps in the report's order, then the checks and the forecast the report does not have.
+  const steps = [
+    ["story-money", story.periodCost != null ? "nav.money" : "nav.energy"], ["story-on", "nav.on"], ["story-when", "nav.when"],
+    ...(story.report ? [["story-days", "nav.days"] as const] : []), ["story-plan", "nav.plan"], ["story-health", "nav.health"], ["story-ahead", "nav.ahead"], ["details", "nav.details"],
+  ] as const;
   return <div className="space-y-8">
     <section aria-labelledby="story-title" className="overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-white to-emerald-50/60 shadow-sm">
       <div className="px-6 pt-6">
         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">{t("summary.eyebrow")}</p>
-        <h2 id="story-title" className="mt-1 max-w-4xl text-xl font-semibold leading-snug text-slate-900 sm:text-2xl">
-          {story.periodCost != null
-            ? rich(t(lightsOk ? "lights.summary.headlineCostOk" : "summary.headlineCost", { days: dates.length }), { name: data.projectName, cost: <Strong>{money(story.periodCost)}</Strong>, closed: <Strong tone="amber">{money(story.closedCost)} ({num(story.closedShare * 100, 0)}%)</Strong> })
-            : rich(t(lightsOk ? "lights.summary.headlineKwhOk" : "summary.headlineKwh", { days: dates.length }), { name: data.projectName, kwh: <Strong>{num(story.split.total, 0)} kWh</Strong>, share: <Strong tone="amber">{num(story.closedShare * 100, 0)}%</Strong> })}
-        </h2>
+        <h2 id="story-title" className="mt-1 max-w-4xl text-xl font-semibold leading-snug text-slate-900 sm:text-2xl">{averageDay ? averageDay.text : headline}</h2>
+        {averageDay && <p className="mt-2 max-w-4xl text-base leading-relaxed text-slate-700">{headline}</p>}
         {story.periodCost != null && story.project.cost?.peak && story.project.cost.amount > 0 && story.project.usageKwh
           ? <p className="mt-2 max-w-3xl text-sm text-slate-600">{t("summary.peak", {
               cost: money(story.project.cost.peak.cost),
@@ -121,8 +157,8 @@ export function DecisionSummary(props: StoryInput) {
       <div className="mt-5 grid gap-px border-y border-slate-200 bg-slate-200/70 md:grid-cols-3">
         <Step index={1} label={t(story.periodCost != null ? "step.spent" : "step.used", { days: dates.length })} value={story.periodCost != null ? money(story.periodCost) : `${num(story.split.total, 0)} kWh`}
           note={<>{story.periodCost != null ? `${num(story.project.usageKwh ?? story.split.total, 0)} kWh · ` : null}{shortDate(dates[0]!, locale)} – {shortDate(dates.at(-1)!, locale)}{story.change != null && <> · <span className={story.change > 0 ? "text-amber-700" : "text-emerald-700"}>{t("step.change", { change: `${story.change > 0 ? "+" : ""}${num(story.change)}`, days: dates.length })}</span></>}</>} />
-        <Step index={2} label={t("step.after")} tone="amber" value={story.periodCost != null ? money(story.closedCost) : `${num(story.split.closedKwh, 0)} kWh`}
-          note={<>{t(story.periodCost != null ? "step.afterNote" : "step.afterNoteEnergy", { pct: num(story.closedShare * 100, 0) })}{story.alwaysOn != null ? t("step.neverBelow", { kw: num(story.alwaysOn, 1) }) : null}</>} />
+        <Step index={2} label={t("step.after")} tone="amber" value={story.periodCost != null ? money(story.closedCost) : `${num(story.closedKwh, 0)} kWh`}
+          note={<>{t(story.periodCost != null ? "step.afterNote" : "step.afterNoteEnergy", { pct: num(story.closedShare * 100, 0) })}{story.alwaysOn != null ? t("step.neverBelow", { kw: num(story.alwaysOn, 1), day: num(story.alwaysOn * 24, 1) }) : null}</>} />
         <Step index={3} label={t("step.save")} tone="emerald" value={savingRange(story, money, t)}
           note={story.savingKwh ? <>{story.provenKwh != null && meaningfulLow(story.provenKwh, story.savingKwh)
             ? t("step.saveRange", { low: story.provenCost != null ? money(story.provenCost) : `${num(story.provenKwh, 0)} kWh`, high: story.savingCost != null ? money(story.savingCost) : `${num(story.savingKwh, 0)} kWh` })
@@ -139,14 +175,15 @@ export function DecisionSummary(props: StoryInput) {
     </section>
 
     <nav aria-label={t("nav.label")} className="flex flex-wrap gap-2 text-xs">
-      {([["story-money", story.periodCost != null ? "nav.money" : "nav.energy"], ["story-when", "nav.when"], ["story-on", "nav.on"], ["story-health", "nav.health"], ["story-plan", "nav.plan"], ["story-ahead", "nav.ahead"], ["details", "nav.details"]] as const).map(([id, label]) => <button key={id} type="button" onClick={() => jump(id)} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-slate-600 hover:border-slate-300 hover:text-slate-900">{t(label)}</button>)}
+      {steps.map(([id, label]) => <button key={id} type="button" onClick={() => jump(id)} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-slate-600 hover:border-slate-300 hover:text-slate-900">{t(label)}</button>)}
     </nav>
 
     <MoneySection story={story} data={data} money={money} />
-    <WhenSection story={story} money={money} inspect={inspectDay} />
     <StaysOnSection story={story} money={money} />
-    <HealthSection story={story} data={data} anomalies={props.anomalies} floor={props.floor} onJump={jump} onInspectDay={date => { setInspectDay({ date, at: Date.now() }); jump("story-when"); }} />
+    <WhenSection story={story} money={money} inspect={inspectDay} />
+    <DaysSection story={story} onInspectDay={openDay} />
     <PlanSection story={story} data={data} money={money} />
+    <HealthSection story={story} data={data} anomalies={props.anomalies} floor={props.floor} onJump={jump} onInspectDay={openDay} />
     <AheadSection story={story} data={data} />
   </div>;
 }
@@ -211,6 +248,22 @@ function ShareBars({ title, rows, format }: { title: string; rows: Array<{ key: 
   </div>;
 }
 
+/**
+ * The site report's breakdown by group on Analysis's cards: the same rows, numbers and opening groups as the Overview,
+ * in the page's own colours (classes the page's light and dark themes both know).
+ */
+const SPLIT_ROW = "grid w-full grid-cols-[minmax(min-content,1fr)_auto_14px] items-center gap-x-3 gap-y-1.5 rounded-lg px-3 text-left text-slate-800 sm:grid-cols-[minmax(0,1fr)_minmax(72px,28%)_auto_14px]";
+const SPLIT_LOOK: GroupSplitLook = {
+  section: "max-w-3xl", heading: "mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500", note: "mb-3 text-xs text-slate-500", list: "space-y-1",
+  row: `${SPLIT_ROW} bg-slate-50 py-2 text-sm`, button: `${SPLIT_ROW} group cursor-pointer bg-slate-50 py-2 text-sm hover:bg-slate-100`, innerRow: `${SPLIT_ROW} py-1.5 text-sm`,
+  name: "break-words font-medium text-slate-900", innerName: "break-words text-slate-800",
+  bar: "relative col-span-full row-start-2 h-2 overflow-hidden rounded-full bg-slate-200 sm:col-span-1 sm:row-start-auto",
+  fill: "absolute inset-y-0 left-0 rounded-full bg-[#2f7a5b]", innerFill: "absolute inset-y-0 left-0 rounded-full bg-[#6fa98c]",
+  value: "whitespace-nowrap text-sm tabular-nums text-slate-600",
+  chevron: "h-2 w-2 justify-self-end -rotate-45 border-b-2 border-r-2 border-current text-slate-500 transition-transform group-aria-expanded:rotate-45 motion-reduce:transition-none",
+  inner: "mb-1.5 ml-3.5 mt-0.5 border-l-2 border-slate-200 pl-2.5", hint: "mt-2 text-xs text-slate-500",
+};
+
 function MoneySection({ story, data, money }: { story: Story; data: AnalysisData; money: (amount: number | null) => string }) {
   const t = useStoryText(story.meaning);
   const { locale } = useEnergyIqLocale();
@@ -222,12 +275,14 @@ function MoneySection({ story, data, money }: { story: Story; data: AnalysisData
   const unmeteredColor = "#9aa5b1";
   // The main meter is the site total, not an area: list what is below it, and what no sub-meter explains as its own line.
   const breakdown = siteBreakdown({ projectKwh: data.current.project.usageKwh, spaces: data.current.spaces, circuits: data.circuits, unmeteredLabel: t("money.unmetered") });
-  // Where the site's meters are grouped by what they serve, the split follows the groups: each with its total and its
-  // share of the group above it. Readings saved before groups existed keep the split by area.
-  const tree = analysisGroupTree(data, t("money.unmetered"));
-  const unmeteredKwh = tree ? tree.unmeteredKwh : breakdown.unmeteredKwh;
+  // Where the site's meters are grouped by what they serve, the split is the site report's breakdown by group, the
+  // same one the Overview shows: each group's kWh on an average day and its share of all use, adding up to 100%.
+  // Without the report the split follows the groups as a tree; readings saved before groups existed split by area.
+  const groupRows = story.report?.groups?.breakdown.length ? story.report.groups.breakdown : null;
+  const tree = groupRows ? null : analysisGroupTree(data, t("money.unmetered"));
+  const unmeteredKwh = groupRows ? story.report!.groups!.unmeteredKwh : tree ? tree.unmeteredKwh : breakdown.unmeteredKwh;
   let colour = 0;
-  const spaces = tree ? [] : breakdown.rows.map(row => ({ key: row.key, label: row.label, value: value(row.kwh), color: row.unmetered ? unmeteredColor : spaceColors[colour++ % spaceColors.length]! }));
+  const spaces = groupRows || tree ? [] : breakdown.rows.map(row => ({ key: row.key, label: row.label, value: value(row.kwh), color: row.unmetered ? unmeteredColor : spaceColors[colour++ % spaceColors.length]! }));
   const groups = tree ? [...tree.children.map(group => ({ key: group.id, label: group.name, value: value(group.kwh) })), ...tree.meters.map(meter => ({ key: meter.unmetered ? UNMETERED_KEY : meter.id, label: meter.name, value: value(meter.kwh) }))].sort((a, b) => b.value - a.value) : [];
   const types: Array<{ key: string; label: string; value: number; color: string; hint?: ReactNode }> = CATEGORY_ORDER.filter(category => (story.project.typeTotals[category] ?? 0) > 0)
     .map(category => ({ key: category, label: categoryLabel(category, locale), value: value(story.project.typeTotals[category]!), color: CATEGORY_COLORS[category], hint: <TypeHint category={category} examples={data.circuits.filter(circuit => circuit.category === category).slice(0, 3).map(circuit => circuit.name)} place={data.projectName} /> })).sort((a, b) => b.value - a.value);
@@ -235,43 +290,62 @@ function MoneySection({ story, data, money }: { story: Story; data: AnalysisData
     types.push({ key: UNMETERED_KEY, label: t("money.unmetered"), value: value(unmeteredKwh), color: unmeteredColor, hint: <span title={t("money.unmeteredHint")}>{t("money.unmetered")}</span> });
     types.sort((a, b) => b.value - a.value);
   }
+  // Beside the split by group, a split by type says something only when there is more than one type (an estate of
+  // lights is all lighting).
+  const shownTypes = groupRows && types.length < 2 ? [] : types;
   const split = groups.length ? groups : spaces;
+  const firstType = shownTypes.find(type => type.key !== UNMETERED_KEY);
+  const what = t(rate != null ? "money.bill" : "money.energy");
+  const leadSentence = (label: string, pct: number | string, withType: boolean) => rich(t(withType && firstType ? "money.takeawayType" : "money.takeaway", { pct, what }), {
+    lead: <span className="font-medium text-slate-900">{label}</span>, type: firstType ? <span className="font-medium text-slate-900">{firstType.label.toLowerCase()}</span> : null,
+  });
+  // With the report's breakdown, the largest line and its whole percentage, as the Overview words it.
+  const groupLead = groupRows ? [...groupRows].sort((a, b) => b.pct - a.pct)[0] : undefined;
   const lead = split.length ? split : types;
-  const firstType = types.find(type => type.key !== UNMETERED_KEY);
   const all = lead.reduce((sum, row) => sum + row.value, 0);
-  const takeaway = lead[0]?.key === UNMETERED_KEY ? t("money.takeawayUnmetered", { pct: num(lead[0].value / Math.max(all, 0.001) * 100, 0) }) : lead[0] ? rich(t(split.length && firstType ? "money.takeawayType" : "money.takeaway", { pct: num(lead[0].value / Math.max(all, 0.001) * 100, 0), what: t(rate != null ? "money.bill" : "money.energy") }), {
-    lead: <span className="font-medium text-slate-900">{lead[0].label}</span>, type: firstType ? <span className="font-medium text-slate-900">{firstType.label.toLowerCase()}</span> : null,
-  }) : t("money.none");
+  const takeaway = groupLead ? groupLead.kind === "unmetered" ? t("money.takeawayUnmetered", { pct: groupLead.pct }) : leadSentence(groupLead.name, groupLead.pct, true)
+    : lead[0]?.key === UNMETERED_KEY ? t("money.takeawayUnmetered", { pct: num(lead[0].value / Math.max(all, 0.001) * 100, 0) })
+    : lead[0] ? leadSentence(lead[0].label, num(lead[0].value / Math.max(all, 0.001) * 100, 0), split.length > 0) : t("money.none");
   return <StoryCard id="story-money" step={1} title={t(rate != null ? "money.title" : "money.titleEnergy")} takeaway={takeaway}>
-    <div className={`grid gap-8 ${split.length && types.length ? "lg:grid-cols-2" : ""}`}>
+    <div className={`grid gap-8 ${(groupRows || split.length) && shownTypes.length ? "lg:grid-cols-2" : ""}`}>
+      {groupRows && <GroupSplit rows={groupRows} title={t("money.byGroup")} note={t("money.byGroupDayNote")} look={SPLIT_LOOK} />}
       {tree && <div>
         <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("money.byGroup")}</h3>
         <p className="mb-3 text-xs text-slate-500">{t("money.byGroupNote")}</p>
         <MeterGroupTree tree={tree} kwh={kwh => rate != null ? money(kwh * rate) : `${num(kwh, kwh < 20 ? 1 : 0)} kWh`} pct={share => `${num(share * 100, 0)}%`} />
       </div>}
       {spaces.length > 0 && <ShareBars title={t(breakdown.byCircuit ? "money.byCircuit" : "money.byArea")} rows={spaces} format={format} />}
-      {types.length > 0 && <ShareBars title={t("money.byType")} rows={types} format={format} />}
+      {shownTypes.length > 0 && <ShareBars title={t("money.byType")} rows={shownTypes} format={format} />}
     </div>
   </StoryCard>;
 }
 
+type DayChoice = "weekday" | "weekend" | "all" | "day";
 function WhenSection({ story, money, inspect }: { story: Story; money: (amount: number | null) => string; inspect?: { date: string; at: number } | null }) {
   const t = useStoryText(story.meaning);
   const { locale } = useEnergyIqLocale();
-  const [dayType, setDayType] = useState<"weekday" | "weekend" | "day">("weekday");
+  // A lights-on site's lights run every night, so every day is one kind: its average is the report's average day, of
+  // every complete day. Opening hours keep a weekday and a weekend average.
+  const lighting = story.meaning === "lights_on";
+  const averages: Array<Exclude<DayChoice, "day">> = lighting ? ["all"] : ["weekday", "weekend"];
+  const [choice, setDayType] = useState<DayChoice>(averages[0]!);
+  const dayType: DayChoice = choice === "day" || averages.includes(choice) ? choice : averages[0]!;
+  // Complete as the report judges it, so the averages are the report's.
+  const complete = (day: AnalysisDay) => story.completeDates.has(day.date);
   // Single-day view: any date in the period, defaulting to the latest day with complete readings.
-  const [date, setDate] = useState(() => [...story.days].reverse().find(day => day.complete)?.date ?? story.days.at(-1)?.date ?? "");
-  // Opening a day from the health check switches this step to that single day.
+  const [date, setDate] = useState(() => [...story.days].reverse().find(complete)?.date ?? story.days.at(-1)?.date ?? "");
+  // Opening a day from the days that stood out or the health check switches this step to that single day.
   useEffect(() => { if (inspect?.date) { setDayType("day"); setDate(inspect.date); } }, [inspect?.date, inspect?.at]);
   const dayIndex = story.days.findIndex(day => day.date === date);
   const pickedDay = story.days[dayIndex];
   const cost = (kwh: number) => story.periodCost != null && story.split.total > 0 ? story.periodCost * kwh / story.split.total : null;
-  const chosen = dayType === "day" ? (pickedDay ? [pickedDay] : []) : story.days.filter(day => day.complete && day.dayType === dayType);
+  const averageDays = (type: Exclude<DayChoice, "day">) => story.days.filter(day => complete(day) && (type === "all" || day.dayType === type));
+  const chosen = dayType === "day" ? (pickedDay ? [pickedDay] : []) : averageDays(dayType);
   const minimum = story.alwaysOn ?? 0;
-  const profileFor = (type: "weekday" | "weekend") => storyProfile(story.project, story.days.filter(day => day.complete && day.dayType === type), story.hours, minimum, story.meaning);
+  const profileFor = (type: Exclude<DayChoice, "day">) => storyProfile(story.project, averageDays(type), story.hours, minimum, story.meaning);
   const rows = dayType === "day" ? storyProfile(story.project, chosen, story.hours, minimum, story.meaning) : profileFor(dayType);
-  // One scale for weekday, weekend and the chosen day, so switching shows how much lower (or higher) each really is.
-  const peak = Math.max(0.1, ...(["weekday", "weekend"] as const).flatMap(type => profileFor(type).map(row => row.total)), ...(dayType === "day" ? rows.map(row => row.total) : []));
+  // One scale for the averages and the chosen day, so switching shows how much lower (or higher) each really is.
+  const peak = Math.max(0.1, ...averages.flatMap(type => profileFor(type).map(row => row.total)), ...(dayType === "day" ? rows.map(row => row.total) : []));
   // About four round steps (1, 2, 2.5 or 5 × a power of ten) so the axis reads 0, 2, 4, 6, 8 rather than ending on an odd value.
   const rough = peak * 1.05 / 4, magnitude = 10 ** Math.floor(Math.log10(rough));
   const step = [1, 2, 2.5, 5, 10].map(factor => factor * magnitude).find(value => value >= rough)!;
@@ -292,12 +366,19 @@ function WhenSection({ story, money, inspect }: { story: Story; money: (amount: 
     { key: "working", label: t("when.working"), color: TIME_BUCKET_COLORS.open },
     { key: "avoidable", label: t("when.leftOn"), color: "#eb6834" },
   ] as const;
-  const noCompleteDays = t(dayType === "weekend" ? "when.noComplete.weekend" : "when.noComplete.weekday");
-  const takeaway = rich(t(story.usingDefaultHours ? "when.takeawayAssumed" : "when.takeaway", { pct: num(story.closedShare * 100, 0) }), {
+  const noCompleteDays = t(dayType === "all" ? "when.noComplete.all" : dayType === "weekend" ? "when.noComplete.weekend" : "when.noComplete.weekday");
+  // Lights-on hours: then the report's own reading of the average day, when the lights come on and go off.
+  const pattern = lighting ? story.report?.pattern?.intro ?? null : null;
+  // The sentence gives the page's one daytime share, as the summary and step 2 do (meters always on by design left out,
+  // 20 minutes allowed at each end). The bar splits all use by the clock, so where the two round differently it says why.
+  const sharePct = num(story.closedShare * 100, 0), barPct = num(story.timeSplitShare * 100, 0);
+  const space = locale === "zh-Hans" ? "" : " ";
+  const takeaway = <>{rich(t(story.usingDefaultHours ? "when.takeawayAssumed" : "when.takeaway", { pct: sharePct }), {
     hours: <span className="font-medium text-slate-900">{openingLabel(story.hours, locale, story.meaning)}</span>,
     bucket: <span className="font-medium text-slate-900">{bucketLabel(biggestClosed).toLowerCase()}</span>,
-  });
-  return <StoryCard id="story-when" step={2} title={t("when.title")} takeaway={takeaway}>
+  })}{lighting && barPct !== sharePct ? <>{space}{t("lights.when.barNote", { pct: barPct, minutes: ON_TIME_MARGIN_MINUTES })}</> : null}{pattern ? <>{space}<Rich text={pattern} /></> : null}</>;
+  const dayOptions = [...averages.map(type => [type, type === "all" ? "when.allAvg" : type === "weekend" ? "when.weekendAvg" : "when.weekdayAvg"] as const), ["day", "when.singleDay"] as const];
+  return <StoryCard id="story-when" step={3} title={t("when.title")} takeaway={takeaway}>
     <div className="mb-2 flex h-9 w-full overflow-hidden rounded-lg" role="img" aria-label={joinText(segments.map(bucket => `${bucketLabel(bucket)} ${num(story.split.kwh[bucket] / story.split.total * 100, 0)}%`), locale)}>
       {segments.map(bucket => { const pct = story.split.kwh[bucket] / story.split.total * 100; return <div key={bucket} className="flex items-center justify-center border-r-2 border-white text-xs font-semibold text-white last:border-r-0" style={{ width: `${pct}%`, background: TIME_BUCKET_COLORS[bucket] }}>{pct >= 8 ? `${num(pct, 0)}%` : ""}</div>; })}
     </div>
@@ -309,13 +390,13 @@ function WhenSection({ story, money, inspect }: { story: Story; money: (amount: 
     <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-slate-900">{dayType === "day" ? pickedDay ? t("when.dayHeading", { date: dateWithDayYear(pickedDay.date, locale) }) : t("when.oneDayHeading") : t(dayType === "weekend" ? "when.avgHeading.weekend" : "when.avgHeading.weekday")}</h3>
+          <h3 className="text-sm font-semibold text-slate-900">{dayType === "day" ? pickedDay ? t("when.dayHeading", { date: dateWithDayYear(pickedDay.date, locale) }) : t("when.oneDayHeading") : dayType === "all" ? t("when.avgHeading.all", { count: chosen.length }) : t(dayType === "weekend" ? "when.avgHeading.weekend" : "when.avgHeading.weekday")}</h3>
           <p className="mt-0.5 max-w-3xl text-sm text-slate-600">{chosen.length ? t(dayAvoidable < 0.05 ? "when.summary" : !allClosed ? "when.summaryLeftOn" : "when.summaryOnTop", {
             total: num(dayTotal, 0), when: t(dayType === "day" ? "when.thatDay" : "when.aDay"), base: num(dayBase, 0), kw: minimum ? `${num(minimum, 1)} kW` : "—", extra: num(dayAvoidable, 1),
-          }) : dayType === "day" ? t("when.choose") : noCompleteDays}{dayType === "day" && pickedDay && !pickedDay.complete ? t("when.missing") : ""}</p>
+          }) : dayType === "day" ? t("when.choose") : noCompleteDays}{dayType === "day" && pickedDay && !complete(pickedDay) ? t("when.missing") : ""}</p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("when.dayGroup")}>{([["weekday", "when.weekdayAvg"], ["weekend", "when.weekendAvg"], ["day", "when.singleDay"]] as const).map(([id, text]) => <button key={id} type="button" aria-pressed={dayType === id} onClick={() => setDayType(id)} className={`rounded-md px-3 py-1 text-xs ${dayType === id ? "bg-slate-900 text-white" : "text-slate-600 hover:text-slate-900"}`}>{t(text)}</button>)}</div>
+          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("when.dayGroup")}>{dayOptions.map(([id, text]) => <button key={id} type="button" aria-pressed={dayType === id} onClick={() => setDayType(id)} className={`rounded-md px-3 py-1 text-xs ${dayType === id ? "bg-slate-900 text-white" : "text-slate-600 hover:text-slate-900"}`}>{t(text)}</button>)}</div>
           {dayType === "day" && <div className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-0.5 text-xs">
             <button type="button" aria-label={t("when.previousDay")} disabled={dayIndex <= 0} onClick={() => setDate(story.days[dayIndex - 1]!.date)} className="rounded-md px-2 py-1 text-slate-600 hover:bg-slate-100 disabled:opacity-40"><EnergyIcon name="chevron" className="h-3.5 w-3.5 rotate-180" /></button>
             <DayPicker days={story.days} value={date} onChange={setDate} />
@@ -350,6 +431,20 @@ function WhenSection({ story, money, inspect }: { story: Story; money: (amount: 
   </StoryCard>;
 }
 
+/**
+ * Lights-on hours: which lights were on in the daytime, and when, largest first — a few named, the rest counted — and
+ * the meters left out because they are always on by design. The site report's own list, word for word.
+ */
+function DaytimeLights({ daytime }: { daytime: NonNullable<SiteReport["daytime"]> }) {
+  return <div className="mb-5 max-w-3xl rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+    <h3 className="font-semibold text-slate-900">{daytime.heading}</h3>
+    {daytime.items.length > 0 && <ul className="mt-1 list-disc space-y-0.5 pl-5">{daytime.items.map(item => <li key={item}>{item}</li>)}{daytime.more && <li>{daytime.more}</li>}</ul>}
+    {daytime.none && <p className="mt-1">{daytime.none}</p>}
+    {daytime.alwaysOn && <p className="mt-1">{daytime.alwaysOn}</p>}
+    <p className="mt-2 text-xs text-slate-500">{daytime.rule}</p>
+  </div>;
+}
+
 function StaysOnSection({ story, money }: { story: Story; money: (amount: number | null) => string }) {
   const t = useStoryText(story.meaning);
   const [all, setAll] = useState(false);
@@ -357,20 +452,25 @@ function StaysOnSection({ story, money }: { story: Story; money: (amount: number
   const yearly = (kw: number) => kw * story.closedHoursPerYear;
   const max = Math.max(0.001, ...story.closedUse.map(row => row.closedKw));
   const covered = story.closedUse.slice(0, 3).reduce((sum, row) => sum + row.closedKwh, 0);
-  const lead = story.closedUse.find(row => row.kind !== "remainder");
+  // The lead is something that could change: never what is always on by design.
+  const lead = story.closedUse.find(row => row.kind !== "remainder" && !row.byDesign);
+  // A draw in kW also as kWh a day, as the Tuya app shows it: what that draw adds up to over a day's closed hours.
+  const perDay = (kw: number) => num(kw * story.closedHoursPerYear / 365, 1);
   const closedTotal = story.closedUse.reduce((sum, row) => sum + row.closedKwh, 0);
   const note = (row: Story["closedUse"][number]) => row.kind === "remainder" ? { text: t("on.tagRest"), tone: "bg-slate-100 text-slate-600" }
+    : row.byDesign ? { text: t("on.tagByDesign"), tone: "bg-slate-100 text-slate-700" }
     : row.essential ? { text: t("on.tagEssential"), tone: "bg-slate-100 text-slate-700" }
       : { text: t("on.tagSwitchable"), tone: "bg-amber-50 text-amber-800" };
-  const takeaway = story.closedUse.length ? <>{t("on.takeaway", { pct: num(covered / Math.max(closedTotal, 0.001) * 100, 0) })}{lead ? rich(t("on.takeawayLead", { kw: num(lead.closedKw, 2) }), { name: <span className="font-medium text-slate-900">{lead.name}</span> }) : null}</> : t("on.noCircuits");
-  return <StoryCard id="story-on" step={3} title={t("on.title")} takeaway={takeaway}>
+  const takeaway = story.closedUse.length ? <>{t("on.takeaway", { pct: num(covered / Math.max(closedTotal, 0.001) * 100, 0) })}{lead ? rich(t("on.takeawayLead", { kw: num(lead.closedKw, 2), day: perDay(lead.closedKw) }), { name: <span className="font-medium text-slate-900">{lead.name}</span> }) : null}</> : t("on.noCircuits");
+  return <StoryCard id="story-on" step={2} title={t("on.title")} takeaway={takeaway}>
+    {story.report?.daytime && <DaytimeLights daytime={story.report.daytime} />}
     {story.closedUse.length ? <>
       <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-sm">
         <thead><tr className="border-b border-slate-200 text-left text-sm text-slate-600"><th className="py-2 pr-3 font-medium">{t("on.colName")}</th><th className="px-3 py-2 font-medium">{t("on.colArea")}</th><th className="px-3 py-2 font-medium">{t("on.colPower")}</th><th className="px-3 py-2 text-right font-medium">{t(story.rate != null ? "on.colCost" : "on.colEnergy")}</th><th className="px-3 py-2 text-right font-medium">{t("on.colShare")}</th><th className="py-2 pl-3 font-medium">{t("on.colMeaning")}</th></tr></thead>
         <tbody>{rows.map(row => { const tag = note(row); return <tr key={row.id} className="border-b border-slate-100 last:border-0">
           <td className="py-2.5 pr-3 font-medium text-slate-900">{row.name}</td>
           <td className="px-3 py-2.5 text-slate-600">{row.kind === "type" ? t("on.wholeSite") : row.space}</td>
-          <td className="px-3 py-2.5"><div className="flex items-center gap-2"><div className="h-2 w-20 shrink-0 rounded-full bg-slate-100"><div className="h-full rounded-full bg-[#eb6834]" style={{ width: `${row.closedKw / max * 100}%` }} /></div><span className="whitespace-nowrap tabular-nums text-slate-700">{num(row.closedKw, 2)} kW</span></div></td>
+          <td className="px-3 py-2.5"><div className="flex items-center gap-2"><div className="h-2 w-20 shrink-0 rounded-full bg-slate-100"><div className="h-full rounded-full bg-[#eb6834]" style={{ width: `${row.closedKw / max * 100}%` }} /></div><span className="whitespace-nowrap tabular-nums text-slate-700">{num(row.closedKw, 2)} kW <span className="text-slate-500">{t("on.perDay", { kwh: perDay(row.closedKw) })}</span></span></div></td>
           <td className="px-3 py-2.5 text-right font-semibold tabular-nums text-slate-900">{story.rate != null ? money(yearly(row.closedKw) * story.rate) : `${num(yearly(row.closedKw), 0)} kWh`}</td>
           <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">{row.totalKwh > 0 ? num(Math.min(100, row.closedKwh / row.totalKwh * 100), 0) : "—"}%</td>
           <td className="py-2.5 pl-3"><span className={`inline-flex rounded-full px-2 py-0.5 text-xs ${tag.tone}`}>{tag.text}</span></td>
@@ -379,6 +479,26 @@ function StaysOnSection({ story, money }: { story: Story; money: (amount: number
       {story.closedUse.length > 8 && <button type="button" onClick={() => setAll(!all)} className="mt-3 text-xs font-medium text-blue-700 hover:text-blue-800">{all ? t("on.showFewer") : t("on.showAll", { count: story.closedUse.length })}</button>}
       <p className="mt-3 text-sm text-slate-600">{t("on.footnote", { hours: num(story.closedHoursPerYear, 0), rate: story.rate != null && story.currency ? ` × ${story.currency} ${story.rate.toFixed(2)}/kWh` : "" })}</p>
     </> : <p className="text-sm text-slate-500">{t("on.none")}</p>}
+  </StoryCard>;
+}
+
+/**
+ * The days that used clearly more or less than a usual day, each with the group or circuit behind it: the site
+ * report's own block, word for word. Each day opens hour by hour in step 3.
+ */
+function DaysSection({ story, onInspectDay }: { story: Story; onInspectDay: (date: string) => void }) {
+  const t = useStoryText(story.meaning);
+  const { locale } = useEnergyIqLocale();
+  const standout = story.report?.standout;
+  if (!standout) return null;
+  const found = standout.items.length > 0;
+  return <StoryCard id="story-days" step={4} title={standout.title} takeaway={found ? t("days.takeaway") : standout.note}>
+    {found && <ul className="space-y-2">{standout.items.map(item => <li key={item.date} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800">
+      <p className="max-w-3xl leading-relaxed">{item.text}</p>
+      <button type="button" onClick={() => onInspectDay(item.date)} aria-label={t("health.openDay", { day: dateWithDayYear(item.date, locale) })} className="shrink-0 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:border-slate-300 hover:bg-slate-50">{t("days.open")} →</button>
+    </li>)}</ul>}
+    {found && standout.note && <p className="mt-3 text-sm text-slate-600">{standout.note}</p>}
+    <p className="mt-3 text-sm text-slate-500">{standout.rule}</p>
   </StoryCard>;
 }
 
@@ -405,7 +525,7 @@ function HealthSection({ story, data, anomalies, floor, onJump, onInspectDay }: 
   ];
   const worst = items.some(item => item.status === "act") ? "act" : items.some(item => item.status === "watch") ? "watch" : "good";
   const acting = items.filter(item => item.status === "act").length;
-  return <StoryCard id="story-health" step={4} title={t("health.title")} takeaway={worst === "good" ? t("health.allGood") : worst === "watch" ? t("health.watch") : t(acting === 1 ? "health.act.one" : "health.act.other", { count: acting })}>
+  return <StoryCard id="story-health" step={6} title={t("health.title")} takeaway={worst === "good" ? t("health.allGood") : worst === "watch" ? t("health.watch") : t(acting === 1 ? "health.act.one" : "health.act.other", { count: acting })}>
     <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{items.map(item => { const look = STATUS[item.status]; return <li key={item.title} className={`rounded-xl border bg-white p-4 ${look.ring}`}>
       <div className="flex items-start justify-between gap-3"><p className="text-sm font-medium text-slate-900">{item.title}</p><span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${look.chip}`}><EnergyIcon name={look.icon} className="h-3.5 w-3.5" />{shared(`status.${item.status}`)}</span></div>
       <p className="mt-2 text-xl font-semibold tabular-nums text-slate-900">{item.value}</p>
@@ -449,8 +569,8 @@ function AheadSection({ story, data }: { story: Story; data: AnalysisData }) {
   const kwh = (value: number) => Math.round(value).toLocaleString(intlLocale(locale));
   const money = (value: number, currency: string) => `${currency} ${Math.round(value).toLocaleString(intlLocale(locale))}`;
   const monthName = (date: string) => new Intl.DateTimeFormat(intlLocale(locale), { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`));
-  if (policies === null) return <StoryCard id="story-ahead" step={6} title={t("title")} takeaway={t("loading")}><p className="text-sm text-slate-600" role="status">{t("loading")}</p></StoryCard>;
-  if (!forecast) return <StoryCard id="story-ahead" step={6} title={t("title")} takeaway={t("unavailable")}>
+  if (policies === null) return <StoryCard id="story-ahead" step={7} title={t("title")} takeaway={t("loading")}><p className="text-sm text-slate-600" role="status">{t("loading")}</p></StoryCard>;
+  if (!forecast) return <StoryCard id="story-ahead" step={7} title={t("title")} takeaway={t("unavailable")}>
     <p className="max-w-3xl text-sm leading-relaxed text-slate-600">{t("unavailable.body", { days: story.days.length })}</p>
     <Link href={`/energyiq/project-configuration?${new URLSearchParams({ projectId: data.projectId, tab: "devices" })}`} className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">{t("unavailable.action")} <EnergyIcon name="arrow" className="h-3.5 w-3.5" /></Link>
   </StoryCard>;
@@ -480,7 +600,7 @@ function AheadSection({ story, data }: { story: Story; data: AnalysisData }) {
     ...story.days.map(day => ({ date: day.date, kwh: day.totalKwh ?? 0, actual: true, open: day.dayType === "weekday", name: day.holidayName, kind: null as CalendarDayKind | null, shortHours: undefined as number | undefined })),
     ...forecast.days.map(day => ({ date: day.date, kwh: day.kwh, actual: false, open: day.open, name: day.name, kind: day.kind, shortHours: day.shortHours })),
   ];
-  return <StoryCard id="story-ahead" step={6} title={t("title")} takeaway={t("takeaway", { month, kwh: kwh(forecast.kwh.mid), cost: cost ? t("takeawayCost", { cost: money(cost.mid, cost.currency) }) : "" })}>
+  return <StoryCard id="story-ahead" step={7} title={t("title")} takeaway={t("takeaway", { month, kwh: kwh(forecast.kwh.mid), cost: cost ? t("takeawayCost", { cost: money(cost.mid, cost.currency) }) : "" })}>
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <div className="rounded-xl border border-slate-200 bg-white p-4">
         <p className="text-sm text-slate-600">{t("expected", { month })}</p>

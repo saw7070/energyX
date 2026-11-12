@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildManagementReview, buildSiteReport, comparableGroups, groupKind, buildMeterGroupTree, type AnalysisData, type ScopeData, type ScopeMeter, type TrendSeries } from "@datafoundry/site-report";
 import { renderManagementReviewHtml, renderStyledSiteReportHtml } from "@datafoundry/site-report/management-review-document";
+import { translatorFor } from "./energyiq-messages";
+import { dataAvailabilityMessages } from "./data-availability-messages";
 
 // One week from Monday 3 Aug 2026. Made-up estate lighting: two blocks and a common area, lights on 19:00–07:00.
 const DATES = Array.from({ length: 7 }, (_, index) => new Date(Date.parse("2026-08-03T00:00:00Z") + index * 86_400_000).toISOString().slice(0, 10));
@@ -85,20 +87,22 @@ describe("management review: sections", () => {
 
   it("gives each top-level group its total and share, and what uses the most inside it", () => {
     const groups = review.groups!;
-    expect(groups.heading).toBe("Block 12B, Block 12A and Common area");
-    expect(groups.rows.map(row => row.name)).toEqual(["Block 12B", "Block 12A", "Common area"]);
+    // In the order the groups were saved, as on the Overview, wherever their size puts them.
+    expect(groups.heading).toBe("Block 12A, Block 12B and Common area");
+    expect(groups.rows.map(row => row.name)).toEqual(["Block 12A", "Block 12B", "Common area"]);
     expect(groups.rows.reduce((sum, row) => sum + row.share, 0)).toBeCloseTo(1, 6);
-    expect(groups.rows[0]!.parts[0]).toMatchObject({ name: "12B corridor lights" });
-    expect(groups.rows[0]!.biggest).toBe("Biggest in Block 12B: **12B corridor lights**, 52% of it.");
+    expect(groups.rows[1]!.parts[0]).toMatchObject({ name: "12B corridor lights" });
+    expect(groups.rows[1]!.biggest).toBe("Biggest in Block 12B: **12B corridor lights**, 52% of it.");
   });
 
   it("compares the two blocks side by side, part for part", () => {
     const comparison = review.comparison!;
-    expect(comparison.heading).toBe("Block 12B against Block 12A");
-    expect(comparison.groups.map(group => group.name)).toEqual(["Block 12B", "Block 12A"]);
+    // The blocks in their saved order; the finding still says which uses more.
+    expect(comparison.heading).toBe("Block 12A against Block 12B");
+    expect(comparison.groups.map(group => group.name)).toEqual(["Block 12A", "Block 12B"]);
     expect(comparison.parts.map(part => part.name)).toEqual(["Corridor lights", "Lift lobby lights", "Emergency lights"]);
-    expect(comparison.parts[1]!.perDay[0]).toBeCloseTo(4.32, 6);
-    expect(comparison.parts[1]!.perDay[1]).toBeCloseTo(3.6, 6);
+    expect(comparison.parts[1]!.perDay[0]).toBeCloseTo(3.6, 6);
+    expect(comparison.parts[1]!.perDay[1]).toBeCloseTo(4.32, 6);
     expect(comparison.intro).toContain("**Block 12B** uses **");
     expect(comparison.intro).toContain("Part for part, the biggest difference is Lift lobby lights: Block 12B uses 20% more than Block 12A.");
   });
@@ -151,7 +155,10 @@ describe("management review: what the hours mean", () => {
     expect(review.summary.findings).toContain("The lights ran at night as planned: only **7%** of the energy was used in the daytime.");
     expect(review.profile!.intro).toContain("Lights come on at about **7 pm** and go off at about **7 am**.");
     expect(review.profile!.intro).toContain("of an average day's use is inside the lights-on hours (7 pm – 7 am).");
-    expect(review.profile!.caption).toBe("Average of 7 days with complete readings.");
+    // One line per group: the blocks' like parts added together, and the common area on its own.
+    expect(review.profile!.caption).toBe("Average of 7 days with complete readings. Each line is one group; the same group in Block 12A and Block 12B is added into one line.");
+    expect(review.profile!.lines?.map(line => line.name)).toEqual(["Corridor lights", "Lift lobby lights", "Emergency lights", "Common area"]);
+    expect(review.profile!.lines![0]!.dayKwh).toBeCloseTo(2 * 0.6 * 12, 6);
     expect(review.method.rows.find(row => row.label === "Lights-on hours")?.value).toBe("19:00 → 07:00 next day");
     // The lights' own measure: half an hour less each night for the part that switches with the lights.
     const trim = review.savings.rows.find(row => row.title === "Fine-tune the light timers and photocells")!;
@@ -215,13 +222,40 @@ describe("meters marked not in use", () => {
     expect(review.summary.decisions.map(decision => decision.title)).toContain("Get Pavilion lights reporting again");
     expect(review.method.meters.find(meter => meter.name === "Pavilion lights")?.note).toBe("Last reading 5 Aug, 6 pm");
   });
+
+  it("a meter that was only using nothing when the readings were loaded is not called stopped, nor given a fix", () => {
+    // A made-up pavilion fan: used until 5 Aug, then nothing; the live check found it online and able to use nothing.
+    const fan: Record<string, Def> = { ...LIGHTING, fan: { name: "Pavilion fan", group: "common", category: "load", kwh: (date, hour) => date < "2026-08-05" || (date === "2026-08-05" && hour < 19) ? (hour >= 9 && hour < 12 ? 0.3 : 0) : null } };
+    const review = buildManagementReview({ ...site(fan, { meaning: "lights_on" }), idleWhenQuiet: ["fan"] }, null, GENERATED);
+    expect(review.summary.findings.join(" ")).not.toContain("Pavilion fan");
+    expect(review.summary.decisions.some(decision => /reporting again/.test(decision.title))).toBe(false);
+    expect(review.method.meters.find(meter => meter.name === "Pavilion fan")?.note).toBe("No use since 5 Aug, 6 pm");
+    // Without that answer the same silence is still a meter that stopped.
+    expect(buildManagementReview(site(fan, { meaning: "lights_on" }), null, GENERATED).summary.decisions.map(decision => decision.title)).toContain("Get Pavilion fan reporting again");
+    expect(buildManagementReview({ ...site(fan, { meaning: "lights_on" }), idleWhenQuiet: ["fan"] }, null, GENERATED, "ms").method.meters.find(meter => meter.name === "Pavilion fan")?.note).toMatch(/^Tiada penggunaan sejak /);
+  });
+
+  it("words a meter that used nothing as Data availability does, whether it went quiet or sent readings of nothing", () => {
+    // The made-up pavilion fan went quiet, online and idle; the store-room fan sent readings, all of them zero.
+    const meters: Record<string, Def> = { ...LIGHTING,
+      fan: { name: "Pavilion fan", group: "common", category: "load", kwh: (date, hour) => date < "2026-08-05" || (date === "2026-08-05" && hour < 19) ? (hour >= 9 && hour < 12 ? 0.3 : 0) : null },
+      store: { name: "Store room fan", group: "common", category: "load", kwh: () => 0 } };
+    for (const locale of ["en", "zh-Hans", "ms"] as const) {
+      const review = buildManagementReview({ ...site(meters, { meaning: "lights_on" }), idleWhenQuiet: ["fan"] }, null, GENERATED, locale);
+      const note = (name: string) => review.method.meters.find(meter => meter.name === name)?.note;
+      const page = translatorFor(dataAvailabilityMessages, locale);
+      expect(note("Store room fan")).toBe(page("status.idle"));
+      const since = page("status.idleSince", { when: "\u0000" }).split("\u0000").map(part => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+      expect(note("Pavilion fan")).toMatch(new RegExp(`^${since[0]}.+${since[1]}$`));
+    }
+  });
 });
 
 describe("management review in other languages and as a document", () => {
   it("writes every sentence in Chinese or Malay", () => {
     const zh = buildManagementReview(site(LIGHTING, { meaning: "lights_on" }), null, GENERATED, "zh-Hans");
     expect(zh.title).toBe("这 7 天说明了什么");
-    expect(zh.comparison!.heading).toBe("Block 12B 与 Block 12A 对比");
+    expect(zh.comparison!.heading).toBe("Block 12A 与 Block 12B 对比");
     expect(zh.summary.findings.join("")).not.toMatch(/ the | used | a day/);
     const ms = buildManagementReview(site(LIGHTING, { meaning: "lights_on" }), null, GENERATED, "ms");
     expect(ms.title).toBe("Apa yang ditunjukkan oleh 7 hari ini");
@@ -232,7 +266,7 @@ describe("management review in other languages and as a document", () => {
     const html = renderManagementReviewHtml(buildManagementReview(site(LIGHTING, { meaning: "lights_on", notInUse: [] }), null, GENERATED));
     expect(html).toMatch(/^<!DOCTYPE html>/);
     expect(html).toContain("<title>Harbour Estate Energy Review · 3–9 Aug 2026</title>");
-    for (const heading of ["Summary", "The things worth deciding", "Total energy, by day, and the cost", "Block 12B against Block 12A", "The average 24 hours", "Saving energy: what it could be worth", "Method and data"]) expect(html).toContain(heading);
+    for (const heading of ["Summary", "The things worth deciding", "Total energy, by day, and the cost", "Block 12A against Block 12B", "The average 24 hours", "Saving energy: what it could be worth", "Method and data"]) expect(html).toContain(heading);
     expect(html).not.toMatch(/undefined|NaN|Infinity|\{\w+\}/);
   });
 
@@ -247,5 +281,220 @@ describe("management review in other languages and as a document", () => {
     expect(review.summary.decisions.map(decision => decision.title)).toContain("Add the electricity rate");
     expect(review.method.rows.find(row => row.label === "Electricity rate")?.value).toBe("Not set, so costs are not shown");
     expect(renderManagementReviewHtml(review)).not.toMatch(/undefined|NaN/);
+  });
+});
+
+/**
+ * A daily report: the same estate on one day only, as the schedule reads it each morning. Readings stop at `until`
+ * o'clock when given, as when the gateway goes quiet part-way through the day; `silent` meters send nothing at all.
+ */
+function oneDay(data: AnalysisData, date: string, options: { until?: number; silent?: string[] } = {}): AnalysisData {
+  const until = options.until ?? 24;
+  const keep = (series: TrendSeries | null): TrendSeries | null => series && { ...series, cells: series.cells.filter(cell => cell[0] === date && cell[1] < until && !options.silent?.includes(series.id)) };
+  const kwh = (series: TrendSeries | null) => series?.cells.reduce((sum, cell) => sum + (cell[2] ?? 0), 0) ?? 0;
+  const cut = (scope: ScopeData): ScopeData => {
+    const meters = scope.meters.map(meter => ({ ...meter, series: keep(meter.series) }));
+    const live = meters.filter(meter => !options.silent?.includes(meter.id));
+    // The engine's total for the hours left: the meters still reporting, against every meter it expects.
+    const cells: TrendSeries["cells"] = (scope.total?.cells ?? []).filter(cell => cell[0] === date && cell[1] < until).map(([day, hour]) => {
+      const values = live.map(meter => meter.series?.cells.find(cell => cell[1] === hour)?.[2] ?? null).filter((value): value is number => value != null);
+      return [day, hour, values.reduce((sum, value) => sum + value, 0), values.length * 60, 0];
+    });
+    const total = scope.total && { ...scope.total, cells };
+    const usage = kwh(total);
+    return { ...scope, dates: [date], total, meters, usageKwh: usage, cost: scope.cost && { ...scope.cost, amount: usage * 0.3 },
+      coverage: total ? cells.reduce((sum, cell) => sum + cell[3], 0) / (total.expectedMinutesPerHour * 24) * 100 : null };
+  };
+  const project = cut(data.current.project);
+  return { ...data, current: { project, spaces: data.current.spaces.map(cut) },
+    ...(data.groups ? { groups: { ...data.groups, meters: data.groups.meters.map(meter => ({ ...meter, kwh: kwh(project.meters.find(item => item.id === meter.id)?.series ?? null) })) } } : {}) };
+}
+const DAY = "2026-08-05";
+const LIT = site(LIGHTING, { meaning: "lights_on" });
+const plain = (html: string) => html.replace(/<style[\s\S]*?<\/style>/g, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+
+describe("a daily report", () => {
+  it("reads as one day in both styles: no averages of one, and no day standing out against itself", () => {
+    const review = buildManagementReview(oneDay(LIT, DAY), null, GENERATED);
+    expect(review.masthead.periodNote).toBe("1 day, SGT");
+    expect(review.title).toBe("What this day shows");
+    expect(review.lede).toBe("This review covers the site's 8 meters on this day, organised by what the meters serve.");
+    expect(review.summary.findings[0]).toMatch(/^The site used \*\*[\d,.]+ kWh\*\* on this day \(about \*\*S\$[\d.]+\*\*\)\.$/);
+    expect(review.keyFigures.map(figure => figure.label).slice(0, 3)).toEqual(["used on the day", "30 days like this one", "bill for 30 days like this one"]);
+    expect(review.total.rows.map(row => row.label)).toEqual(["This day", "30 days like this one", "A year of days like this one"]);
+    expect(review.total.standout).toBeNull();
+    // The complete day is drawn one line per group, as the full report draws it.
+    expect(review.profile!.caption).toBe("Use by hour on this day. Each line is one group; the same group in Block 12A and Block 12B is added into one line.");
+    expect(review.savings.note).toMatch(/^Estimates from one day of readings/);
+
+    const report = buildSiteReport(oneDay(LIT, DAY), null, GENERATED);
+    expect(report.masthead.periodNote).toBe("1 day, SGT");
+    expect(report.lede).toMatch(/^On this day the site used \*\*[\d,.]+ kWh\*\*, measured by 8 meters\./);
+    expect(report.keyFigures[0]!.label).toBe("total use for the day");
+    // The one complete day is drawn hour by hour, which is what a daily reader wants to see.
+    expect(report.pattern!.caption).toMatch(/^Use by hour on this day \(kW\)\./);
+    for (const style of ["full", "management"] as const) {
+      const html = plain(renderStyledSiteReportHtml(style, oneDay(LIT, DAY), null, GENERATED));
+      expect(html).not.toMatch(/\b1 days\b|Days that stood out|undefined|NaN/);
+    }
+  });
+
+  it("says first when some readings for the day are missing, and projects nothing from part of a day", () => {
+    const data = oneDay(LIT, DAY, { until: 18 });
+    const report = buildSiteReport(data, null, GENERATED);
+    expect(`${report.title.before}${report.title.emphasis}`).toBe("Some readings for this day are missing");
+    expect(report.lede).toContain("Only **75%** of the expected readings arrived, so the figures below count only the readings received and may be lower than the real use.");
+    expect(report.estimate.intro).toBe("No meter has a full day of readings on this day, so a 30-day month is not estimated.");
+    expect(report.circuits.every(circuit => circuit.monthCost == null)).toBe(true);
+    expect(report.pattern).toBeNull();
+    const full = plain(renderStyledSiteReportHtml("full", data, null, GENERATED));
+    expect(full).toContain("Some readings for this day are missing, so the hour-by-hour pattern is not drawn.");
+    expect(full).not.toMatch(/S\$0 a month|S\$0\/month|at 0%/);
+
+    const review = buildManagementReview(data, null, GENERATED);
+    expect(review.summary.findings[0]).toBe("Only **75%** of the expected readings for this day arrived, so these figures count only the readings received and may be lower than the real use.");
+    expect(review.keyFigures[0]!.label).toBe("measured on the day; some readings missing");
+    expect(review.keyFigures.map(figure => figure.label)).not.toContain("30 days like this one");
+    expect(review.total.rows).toEqual([]);
+  });
+
+  it("names a meter that sent nothing all day, rather than calling it steady", () => {
+    const report = buildSiteReport(oneDay(LIT, DAY, { silent: ["a-lobby"] }), null, GENERATED);
+    expect(`${report.title.before}${report.title.emphasis}`).toBe("Some readings for this day are missing");
+    expect(report.lede).toContain("12A lift lobby lights sent no readings at all.");
+    expect(report.circuits.find(circuit => circuit.meterIds.includes("a-lobby"))!.finding).toBe("No complete readings on this day, so it could not be checked.");
+  });
+
+  it("says so plainly when no readings arrived for the day, and shows nothing else", () => {
+    const data = oneDay(LIT, DAY, { until: 0 });
+    const report = buildSiteReport(data, null, GENERATED);
+    expect(`${report.title.before}${report.title.emphasis}`).toBe("No readings arrived for this day");
+    expect(report.lede).toBe("No readings arrived for this day, so there is nothing to report yet. Check that the meters and their gateway are online.");
+    const full = plain(renderStyledSiteReportHtml("full", data, null, GENERATED));
+    expect(full).not.toContain("A 30-day month");
+    expect(full).not.toContain("total use for the day");
+    const review = buildManagementReview(data, null, GENERATED);
+    expect(review.sections).toEqual(["summary", "method"]);
+    expect(review.summary.findings).toEqual(["No readings arrived for this day. Check that the meters and their gateway are online."]);
+    expect(review.summary.decisions.map(decision => decision.title)).toEqual(["Get 8 meters reporting again"]);
+    expect(plain(renderStyledSiteReportHtml("management", data, null, GENERATED))).not.toMatch(/Total energy, by day|undefined|NaN/);
+  });
+
+  it("on a day with no readings, says meters the live check found online used nothing, and gives no fix for them", () => {
+    // A made-up office on a public holiday: both meters online all day and using nothing, so nothing new was sent.
+    const office: Record<string, Def> = {
+      lights: { name: "Office lights", group: "office", category: "light", kwh: (_d, h) => h >= 9 && h < 18 ? 0.5 : 0 },
+      fan: { name: "Pantry fan", group: "office", category: "load", kwh: (_d, h) => h >= 9 && h < 18 ? 0.1 : 0 },
+    };
+    const hours = Object.fromEntries(["monday", "tuesday", "wednesday", "thursday", "friday"].map(day => [day, [{ from: "09:00", to: "18:00" }]]));
+    const holiday = oneDay(site(office, { groups: null, hours }), DAY, { until: 0 });
+    const idle = { ...holiday, idleWhenQuiet: ["fan", "lights"] };
+    const review = buildManagementReview(idle, null, GENERATED);
+    expect(review.summary.findings).toEqual(["No readings arrived for this day: all **2 meters** were online but used nothing, so they sent no new readings."]);
+    expect(review.summary.decisions).toEqual([]);
+    expect(buildSiteReport(idle, null, GENERATED).lede).toBe("No readings arrived for this day: all 2 meters were online but used nothing, so they sent no new readings.");
+    // Each meter in Data availability's words, in every language.
+    for (const locale of ["en", "zh-Hans", "ms"] as const) {
+      const notes = buildManagementReview(idle, null, GENERATED, locale).method.meters.map(meter => meter.note);
+      expect(notes).toEqual([translatorFor(dataAvailabilityMessages, locale)("status.idle"), translatorFor(dataAvailabilityMessages, locale)("status.idle")]);
+      for (const page of [renderStyledSiteReportHtml("full", idle, null, GENERATED, locale), renderStyledSiteReportHtml("management", idle, null, GENERATED, locale)]) expect(plain(page)).not.toMatch(/undefined|NaN|\{\w+\}/);
+    }
+    // One idle, one silent: only the silent one is to get reporting again.
+    const mixed = { ...holiday, idleWhenQuiet: ["fan"] };
+    const mixedReview = buildManagementReview(mixed, null, GENERATED);
+    expect(mixedReview.summary.findings).toEqual(["No readings arrived for this day. Check that the meters and their gateway are online.", "**Pantry fan** was online but used nothing, so it sent no new readings."]);
+    expect(mixedReview.summary.decisions.map(decision => decision.title)).toEqual(["Get Office lights reporting again"]);
+    expect(mixedReview.method.meters.map(meter => meter.note)).toEqual(["No readings in this period", "No use in this period"]);
+    expect(buildSiteReport(mixed, null, GENERATED).lede).toBe("No readings arrived for this day, so there is nothing to report yet. Check that the meters and their gateway are online. Office lights sent no readings at all. Pantry fan used nothing, so it sent no new readings.");
+    for (const locale of ["zh-Hans", "ms"] as const) for (const page of [renderStyledSiteReportHtml("full", mixed, null, GENERATED, locale), renderStyledSiteReportHtml("management", mixed, null, GENERATED, locale)]) expect(plain(page)).not.toMatch(/undefined|NaN|\{\w+\}/);
+  });
+
+  it("works out no daytime share from part of a day, where the missing evening would make night use look like daytime use", () => {
+    // The whole day: the lights ran at night as planned.
+    expect(buildManagementReview(oneDay(LIT, DAY), null, GENERATED).summary.findings).toContain("The lights ran at night as planned: only **7%** of the energy was used in the daytime.");
+    expect(buildSiteReport(oneDay(LIT, DAY), null, GENERATED).keyFigures[3]!.value).toBe("7.0%");
+    // Readings stop at 18:00. By the hours that arrived, 11% would look like daytime use: over the warning line.
+    const data = oneDay(LIT, DAY, { until: 18 });
+    const review = buildManagementReview(data, null, GENERATED);
+    expect(review.summary.findings.join(" ")).not.toMatch(/daytime|at night/);
+    expect(review.keyFigures.some(figure => figure.value.endsWith("%"))).toBe(false);
+    const report = buildSiteReport(data, null, GENERATED);
+    expect(report.lede).not.toMatch(/daytime|lights-on hours/);
+    expect(report.keyFigures[3]!.value).toBe("—");
+    expect(report.headline).toBe("Some readings for this day are missing");
+    // No share of the day said to be daytime use (the breakdown by group still gives each group's share of the day).
+    expect(plain(renderStyledSiteReportHtml("full", data, null, GENERATED))).not.toMatch(/when the lights should be off|\b1[01](\.\d)?% of (it|the)\b/);
+    expect(plain(renderStyledSiteReportHtml("management", data, null, GENERATED))).not.toContain("when the lights should be off");
+  });
+
+  it("on a day with no readings, says why there is no cost and shows no use a day for any meter", () => {
+    // The method table's fifth row is the electricity rate, in every language.
+    const rate = (review: ReturnType<typeof buildManagementReview>) => review.method.rows[4]!.value;
+    const empty = buildManagementReview(oneDay(LIT, DAY, { until: 0 }), null, GENERATED);
+    expect(empty.method.rows[4]!.label).toBe("Electricity rate");
+    expect(rate(empty)).toBe("No readings, so no cost is worked out");
+    expect(empty.method.meters.map(meter => meter.perDay)).toEqual(empty.method.meters.map(() => null));
+    expect(plain(renderStyledSiteReportHtml("management", oneDay(LIT, DAY, { until: 0 }), null, GENERATED))).not.toMatch(/Not set|0\.00/);
+    expect(rate(buildManagementReview(oneDay(LIT, DAY, { until: 0 }), null, GENERATED, "zh-Hans"))).toBe("没有读数，所以不计算电费");
+    expect(rate(buildManagementReview(oneDay(LIT, DAY, { until: 0 }), null, GENERATED, "ms"))).toBe("Tiada bacaan, jadi kos tidak dikira");
+    // A day with readings keeps its rate, and a rate that is really missing still says so.
+    expect(rate(buildManagementReview(oneDay(LIT, DAY), null, GENERATED))).toMatch(/^S\$0\.3000/);
+    expect(rate(buildManagementReview(oneDay(site(LIGHTING, { meaning: "lights_on", rate: null }), DAY), null, GENERATED))).toBe("Not set, so costs are not shown");
+  });
+
+  it("words the full report's 30 days as days like this one, with no average of one day to compare with", () => {
+    const report = buildSiteReport(oneDay(LIT, DAY), null, GENERATED);
+    expect(report.estimate.intro).toMatch(/^If every day were like this one, 30 days would use about \*\*[\d,]+ kWh\*\*\. At \*\*S\$0\.3000\/kWh before GST\*\*, that is about \*\*S\$[\d,]+\*\* for 30 days like this one\.$/);
+    expect(report.estimate.note).toMatch(/^How we estimate: we count 30 days as if every one were like this day\./);
+    expect(report.benchmark.weekdayAvg).toBeNull();
+    expect(report.benchmark.weekendAvg).toBeNull();
+    expect(report.benchmark.rows.map(row => row.label)).not.toEqual(expect.arrayContaining(["Average weekday"]));
+    expect(report.benchmark.intro).toBe("A single day has no weekday or weekend average to compare with. The chart shows this day's total.");
+    const html = plain(renderStyledSiteReportHtml("full", oneDay(LIT, DAY), null, GENERATED));
+    expect(html).toContain("30 days like this one: use and bill");
+    expect(html).toContain("This day, and what never switches off");
+    expect(html).not.toMatch(/Based on a normal weekday|Average weekday|Average weekend day|weekday avg|weekend avg|Weekday average|21\.4 weekdays/);
+    for (const [locale, intro] of [["zh-Hans", /^如果每天都和这一天一样，30 天约用电/], ["ms", /^Jika setiap hari sama seperti hari itu, 30 hari akan menggunakan kira-kira/]] as const) {
+      expect(buildSiteReport(oneDay(LIT, DAY), null, GENERATED, locale).estimate.intro).toMatch(intro);
+    }
+    // A longer report keeps its averages.
+    expect(buildSiteReport(LIT, null, GENERATED).estimate.intro).toMatch(/^Based on a normal weekday and weekend day/);
+    // The review's hour-by-hour section is about this day, not an average one.
+    expect(plain(renderStyledSiteReportHtml("management", oneDay(LIT, DAY), null, GENERATED))).toContain("This day, hour by hour");
+    expect(plain(renderStyledSiteReportHtml("management", LIT, null, GENERATED))).toContain("The average 24 hours");
+    expect(plain(renderStyledSiteReportHtml("management", oneDay(LIT, DAY), null, GENERATED, "zh-Hans"))).toContain("当天的逐小时用电");
+    expect(plain(renderStyledSiteReportHtml("management", oneDay(LIT, DAY), null, GENERATED, "ms"))).toContain("Hari itu, jam demi jam");
+  });
+
+  it("still lists every location on part of a day at a site with no groups, by what each measured", () => {
+    const data = oneDay(site(LIGHTING, { meaning: "lights_on", groups: null }), DAY, { until: 18 });
+    const report = buildSiteReport(data, null, GENERATED);
+    expect(report.groups).toBeNull();
+    expect(report.zones.map(zone => zone.label).sort()).toEqual(["block-a", "block-b", "common"]);
+    expect(report.zones.reduce((sum, zone) => sum + zone.share, 0)).toBeCloseTo(1, 6);
+    expect(report.profile.intro).toContain("grouped into three locations:");
+    expect(report.estimate.comparison).toMatch(/uses the most, at \*\*\d+%\*\* of the energy, compared with/);
+    const html = plain(renderStyledSiteReportHtml("full", data, null, GENERATED));
+    expect(html).toContain("Measured on the day (kWh)");
+    expect(html).not.toMatch(/no locations|Est\. kWh per 30 days|of the month's energy/);
+    expect(plain(renderStyledSiteReportHtml("full", data, null, GENERATED, "zh-Hans"))).toContain("分为 3 个位置：");
+    expect(plain(renderStyledSiteReportHtml("full", data, null, GENERATED, "ms"))).toContain("dikumpulkan kepada 3 lokasi:");
+  });
+
+  it("speaks Chinese and Malay for one day, and for a day with readings missing", () => {
+    const zh = buildSiteReport(oneDay(LIT, DAY, { until: 18 }), null, GENERATED, "zh-Hans");
+    expect(zh.masthead.periodNote).toBe("1 天，SGT");
+    expect(`${zh.title.before}${zh.title.emphasis}`).toBe("当天有部分读数缺失");
+    expect(zh.keyFigures[0]!.label).toBe("当天总用电量");
+    expect(zh.lede).toContain("只收到预期读数的 **75%**");
+    expect(buildManagementReview(oneDay(LIT, DAY), null, GENERATED, "zh-Hans").summary.findings[0]).toMatch(/^本场地当天共用电/);
+    const ms = buildSiteReport(oneDay(LIT, DAY, { until: 18 }), null, GENERATED, "ms");
+    expect(ms.masthead.periodNote).toBe("1 hari, SGT");
+    expect(`${ms.title.before}${ms.title.emphasis}`).toBe("Sebahagian bacaan hari itu tidak diterima");
+    expect(ms.keyFigures[0]!.label).toBe("jumlah penggunaan pada hari itu");
+    expect(buildManagementReview(oneDay(LIT, DAY), null, GENERATED, "ms").masthead.periodNote).toBe("1 hari, SGT");
+    for (const locale of ["zh-Hans", "ms"] as const) {
+      expect(plain(renderStyledSiteReportHtml("full", oneDay(LIT, DAY, { until: 18 }), null, GENERATED, locale))).not.toMatch(/\{\w+\}|undefined|NaN|Some readings|No meter has/);
+    }
   });
 });

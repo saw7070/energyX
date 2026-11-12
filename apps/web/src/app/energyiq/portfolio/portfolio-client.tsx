@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { configApi, type EnergyPortfolioDto } from "../../../lib/config-api";
 import { useEnergyIqAccess } from "../_components/energyiq-access";
@@ -17,6 +17,13 @@ export type PeriodPreset = "lastMonth" | "thisMonth" | "last3Months" | "thisYear
 const PRESETS: PeriodPreset[] = ["lastMonth", "thisMonth", "last3Months", "thisYear", "custom"];
 /** Every site EnergyX serves is in Singapore or Malaysia, both UTC+8. */
 const SITE_TIME_ZONE = "Asia/Singapore";
+/**
+ * The page opens on last month. When no site has readings then (a site connected this month), it moves on to the
+ * first of these that has some, latest first, so a new client does not open on a page of zeros.
+ */
+const OPENING_FALLBACKS: Array<Exclude<PeriodPreset, "custom">> = ["thisMonth", "last3Months", "thisYear"];
+const hasReadings = (portfolio: EnergyPortfolioDto) => portfolio.totals.sitesWithData > 0;
+type Period = { from: string; to: string };
 
 export function EnergyIqPortfolio() {
   const t = useMessages(portfolioMessages);
@@ -27,26 +34,61 @@ export function EnergyIqPortfolio() {
   const canManageReports = access?.team?.canManagePeople === true || access?.role === "admin";
   const [preset, setPreset] = useState<PeriodPreset>("lastMonth");
   const [custom, setCustom] = useState(() => presetPeriod("lastMonth"));
+  // The period on show; `query` is what to load, and `opening` until the reader picks a period themselves.
   const [period, setPeriod] = useState(() => presetPeriod("lastMonth"));
+  const [query, setQuery] = useState<{ period: Period; opening: boolean }>(() => ({ period: presetPeriod("lastMonth"), opening: true }));
+  const [movedOn, setMovedOn] = useState(false);
+  const chosen = useRef(false);
+  const latest = useRef(0);
   const [portfolio, setPortfolio] = useState<EnergyPortfolioDto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<"pdf" | "carbon.csv" | null>(null);
 
-  const load = useCallback(async (next: { from: string; to: string }) => {
+  const load = useCallback(async (next: { period: Period; opening: boolean }) => {
+    // Only the newest request may fill the page, so a slow answer never replaces a newer choice.
+    const request = ++latest.current;
     setPortfolio(null);
     setError(null);
     try {
-      setPortfolio(await configApi.getEnergyPortfolio(next));
+      let shown = await configApi.getEnergyPortfolio(next.period);
+      let found: { preset: Exclude<PeriodPreset, "custom">; period: Period; portfolio: EnergyPortfolioDto } | null = null;
+      if (next.opening && !hasReadings(shown)) {
+        for (const fallback of OPENING_FALLBACKS) {
+          if (chosen.current || request !== latest.current) break;
+          const candidate = presetPeriod(fallback);
+          const answer = await configApi.getEnergyPortfolio(candidate);
+          if (hasReadings(answer)) { found = { preset: fallback, period: candidate, portfolio: answer }; break; }
+        }
+      }
+      if (request !== latest.current) return;
+      // A period the reader picked meanwhile is kept.
+      if (next.opening && !chosen.current) {
+        setPreset(found?.preset ?? "lastMonth");
+        setPeriod(found?.period ?? next.period);
+        setCustom(found?.period ?? next.period);
+        setMovedOn(Boolean(found));
+      }
+      if (found && !chosen.current) shown = found.portfolio;
+      setPortfolio(shown);
     } catch (reason) {
+      if (request !== latest.current) return;
       setError(friendlyErrorMessage(reason, { fallback: t("loadFailed") }));
     }
   }, [t]);
   // The client can change from the top bar; reload so one client's sites never show under another's name.
-  useEffect(() => { if (workspaceId) void load(period); }, [workspaceId, period, load]);
+  useEffect(() => { if (workspaceId) void load(query); }, [workspaceId, query, load]);
 
+  const show = (next: Period) => {
+    chosen.current = true;
+    setMovedOn(false);
+    setPeriod(next);
+    setQuery({ period: next, opening: false });
+  };
   const choose = (next: PeriodPreset) => {
+    chosen.current = true;
+    setMovedOn(false);
     setPreset(next);
-    if (next !== "custom") setPeriod(presetPeriod(next));
+    if (next !== "custom") show(presetPeriod(next));
   };
   const download = async (kind: "pdf" | "carbon.csv") => {
     setDownloading(kind);
@@ -94,13 +136,14 @@ export function EnergyIqPortfolio() {
             ))}
           </div>
           {preset === "custom" ? (
-            <form className={styles.custom} onSubmit={event => { event.preventDefault(); if (custom.from <= custom.to) setPeriod({ ...custom }); }}>
+            <form className={styles.custom} onSubmit={event => { event.preventDefault(); if (custom.from <= custom.to) show({ ...custom }); }}>
               <label><span>{t("from")}</span><input type="date" value={custom.from} max={custom.to} onChange={event => setCustom(current => ({ ...current, from: event.target.value }))} /></label>
               <label><span>{t("to")}</span><input type="date" value={custom.to} min={custom.from} onChange={event => setCustom(current => ({ ...current, to: event.target.value }))} /></label>
               <button type="submit" className={styles.secondary}>{t("apply")}</button>
             </form>
           ) : <span className={styles.periodText}>{periodText(period, intlLocale(locale))}</span>}
         </div>
+        {movedOn && portfolio && <p role="status" className={styles.muted}>{t("openedLater")}</p>}
 
         {error && <p role="alert" className={styles.error}>{error}</p>}
         {portfolio ? <PortfolioView portfolio={portfolio} /> : !error && <p role="status" className={styles.loading}>{t("loading")}</p>}

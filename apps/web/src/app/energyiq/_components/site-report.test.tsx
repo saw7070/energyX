@@ -175,6 +175,31 @@ describe("the report the Overview shows", () => {
     } finally { await page.unmount(); }
   });
 
+  it("never puts a daily report on the Overview: it shows the weekly one, or builds its own", async () => {
+    // Newest first: yesterday's daily report, then last week's. This project's Overview is monthly, and none is saved.
+    const library = vi.spyOn(configApi, "reportLibraryRequest").mockImplementation(async (_projectId: string, action = "") =>
+      (action ? { snapshot: { ...stored, cadence: "weekly" } } : {
+        reports: [{ id: "site-daily", source: "site", cadence: "daily" }, { id: "site-weekly", source: "site", cadence: "weekly" }], overviewCadence: "monthly",
+      }) as never);
+    vi.spyOn(configApi, "reportAgentRequest").mockResolvedValue({ periodOptions: { availablePeriod: null } });
+    let page = await overview();
+    try {
+      expect(page.host.querySelector("[data-saved]")?.textContent).toBe("site-weekly weekly 2026-08-03→2026-08-17");
+      expect(library).not.toHaveBeenCalledWith("p", "snapshot/site-daily");
+    } finally { await page.unmount(); }
+
+    // Only daily reports saved so far: the page builds the report itself rather than show one day.
+    library.mockImplementation(async (_projectId: string, action = "") =>
+      (action ? { snapshot: { ...stored, cadence: "daily" } } : { reports: [{ id: "site-daily", source: "site", cadence: "daily" }], overviewCadence: "monthly" }) as never);
+    mock.load.mockResolvedValue(data);
+    page = await overview();
+    try {
+      expect(page.host.querySelector("[data-saved]")?.textContent).toBe("none");
+      expect(library).not.toHaveBeenCalledWith("p", "snapshot/site-daily");
+      expect(mock.load).toHaveBeenCalledTimes(1);
+    } finally { await page.unmount(); }
+  });
+
   it("falls back to building the report when the saved one cannot be read", async () => {
     vi.spyOn(configApi, "reportLibraryRequest").mockImplementation(async (_projectId: string, action = "") => {
       if (action) throw new Error("REPORT_NOT_FOUND");

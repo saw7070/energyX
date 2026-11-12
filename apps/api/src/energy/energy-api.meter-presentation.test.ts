@@ -9,7 +9,7 @@ import { expect, it } from "vitest";
 import type { ConfigApiContext } from "../routes/types.js";
 import { ensureEnergyIqBootstrap, NGEE_ANN_WORKSPACE_ID } from "./energy-bootstrap.js";
 import { handleEnergyApiRequest } from "./energy-api.js";
-import { buildTuyaOfficeSetup } from "./tuya-office-project.js";
+import { buildTuyaOfficeSetup, TUYA_OFFICE_PROJECT_ID, TUYA_OFFICE_WORKSPACE_ID } from "./tuya-office-project.js";
 
 it("preserves optional presentation through the setup HTTP boundary", async () => {
   const root = mkdtempSync(join(tmpdir(), "energy-presentation-"));
@@ -32,6 +32,39 @@ it("preserves optional presentation through the setup HTTP boundary", async () =
     const saved = metadata.energyIq.projectSetup.getDraft({project_id:projectId,user_id:"dev-user"});
     expect(saved.document.meter_mapping!.rows[0]!.presentation).toEqual(presentation);
     expect(saved.document.meter_mapping!.virtual_meters![0]!.presentation?.group).toBe("Other consumption");
+  } finally {metadata.close();rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:100});}
+});
+
+it("keeps a meter's always-on mark and number of lights through the setup HTTP boundary, and refuses a count that is not one", async () => {
+  const root = mkdtempSync(join(tmpdir(), "energy-presentation-"));
+  const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+  const put = async (body: unknown) => {
+    const stream = new PassThrough();
+    Object.assign(stream,{method:"PUT",headers:{}});
+    stream.end(JSON.stringify(body));
+    return handleEnergyApiRequest(stream as unknown as IncomingMessage,["projects",TUYA_OFFICE_PROJECT_ID,"setup","draft"],{
+      metadataStore:metadata,dataGateway:new LocalDataGateway(metadata),userId:"dev-user",workspaceId:TUYA_OFFICE_WORKSPACE_ID,
+    } as unknown as Required<ConfigApiContext>);
+  };
+  try {
+    // The made-up demo office; the meters are given made-up estate names below.
+    ensureEnergyIqBootstrap(metadata);
+    const draft = metadata.energyIq.projectSetup.getDraft({ project_id: TUYA_OFFICE_PROJECT_ID, user_id: "dev-user" });
+    const document = structuredClone(draft.document);
+    document.meter_mapping!.rows[0]!.presentation = { device_name: "Lobby emergency lights", always_on: "true", light_count: " 12 " };
+    // An unticked box sent as anything but "true" is simply left out.
+    document.meter_mapping!.rows[1]!.presentation = { device_name: "Corridor lights", always_on: "false", light_count: "" };
+    expect((await put({ expectedRevision: draft.revision, document })).status).toBe(200);
+    const saved = metadata.energyIq.projectSetup.getDraft({ project_id: TUYA_OFFICE_PROJECT_ID, user_id: "dev-user" });
+    expect(saved.document.meter_mapping!.rows[0]!.presentation).toEqual({ device_name: "Lobby emergency lights", always_on: "true", light_count: "12" });
+    expect(saved.document.meter_mapping!.rows[1]!.presentation).toEqual({ device_name: "Corridor lights" });
+
+    for (const light_count of ["0", "2.5", "10000", "a dozen"]) {
+      const invalid = structuredClone(saved.document);
+      invalid.meter_mapping!.rows[0]!.presentation = { device_name: "Lobby emergency lights", light_count };
+      expect(await put({ expectedRevision: saved.revision, document: invalid })).toMatchObject({ status: 400, body: { error: { message: "ENERGYIQ_METER_PRESENTATION_INVALID:light_count" } } });
+    }
+    expect(metadata.energyIq.projectSetup.getDraft({ project_id: TUYA_OFFICE_PROJECT_ID, user_id: "dev-user" }).revision).toBe(saved.revision);
   } finally {metadata.close();rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:100});}
 });
 

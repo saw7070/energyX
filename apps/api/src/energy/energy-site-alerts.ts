@@ -70,6 +70,9 @@ export const readSiteAlerts = (input: {
       .sort((left, right) => right.finishedAt!.localeCompare(left.finishedAt!))
       // The advisor and the server can each write a report for the same week; one alert says it is ready.
       .filter((run, index, runs) => runs.findIndex((other) => samePeriod(other, run)) === index)
+      // A daily report comes every day; only the newest says so, so a week of them never pushes an unread weekly or
+      // monthly report off the bell.
+      .filter((run, index, runs) => cadenceOf(run) !== "daily" || runs.findIndex((other) => cadenceOf(other) === "daily") === index)
       .slice(0, 5)
       .map((run): SiteAlertReport => {
         const period = run.reportingPeriod ?? run.period;

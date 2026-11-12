@@ -17,7 +17,11 @@ export type DeviceStatistics = {
   closedDays: number;
   outOfHoursKwh: number | null;
   outOfHoursPct: number | null;
-  /** The draw exceeded in 9 of every 10 fully received hours. */
+  /**
+   * The draw exceeded in 9 of every 10 fully received hours. Null without a single complete day: a meter that sent only
+   * a few hours (often catch-up readings holding what it counted while offline) would otherwise read as drawing that
+   * all day, and its kWh a day and cost a year, worked out as this × 24, would be many times its real use.
+   */
   alwaysOnKw: number | null;
   dailyAverageKwh: number | null;
   openDayAverageKwh: number | null;
@@ -112,7 +116,7 @@ export function deviceStatistics(cells: HourCell[], dates: string[], calendar: E
     closedDays: complete.filter(day => !day.open).length,
     outOfHoursKwh: calendar && total > 0 ? outOfHours : null,
     outOfHoursPct: calendar && total > 0 ? outOfHours / total * 100 : null,
-    alwaysOnKw: percentile(fullHours, 0.1),
+    alwaysOnKw: complete.length ? percentile(fullHours, 0.1) : null,
     dailyAverageKwh: average(complete.map(day => day.kwh!)),
     openDayAverageKwh: average(complete.filter(day => day.open).map(day => day.kwh!)),
     closedDayAverageKwh: average(complete.filter(day => !day.open).map(day => day.kwh!)),
@@ -152,6 +156,17 @@ export function hourlyByDay(cells: HourCell[], dates: string[], expectedMinutesP
     const day = byDay.get(date);
     if (!day || kwh === null || validMinutes <= 0) continue;
     day[hour] = kwh * expectedMinutesPerHour / validMinutes;
+  }
+  return byDay;
+}
+
+/** The kWh actually recorded in each hour of each day whose readings only partly arrived; null for every other hour. */
+export function partialHourKwhByDay(cells: HourCell[], dates: string[], expectedMinutesPerHour = 60): Map<string, Array<number | null>> {
+  const byDay = new Map(dates.map(date => [date, Array.from({ length: 24 }, (): number | null => null)]));
+  for (const [date, hour, kwh, validMinutes] of cells) {
+    const day = byDay.get(date);
+    if (!day || kwh === null || validMinutes <= 0 || validMinutes >= expectedMinutesPerHour) continue;
+    day[hour] = kwh;
   }
   return byDay;
 }

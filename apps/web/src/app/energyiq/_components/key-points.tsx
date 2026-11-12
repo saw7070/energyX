@@ -15,6 +15,7 @@ import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { intlLocale, type EnergyIqLocale } from "./energyiq-messages";
 import { keyPointsMessages } from "./key-points-messages";
 import { useEnergyIqAccess } from "./energyiq-access";
+import { GroupSplit } from "./group-split";
 
 /** Two sentences that say nearly the same thing ("used after working hours" / "used outside working hours"). */
 const sameText = (left: string, right: string): boolean => {
@@ -28,7 +29,7 @@ const sameText = (left: string, right: string): boolean => {
 };
 
 /**
- * Analysis for the same dates as the headline's report. A headline about equipment left on opens step 3,
+ * Analysis for the same dates as the headline's report. A headline about equipment left on opens step 2,
  * "What stays on after working hours"; anything else opens the short version at the top. Pass the report's topic
  * when known: the headline may be in Chinese or Malay, so the English wording test is only a fallback.
  */
@@ -106,6 +107,9 @@ export function KeyPoints({projectId}:{projectId:string}) {
   const saved=site.saved;
   const shownPeriod=saved?.period ?? source?.period ?? null;
   const names=plainNames(report);
+  const split=report?.groups?.breakdown?.length ? report.groups.breakdown : null;
+  // The average day leads only above where it goes by group; a site without groups keeps the report's headline.
+  const averageDay=split ? report?.averageDay ?? null : null;
   // Everyday names and times if the published summary is shown: "office area lights" instead of "DB1 L1 Light", "8 pm" instead of "20:00".
   const plain=(text:string)=>plainTimes(names(plainCard(text)), locale);
   return <main className={styles.page}>
@@ -114,11 +118,20 @@ export function KeyPoints({projectId}:{projectId:string}) {
       :!result?<p role="status">{t("loading")}</p>
       :<>
       <section className={styles.hero}><p className={styles.heroEyebrow}>{metrics?.projectName ?? activeProject?.name ?? t("yourProject")}</p>
-        <h2>{report ? <>{report.title.before}<span>{report.title.emphasis}</span></> : site.state && publication?.selection.summary ? plain(publication.selection.summary) : t("fallbackHeadline")}</h2>
+        {/* With groups, the first view leads with the site's average day, then where it goes by group; the finding follows. */}
+        <h2>{averageDay ? averageDay.text : report ? <>{report.title.before}<span>{report.title.emphasis}</span></> : site.state && publication?.selection.summary ? plain(publication.selection.summary) : t("fallbackHeadline")}</h2>
+        {split && <GroupSplit rows={split} />}
+        {averageDay && report && <p className={styles.heroFinding}>{report.title.before}<span>{report.title.emphasis}</span></p>}
         {/* The sentence under the headline only when it adds something: often it is the headline again. */}
         {report?.headline && sameText(report.headline, `${report.title.before}${report.title.emphasis}`) === false ? <p>{report.headline}</p> : null}
-        {/* Where the energy goes, one short line by top-level group, from the same report as the headline. */}
-        {report?.groups && <p className={styles.heroGroups}>{t("byGroup", { summary: report.groups.summary })}</p>}
+        {/* Lights-on sites warned about daytime use: which lights were on in the daytime, and when, largest first. */}
+        {report?.daytime && report.headlineTopic === "daytime" && report.daytime.items.length > 0 && <div className={styles.heroDaytime}>
+          <p>{report.daytime.heading}</p>
+          <ul>{report.daytime.items.map(item => <li key={item}>{item}</li>)}{report.daytime.more && <li>{report.daytime.more}</li>}</ul>
+          {report.daytime.alwaysOn && <p>{report.daytime.alwaysOn}</p>}
+        </div>}
+        {/* Without a breakdown, one short line by top-level group: each group's share of all use, not of the line above. */}
+        {report?.groups && !split && <p className={styles.heroGroups}>{t("byGroup", { summary: report.groups.summary })}</p>}
         <ForecastLine projectId={projectId} className={styles.heroForecast} />
         <p className={styles.heroLinks}><Link href={analysisHref(projectId, shownPeriod, report?.headline ?? "", report?.headlineTopic)}>{t("seeWhy")}</Link></p></section>
       {/* What the site is drawing right now, for a site with a live connection. */}
@@ -139,7 +152,7 @@ export function KeyPoints({projectId}:{projectId:string}) {
       {/* Circuits that went dark: the figures above stop where their readings do. */}
       <StoppedMetersNote projectId={projectId} className={styles.stopped} />
       {/* When the next report arrives by itself, so nobody waits for one that is already scheduled. */}
-      <ReportScheduleNote projectId={projectId} className={styles.schedule} />
+      <ReportScheduleNote projectId={projectId} overview className={styles.schedule} />
       </>}
       {/* The saved report itself. Until one exists it is built here, for the same dates as the priorities. */}
       {result && !error && <SiteReportPanel state={site.state} onRetry={site.retry} projectId={projectId} saved={saved} />}

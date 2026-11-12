@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildSiteReport, daySentence, dayKindOf, explainDays, findAnomalies, meterGroupPlaces, scopeDays, sharedMeterNames, standoutDays, standoutMeters, standoutReport, standoutRule,
-  usualDayBaselines, type AnalysisDay,
+  behindSentence, behindTheDay, buildSiteReport, daySentence, dayKindOf, explainDays, findAnomalies, meterGroupPlaces, scopeDays, sharedMeterNames, standoutDays, standoutMeters, standoutReport, standoutRule,
+  usualDayBaselines, type AnalysisData, type AnalysisDay,
 } from "@datafoundry/site-report";
 import { DAILY, DATA, DATES, GAP_DAY, IDS, meter, series, site, THURSDAY } from "./standout-days.test-fixture";
 
@@ -16,8 +16,8 @@ describe("why a day was different", () => {
     expect(thursday.usualKwh).toBeCloseTo(46.1, 6);
     expect(thursday.deltaKwh).toBeCloseTo(2.3, 6);
     // The lift lobby's +0.2 kWh is under a tenth of the difference, so it is not named.
-    expect(thursday.contributors.map(item => [item.name, Number(item.deltaKwh.toFixed(2))])).toEqual([["Compassvale Bow entrance", 1.5], ["Pavilion DL & fan", 0.6]]);
-    expect(daySentence(thursday)).toBe("Thu 5 Nov used 48.4 kWh, 2.3 kWh more than a usual day (46.1 kWh). Most of the extra: Compassvale Bow entrance +1.5 kWh and Pavilion DL & fan +0.6 kWh.");
+    expect(thursday.contributors.map(item => [item.name, Number(item.deltaKwh.toFixed(2))])).toEqual([["Estate entrance", 1.5], ["Pavilion lights & fan", 0.6]]);
+    expect(daySentence(thursday)).toBe("Thu 5 Nov used 48.4 kWh, 2.3 kWh more than a usual day (46.1 kWh). Most of the extra: Estate entrance +1.5 kWh and Pavilion lights & fan +0.6 kWh.");
     expect(standoutDays(explained).map(item => item.date)).toEqual([THURSDAY]);
   });
 
@@ -51,7 +51,7 @@ describe("why a day was different", () => {
     // A meter that missed readings on a standout day is left out of the named meters; its share stays in "everything else".
     const thursdayGap = { ...site, meters: site.meters.map(item => item.id === "bow" ? { ...item, series: { ...item.series!, cells: item.series!.cells.map(cell => cell[0] === THURSDAY && cell[1] === 3 ? [cell[0], cell[1], cell[2], 0, 1] as typeof cell : cell) } } : item) };
     const thursday = explainDays({ days, meters: standoutMeters([thursdayGap]), lighting: true }).find(item => item.date === THURSDAY)!;
-    expect(thursday.contributors.map(item => item.name)).toEqual(["Pavilion DL & fan"]);
+    expect(thursday.contributors.map(item => item.name)).toEqual(["Pavilion lights & fan"]);
     expect(thursday.otherKwh).toBeCloseTo(1.7, 6);
   });
 
@@ -78,15 +78,15 @@ describe("why a day was different", () => {
 
   it("names meters as everywhere else: the short name when one is set, and the group they serve", () => {
     const thursday = on(THURSDAY);
-    expect(thursday.contributors.map(item => [item.name, item.place])).toEqual([["Compassvale Bow entrance", "Common area"], ["Pavilion DL & fan", "Common area › Pavilion"]]);
+    expect(thursday.contributors.map(item => [item.name, item.place])).toEqual([["Estate entrance", "Common area"], ["Pavilion lights & fan", "Common area › Pavilion"]]);
     // Readings saved before groups existed still show where the meter is.
     const ungrouped = explainDays({ days, meters: standoutMeters([site]), lighting: true }).find(item => item.date === THURSDAY)!;
     expect(ungrouped.contributors.map(item => item.place)).toEqual(["Outdoor", "Outdoor"]);
     // A short name is the name readers see; the installer's full label stays behind it.
-    const short = { ...site, meters: site.meters.map(item => item.id === "bow" ? { ...item, name: "Bow entrance", fullName: "Compassvale Bow entrance" } : item) };
+    const short = { ...site, meters: site.meters.map(item => item.id === "bow" ? { ...item, name: "Entrance", fullName: "Estate entrance" } : item) };
     const renamed = explainDays({ days, meters: standoutMeters([short]), lighting: true, places: meterGroupPlaces(DATA.groups) }).find(item => item.date === THURSDAY)!;
-    expect(renamed.contributors[0]).toMatchObject({ name: "Bow entrance", fullName: "Compassvale Bow entrance", place: "Common area" });
-    expect(daySentence(renamed)).toContain("Most of the extra: Bow entrance +1.5 kWh and Pavilion DL & fan +0.6 kWh.");
+    expect(renamed.contributors[0]).toMatchObject({ name: "Entrance", fullName: "Estate entrance", place: "Common area" });
+    expect(daySentence(renamed)).toContain("Most of the extra: Entrance +1.5 kWh and Pavilion lights & fan +0.6 kWh.");
   });
 
   it("is the one usual day the chart line and its unusually-high check use", () => {
@@ -103,7 +103,8 @@ describe("why a day was different", () => {
   it("writes the report block with the standout days, missing days and the rule", () => {
     const block = standoutReport(DATA);
     expect(block.title).toBe("Days that stood out");
-    expect(block.items).toEqual([{ date: THURSDAY, text: "Thu 5 Nov used 48.4 kWh, 2.3 kWh more than a usual day (46.1 kWh). Most of the extra: Compassvale Bow entrance +1.5 kWh and Pavilion DL & fan +0.6 kWh." }]);
+    // One short sentence about what is behind the day: here a meter filed straight in Common area, beside its Pavilion group.
+    expect(block.items).toEqual([{ date: THURSDAY, text: "On 5 Nov Estate entrance used 7.5 kWh; it usually uses 6 kWh." }]);
     expect(block.note).toBe("Readings were missing on 10 Nov, so that day is not compared.");
     expect(block.rule).toBe(standoutRule("en", true));
     expect(block.rule).toContain("more than 3%");
@@ -117,15 +118,54 @@ describe("why a day was different", () => {
   it("words the block in Chinese and Malay, and adds the place when two meters share a name", () => {
     const zh = standoutReport(DATA, "zh-Hans");
     expect(zh.title).toBe("与平常不同的日子");
-    expect(zh.items[0]!.text).toBe("11月5日 周四用电 48.4 kWh，比正常日子（46.1 kWh）多 2.3 kWh。多用的电主要来自：Compassvale Bow entrance +1.5 kWh和Pavilion DL & fan +0.6 kWh。");
+    expect(zh.items[0]!.text).toBe("11月5日，Estate entrance用电 7.5 kWh，平时约 6 kWh。");
     expect(zh.note).toBe("11月10日读数缺失，因此这一天不作比较。");
     const ms = standoutReport(DATA, "ms");
-    expect(ms.items[0]!.text).toBe("Kha 5 Nov menggunakan 48.4 kWh, 2.3 kWh lebih daripada hari biasa (46.1 kWh). Kebanyakan lebihan daripada: Compassvale Bow entrance +1.5 kWh dan Pavilion DL & fan +0.6 kWh.");
+    expect(ms.items[0]!.text).toBe("Pada 5 Nov, Estate entrance menggunakan 7.5 kWh; biasanya 6 kWh.");
     // Both lift lobbies rise on Friday; their shared name gets the block in brackets.
     const friday = "2026-11-06";
     const lobbies = { ...site, total: series("__scope__", date => IDS.reduce((sum, id) => sum + DAILY[id]!(date), 0) + (date === friday ? 3 : 0)),
       meters: site.meters.map(item => item.id.startsWith("lobby") ? { ...item, series: series(item.id, date => DAILY[item.id]!(date) + (date === friday ? 1.5 : 0)) } : item) };
-    const text = standoutReport({ ...DATA, current: { project: lobbies, spaces: [] } }).items.find(item => item.date === friday)!.text;
-    expect(text).toContain("Lift lobby lights (Block 264E) +1.5 kWh and Lift lobby lights (Block 264F) +1.4 kWh");
+    // With groups, the groups behind the day are named; a name with a number in it stays as it is. Both blocks moved
+    // about the same, so both are named rather than one blamed for what two did.
+    expect(standoutReport({ ...DATA, current: { project: lobbies, spaces: [] } }).items.find(item => item.date === friday)!.text)
+      .toBe("On 6 Nov Block 1A used 19.5 kWh; it usually uses 18 kWh. Block 1B used 19.5 kWh; it usually uses 18.1 kWh.");
+    // Without groups (readings saved before groups existed), the meters are named, with their place when they share a name.
+    const text = standoutReport({ ...DATA, groups: undefined, current: { project: lobbies, spaces: [] } }).items.find(item => item.date === friday)!.text;
+    expect(text).toBe("On 6 Nov Lift lobby lights (Block 1A) used 19.5 kWh; they usually use 18 kWh. Lift lobby lights (Block 1B) used 19.5 kWh; they usually use 18.1 kWh.");
+    expect(standoutReport({ ...DATA, current: { project: lobbies, spaces: [] } }, "zh-Hans").items.find(item => item.date === friday)!.text)
+      .toBe("11月6日，Block 1A用电 19.5 kWh，平时约 18 kWh。Block 1B用电 19.5 kWh，平时约 18.1 kWh。");
+  });
+
+  it("adds a group up from the meters that sent readings, so a silent meter never hides what its group did", () => {
+    // On Friday the Pavilion lights & fan use 2 kWh more and the estate entrance 0.3 kWh more. The Pavilion group also
+    // holds a walkway light that is marked not in use and sends nothing.
+    const friday = "2026-11-06";
+    const extra: Record<string, number> = { pavilion: 2, bow: 0.3 };
+    const project = { ...site, total: series("__scope__", date => IDS.reduce((sum, id) => sum + DAILY[id]!(date) + (date === friday ? extra[id] ?? 0 : 0), 0)),
+      meters: site.meters.map(item => extra[item.id] ? { ...item, series: series(item.id, date => DAILY[item.id]!(date) + (date === friday ? extra[item.id]! : 0)) } : item) };
+    const groups = { ...DATA.groups!, meters: [...DATA.groups!.meters, { id: "walkway", name: "Walkway light", groupId: "pavilion-area", kwh: 0 }] };
+    const data: AnalysisData = { ...DATA, groups, notInUse: [{ id: "walkway", name: "Walkway light", reason: "Not wired up yet" }], current: { project, spaces: [] } };
+    const text = (input: AnalysisData) => standoutReport(input).items.find(item => item.date === friday)!.text;
+    // The Pavilion is behind the day, as the same readings without groups say too; the estate entrance is too small to name.
+    expect(text(data)).toBe("On 6 Nov Pavilion lights & fan used 6 kWh; it usually uses 4 kWh.");
+    expect(text({ ...data, groups: undefined })).toBe("On 6 Nov Pavilion lights & fan used 6 kWh; it usually uses 4 kWh.");
+    // With two meters sending in the group, the group is named from those two; the silent one adds nothing.
+    const fan = { ...site.meters.find(item => item.id === "pavilion")!, id: "pavilion-2", name: "Pavilion fan", series: series("pavilion-2", date => 1 + (date === friday ? 1 : 0)) };
+    const both = { ...data, groups: { ...groups, meters: [...groups.meters, { id: "pavilion-2", name: "Pavilion fan", groupId: "pavilion-area", kwh: 14 }] },
+      current: { project: { ...project, meters: [...project.meters, fan], total: series("__scope__", date => IDS.reduce((sum, id) => sum + DAILY[id]!(date) + (date === friday ? extra[id] ?? 0 : 0), 0) + 1 + (date === friday ? 1 : 0)) }, spaces: [] } };
+    expect(text(both)).toBe("On 6 Nov the pavilion used 8 kWh; it usually uses 5 kWh.");
+  });
+
+  it("says other meters moved too when what is named explains less than half of the day", () => {
+    const thursday = on(THURSDAY);
+    const lamp = { kind: "meter" as const, id: "lamp", name: "Driveway lamp", kwh: 2, usualKwh: 1.2, place: "Common area" };
+    const context = { locale: "en" as const, groups: DATA.groups, shared: new Set<string>() };
+    // 0.8 kWh of a 2.3 kWh rise.
+    expect(behindSentence(thursday, [lamp], context)).toBe("On 5 Nov Driveway lamp used 2 kWh; it usually uses 1.2 kWh. Other meters used a little more too.");
+    expect(behindSentence(thursday, [lamp], { ...context, locale: "ms" })).toBe("Pada 5 Nov, Driveway lamp menggunakan 2 kWh; biasanya 1.2 kWh. Meter lain juga menggunakan sedikit lebih banyak.");
+    expect(behindSentence(thursday, [{ ...lamp, kwh: 3 }], context)).toBe("On 5 Nov Driveway lamp used 3 kWh; it usually uses 1.2 kWh.");
+    // Nothing to name: the whole-site sentence is used instead.
+    expect(behindTheDay(on("2026-11-03"), DATA.groups)).toEqual([]);
   });
 });

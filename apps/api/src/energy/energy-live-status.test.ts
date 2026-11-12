@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { readOfflineMeters, readOfflineSince, recordDeviceStatus } from "./energy-live-status.js";
+import { readOfflineMeters, readOfflineSince, readOnlineMeters, recordDeviceStatus } from "./energy-live-status.js";
 
 const MIN = 60_000;
 const T0 = Date.parse("2026-10-03T06:00:00.000Z");
@@ -19,6 +19,16 @@ describe("live device status", () => {
     expect(readOfflineMeters({ db, projectId: "site", now: T0 + 46 * MIN })).toEqual([{ meterPointId: "tv", offlineSince: new Date(T0 + 15 * MIN).toISOString() }]);
     poll(T0 + 60 * MIN, true);
     expect(readOfflineMeters({ db, projectId: "site", now: T0 + 61 * MIN })).toEqual([]);
+  });
+
+  it("knows which meters are online now, and says nothing once the check itself is out of date", () => {
+    const db = new DatabaseSync(":memory:");
+    recordDeviceStatus({ db, projectId: "site", checkedAt: T0, statuses: [{ meterPointId: "pavilion", online: true }, { meterPointId: "lobby", online: false }] });
+    recordDeviceStatus({ db, projectId: "other", checkedAt: T0, statuses: [{ meterPointId: "gate", online: true }] });
+    expect(readOnlineMeters({ db, projectId: "site", now: T0 + 15 * MIN })).toEqual(new Set(["pavilion"]));
+    // An hour without a check: no answer is better than an old one.
+    expect(readOnlineMeters({ db, projectId: "site", now: T0 + 60 * MIN })).toEqual(new Set());
+    expect(readOnlineMeters({ db, projectId: "empty" })).toEqual(new Set());
   });
 
   it("counts a meter that turns off with its lights as offline only after 16 hours", () => {

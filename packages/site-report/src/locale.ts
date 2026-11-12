@@ -29,5 +29,16 @@ export function forHoursMeaning<K extends string>(t: Translate<K>, book: Transla
   return (key, values) => t(`lights.${key}` in book.en ? `lights.${key}` as K : key, values);
 }
 
+/**
+ * For a report that covers a single day (a daily report), words each sentence with its "day." variant when the book
+ * has one, e.g. "day.kf.total" ("total use for the day") instead of "kf.total" ("total use, 14 days"). Put
+ * `forHoursMeaning` around it, so a lights-on sentence finds its "day.lights." variant. Longer reports use the book
+ * unchanged.
+ */
+export function forOneDay<K extends string>(t: Translate<K>, book: Translations<K>, oneDay: boolean): Translate<K> {
+  if (!oneDay) return t;
+  return (key, values) => t(`day.${key}` in book.en ? `day.${key}` as K : key, values);
+}
+
 /** The locale to hand to Intl / toLocaleString for numbers and dates; Singapore conventions in every language. */
 export const intlLocale = (locale: EnergyIqLocale) => ({ en: "en-SG", "zh-Hans": "zh-Hans-SG", ms: "ms-SG" } as const)[locale];

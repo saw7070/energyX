@@ -53,7 +53,10 @@ export function DataAvailability({ projectId, siteName, document, canEdit, busy,
   const shiftDay = (value: string, days: number) => new Date(Date.parse(`${value}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
   const monthName = (id: string) => new Intl.DateTimeFormat(intl, { timeZone: "UTC", month: "long", year: "numeric" }).format(new Date(`${id}-01T00:00:00Z`));
   const target = data?.targetPct ?? 95;
-  const statusText = (status: Meter["status"]) => t(`status.${status}`, { target });
+  // A meter using nothing says since when; with no readings at all in the period, it used nothing in it.
+  const statusText = (status: Meter["status"], meter?: Meter) => status === "idle"
+    ? meter?.lastReadingAt && (meter.realHours > 0 || meter.estimatedHours > 0) ? t("status.idleSince", { when: when(meter.lastReadingAt) }) : t("status.idle")
+    : t(`status.${status}`, { target });
   const reasonText = (stored: string) => notInUseText(stored, reason => t(`reason.${reason}`));
   const checkText = (meter: Meter, check: Meter["checks"][number], short = false) => short
     ? t(`check.short.${check.kind}`, { hours: check.hours, from: when(check.from) })
@@ -67,7 +70,7 @@ export function DataAvailability({ projectId, siteName, document, canEdit, busy,
       outageTitle: t("csv.outageTitle"),
       outageColumns: t("csv.outageColumns").split("|") as Parameters<typeof availabilityCsv>[2]["outageColumns"],
       status: statusText,
-      outageKind: outage => outage.ongoing ? t("outage.ongoing") : outage.kind === "estimated" ? t("outage.estimated", { kwh: number(outage.estimatedKwh, 2) }) : t("outage.missing"),
+      outageKind: outage => outage.idle ? t("outage.idleNote") : outage.ongoing ? t("outage.ongoing") : outage.kind === "estimated" ? t("outage.estimated", { kwh: number(outage.estimatedKwh, 2) }) : t("outage.missing"),
       check: check => t(`check.short.${check.kind}`, { hours: check.hours, from: when(check.from) }),
     });
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
@@ -82,9 +85,12 @@ export function DataAvailability({ projectId, siteName, document, canEdit, busy,
     setEditing(null);
   };
 
-  const checks = (data?.meters ?? []).flatMap(meter => meter.checks.map(check => ({ meter, check })));
+  // Days of no use from a meter that is only using nothing now (idle: online, and able to) stay a quiet note beside it.
+  // Anywhere else they still need a look: a lighting circuit sending 0 kWh for days may have lights that do not come on.
+  const quietNote = (meter: Meter, check: Meter["checks"][number]) => check.kind === "flat_zero" && meter.status === "idle";
+  const checks = (data?.meters ?? []).flatMap(meter => meter.checks.filter(check => !quietNote(meter, check)).map(check => ({ meter, check })));
   // Meters that need attention first; within each, the least received first.
-  const severity: Record<Meter["status"], number> = { no_readings: 0, stopped: 1, below_target: 2, ok: 3, not_in_use: 4 };
+  const severity: Record<Meter["status"], number> = { no_readings: 0, stopped: 1, below_target: 2, ok: 3, idle: 4, not_in_use: 5 };
   // A meter offline right now leads: every hour it stays offline costs availability.
   const rank = (meter: Meter) => meter.offlineSince ? -1 : severity[meter.status];
   const meters = [...(data?.meters ?? [])].sort((left, right) => rank(left) - rank(right) || left.availabilityPct - right.availabilityPct || left.name.localeCompare(right.name));
@@ -93,7 +99,7 @@ export function DataAvailability({ projectId, siteName, document, canEdit, busy,
   const locations = new Map((data?.meters ?? []).map(meter => [meter.meterPointId, meter.location]));
   const sitePct = data?.site.availabilityPct ?? null;
   const meets = sitePct !== null && sitePct >= target;
-  const badgeClass = (status: Meter["status"]) => status === "ok" ? styles.badgeOk : status === "not_in_use" ? styles.badgeMuted : status === "no_readings" ? styles.badgeBad : styles.badgeWarn;
+  const badgeClass = (status: Meter["status"]) => status === "ok" ? styles.badgeOk : status === "not_in_use" || status === "idle" ? styles.badgeMuted : status === "no_readings" ? styles.badgeBad : styles.badgeWarn;
   const columns = canEdit ? 7 : 6;
 
   return <section className={styles.panel} aria-label={t("title")}>
@@ -150,7 +156,7 @@ export function DataAvailability({ projectId, siteName, document, canEdit, busy,
             <tbody>{meters.flatMap(meter => {
               const low = meter.status !== "not_in_use" && meter.availabilityPct < target;
               const row = <tr key={meter.meterPointId}>
-                <td><span className={styles.name}><b>{meter.name}</b>{meter.location && <small>{meter.location}</small>}{meter.checks.map(check => <small key={check.from} className={styles.flag}>{checkText(meter, check, true)}</small>)}</span></td>
+                <td><span className={styles.name}><b>{meter.name}</b>{meter.location && <small>{meter.location}</small>}{meter.checks.map(check => <small key={check.from} className={quietNote(meter, check) ? undefined : styles.flag}>{checkText(meter, check, true)}</small>)}</span></td>
                 <td><span className={styles.received}>
                   <span className={`${styles.bar} ${low ? styles.barLow : ""}`} aria-hidden="true"><span style={{ width: `${Math.min(100, meter.availabilityPct)}%` }} /><i className={styles.target} style={{ left: `${target}%` }} /></span>
                   <b>{number(meter.availabilityPct)}%</b>
@@ -159,16 +165,18 @@ export function DataAvailability({ projectId, siteName, document, canEdit, busy,
                   {meter.days.map((kind, index) => <i key={index} data-day={kind} title={t("day.title", { date: shortDay(shiftDay(data.from, index)), status: t(`day.${kind}`) })} />)}
                 </span>}</td>}
                 <td className={styles.number}>{meter.longestOutageHours >= 1 ? t("hours", { hours: number(meter.longestOutageHours) }) : <span className={styles.quiet}>{t("none")}</span>}</td>
-                <td className={styles.number}>{meter.estimatedKwh > 0 ? t("kwh", { kwh: number(meter.estimatedKwh, 2) }) : <span className={styles.quiet}>—</span>}</td>
+                <td className={styles.number}>{meter.estimatedKwh > 0 ? <span title={t("estimated.cell", { kwh: number(meter.estimatedKwh, 2) })}><span aria-hidden="true">{t("kwh", { kwh: number(meter.estimatedKwh, 2) })}</span><span className="sr-only">{t("estimated.cell", { kwh: number(meter.estimatedKwh, 2) })}</span></span> : <span className={styles.quiet}>—</span>}</td>
                 <td>{meter.lastReadingAt ? when(meter.lastReadingAt) : <span className={styles.quiet}>—</span>}</td>
                 <td>{meter.offlineSince
                   ? <><span className={`${styles.badge} ${styles.badgeBad}`}><i aria-hidden="true" />{t("status.offline_now")}</span><small className={styles.note}>{t("offlineSince", { when: when(meter.offlineSince) })}</small></>
-                  : <span className={`${styles.badge} ${badgeClass(meter.status)}`}><i aria-hidden="true" />{statusText(meter.status)}</span>}{meter.notInUse && <small className={styles.note}>{reasonText(meter.notInUse)}</small>}</td>
+                  : <span className={`${styles.badge} ${badgeClass(meter.status)}`}><i aria-hidden="true" />{statusText(meter.status, meter)}</span>}{meter.notInUse && <small className={styles.note}>{reasonText(meter.notInUse)}</small>}{meter.status === "idle" && !meter.offlineSince && <small className={styles.note}>{t("idle.note")}</small>}</td>
+                {/* A meter only using nothing (idle) is in use, just rarely, so it is not offered "Mark not in use". */}
                 {canEdit && <td className={styles.actionCell}>{meter.status === "not_in_use"
                   ? <button type="button" className={styles.rowAction} disabled={busy} onClick={() => save(meter, null)}>{t("action.inUse")}</button>
+                  : meter.status === "idle" ? null
                   : <button type="button" className={styles.rowAction} disabled={busy} aria-expanded={editing?.meterId === meter.meterPointId} onClick={() => setEditing(editing?.meterId === meter.meterPointId ? null : { meterId: meter.meterPointId, other: false, reason: "" })}>{t("action.notInUse")}</button>}</td>}
               </tr>;
-              if (editing?.meterId !== meter.meterPointId) return [row];
+              if (editing?.meterId !== meter.meterPointId || meter.status === "idle") return [row];
               return [row, <tr key={`${meter.meterPointId}-edit`} className={styles.pickerRow}><td colSpan={columns}>
                 <div className={styles.picker} role="group" aria-label={t("notInUse.pick")}>
                   <span className={styles.pickLabel}>{t("notInUse.pick")}</span>
@@ -197,9 +205,11 @@ export function DataAvailability({ projectId, siteName, document, canEdit, busy,
           <tbody>{data.outages.map(outage => <tr key={`${outage.meterPointId}-${outage.from}`}>
             <td><span className={styles.name}><b>{outage.name}</b>{locations.get(outage.meterPointId) && <small>{locations.get(outage.meterPointId)}</small>}</span></td>
             <td>{when(outage.from)}</td>
-            <td>{outage.ongoing ? <span className={`${styles.badge} ${styles.badgeWarn}`}><i aria-hidden="true" />{t("outage.ongoing")}</span> : when(outage.to)}</td>
+            <td>{outage.idle ? <span className={`${styles.badge} ${styles.badgeMuted}`}><i aria-hidden="true" />{t("outage.stillIdle")}</span> : outage.ongoing ? <span className={`${styles.badge} ${styles.badgeWarn}`}><i aria-hidden="true" />{t("outage.ongoing")}</span> : when(outage.to)}</td>
             <td className={styles.number}>{t("hours", { hours: number(outage.hours) })}</td>
-            <td>{outage.kind === "estimated"
+            <td>{outage.idle
+              ? <><span className={`${styles.badge} ${styles.badgeMuted}`}>{t("kind.idle")}</span><small className={styles.note}>{t("outage.idleNote")}</small></>
+              : outage.kind === "estimated"
               ? <><span className={`${styles.badge} ${styles.badgeMuted}`}>{t("kind.estimated")}</span><small className={styles.note}>{t("outage.estimatedShort", { kwh: number(outage.estimatedKwh, 2) })}</small></>
               : <span className={`${styles.badge} ${styles.badgeBad}`}>{t("kind.missing")}</span>}</td>
           </tr>)}</tbody>
