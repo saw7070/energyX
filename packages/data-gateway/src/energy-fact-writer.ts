@@ -1373,13 +1373,19 @@ const rebuildProjectCumulativeQualityEvents = async (
 export const TUYA_OUTAGE_MIN_HOURS = 3;
 export const TUYA_OUTAGE_MIN_KWH = 0.05;
 /**
- * A lighting circuit is idle all day and its meter, still online, sends nothing because its total does not move. The
- * evening's first reading then carries only what the lights used since the last hourly report slot. When that is no
- * more than this many of the meter's busiest hours, the spell was idle, not an outage: nothing was used until the final
- * hour, which holds the whole delta. Real outages carry far more than one hour's worth.
+ * A lighting circuit is idle all day and its meter sends nothing: its total does not move, or the meter loses power with
+ * its lights. The evening's first reading then carries only what the lights used since they came back on. When that is
+ * no more than this many of the meter's busiest hours, the spell was idle, not an outage: nothing was used until the
+ * final report slot, which holds the whole delta. Real outages carry far more than one hour's worth.
+ *
+ * The busiest hour is a rate (kWh per hour) from readings 10-90 minutes apart, so a meter that reports every 15 minutes
+ * is measured as fairly as one that reports hourly. The final slot is the meter's usual reporting interval, at most an
+ * hour, so a 15-minute meter's evening reading is not spread back over an hour before the lights came on.
  */
 export const TUYA_IDLE_CLOSING_MAX_HOURLY_PEAKS = 1.5;
 const TUYA_REPORT_SLOT_MS = 3_600_000;
+const TUYA_RATE_MIN_PAIR_MS = 600_000;
+const TUYA_RATE_MAX_PAIR_MS = 5_400_000;
 
 const rebuildProjectEventCumulativeIntervals = async (
   connection: DuckDbModule.Connection,
@@ -1408,9 +1414,12 @@ const rebuildProjectEventCumulativeIntervals = async (
       SELECT *,
         elapsed_milliseconds > ${TUYA_OUTAGE_MIN_HOURS * 3_600_000}
           AND raw_delta_kwh >= ${TUYA_OUTAGE_MIN_KWH} AS is_quiet_with_use,
-        MAX(CASE WHEN elapsed_milliseconds BETWEEN 1800000 AND 5400000 THEN raw_delta_kwh END) OVER (
+        MAX(CASE WHEN elapsed_milliseconds BETWEEN ${TUYA_RATE_MIN_PAIR_MS} AND ${TUYA_RATE_MAX_PAIR_MS} AND raw_delta_kwh > 0
+          THEN raw_delta_kwh * ${TUYA_REPORT_SLOT_MS}.0 / elapsed_milliseconds END) OVER (
           PARTITION BY project_id, resource, meter_node_id
-        ) AS hourly_peak_kwh
+        ) AS hourly_peak_kwh,
+        CAST(LEAST(${TUYA_REPORT_SLOT_MS}, COALESCE(MEDIAN(CASE WHEN elapsed_milliseconds BETWEEN 60000 AND ${TUYA_RATE_MAX_PAIR_MS}
+          THEN elapsed_milliseconds END) OVER (PARTITION BY project_id, resource, meter_node_id), ${TUYA_REPORT_SLOT_MS})) AS BIGINT) AS report_slot_ms
       FROM pair_values
     )
     SELECT * EXCLUDE (is_quiet_with_use, hourly_peak_kwh),
@@ -1428,20 +1437,20 @@ const rebuildProjectEventCumulativeIntervals = async (
     FROM classified
   `, [projectId]);
 
-  // An idle spell becomes two segments: nothing used until the final report slot, then the whole delta in it.
+  // An idle spell becomes two segments: nothing used until the meter's final report slot, then the whole delta in it.
   await duckDbRun(connection, `
     CREATE OR REPLACE TEMP TABLE canonical_event_segments AS
     SELECT * FROM canonical_event_pairs WHERE NOT is_idle_then_use
     UNION ALL BY NAME
     SELECT * REPLACE (
-      event_time - INTERVAL '1 hour' AS event_time,
-      elapsed_milliseconds - ${TUYA_REPORT_SLOT_MS} AS elapsed_milliseconds,
+      event_time - report_slot_ms * INTERVAL '1 millisecond' AS event_time,
+      elapsed_milliseconds - report_slot_ms AS elapsed_milliseconds,
       CAST(0 AS DOUBLE) AS raw_delta_kwh
     ) FROM canonical_event_pairs WHERE is_idle_then_use
     UNION ALL BY NAME
     SELECT * REPLACE (
-      event_time - INTERVAL '1 hour' AS previous_event_time,
-      CAST(${TUYA_REPORT_SLOT_MS} AS BIGINT) AS elapsed_milliseconds
+      event_time - report_slot_ms * INTERVAL '1 millisecond' AS previous_event_time,
+      report_slot_ms AS elapsed_milliseconds
     ) FROM canonical_event_pairs WHERE is_idle_then_use
   `);
 
