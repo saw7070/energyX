@@ -190,7 +190,7 @@ export const lastSentText = (iso: string, timezone: string, locale: EnergyIqLoca
 /** Findings that ask the reader to do something are drawn to be noticed; the rest simply report. */
 const needsAttention = (finding: Finding) => finding.icon === "alert" || finding.icon === "info";
 /** Deterministic, plain-language highlights. Savings are framed as questions to check, never as proven waste. */
-export function siteFindings({ rows, stats, shares, siteKwh, rate, openingHours, board = null, locale = "en", timezone, notInUse = new Set(), periodDays = 28 }: { rows: DeviceRow[]; stats: Map<string, DeviceStatistics>; shares: EnergyShare[]; siteKwh: number; rate: number | null; openingHours: string | null; /** The board's name when the figures cover one board; the whole site otherwise. */ board?: string | null; locale?: EnergyIqLocale; timezone?: string; /** Meters someone confirmed are not in use: their silence is not a problem. */ notInUse?: ReadonlySet<string>; /** Days the figures cover: shorter than 28 for a site that started sending recently. */ periodDays?: number }): Finding[] {
+export function siteFindings({ rows, stats, shares, siteKwh, rate, openingHours, board = null, locale = "en", timezone, notInUse = new Set(), alwaysOn: byDesign = new Set(), periodDays = 28 }: { rows: DeviceRow[]; stats: Map<string, DeviceStatistics>; shares: EnergyShare[]; siteKwh: number; rate: number | null; openingHours: string | null; /** The board's name when the figures cover one board; the whole site otherwise. */ board?: string | null; locale?: EnergyIqLocale; timezone?: string; /** Meters someone confirmed are not in use: their silence is not a problem. */ notInUse?: ReadonlySet<string>; /** Meters ticked "Always on by design": running day and night is expected, so never a cost to cut. */ alwaysOn?: ReadonlySet<string>; /** Days the figures cover: shorter than 28 for a site that started sending recently. */ periodDays?: number }): Finding[] {
   const t = translatorFor(deviceMessages, locale);
   const { kwh, kw, pct, sgd } = numberFormats(locale);
   const findings: Finding[] = [];
@@ -198,7 +198,9 @@ export function siteFindings({ rows, stats, shares, siteKwh, rate, openingHours,
   const days = dayCountText(periodDays, locale);
   const top = shares.find(share => !share.unmetered);
   if (top && siteKwh > 0) findings.push({ icon: "bolt", title: t("finding.biggest.title", { name: top.name }), detail: t(board === null ? "finding.biggest.site" : "finding.biggest.board", { pct: pct(top.kwh / siteKwh * 100), board: board ?? "", kwh: kwh(top.kwh), money: money(top.kwh), days }) });
-  const devices = rows.filter(row => !row.isBoardTotal && stats.has(row.id));
+  // A meter always on by design (emergency lighting) is meant to run at every hour: never named as running after hours
+  // or as never switching off, as the reports and Analysis leave it out of daytime use and savings.
+  const devices = rows.filter(row => !row.isBoardTotal && stats.has(row.id) && !byDesign.has(row.id));
   const afterHours = devices.map(row => ({ row, stat: stats.get(row.id)! })).filter(item => item.stat.outOfHoursKwh !== null && (item.stat.outOfHoursPct ?? 0) >= 50).sort((a, b) => b.stat.outOfHoursKwh! - a.stat.outOfHoursKwh!)[0];
   if (afterHours) findings.push({ icon: "alert", title: t("finding.afterHours.title", { name: afterHours.row.name }), detail: t("finding.afterHours.detail", { kwh: kwh(afterHours.stat.outOfHoursKwh!), pct: pct(afterHours.stat.outOfHoursPct!), hours: openingHours ?? t("operatingHours"), money: money(afterHours.stat.outOfHoursKwh!) }) });
   const alwaysOn = devices.map(row => ({ row, kw: stats.get(row.id)!.alwaysOnKw ?? 0 })).filter(item => item.kw >= 0.05 && item.row.id !== afterHours?.row.id).sort((a, b) => b.kw - a.kw)[0];
@@ -262,15 +264,17 @@ const SPECIAL_DAY_KINDS: DayKind[] = ["public_holiday", "special_closure", "spec
 export const boardTotalNote = (type: string, locale: EnergyIqLocale = "en") => translatorFor(deviceMessages, locale)(type === "Lighting" ? "boardTotal.lighting" : type === "Power" ? "boardTotal.power" : "boardTotal.other");
 
 /** Plain-language highlights for one device. Framed as things to check, never as proven waste. */
-export function deviceFindings({ row, stat, rate, openingHours, locale = "en", timezone }: { row: DeviceRow; stat: DeviceStatistics; rate: number | null; openingHours: string | null; locale?: EnergyIqLocale; timezone?: string }): Finding[] {
+export function deviceFindings({ row, stat, rate, openingHours, locale = "en", timezone, alwaysOnByDesign = false }: { row: DeviceRow; stat: DeviceStatistics; rate: number | null; openingHours: string | null; locale?: EnergyIqLocale; timezone?: string; /** Ticked "Always on by design": running day and night is expected, so said so instead of offered as a cost. */ alwaysOnByDesign?: boolean }): Finding[] {
   const t = translatorFor(deviceMessages, locale);
   const { kwh, kw, pct, sgd } = numberFormats(locale);
   const findings: Finding[] = [];
   const money = (kwh: number) => rate ? t("money.about", { amount: sgd(kwh * rate) }) : "";
   if (row.isBoardTotal) findings.push({ icon: "info", title: t("finding.boardTotal.title"), detail: t("finding.boardTotal.detail", { note: boardTotalNote(row.type, locale) }) });
-  if (stat.outOfHoursKwh !== null && (stat.outOfHoursPct ?? 0) >= 50) findings.push({ icon: "alert", title: t("finding.deviceAfterHours.title"), detail: t("finding.afterHours.detail", { kwh: kwh(stat.outOfHoursKwh), pct: pct(stat.outOfHoursPct!), hours: openingHours ?? t("operatingHours"), money: money(stat.outOfHoursKwh) }) });
-  if (stat.alwaysOnKw !== null && stat.alwaysOnKw >= 0.05 && stat.dailyAverageKwh && stat.alwaysOnKw * 24 >= stat.dailyAverageKwh * 0.6) findings.push({ icon: "bolt", title: t("finding.deviceAlwaysOn.title"), detail: rate ? t("finding.deviceAlwaysOn.detailCost", { kw: kw(stat.alwaysOnKw), kwh: kwh(stat.alwaysOnKw * 24), amount: sgd(stat.alwaysOnKw * 24 * 365 * rate) }) : t("finding.deviceAlwaysOn.detail", { kw: kw(stat.alwaysOnKw), kwh: kwh(stat.alwaysOnKw * 24) }) });
-  if (stat.openDays > 0 && stat.closedDays > 0 && stat.openDayAverageKwh && stat.closedDayAverageKwh !== null && stat.closedDayAverageKwh / stat.openDayAverageKwh >= 0.7) findings.push({ icon: "alert", title: t("finding.closedBusy.title"), detail: t("finding.closedBusy.detail", { closed: kwh(stat.closedDayAverageKwh), pct: pct(stat.closedDayAverageKwh / stat.openDayAverageKwh * 100), open: kwh(stat.openDayAverageKwh) }) });
+  // Running after hours, never switching off and busy closed days are all what such a meter is meant to do.
+  if (alwaysOnByDesign) findings.push({ icon: "meter", title: t("finding.byDesign.title"), detail: t("finding.byDesign.detail") });
+  else if (stat.outOfHoursKwh !== null && (stat.outOfHoursPct ?? 0) >= 50) findings.push({ icon: "alert", title: t("finding.deviceAfterHours.title"), detail: t("finding.afterHours.detail", { kwh: kwh(stat.outOfHoursKwh), pct: pct(stat.outOfHoursPct!), hours: openingHours ?? t("operatingHours"), money: money(stat.outOfHoursKwh) }) });
+  if (!alwaysOnByDesign && stat.alwaysOnKw !== null && stat.alwaysOnKw >= 0.05 && stat.dailyAverageKwh && stat.alwaysOnKw * 24 >= stat.dailyAverageKwh * 0.6) findings.push({ icon: "bolt", title: t("finding.deviceAlwaysOn.title"), detail: rate ? t("finding.deviceAlwaysOn.detailCost", { kw: kw(stat.alwaysOnKw), kwh: kwh(stat.alwaysOnKw * 24), amount: sgd(stat.alwaysOnKw * 24 * 365 * rate) }) : t("finding.deviceAlwaysOn.detail", { kw: kw(stat.alwaysOnKw), kwh: kwh(stat.alwaysOnKw * 24) }) });
+  if (!alwaysOnByDesign && stat.openDays > 0 && stat.closedDays > 0 && stat.openDayAverageKwh && stat.closedDayAverageKwh !== null && stat.closedDayAverageKwh / stat.openDayAverageKwh >= 0.7) findings.push({ icon: "alert", title: t("finding.closedBusy.title"), detail: t("finding.closedBusy.detail", { closed: kwh(stat.closedDayAverageKwh), pct: pct(stat.closedDayAverageKwh / stat.openDayAverageKwh * 100), open: kwh(stat.openDayAverageKwh) }) });
   if (row.stoppedAt && timezone) findings.push({ icon: "alert", title: t("finding.deviceStopped.title"), detail: t("finding.deviceStopped.detail", { when: lastSentText(row.stoppedAt, timezone, locale) }) });
   if (row.idleSince && timezone) findings.push({ icon: "meter", title: t("finding.deviceIdle.title", { when: lastSentText(row.idleSince, timezone, locale) }), detail: t("finding.deviceIdle.detail") });
   if (stat.receivedPct < COMPLETE_COVERAGE_PCT) findings.push({ icon: "info", title: t("finding.missing.title"), detail: t("finding.missing.detail", { pct: pct(stat.receivedPct) }) });
@@ -491,7 +495,7 @@ function DevicePicker({ rows, boardName, value, onPick }: { rows: DeviceRow[]; b
   </div>;
 }
 
-export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: { projectId: string; boardNames: Map<string, string>; boardParents?: Map<string, string>; notInUse?: ReadonlySet<string> }) {
+export function SiteDevices({ projectId, boardNames, boardParents, notInUse, alwaysOn }: { projectId: string; boardNames: Map<string, string>; boardParents?: Map<string, string>; notInUse?: ReadonlySet<string>; /** Meters ticked "Always on by design". */ alwaysOn?: ReadonlySet<string> }) {
   const t = useMessages(deviceMessages);
   const tChart = useMessages(chartMessages);
   const { locale } = useEnergyIqLocale();
@@ -629,7 +633,7 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
     const scopeName = isSite ? t("scope.site") : label;
     const scopeKwh = analysis.summary.usageKwh;
     const shares = energyBreakdown(rows, boardNames, locale, boardParents);
-    const findings = siteFindings({ rows, stats, shares, siteKwh: scopeKwh, rate, openingHours, board: isSite ? null : boardName(boardId), locale, timezone: summary.timezone, periodDays, ...(notInUse ? { notInUse } : {}) });
+    const findings = siteFindings({ rows, stats, shares, siteKwh: scopeKwh, rate, openingHours, board: isSite ? null : boardName(boardId), locale, timezone: summary.timezone, periodDays, ...(notInUse ? { notInUse } : {}), ...(alwaysOn ? { alwaysOn } : {}) });
     const dailyAverage = analysis.summary.averageDailyUsageKwh;
     const offHours = analysis.offHours.status === "available" ? analysis.offHours : null;
     const peakAt = peakText(analysis.summary.peakAt);
@@ -763,7 +767,7 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse }: {
       </span>
     </div>;
     if (!stat || row.usageKwh === null) return <>{nav}<p className={styles.emptyDevice}>{t("device.noReadings", { name: row.name, period })}</p></>;
-    const findings = deviceFindings({ row, stat, rate, openingHours, locale, timezone: summary.timezone });
+    const findings = deviceFindings({ row, stat, rate, openingHours, locale, timezone: summary.timezone, alwaysOnByDesign: !!alwaysOn?.has(row.id) });
     const profileMax = niceMax(Math.max(0, ...stat.openProfileKw.map(value => value ?? 0), ...stat.closedProfileKw.map(value => value ?? 0)));
     const byDay = hourlyByDay(loaded.cells.get(row.id) ?? [], loaded.dates);
     // An hour only partly received shows its kW worked out from that part, but the kWh it really recorded.

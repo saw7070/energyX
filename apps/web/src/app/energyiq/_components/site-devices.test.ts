@@ -105,6 +105,15 @@ describe("siteFindings", () => {
     expect(findings[3]!.detail).toContain("Director Room Power");
     expect(findings[0]!.detail).toContain("in these 28 days.");
   });
+  it("never offers a meter ticked always on by design as running after hours or as a baseline cost", () => {
+    const rows = summariseDevices(analysis).rows;
+    const stat = (outOfHoursPct: number, alwaysOnKw: number) => ({ outOfHoursKwh: 300, outOfHoursPct, alwaysOnKw }) as DeviceStatistics;
+    const stats = new Map([["conow", stat(70, 0.5)], ["tv", stat(10, 0.2)]]);
+    const titles = (alwaysOn: Set<string>) => siteFindings({ rows, stats, shares: energyBreakdown(rows, new Map()), siteKwh: 2309.07, rate: 0.3191, openingHours: "Mon–Fri 09:00–18:00", alwaysOn }).map(finding => finding.title);
+    // The biggest user is still named; what never switches off moves to the next meter that could switch off.
+    expect(titles(new Set(["conow"]))).toEqual(["Showroom Conow is the biggest single user", "TV Meeting Room 2 never really switches off", "1 device sent no readings"]);
+    expect(titles(new Set(["conow", "tv"])).join(" ")).not.toMatch(/after working hours|never really switches off/);
+  });
   it("names the meters that stopped sending and when the first one went quiet", () => {
     const rows = summariseDevices({
       ...analysis,
@@ -171,6 +180,17 @@ describe("deviceFindings", () => {
     expect(findings[0]!.title).toBe("This meter stopped sending");
     expect(findings[0]!.detail).toContain("23 Sept, 4:45 pm");
     expect(findings[0]!.icon).toBe("alert");
+  });
+
+  it("says a meter ticked always on by design is expected to run day and night, and offers no saving on it", () => {
+    const busy = { ...base, outOfHoursKwh: 360, outOfHoursPct: 72, alwaysOnKw: 0.7, closedDayAverageKwh: 17 };
+    const findings = deviceFindings({ row, stat: busy, rate: 0.3, openingHours: "Mon–Fri 09:00–18:00", alwaysOnByDesign: true });
+    expect(findings.map(item => item.title)).toEqual(["Always on by design"]);
+    expect(findings[0]!.detail).toBe("It is meant to run day and night, so this is expected and not counted as a saving.");
+    expect(findings.map(item => item.detail).join(" ")).not.toMatch(/SGD|a year/);
+    // Missing readings are still said.
+    expect(deviceFindings({ row, stat: { ...busy, receivedPct: 90 }, rate: 0.3, openingHours: null, alwaysOnByDesign: true }).map(item => item.title)).toEqual(["Always on by design", "Some readings are missing"]);
+    for (const locale of ["zh-Hans", "ms"] as const) expect(deviceFindings({ row, stat: busy, rate: 0.3, openingHours: null, locale, alwaysOnByDesign: true })[0]!.title).toBe(locale === "ms" ? "Sentiasa hidup mengikut reka bentuk" : "按设计一直开着");
   });
 
   it("explains that a board total overlaps its devices", () => {
