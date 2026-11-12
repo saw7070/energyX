@@ -98,7 +98,10 @@ it("writes the scheduled report in the chosen style and marks only the managemen
   expect(review.run.prompt).toContain("Monthly site management review");
   const html = readFileSync(join(root, review.run.id, "accepted-output.txt"), "utf8");
   expect(html).toContain("Harbour Estate Energy Review");
-  expect(html).toContain("Block 12B against Block 12A");
+  // The blocks sit in their saved order (here, the order listed), as Facility shows them; the finding still names the
+  // block that uses more.
+  expect(html).toContain("Block 12A against Block 12B");
+  expect(html.replace(/<[^>]+>/g, "")).toMatch(/Block 12B uses \d+% more than Block 12A/);
   const snapshot = parseSiteReportSnapshot(JSON.parse(readFileSync(join(root, review.run.id, "outputs", "site-report-input.json"), "utf8")));
   expect(snapshot.style).toBe("management");
   expect(snapshot.cadence).toBe("monthly");
