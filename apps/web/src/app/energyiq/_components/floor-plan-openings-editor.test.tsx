@@ -59,10 +59,10 @@ describe("doors and windows in the editor", () => {
     await view.drag(door(), [460, 140], [520, 170]);
     let saved = await view.save();
     const pantry = saved.layout.rooms.find(room => room.name === "Pantry")!;
-    expect(pantry).toMatchObject({ autoDoor: false });
+    expect(pantry).toMatchObject({ autoDoor: false, id: expect.stringMatching(/^rm-/) });
     expect(saved.layout.rooms.find(room => room.name === "Showroom")).not.toHaveProperty("autoDoor");
     expect(saved.layout.openings).toHaveLength(1);
-    expect(saved.layout.openings![0]).toMatchObject({ room: "Pantry", wall: "e", kind: "door", hinge: "end", swing: "out" });
+    expect(saved.layout.openings![0]).toMatchObject({ room: (pantry as { id?: string }).id, wall: "e", kind: "door", hinge: "end", swing: "out" });
     expect(saved.layout.openings![0]!.offset).toBeGreaterThan(0.6);
     // Undo puts it back where it was; delete takes it away.
     await act(async () => view.button("Undo").click());
@@ -71,6 +71,8 @@ describe("doors and windows in the editor", () => {
     expect(view.canvas().querySelector("[data-opening]")).toBeNull();
     saved = await view.save();
     expect(saved.layout.openings).toEqual([]);
+    // Its own door gone, the room gets its automatic door back.
+    expect(saved.layout.rooms.find(room => room.name === "Pantry")).not.toHaveProperty("autoDoor");
     await view.unmount();
   });
 
@@ -87,7 +89,41 @@ describe("doors and windows in the editor", () => {
     expect(auto().disabled).toBe(true);
     expect(view.button("Door · Bottom")).toBeDefined();
     const saved = await view.save();
-    expect(saved.layout.openings![0]).toMatchObject({ room: "Showroom", wall: "s", offset: 0.5, kind: "door" });
+    const showroom = saved.layout.rooms.find(room => room.name === "Showroom") as { id?: string };
+    expect(saved.layout.openings![0]).toMatchObject({ room: showroom.id, wall: "s", offset: 0.5, kind: "door" });
+    await view.unmount();
+  });
+
+  it("keeps focus in the editor on the door added or picked from a room's panel, so its keys keep working", async () => {
+    const view = await render();
+    const tile = [...view.canvas().querySelectorAll("g")].find(item => item.querySelector("text")?.textContent === "Showroom")!;
+    await view.click(tile, [60, 100]);
+    await act(async () => { view.button("+ Add door").focus(); view.button("+ Add door").click(); });
+    expect(document.activeElement?.getAttribute("data-item")).toBe("opening:op-1");
+    // Delete works straight away, from the door that has focus.
+    await view.press("Delete", document.activeElement!);
+    expect(view.canvas().querySelector("[data-opening]")).toBeNull();
+    await act(async () => view.button("Undo").click());
+    await view.click(tile, [60, 100]);
+    await act(async () => view.button("Door · Bottom").click());
+    expect(view.heading()).toBe("Door or window");
+    expect(document.activeElement?.getAttribute("data-item")).toBe("opening:op-1");
+    await view.unmount();
+  });
+
+  it("leaves a locked room's doors as they are", async () => {
+    const view = await render();
+    const tile = [...view.canvas().querySelectorAll("g")].find(item => item.querySelector("text")?.textContent === "Showroom")!;
+    await view.click(tile, [60, 100]);
+    await act(async () => view.button("+ Add door").click());
+    await view.click(tile, [60, 100]);
+    await act(async () => view.button("Lock in place").click());
+    expect(view.button("+ Add door").disabled).toBe(true);
+    await act(async () => view.button("Door · Bottom").click());
+    const panel = view.host.querySelector('[data-panel="opening"]')!;
+    expect([...panel.querySelectorAll("select")].every(item => item.disabled)).toBe(true);
+    expect(view.button("Delete door or window").disabled).toBe(true);
+    expect(panel.textContent).toContain("This room is locked");
     await view.unmount();
   });
 });
@@ -119,6 +155,50 @@ describe("walls and lines in the editor", () => {
     expect(view.canvas().querySelector("[data-point]")).toBeNull();
     const saved = await view.save();
     expect(saved.layout.lines).toEqual([{ id: "ln-1", points: [[100, 560], [300, 600]], style: "fence", locked: true }]);
+    await view.unmount();
+  });
+
+  it("finishes a line with the Finish line button, and adds a point from the panel (for touch screens)", async () => {
+    const view = await render();
+    await act(async () => view.button("+ Wall / line").click());
+    expect(view.button("Finish line").disabled).toBe(true);
+    await view.click(view.canvas(), [100, 560]);
+    await view.click(view.canvas(), [300, 560]);
+    await act(async () => view.button("Finish line").click());
+    expect(view.heading()).toBe("Wall or line");
+    expect(view.canvas().querySelector("[data-line] polyline")?.getAttribute("points")).toBe("100,560 300,560");
+    await act(async () => view.button("Add point").click());
+    expect(view.canvas().querySelector("[data-line] polyline")?.getAttribute("points")).toBe("100,560 200,560 300,560");
+    expect(view.host.querySelector('[data-panel="line"]')?.textContent).toContain("2");
+    await view.unmount();
+  });
+
+  it("adds a point on a finger tap only, never from a finger that scrolls or pinches", async () => {
+    const view = await render();
+    await act(async () => view.button("+ Wall / line").click());
+    const touch = (type: string, x: number, y: number, pointerId = 1) => new PointerEvent(type, { bubbles: true, button: 0, clientX: x, clientY: y, pointerId, pointerType: "touch" });
+    const send = async (event: PointerEvent) => { await act(async () => { view.canvas().dispatchEvent(event); }); };
+    // A finger that moves on (a scroll) adds nothing.
+    await send(touch("pointerdown", 100, 560)); await send(touch("pointermove", 100, 600)); await send(touch("pointerup", 100, 600));
+    await send(touch("pointerdown", 100, 560)); await send(touch("pointerup", 100, 560));
+    await send(touch("pointerdown", 300, 560)); await send(touch("pointerup", 302, 561));
+    await act(async () => view.button("Finish line").click());
+    expect(view.canvas().querySelector("[data-line] polyline")?.getAttribute("points")).toBe("100,560 300,560");
+    await view.unmount();
+  });
+
+  it("Enter with no points adds a wall across the middle, for keyboard users", async () => {
+    const view = await render();
+    await act(async () => view.button("+ Wall / line").click());
+    await view.press("Enter");
+    expect(view.heading()).toBe("Wall or line");
+    const points = view.canvas().querySelector("[data-line] polyline")?.getAttribute("points")?.split(" ").map(point => point.split(",").map(Number));
+    expect(points).toHaveLength(2);
+    expect(points![0]![1]).toBe(points![1]![1]);
+    expect(points![1]![0]! - points![0]![0]!).toBeGreaterThan(200);
+    // The arrow keys then move it.
+    await view.press("ArrowDown");
+    expect(view.canvas().querySelector("[data-line] polyline")?.getAttribute("points")).not.toBe(points!.map(point => point.join(",")).join(" "));
     await view.unmount();
   });
 

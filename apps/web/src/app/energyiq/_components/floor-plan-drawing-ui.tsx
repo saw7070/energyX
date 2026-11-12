@@ -2,7 +2,7 @@
 import { memo, useState, type KeyboardEvent, type ReactNode } from "react";
 import { LINE_STYLES, LINE_THICKNESSES, OPENING_KINDS, SPATIAL_WALLS, type SpatialWall } from "@datafoundry/contracts";
 import { useMessages } from "./energyiq-locale";
-import { removePoint, restyleLine, type PlanLine } from "./floor-plan-lines";
+import { insertPoint, MAX_LINE_POINTS, midpointAfter, removePoint, restyleLine, type PlanLine } from "./floor-plan-lines";
 import { floorPlanMessages } from "./floor-plan-messages";
 import type { FloorPlan, PlanRoom, Point, Rect, Selection } from "./floor-plan-model";
 import { addOpening, flipOpening, isDoorLike, openingsOf, updateOpening, type PlanOpening } from "./floor-plan-openings";
@@ -56,23 +56,26 @@ const freeWall = (plan: FloorPlan, room: PlanRoom): SpatialWall => (["s", "n", "
 
 /**
  * In a room's panel: whether the plan draws a door for it by itself, its own doors and windows (each selects it), and a
- * button that adds a door. `commit` makes one undo step and selects what it is given.
+ * button that adds a door. `commit` makes one undo step and selects what it is given; `onPicked` puts focus on the door
+ * picked or added, since this panel (and the button pressed) goes away when it is selected. A locked room's doors stay as they are.
  */
-export function RoomDoors({ plan, room, commit, onSelect, onFull }: { plan: FloorPlan; room: PlanRoom; commit: (next: FloorPlan, selection?: Selection[]) => void; onSelect: (item: Selection) => void; onFull: () => void }) {
+export function RoomDoors({ plan, room, locked, commit, onSelect, onPicked, onFull }: { plan: FloorPlan; room: PlanRoom; locked: boolean; commit: (next: FloorPlan, selection?: Selection[]) => void; onSelect: (item: Selection) => void; onPicked: (item: Selection) => void; onFull: () => void }) {
   const t = useMessages(floorPlanMessages);
   const own = openingsOf(plan, room.key), hasDoor = own.some(item => isDoorLike(item.kind));
-  const setAuto = (on: boolean) => commit({ ...plan, rooms: plan.rooms.map(item => { if (item.key !== room.key) return item; const { autoDoor: _old, ...rest } = item; return on ? rest : { ...rest, autoDoor: false as const }; }) });
-  const add = () => { const result = addOpening(plan, room.key, freeWall(plan, room), 0.5); if (result) commit(result.plan, [{ kind: "opening", key: result.key }]); else onFull(); };
+  // Ticked or unticked by hand: the reader's choice, which deleting a door later never changes.
+  const setAuto = (on: boolean) => commit({ ...plan, rooms: plan.rooms.map(item => { if (item.key !== room.key) return item; const { autoDoor: _old, autoDoorOffByDoor: _by, ...rest } = item; return on ? rest : { ...rest, autoDoor: false as const }; }) });
+  const add = () => { const result = addOpening(plan, room.key, freeWall(plan, room), 0.5); if (!result) { onFull(); return; } const item: Selection = { kind: "opening", key: result.key }; commit(result.plan, [item]); onPicked(item); };
+  const pick = (item: Selection) => { onSelect(item); onPicked(item); };
   return <fieldset className={styles.doorsField}><legend>{t("panel.doors")}</legend>
-    <label className={styles.check}><input type="checkbox" checked={room.autoDoor !== false && !hasDoor} disabled={hasDoor} onChange={event => setAuto(event.target.checked)} />{t("panel.autoDoor")}</label>
+    <label className={styles.check}><input type="checkbox" checked={room.autoDoor !== false && !hasDoor} disabled={hasDoor || locked} onChange={event => setAuto(event.target.checked)} />{t("panel.autoDoor")}</label>
     <small>{t("panel.autoDoorHint")}</small>
-    {own.length > 0 && <ul className={styles.doorList}>{own.map(item => <li key={item.key}><button type="button" onClick={() => onSelect({ kind: "opening", key: item.key })}>{t(`opening.${item.kind}`)} · {t(`wall.${item.wall}`)}</button></li>)}</ul>}
-    <button type="button" className={styles.tool} onClick={add}>{t("panel.addDoor")}</button>
+    {own.length > 0 && <ul className={styles.doorList}>{own.map(item => <li key={item.key}><button type="button" onClick={() => pick({ kind: "opening", key: item.key })}>{t(`opening.${item.kind}`)} · {t(`wall.${item.wall}`)}</button></li>)}</ul>}
+    <button type="button" className={styles.tool} disabled={locked} onClick={add}>{t("panel.addDoor")}</button>
   </fieldset>;
 }
 
-/** The side panel for one door, double door, opening or window. */
-export function OpeningPanel({ plan, opening, commit, onDelete }: { plan: FloorPlan; opening: PlanOpening; commit: (next: FloorPlan) => void; onDelete: () => void }) {
+/** The side panel for one door, double door, opening or window; with its room locked, it only shows what the door is. */
+export function OpeningPanel({ plan, opening, locked, commit, onDelete }: { plan: FloorPlan; opening: PlanOpening; locked: boolean; commit: (next: FloorPlan) => void; onDelete: () => void }) {
   const t = useMessages(floorPlanMessages);
   const room = plan.rooms.find(item => item.key === opening.room);
   const change = (patch: Parameters<typeof updateOpening>[2]) => commit(updateOpening(plan, opening.key, patch));
@@ -80,27 +83,32 @@ export function OpeningPanel({ plan, opening, commit, onDelete }: { plan: FloorP
   return <div className={styles.panel} data-panel="opening">
     <h5>{t("panel.opening")}</h5>
     {room && <p>{t("panel.openingIn", { room: room.name })}</p>}
-    <label>{t("panel.openingKind")}<select value={opening.kind} onChange={event => change({ kind: event.target.value as PlanOpening["kind"] })}>{OPENING_KINDS.map(kind => <option key={kind} value={kind}>{t(`opening.${kind}`)}</option>)}</select></label>
-    <label>{t("panel.openingWall")}<select value={opening.wall} onChange={event => change({ wall: event.target.value as SpatialWall })}>{SPATIAL_WALLS.map(wall => <option key={wall} value={wall}>{t(`wall.${wall}`)}</option>)}</select></label>
-    <AmountField key={`width:${opening.key}`} label={t("panel.openingWidth")} value={opening.width} disabled={false} onCommit={width => change({ width })} />
-    {door && <label>{t("panel.swing")}<select value={opening.swing ?? "in"} onChange={event => change({ swing: event.target.value as "in" | "out" })}><option value="in">{t("swing.in")}</option><option value="out">{t("swing.out")}</option></select></label>}
-    {opening.kind === "door" && <label>{t("panel.hinge")}<select value={opening.hinge ?? "start"} onChange={event => change({ hinge: event.target.value as "start" | "end" })}><option value="start">{t("hinge.start")}</option><option value="end">{t("hinge.end")}</option></select></label>}
-    {door && <button type="button" className={styles.tool} title={t("panel.flipHint")} onClick={() => commit(flipOpening(plan, opening.key))}>{t("panel.flip")}</button>}
-    <p className={styles.hint}>{t("panel.openingHint")}</p>
-    <button type="button" className={styles.danger} onClick={onDelete}>{t("panel.deleteOpening")}</button>
+    <label>{t("panel.openingKind")}<select value={opening.kind} disabled={locked} onChange={event => change({ kind: event.target.value as PlanOpening["kind"] })}>{OPENING_KINDS.map(kind => <option key={kind} value={kind}>{t(`opening.${kind}`)}</option>)}</select></label>
+    <label>{t("panel.openingWall")}<select value={opening.wall} disabled={locked} onChange={event => change({ wall: event.target.value as SpatialWall })}>{SPATIAL_WALLS.map(wall => <option key={wall} value={wall}>{t(`wall.${wall}`)}</option>)}</select></label>
+    <AmountField key={`width:${opening.key}`} label={t("panel.openingWidth")} value={opening.width} disabled={locked} onCommit={width => change({ width })} />
+    {door && <label>{t("panel.swing")}<select value={opening.swing ?? "in"} disabled={locked} onChange={event => change({ swing: event.target.value as "in" | "out" })}><option value="in">{t("swing.in")}</option><option value="out">{t("swing.out")}</option></select></label>}
+    {opening.kind === "door" && <label>{t("panel.hinge")}<select value={opening.hinge ?? "start"} disabled={locked} onChange={event => change({ hinge: event.target.value as "start" | "end" })}><option value="start">{t("hinge.start")}</option><option value="end">{t("hinge.end")}</option></select></label>}
+    {door && <button type="button" className={styles.tool} disabled={locked} title={t("panel.flipHint")} onClick={() => commit(flipOpening(plan, opening.key))}>{t("panel.flip")}</button>}
+    <p className={styles.hint}>{locked ? t("panel.openingLocked") : t("panel.openingHint")}</p>
+    <button type="button" className={styles.danger} disabled={locked} onClick={onDelete}>{t("panel.deleteOpening")}</button>
   </div>;
 }
 
-/** The side panel for one line: its style and thickness, the point picked on it, and the shared actions. */
-export function LinePanel({ plan, line, locked, point, commit, onPointGone, actions, onDelete }: { plan: FloorPlan; line: PlanLine; locked: boolean; point: number | null; commit: (next: FloorPlan) => void; onPointGone: () => void; actions: ReactNode; onDelete: () => void }) {
+/**
+ * The side panel for one line: its style and thickness, the point picked on it, and the shared actions. Add point puts
+ * a point in the middle of the segment after the picked one (or of the longest), for touch screens and keyboards.
+ */
+export function LinePanel({ plan, line, locked, point, commit, onPointGone, onPointAdded, actions, onDelete }: { plan: FloorPlan; line: PlanLine; locked: boolean; point: number | null; commit: (next: FloorPlan) => void; onPointGone: () => void; onPointAdded: (index: number) => void; actions: ReactNode; onDelete: () => void }) {
   const t = useMessages(floorPlanMessages);
   const picked = point !== null && point < line.points.length ? point : null;
+  const addPoint = () => { const spot = midpointAfter(line.points, picked); if (!spot) return; const next = insertPoint(plan, line.key, spot.after, [Math.round(spot.at[0]), Math.round(spot.at[1])]); if (next === plan) return; commit(next); onPointAdded(spot.after + 1); };
   return <div className={styles.panel} data-panel="line">
     <h5>{t("panel.line")}</h5>
     <label>{t("panel.lineStyle")}<select value={line.style} disabled={locked} onChange={event => commit(restyleLine(plan, line.key, { style: event.target.value as PlanLine["style"] }))}>{LINE_STYLES.map(style => <option key={style} value={style}>{t(`line.${style}`)}</option>)}</select></label>
     <label>{t("panel.thickness")}<select value={line.thickness ?? "m"} disabled={locked} onChange={event => commit(restyleLine(plan, line.key, { thickness: event.target.value as NonNullable<PlanLine["thickness"]> }))}>{LINE_THICKNESSES.map(size => <option key={size} value={size}>{t(`thickness.${size}`)}</option>)}</select></label>
     <p className={styles.hint}>{t("panel.lineHint")}</p>
     {picked !== null && <small role="status">{t("a11y.point", { number: picked + 1, count: line.points.length })}</small>}
+    <button type="button" className={styles.tool} disabled={locked || line.points.length >= MAX_LINE_POINTS} onClick={addPoint}>{t("panel.addPoint")}</button>
     <button type="button" className={styles.tool} disabled={locked || picked === null || line.points.length <= 2} onClick={() => { if (picked === null) return; commit(removePoint(plan, line.key, picked)); onPointGone(); }}>{t("panel.deletePoint")}</button>
     {actions}
     <button type="button" className={styles.danger} disabled={locked} onClick={onDelete}>{t("panel.deleteLine")}</button>

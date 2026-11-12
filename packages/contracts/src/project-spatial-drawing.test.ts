@@ -11,11 +11,18 @@ describe("doors, windows and walls on a layout", () => {
     for (const bad of [{ ...good, wall: "up" }, { ...good, offset: 2 }, { ...good, width: -1 }, { ...good, width: Number.NaN }, { ...good, kind: "portal" }, { ...good, id: "<x>" }, { ...good, swing: "sideways" }, { ...good, room: "" }, null, "door"]) expect(isSpatialOpening(bad)).toBe(false);
     const line = { id: "ln-1", points: [[0, 0], [100, 0]], style: "wall" };
     expect(isSpatialLine(line)).toBe(true);
-    for (const bad of [{ ...line, points: [[0, 0]] }, { ...line, points: [[0, 0], [1e9, 0]] }, { ...line, points: [[0, 0], ["1", 2]] }, { ...line, style: "laser" }, { ...line, thickness: "xl" }, { ...line, points: Array.from({ length: 201 }, (_, i) => [i, i]) }]) expect(isSpatialLine(bad)).toBe(false);
-    expect(spatialOpenings({ openings: Array.from({ length: 500 }, (_, i) => ({ ...good, id: `op-${i}` })) })).toHaveLength(400);
+    for (const bad of [{ ...line, points: [[0, 0]] }, { ...line, points: [[0, 0], [1e9, 0]] }, { ...line, points: [[0, 0], ["1", 2]] }, { ...line, style: "laser" }, { ...line, thickness: "xl" }, { ...line, points: Array.from({ length: 25 }, (_, i) => [i, i]) }, { ...line, points: [[0, 0], [10001, 0]] }]) expect(isSpatialLine(bad)).toBe(false);
+    expect(spatialOpenings({ openings: Array.from({ length: 500 }, (_, i) => ({ ...good, id: `op-${i}` })) })).toHaveLength(200);
     expect(spatialLines({ lines: Array.from({ length: 150 }, (_, i) => ({ ...line, id: `ln-${i}` })) })).toHaveLength(100);
     expect(spatialLines({ lines: "nope" })).toEqual([]);
     expect(spatialOpenings(null)).toEqual([]);
+  });
+
+  it("keeps only the first entry of each id, so every reader draws the same list with unique keys", () => {
+    const good = { id: "op-1", room: "Store", wall: "e", offset: 0.5, width: 30, kind: "door" };
+    expect(spatialOpenings({ openings: [good, { ...good, wall: "n" }, { ...good, id: "op-2" }] }).map(item => [item.id, item.wall])).toEqual([["op-1", "e"], ["op-2", "e"]]);
+    const line = { id: "ln-1", points: [[0, 0], [100, 0]], style: "wall" };
+    expect(spatialLines({ lines: [{ ...line, id: "x", points: [[1]] }, line, { ...line, style: "fence" }, { ...line, id: "x" }] }).map(item => [item.id, item.style])).toEqual([["ln-1", "wall"], ["x", "wall"]]);
   });
 
   it("finds an opening's room by id, then by name, and keeps the opening on its wall", () => {

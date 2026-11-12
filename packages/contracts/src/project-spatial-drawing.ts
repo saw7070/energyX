@@ -18,17 +18,22 @@ export const LINE_STYLES = ["wall", "partition", "fence", "road"] as const;
 export type SpatialLineStyle = typeof LINE_STYLES[number];
 export const LINE_THICKNESSES = ["s", "m", "l"] as const;
 export type SpatialLineThickness = typeof LINE_THICKNESSES[number];
-/** A wall, partition, fence or road edge drawn as a line through `points` (2 to 200 of them). */
+/** A wall, partition, fence or road edge drawn as a line through `points` (2 to MAX_LINE_POINTS of them, each 0 to 10000). */
 export interface SpatialLine { id: string; points: Array<[number, number]>; style: SpatialLineStyle; thickness?: SpatialLineThickness; locked?: boolean }
 
-/** Most openings and lines a layout can hold, and most points one line can have. */
-export const MAX_OPENINGS = 400, MAX_LINES = 100, MAX_LINE_POINTS = 200;
+/**
+ * Most openings and lines a layout can hold, and most points one line can have. The layout is saved inside Project notes
+ * (at most 100,000 characters), so a plan with every list full still has to fit there beside the rest of the site.
+ */
+export const MAX_OPENINGS = 200, MAX_LINES = 100, MAX_LINE_POINTS = 24;
 /** An opening or line id: short letters, digits, - and _. */
 export const DRAWING_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const isOneOf = <T extends string>(list: readonly T[], value: unknown): value is T => (list as readonly unknown[]).includes(value);
 const isNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
-const coordinate = (value: unknown) => isNumber(value) && value >= 0 && value <= 10000;
+/** Largest coordinate a line point may have (points start at 0). */
+export const MAX_LINE_COORD = 10000;
+const coordinate = (value: unknown) => isNumber(value) && value >= 0 && value <= MAX_LINE_COORD;
 
 export function isSpatialOpening(value: unknown): value is SpatialOpening {
   if (!isRecord(value)) return false;
@@ -42,10 +47,17 @@ export function isSpatialLine(value: unknown): value is SpatialLine {
   return typeof id === "string" && DRAWING_ID.test(id) && Array.isArray(points) && points.length >= 2 && points.length <= MAX_LINE_POINTS && points.every(point => Array.isArray(point) && point.length === 2 && point.every(coordinate))
     && isOneOf(LINE_STYLES, style) && (thickness === undefined || isOneOf(LINE_THICKNESSES, thickness)) && (locked === undefined || typeof locked === "boolean");
 }
-/** The layout's openings that can be drawn (well formed, at most MAX_OPENINGS). */
-export const spatialOpenings = (layout: unknown): SpatialOpening[] => { const list = isRecord(layout) ? layout.openings : undefined; return Array.isArray(list) ? list.filter(isSpatialOpening).slice(0, MAX_OPENINGS) : []; };
-/** The layout's lines that can be drawn (well formed, at most MAX_LINES). */
-export const spatialLines = (layout: unknown): SpatialLine[] => { const list = isRecord(layout) ? layout.lines : undefined; return Array.isArray(list) ? list.filter(isSpatialLine).slice(0, MAX_LINES) : []; };
+/** The well-formed entries of a list, the first of each id only (ids are drawing keys), at most `max`. */
+function firstOfEach<T extends { id: string }>(list: unknown, valid: (value: unknown) => value is T, max: number): T[] {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set<string>(), kept: T[] = [];
+  for (const item of list) { if (kept.length >= max) break; if (!valid(item) || seen.has(item.id)) continue; seen.add(item.id); kept.push(item); }
+  return kept;
+}
+/** The layout's openings that can be drawn (well formed, one per id, at most MAX_OPENINGS). */
+export const spatialOpenings = (layout: unknown): SpatialOpening[] => firstOfEach(isRecord(layout) ? layout.openings : undefined, isSpatialOpening, MAX_OPENINGS);
+/** The layout's lines that can be drawn (well formed, one per id, at most MAX_LINES). */
+export const spatialLines = (layout: unknown): SpatialLine[] => firstOfEach(isRecord(layout) ? layout.lines : undefined, isSpatialLine, MAX_LINES);
 /** The room an opening belongs to: the one with its id, else the one with its name. */
 export function openingRoom<R extends { name: string }>(rooms: readonly R[], opening: { room: string }): R | undefined {
   return rooms.find(room => (room as { id?: unknown }).id === opening.room) ?? rooms.find(room => room.name === opening.room);

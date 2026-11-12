@@ -1,8 +1,8 @@
 import { readProjectSpatialReference, type ProjectSpatialReference } from "@datafoundry/contracts";
 import { translatorFor, type EnergyIqLocale } from "./energyiq-messages";
 import { floorPlanMessages } from "./floor-plan-messages";
-import { readLines, writeLines, lineBox, moveLine, type PlanLine } from "./floor-plan-lines";
-import { readOpenings, slideOpening, writeOpenings, type PlanOpening } from "./floor-plan-openings";
+import { readLines, writeLines, lineBox, moveLine, shiftLines, type PlanLine } from "./floor-plan-lines";
+import { markDoorRooms, readOpenings, removeOpening, slideOpening, writeOpenings, type PlanOpening } from "./floor-plan-openings";
 import { boardFilledIn, carriedOf, DEVICE_KEYS, ENTRANCE_KEYS, GROUP_KEYS, isRecord, LAYOUT_KEYS, ROLE_KEYS, ROOM_KEYS, sameNames, samePoint, sameRect, STANDALONE_ZONE_KEYS, withCarried, withoutCarried, withoutFilledBoard, ZONE_KEYS, type AreaBaseline, type Carried, type Json } from "./floor-plan-carry";
 
 /** [x, y, width, height] in plan units. */
@@ -23,7 +23,7 @@ export type PlanArea = { key: string; label: string; board: string; rect: Rect; 
  * `id` is the room's stable id, so later things (such as doors) can point at a room even after it is renamed. Only new
  * and copied rooms get one; a room saved without one keeps working by its name.
  */
-export type PlanRoom = { key: string; name: string; rect: Rect; area?: string; colour?: string; zone?: string; zoneRect?: Rect; id?: string; locked?: true; autoDoor?: false } & Carried;
+export type PlanRoom = { key: string; name: string; rect: Rect; area?: string; colour?: string; zone?: string; zoneRect?: Rect; id?: string; locked?: true; autoDoor?: false; autoDoorOffByDoor?: true } & Carried;
 /** A device on the plan: a dot at `position`, or, with `size`, a named box centred there (e.g. a bank of LED screens). */
 export type PlanDevice = { meterId: string; position: Point; size?: Point; colour?: string; locked?: true } & Carried;
 export type PlanEntrance = { label: string; position: Point } & Carried;
@@ -36,9 +36,10 @@ export type HiddenZone = { index: number; zone: Json; rooms?: string[] };
  * Layout-level things carried through a save: the saved key order, areas not on the drawing, where the entrance was
  * when the layout opened (for directions from it), and whether the layout had no device list. What the layout holds but
  * the editor cannot draw is kept as saved too: an entrance with no usable position (`rawEntrance`), device entries with
- * no meter or position (`devices`, at their place in the list) and a device list that is not a list (`rawDevices`).
+ * no meter or position (`devices`, at their place in the list) and a device list that is not a list (`rawDevices`), and
+ * door and line entries the editor cannot read (`openings`, `lines`: written back after its own).
  */
-export type CarriedLayout = { order?: string[]; zones?: HiddenZone[]; entrance?: Point | null; noDevices?: true; rawEntrance?: { value: unknown }; devices?: Array<{ index: number; device: unknown }>; rawDevices?: { value: unknown } };
+export type CarriedLayout = { order?: string[]; zones?: HiddenZone[]; entrance?: Point | null; noDevices?: true; rawEntrance?: { value: unknown }; devices?: Array<{ index: number; device: unknown }>; rawDevices?: { value: unknown }; openings?: unknown[]; lines?: unknown[] };
 /** `colours` holds a colour chosen for a board (board name → #rrggbb); boards without one use the automatic order. */
 /**
  * `editor` is the saved `layout.editor` block (grid and snap choices, see floor-plan-snap), kept as saved: only the editor
@@ -182,11 +183,15 @@ export function planFromReference(reference: StoredSpatialReference, locale: Ene
   const rawOpenings: unknown = (layout as { openings?: unknown }).openings, rawLines: unknown = (layout as { lines?: unknown }).lines;
   const drawing = [...(Array.isArray(rawOpenings) ? ["openings"] : []), ...(Array.isArray(rawLines) ? ["lines"] : [])];
   const { extra, order } = carriedOf(layout, [...LAYOUT_KEYS, ...(editor ? ["editor"] : []), ...drawing]);
+  // Entries the editor cannot read ride along as saved (a save never loses them).
+  const unreadOpenings: unknown[] = [], unreadLines: unknown[] = [];
+  const openings = Array.isArray(rawOpenings) ? readOpenings(rawOpenings, rooms, unreadOpenings) : undefined, lines = Array.isArray(rawLines) ? readLines(rawLines, layout.viewBox, unreadLines) : undefined;
   const carried: CarriedLayout = {
     ...(order ? { order } : {}), ...(hidden.length ? { zones: hidden } : {}), ...(layout.zones.some(zone => "directionFromEntrance" in zone) ? { entrance: entrance ? [...entrance.position] as Point : null } : {}), ...(rawDevices === undefined ? { noDevices: true as const } : {}),
     ...("entrance" in layout && !entrance ? { rawEntrance: { value: rawEntrance } } : {}), ...(skipped.length ? { devices: skipped } : {}), ...(rawDevices !== undefined && !Array.isArray(rawDevices) ? { rawDevices: { value: rawDevices } } : {}),
+    ...(unreadOpenings.length ? { openings: unreadOpenings } : {}), ...(unreadLines.length ? { lines: unreadLines } : {}),
   };
-  return { viewBox: [...layout.viewBox] as Rect, areas, rooms, devices, entrance, ...(Object.keys(colours).length ? { colours } : {}), ...((layout as { style?: unknown }).style !== undefined ? { style: planStyleOf(layout as { style?: unknown }) } : {}), ...(editor ? { editor } : {}), ...(extra ? { extra } : {}), ...(Object.keys(carried).length ? { carried } : {}), ...(Array.isArray(rawOpenings) ? { openings: readOpenings(rawOpenings, rooms) } : {}), ...(Array.isArray(rawLines) ? { lines: readLines(rawLines, layout.viewBox) } : {}) };
+  return { viewBox: [...layout.viewBox] as Rect, areas, rooms: openings ? markDoorRooms(rooms, openings) : rooms, devices, entrance, ...(Object.keys(colours).length ? { colours } : {}), ...((layout as { style?: unknown }).style !== undefined ? { style: planStyleOf(layout as { style?: unknown }) } : {}), ...(editor ? { editor } : {}), ...(extra ? { extra } : {}), ...(Object.keys(carried).length ? { carried } : {}), ...(openings ? { openings } : {}), ...(lines ? { lines } : {}) };
 }
 /** Areas the layout holds that are not on the drawing: kept as saved, listed for the reader. */
 export const hiddenZones = (plan: FloorPlan): Array<{ id: string; board: string }> => (plan.carried?.zones ?? []).map(({ zone }) => ({ id: String(zone.id), board: typeof zone.referenceBoard === "string" ? zone.referenceBoard : "" }));
@@ -221,12 +226,12 @@ export function settleRooms(plan: FloorPlan): FloorPlan {
   return changed ? { ...plan, rooms } : plan;
 }
 
-export const NO_PASSENGERS = () => ({ rooms: new Set<string>(), areas: new Set<string>(), devices: new Set<string>() });
+export const NO_PASSENGERS = () => ({ rooms: new Set<string>(), areas: new Set<string>(), devices: new Set<string>(), lines: new Set<string>() });
 /**
  * Items that ride along when an area or room is moved: the area's own rooms (not rooms of another area it overlaps),
- * the equipment groups inside those rooms, and the devices on them.
+ * the equipment groups inside those rooms, the devices on them, and the walls and lines drawn fully inside it.
  */
-export function passengers(plan: FloorPlan, selection: Selection): { rooms: Set<string>; areas: Set<string>; devices: Set<string> } {
+export function passengers(plan: FloorPlan, selection: Selection): ReturnType<typeof NO_PASSENGERS> {
   const host = selection.kind === "area" ? plan.areas.find(item => item.key === selection.key) : selection.kind === "room" ? plan.rooms.find(item => item.key === selection.key) : null;
   if (!host || (selection.kind === "area" && (host as PlanArea).insideRoom)) return NO_PASSENGERS();
   const rooms = selection.kind === "area" ? plan.rooms.filter(room => roomOwner(plan, room)?.key === host.key).map(room => room.key) : [];
@@ -239,7 +244,8 @@ export function passengers(plan: FloorPlan, selection: Selection): { rooms: Set<
   const devices = plan.devices.filter(item => riding.some(room => contains(room.rect, item.position))
     || (selection.kind === "area" && contains(host.rect, item.position) && !others.some(room => contains(room.rect, item.position)) && !otherAreas.some(other => contains(other.rect, item.position) && area(other.rect) < area(host.rect))))
     .map(item => item.meterId);
-  return { rooms: new Set(rooms), areas: new Set(areas), devices: new Set(devices) };
+  const [hx, hy, hw, hh] = host.rect, lines = (plan.lines ?? []).filter(line => line.points.every(([x, y]) => x >= hx && x <= hx + hw && y >= hy && y <= hy + hh)).map(line => line.key);
+  return { rooms: new Set(rooms), areas: new Set(areas), devices: new Set(devices), lines: new Set(lines) };
 }
 
 /** Moves the selection (and anything inside it) by dx, dy without leaving the plan. */
@@ -257,6 +263,7 @@ export function moveSelection(plan: FloorPlan, selection: Selection, dx: number,
   const delta = within(host.rect);
   return {
     ...plan,
+    ...(plan.lines && riders.lines.size ? { lines: shiftLines(plan, riders.lines, delta[0], delta[1]).lines } : {}),
     areas: plan.areas.map(item => item.key === host.key && selection.kind === "area" || riders.areas.has(item.key) ? { ...item, rect: clampRect(shift(item.rect, delta), plan.viewBox) } : item),
     rooms: plan.rooms.map(item => item.key === host.key && selection.kind === "room" || riders.rooms.has(item.key) ? { ...item, rect: clampRect(shift(item.rect, delta), plan.viewBox) } : item),
     devices: plan.devices.map(item => riders.devices.has(item.meterId) ? { ...item, position: clampPoint([item.position[0] + delta[0], item.position[1] + delta[1]], plan.viewBox) } : item),
@@ -357,7 +364,7 @@ export function removeSelection(plan: FloorPlan, selection: Selection): FloorPla
   if (selection.kind === "device") return { ...plan, devices: plan.devices.filter(item => item.meterId !== selection.key) };
   if (selection.kind === "entrance") return { ...plan, entrance: null };
   if (selection.kind === "line") return { ...plan, lines: (plan.lines ?? []).filter(item => item.key !== selection.key) };
-  if (selection.kind === "opening") return { ...plan, openings: (plan.openings ?? []).filter(item => item.key !== selection.key) };
+  if (selection.kind === "opening") return removeOpening(plan, selection.key);
   // A room's doors and windows go with it.
   if (selection.kind === "room") return { ...plan, rooms: plan.rooms.filter(item => item.key !== selection.key), areas: plan.areas.map(item => item.insideRoom === selection.key ? asOwnArea(item) : item), ...(plan.openings?.some(item => item.room === selection.key) ? { openings: plan.openings.filter(item => item.room !== selection.key) } : {}) };
   return settleRooms({ ...plan, areas: plan.areas.filter(item => item.key !== selection.key) });
@@ -465,9 +472,25 @@ export function referenceFromPlan(plan: FloorPlan, projectId: string, previous: 
   return reference;
 }
 
+/**
+ * The stored block as text. Each door and each line goes on one line of its own: indented in full, a line's points take
+ * about four lines each, and a full plan would not fit in Project notes. Everything else is written as it always was,
+ * so a layout without doors or lines saves exactly as before.
+ */
+export function referenceText(reference: StoredSpatialReference): string {
+  const layout = reference.layout as Record<string, unknown>, openings = layout.openings, lines = layout.lines;
+  if (!Array.isArray(openings) && !Array.isArray(lines)) return JSON.stringify(reference, null, 2);
+  const compact: string[] = [];
+  let tag = "fp";
+  const base = () => JSON.stringify(reference);
+  while (base().includes(`@@${tag}:`)) tag += "x";
+  const mark = (item: unknown) => { compact.push(JSON.stringify(item) ?? "null"); return `@@${tag}:${compact.length - 1}@@`; };
+  const marked = { ...reference, layout: { ...layout, ...(Array.isArray(openings) ? { openings: openings.map(mark) } : {}), ...(Array.isArray(lines) ? { lines: lines.map(mark) } : {}) } };
+  return JSON.stringify(marked, null, 2).replace(new RegExp(`"@@${tag}:(\\d+)@@"`, "g"), (_, index: string) => compact[Number(index)]!);
+}
 /** Replaces the existing layout block in the notes, or adds one at the end. */
 export function notesWithReference(notes: string, block: string | null, reference: StoredSpatialReference): string {
-  const next = "```json\n" + JSON.stringify(reference, null, 2) + "\n```";
+  const next = "```json\n" + referenceText(reference) + "\n```";
   if (block && notes.includes(block)) return notes.replace(block, () => next);
   return `${notes.trimEnd()}${notes.trim() ? "\n\n" : ""}## Floor layout\n\n${next}\n`;
 }

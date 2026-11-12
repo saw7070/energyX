@@ -4,30 +4,36 @@
  * never changes how meters are grouped.
  *
  * Saved layouts are untrusted: only well-formed lines are read (see project-spatial-drawing), their points are kept inside
- * the plan, and anything else a line carries rides along as saved.
+ * the plan, and anything else a line carries rides along as saved. Entries the editor cannot read (malformed, a repeated
+ * id, past the cap) are kept as saved too, and written back after the editor's own, so a save never loses them.
  */
-import { isSpatialLine, MAX_LINE_POINTS, MAX_LINES, type SpatialLineStyle, type SpatialLineThickness } from "@datafoundry/contracts";
-import { carriedOf, withCarried, type Carried, type Json } from "./floor-plan-carry";
+import { isSpatialLine, MAX_LINE_COORD, MAX_LINE_POINTS, MAX_LINES, type SpatialLineStyle, type SpatialLineThickness } from "@datafoundry/contracts";
+import { carriedOf, withCarried, type Carried } from "./floor-plan-carry";
 import type { FloorPlan, Point, Rect } from "./floor-plan-model";
 
-export type PlanLine = { key: string; points: Point[]; style: SpatialLineStyle; thickness?: SpatialLineThickness; locked?: true } & Carried;
+/** `savedPoints` holds the points as saved while `points` is still the list read with them (any change makes a new list). */
+export type PlanLine = { key: string; points: Point[]; style: SpatialLineStyle; thickness?: SpatialLineThickness; locked?: true; savedPoints?: { read: Point[]; value: Array<[number, number]> } } & Carried;
 export { MAX_LINE_POINTS, MAX_LINES };
 
-const inside = ([x, y]: Point, [vx, vy, vw, vh]: Rect): Point => [Math.min(Math.max(vx, x), vx + vw), Math.min(Math.max(vy, y), vy + vh)];
-/** The lines a saved layout holds, with their points kept inside the plan. */
-export function readLines(raw: unknown, viewBox: Rect): PlanLine[] {
+/** A point kept inside the plan, and never past what a saved line may hold (0 to MAX_LINE_COORD). */
+export const inside = ([x, y]: Point, [vx, vy, vw, vh]: Rect): Point => [Math.min(Math.max(vx, x, 0), vx + vw, MAX_LINE_COORD), Math.min(Math.max(vy, y, 0), vy + vh, MAX_LINE_COORD)];
+/** The lines a saved layout holds, with their points kept inside the plan; `skipped` gets the entries the editor cannot read. */
+export function readLines(raw: unknown, viewBox: Rect, skipped: unknown[] = []): PlanLine[] {
   if (!Array.isArray(raw)) return [];
   const seen = new Set<string>(), list: PlanLine[] = [];
   for (const item of raw) {
-    if (list.length >= MAX_LINES || !isSpatialLine(item) || seen.has(item.id)) continue;
+    if (list.length >= MAX_LINES || !isSpatialLine(item) || seen.has(item.id)) { skipped.push(item); continue; }
     seen.add(item.id);
-    const owned = ["id", "points", "style", "thickness", ...(item.locked === true ? ["locked"] : [])];
-    list.push({ key: item.id, points: item.points.map(point => inside(point, viewBox)), style: item.style, ...(item.thickness ? { thickness: item.thickness } : {}), ...(item.locked === true ? { locked: true as const } : {}), ...carriedOf(item, owned) });
+    const owned = ["id", "points", "style", "thickness", ...(item.locked === true ? ["locked"] : [])], points = item.points.map(point => inside(point, viewBox));
+    list.push({ key: item.id, points, style: item.style, ...(item.thickness ? { thickness: item.thickness } : {}), ...(item.locked === true ? { locked: true as const } : {}), savedPoints: { read: points, value: item.points }, ...carriedOf(item, owned) });
   }
   return list;
 }
-/** The lines as saved, on whole plan units. */
-export const writeLines = (plan: FloorPlan): Json[] => (plan.lines ?? []).map(item => withCarried({ id: item.key, points: item.points.map(point => point.map(Math.round)), style: item.style, ...(item.thickness ? { thickness: item.thickness } : {}), ...(item.locked ? { locked: true } : {}) }, item));
+/** The lines as saved: points nobody moved exactly as they were, moved ones on whole plan units; then the entries the editor could not read. */
+export const writeLines = (plan: FloorPlan): unknown[] => [
+  ...(plan.lines ?? []).map(item => withCarried({ id: item.key, points: item.savedPoints?.read === item.points ? item.savedPoints.value : item.points.map(point => point.map(Math.round)), style: item.style, ...(item.thickness ? { thickness: item.thickness } : {}), ...(item.locked ? { locked: true } : {}) }, item)),
+  ...(plan.carried?.lines ?? []),
+];
 
 /** The box around a line's points (never quite empty, so a straight line still reads as having a size). */
 export function lineBox(line: { points: Point[] }): Rect {
@@ -65,6 +71,17 @@ export const removePoint = (plan: FloorPlan, key: string, index: number): FloorP
 export const restyleLine = (plan: FloorPlan, key: string, patch: { style?: SpatialLineStyle; thickness?: SpatialLineThickness }): FloorPlan => replace(plan, key, line => (patch.style ?? line.style) === line.style && (patch.thickness ?? line.thickness ?? "m") === (line.thickness ?? "m") ? line : { ...line, ...patch });
 
 /** The segment of a line nearest a point (its first point's index) and the nearest place on it. */
+/**
+ * Where "Add point" puts a new point: in the middle of the segment after the picked point (or before it, for the last
+ * point), else in the middle of the longest segment. For touch screens and keyboards, where double-clicking is not easy.
+ */
+export function midpointAfter(points: Point[], picked: number | null): { after: number; at: Point } | null {
+  if (points.length < 2) return null;
+  let after = picked !== null && picked >= 0 && picked < points.length ? Math.min(picked, points.length - 2) : -1;
+  if (after < 0) { let longest = -1; for (let index = 0; index < points.length - 1; index += 1) { const [ax, ay] = points[index]!, [bx, by] = points[index + 1]!, length = Math.hypot(bx - ax, by - ay); if (length > longest) { longest = length; after = index; } } }
+  const [ax, ay] = points[after]!, [bx, by] = points[after + 1]!;
+  return { after, at: [(ax + bx) / 2, (ay + by) / 2] };
+}
 export function nearestSegment(points: Point[], [px, py]: Point): { after: number; at: Point; distance: number } | null {
   let best: { after: number; at: Point; distance: number } | null = null;
   for (let index = 0; index < points.length - 1; index += 1) {

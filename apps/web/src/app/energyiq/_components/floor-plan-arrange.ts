@@ -4,8 +4,8 @@
  */
 import { freshCopy, sameRect } from "./floor-plan-carry";
 import { clampDelta, within } from "./floor-plan-geometry";
-import { findLine, lineBox, MAX_LINES, shiftLines, type PlanLine } from "./floor-plan-lines";
-import { copiedOpenings, openingBox, type PlanOpening } from "./floor-plan-openings";
+import { findLine, inside, lineBox, MAX_LINES, shiftLines, type PlanLine } from "./floor-plan-lines";
+import { copiedOpenings, newRoomId, openingBox, type PlanOpening } from "./floor-plan-openings";
 import { asOwnArea, clampPoint, clampRect, deviceRect, MAX_AREAS, MAX_ROOMS, moveSelection, NO_PASSENGERS, passengers, removeSelection, roomOwner, settleRooms, type FloorPlan, type PlanArea, type PlanRoom, type Point, type Rect, type Selection } from "./floor-plan-model";
 
 export type Riders = ReturnType<typeof NO_PASSENGERS>;
@@ -19,7 +19,8 @@ function find(plan: FloorPlan, item: Selection): { locked?: true } | null | unde
   if (item.kind === "room") return plan.rooms.find(entry => entry.key === item.key);
   if (item.kind === "device") return plan.devices.find(entry => entry.meterId === item.key);
   if (item.kind === "line") return findLine(plan, item.key);
-  if (item.kind === "opening") return plan.openings?.find(entry => entry.key === item.key) as { locked?: true } | undefined;
+  // A door or window is locked with its room: locking a room keeps its doors where they are too.
+  if (item.kind === "opening") { const opening = plan.openings?.find(entry => entry.key === item.key); return opening ? (plan.rooms.find(room => room.key === opening.room)?.locked ? { locked: true } : {}) : undefined; }
   return plan.entrance as { locked?: true } | null;
 }
 export const exists = (plan: FloorPlan, item: Selection) => !!find(plan, item);
@@ -51,15 +52,15 @@ export function everything(plan: FloorPlan, shown: (meterId: string) => boolean 
 export const inBox = (plan: FloorPlan, box: Rect, shown?: (meterId: string) => boolean) => everything(plan, shown).filter(item => { const at = boxOf(plan, item); return !!at && within(at, box); });
 
 /**
- * What rides along when the selection moves: the rooms, equipment and devices inside each selected area or room. A
+ * What rides along when the selection moves: the rooms, equipment, devices and lines inside each selected area or room. A
  * locked item still rides with the area it is in; only moving it on its own is blocked.
  */
 export function ridersOf(plan: FloorPlan, list: Selection[]): Riders {
   const riders = NO_PASSENGERS();
   for (const item of list) {
     if (isLocked(plan, item)) continue;
-    const { rooms, areas, devices } = passengers(plan, item);
-    rooms.forEach(key => riders.rooms.add(key)); areas.forEach(key => riders.areas.add(key)); devices.forEach(key => riders.devices.add(key));
+    const { rooms, areas, devices, lines } = passengers(plan, item);
+    rooms.forEach(key => riders.rooms.add(key)); areas.forEach(key => riders.areas.add(key)); devices.forEach(key => riders.devices.add(key)); lines.forEach(key => riders.lines.add(key));
   }
   return riders;
 }
@@ -86,14 +87,14 @@ export function moveItems(plan: FloorPlan, list: Selection[], dx: number, dy: nu
     rooms: plan.rooms.map(item => rooms.has(item.key) ? { ...item, rect: shift(item.rect) } : item),
     devices: plan.devices.map(item => devices.has(item.meterId) ? { ...item, position: step(item.position) } : item),
     entrance: plan.entrance && hosts.some(item => item.kind === "entrance") ? { ...plan.entrance, position: step(plan.entrance.position) } : plan.entrance,
-    ...(plan.lines ? { lines: shiftLines(plan, new Set(hosts.filter(item => item.kind === "line").map(item => item.key)), mx, my).lines } : {}),
+    ...(plan.lines ? { lines: shiftLines(plan, keys("line", riders.lines), mx, my).lines } : {}),
   };
 }
 
 /** Deletes the selected items that are not locked. */
 export const removeItems = (plan: FloorPlan, list: Selection[]) => list.filter(item => !isLocked(plan, item)).reduce((current, item) => exists(current, item) ? removeSelection(current, item) : current, plan);
 
-/** Locks or unlocks the selected areas, rooms, equipment, devices and lines (the entrance, doors and windows have no lock). */
+/** Locks or unlocks the selected areas, rooms, equipment, devices and lines (the entrance has no lock; doors and windows lock with their room). */
 export function lockItems(plan: FloorPlan, list: Selection[], lock: boolean): FloorPlan {
   let changed = false;
   const set = <T extends { locked?: true }>(item: T, picked: boolean): T => {
@@ -188,11 +189,7 @@ export function uniqueRoomName(name: string, taken: Set<string>, max = ROOM_NAME
     if (!taken.has(candidate)) return candidate;
   }
 }
-/** A new stable room id no other room has. */
-export function newRoomId(taken: Iterable<string>): string {
-  const used = new Set(taken);
-  for (;;) { const id = `rm-${Math.random().toString(36).slice(2, 10).padEnd(8, "0")}`; if (!used.has(id)) return id; }
-}
+export { newRoomId };
 export const roomIds = (plan: FloorPlan) => plan.rooms.flatMap(room => room.id ? [room.id] : []);
 /**
  * Whether adding `areas` areas and `rooms` rooms keeps the plan within what a saved layout can hold. `hidden` is how
@@ -237,10 +234,10 @@ export function pasteClip(plan: FloorPlan, clip: Clip, offset: number, copyOf: (
   // Lines get new keys and start unlocked; doors and windows come with the copies of their rooms.
   const lineKeys = new Map<string, string>(), taken = new Set((plan.lines ?? []).map(item => item.key));
   const lines = (clip.lines ?? []).slice(0, Math.max(0, MAX_LINES - taken.size)).map((source): PlanLine => {
-    const { locked: _locked, ...copy } = freshCopy(source);
+    const { locked: _locked, savedPoints: _saved, ...copy } = freshCopy(source);
     let number = 1; while (taken.has(`ln-copy-${number}`)) number += 1;
     const key = `ln-copy-${number}`; taken.add(key); lineKeys.set(source.key, key);
-    return { ...copy, key, points: source.points.map(([x, y]) => clampPoint([x + dx, y + dy], plan.viewBox)) };
+    return { ...copy, key, points: source.points.map(([x, y]) => inside([x + dx, y + dy], plan.viewBox)) };
   });
   const openings = copiedOpenings(plan, clip.openings ?? [], roomKeys);
   const selection = clip.roots.flatMap((root): Selection[] => { const key = (root.kind === "area" ? areaKeys : root.kind === "line" ? lineKeys : roomKeys).get(root.key); return key ? [{ kind: root.kind, key }] : []; });
