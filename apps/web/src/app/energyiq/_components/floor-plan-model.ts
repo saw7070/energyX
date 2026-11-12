@@ -1,4 +1,4 @@
-import { readProjectSpatialReference, spatialLevels, spatialRotation, type ProjectSpatialReference } from "@datafoundry/contracts";
+import { readProjectSpatialReference, spatialLevels, spatialRotation, spatialTextUnit, type ProjectSpatialReference } from "@datafoundry/contracts";
 import { translatorFor, type EnergyIqLocale } from "./energyiq-messages";
 import { floorPlanMessages } from "./floor-plan-messages";
 import { entranceMarked, entranceParts, entranceSymbol, firstEntrance, readLabels, readSymbols, shiftLabel, shiftSymbol, keepBoxInside, withPlaced, writeLabel, writeSymbol, type EntranceMarkParts, type MarkSkip } from "./floor-plan-mark-data";
@@ -7,6 +7,7 @@ import { readLines, writeLines, lineBox, MAX_LINES, moveLine, shiftLines, type P
 import { markDoorRooms, MAX_OPENINGS, readOpenings, removeOpening, slideOpening, writeOpenings, type PlanOpening } from "./floor-plan-openings";
 import { holds, insideBox, middleOf, outlineFromSaved, savedShape } from "./floor-plan-polygon";
 import { MAX_SHAPES, shapesFromLayout, shapesForLayout, type PlanShape } from "./floor-plan-plain-shapes";
+import { planUnit } from "./floor-plan-unit";
 import { boardFilledIn, carriedOf, DEVICE_KEYS, ENTRANCE_KEYS, GROUP_KEYS, isRecord, LAYOUT_KEYS, ROLE_KEYS, ROOM_KEYS, sameNames, samePoint, sameRect, STANDALONE_ZONE_KEYS, withCarried, withoutCarried, withoutFilledBoard, ZONE_KEYS, type AreaBaseline, type Carried, type Json } from "./floor-plan-carry";
 
 /** [x, y, width, height] in plan units. */
@@ -190,9 +191,12 @@ export function resizeRect([x, y, w, h]: Rect, handle: Handle, dx: number, dy: n
   return [left, top, right - left, bottom - top];
 }
 
-/** Where an equipment group sits when the stored layout only names its room (same geometry as the read-only map). */
-function groupRect(room: Rect, viewBox: Rect): Rect {
-  const unit = viewBox[2] / 100, [rx, ry, rw, rh] = room, pad = unit * 1.2, height = Math.min(rh * 0.34, unit * 7);
+/**
+ * Where an equipment group sits when the stored layout only names its room (same geometry as the read-only map, at the
+ * text size the map draws that room's floor with: see planUnit).
+ */
+function groupRect(room: Rect, unit: number): Rect {
+  const [rx, ry, rw, rh] = room, pad = unit * 1.2, height = Math.min(rh * 0.34, unit * 7);
   return [rx + pad, ry + rh - height - pad, rw - pad * 2, height];
 }
 
@@ -226,13 +230,19 @@ export function planFromReference(reference: StoredSpatialReference, locale: Ene
   const markers = isRecord(layout.boardMarkers);
   const baseline = (zone: object, rect: Rect, derived: boolean): { saved?: AreaBaseline } => markers || derived || "rooms" in zone || "directionFromEntrance" in zone
     ? { saved: { rect: [...rect] as Rect, rooms: filedUnder((zone as { id: string }).id), ...(derived ? { derived: true as const } : {}) } } : {};
+  // The map draws each floor of a site with floors on its own, its text sized from that floor's rooms and areas (see planUnit).
+  const floorOf = (item: { level?: string }) => item.level ?? levels?.[0]?.id;
+  const floorUnit = (room: PlanRoom) => {
+    const split = (levels?.length ?? 0) > 1, here = (item: { level?: string }) => !split || floorOf(item) === floorOf(room);
+    return spatialTextUnit(layout.viewBox, rooms.filter(here).map(item => item.rect), layout.zones.filter(zone => zone.rect && zone.independentSpace !== false && here(levelOf(zone, floors))).map(zone => zone.rect));
+  };
   const areas = layout.zones.flatMap((zone): PlanArea[] => {
     if (!drawable(zone)) return [];
     // A zone that named no panel is read as if it had none at all, so its saved keys and their order stay as they were.
     const raw = withoutFilledBoard(zone as unknown as Json), common = { key: zone.id, label: zone.id, board: zone.referenceBoard ?? "", ...(boardFilledIn(zone) ? { boardFilled: true as const } : {}) };
     if (zone.independentSpace === false) {
       const room = rooms.find(item => item.name === zone.physicalParentRoom)!;
-      const rect = zone.rect ? [...zone.rect] as Rect : groupRect(room.rect, layout.viewBox);
+      const rect = zone.rect ? [...zone.rect] as Rect : groupRect(room.rect, floorUnit(room));
       // Equipment is on its room's floor, whatever its own entry says.
       return [{ ...common, rect, insideRoom: room.key, ...(zone.equipment ? { equipment: zone.equipment } : {}), ...colourOf(zone), ...locationsOf(zone), ...lockedOf(zone), ...(room.level ? { level: room.level } : {}), ...carriedOf(raw, owned(raw, ZONE_KEYS, {}, floors)), ...baseline(zone, rect, !zone.rect) }];
     }
@@ -348,8 +358,8 @@ export function moveSelection(plan: FloorPlan, selection: Selection, dx: number,
   if (selection.kind === "device") return { ...plan, devices: plan.devices.map(item => item.meterId === selection.key ? { ...item, position: devicePosition(item, [item.position[0] + dx, item.position[1] + dy], plan.viewBox) } : item) };
   if (selection.kind === "entrance") return plan.entrance ? { ...plan, entrance: { ...plan.entrance, position: clampPoint([plan.entrance.position[0] + dx, plan.entrance.position[1] + dy], plan.viewBox) } } : plan;
   // A text label or landmark stays fully inside the plan, turned as it is.
-  if (selection.kind === "label") return { ...plan, labels: (plan.labels ?? []).map(item => item.key === selection.key ? shiftLabel(item, dx, dy, plan.viewBox) : item) };
-  if (selection.kind === "symbol") return { ...plan, symbols: (plan.symbols ?? []).map(item => item.key === selection.key ? shiftSymbol(item, dx, dy, plan.viewBox) : item) };
+  if (selection.kind === "label") return { ...plan, labels: (plan.labels ?? []).map(item => item.key === selection.key ? shiftLabel(item, dx, dy, plan.viewBox, planUnit(plan)) : item) };
+  if (selection.kind === "symbol") return { ...plan, symbols: (plan.symbols ?? []).map(item => item.key === selection.key ? shiftSymbol(item, dx, dy, plan.viewBox, planUnit(plan)) : item) };
   // A line moves as a whole; a door or window only slides along its wall.
   if (selection.kind === "line") return moveLine(plan, selection.key, dx, dy);
   if (selection.kind === "opening") return slideOpening(plan, selection.key, dx, dy);
@@ -404,7 +414,7 @@ export function autoPlace(plan: FloorPlan, meters: Array<{ id: string; name: str
     const entry = targets.get(target.key) ?? { rect: target.rect, kind: target.kind, ids: [] };
     entry.ids.push(meter.id); targets.set(target.key, entry);
   }
-  const unit = plan.viewBox[2] / 100, rowGap = unit * 3.4, spacing = unit * 9;
+  const unit = planUnit(plan), rowGap = unit * 3.4, spacing = unit * 9;
   const added: PlanDevice[] = [];
   for (const [key, { rect, kind, ids }] of targets) {
     const [, y, , h] = rect;
@@ -436,7 +446,7 @@ export const MAX_PLAN_SIZE = MAX_COORD;
 export const MIN_PLAN: Point = [MIN_SIZE * 10, MIN_SIZE * 8];
 /** Where everything drawn sits, with room for labels: [left, top, right, bottom] in plan units, or null for an empty plan. */
 export function contentBounds(plan: FloorPlan): [number, number, number, number] | null {
-  const unit = plan.viewBox[2] / 100, margin = 20;
+  const unit = planUnit(plan), margin = 20;
   // Areas not on the drawing still hold their place when they have one: the plan can never shrink below them.
   const hiddenRects = (plan.carried?.zones ?? []).map(({ zone }) => zone.rect).filter(isRect);
   const boxes: Rect[] = [...plan.areas.map(item => item.rect), ...plan.rooms.map(item => item.rect), ...(plan.shapes ?? []).map(item => item.rect), ...hiddenRects, ...plan.devices.map(item => item.size && item.rotation ? frameBounds(boxFrame(item.position, item.size, item.rotation)) : deviceRect(item) ?? [item.position[0] - unit * 5, item.position[1], unit * 10, unit * 3] as Rect)];

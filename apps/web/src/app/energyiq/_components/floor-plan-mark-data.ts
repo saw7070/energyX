@@ -124,13 +124,16 @@ export function withPlaced(list: unknown[], placed: MarkSkip[]): unknown[] {
   return out;
 }
 
-/** A label or landmark moved by (dx, dy), as far as it can go and still lie fully inside the plan, turned as it is. */
-export function shiftLabel(label: PlanLabel, dx: number, dy: number, viewBox: Rect): PlanLabel {
-  const unit = viewBox[2] / 100, moved: PlanLabel = { ...label, position: [label.position[0] + dx, label.position[1] + dy] };
+/**
+ * A label or landmark moved by (dx, dy), as far as it can go and still lie fully inside the plan, turned as it is.
+ * `unit` is the plan's text size (planUnit, as the map draws it); without one, a hundredth of the plan's width.
+ */
+export function shiftLabel(label: PlanLabel, dx: number, dy: number, viewBox: Rect, unit = viewBox[2] / 100): PlanLabel {
+  const moved: PlanLabel = { ...label, position: [label.position[0] + dx, label.position[1] + dy] };
   return { ...moved, position: keepInside(moved.position, labelBounds(moved, unit), viewBox) };
 }
-export function shiftSymbol(symbol: PlanSymbol, dx: number, dy: number, viewBox: Rect): PlanSymbol {
-  const unit = viewBox[2] / 100, moved: PlanSymbol = { ...symbol, position: [symbol.position[0] + dx, symbol.position[1] + dy] };
+export function shiftSymbol(symbol: PlanSymbol, dx: number, dy: number, viewBox: Rect, unit = viewBox[2] / 100): PlanSymbol {
+  const moved: PlanSymbol = { ...symbol, position: [symbol.position[0] + dx, symbol.position[1] + dy] };
   return { ...moved, position: keepInside(moved.position, symbolBounds(moved, unit), viewBox) };
 }
 /** A turned device box's middle, moved so the whole turned box stays inside the plan. */

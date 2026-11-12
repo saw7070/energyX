@@ -13,6 +13,7 @@
 import { isSpatialOpening, MAX_OPENINGS, openingSpan, type SpatialOpening, type SpatialOpeningKind, type SpatialWall } from "@datafoundry/contracts";
 import { carriedOf, withCarried, type Carried, type Json } from "./floor-plan-carry";
 import type { FloorPlan, PlanRoom, Point, Rect } from "./floor-plan-model";
+import { planUnit } from "./floor-plan-unit";
 
 export type PlanOpening = { key: string; room: string; wall: SpatialWall; offset: number; width: number; kind: SpatialOpeningKind; swing?: "in" | "out"; hinge?: "start" | "end" } & Carried;
 const OPENING_KEYS = ["id", "room", "wall", "offset", "width", "kind", "swing", "hinge"] as const;
@@ -68,7 +69,7 @@ export const takesDoors = (room: { outline?: unknown }) => !room.outline;
 export const openingsOf = (plan: FloorPlan, roomKey: string) => (plan.openings ?? []).filter(item => item.room === roomKey);
 /** Usual width of a new opening: about a door's width on a plan this size, never wider than most of its wall. */
 export function defaultWidth(plan: FloorPlan, kind: SpatialOpeningKind, length: number): number {
-  const unit = plan.viewBox[2] / 100, wanted = unit * (kind === "door" ? 3 : kind === "opening" ? 4 : 5);
+  const unit = planUnit(plan), wanted = unit * (kind === "door" ? 3 : kind === "opening" ? 4 : 5);
   return Math.max(4, Math.round(Math.min(wanted, length * 0.8)));
 }
 /** Door ids already used: on this floor, by entries kept as saved, and (for one floor of several) on the other floors. */
@@ -142,7 +143,7 @@ export function spanOf(plan: FloorPlan, item: PlanOpening) {
 export function openingBox(plan: FloorPlan, item: PlanOpening): Rect | null {
   const span = spanOf(plan, item);
   if (!span) return null;
-  const depth = plan.viewBox[2] / 100 * 0.8, [ax, ay] = span.a, [bx, by] = span.b;
+  const depth = planUnit(plan) * 0.8, [ax, ay] = span.a, [bx, by] = span.b;
   return ay === by ? [ax, ay - depth / 2, Math.max(bx - ax, 0.01), depth] : [ax - depth / 2, ay, depth, Math.max(by - ay, 0.01)];
 }
 /**

@@ -95,6 +95,38 @@ const common = (raw: Record<string, unknown>) => {
   const rotation = spatialRotation(raw.rotation);
   return { ...(rotation ? { rotation } : {}), ...(isSpatialColour(raw.colour) ? { colour: raw.colour } : {}), ...(raw.locked === true ? { locked: true } : {}) };
 };
+const wellFormed = (rects: ReadonlyArray<unknown>): SpatialRect[] => rects.filter((rect): rect is SpatialRect => Array.isArray(rect) && rect.length === 4 && rect.every(value => typeof value === "number" && Number.isFinite(value)) && rect[2] > 0);
+/** The middle width of the boxes, or null when there are none. */
+function medianWidth(rects: SpatialRect[]): number | null {
+  const widths = rects.map(rect => rect[2]).sort((a, b) => a - b);
+  if (!widths.length) return null;
+  return widths.length % 2 ? widths[(widths.length - 1) / 2]! : (widths[widths.length / 2 - 1]! + widths[widths.length / 2]!) / 2;
+}
+/**
+ * How wide the drawing itself is: from its leftmost to its rightmost box, plus the smaller of the two margins on each
+ * side. For a drawing that fills its space evenly that is the space's width; space added past one edge does not count.
+ */
+function drawnWidth([vx, , vw]: ReadonlyArray<number>, rects: SpatialRect[]): number {
+  const left = Math.min(...rects.map(rect => rect[0])), right = Math.max(...rects.map(rect => rect[0] + rect[2]));
+  return right - left + 2 * Math.max(0, Math.min(left - vx!, vx! + vw! - right));
+}
+/**
+ * The size of plan text and symbols, in plan units. It is a hundredth of the drawing space's width, as it always was,
+ * but never more than the drawing calls for: a 26th of the typical room's width; or, for a drawing whose areas are
+ * roomy (a 30th of the typical area's width), a hundredth of the width the areas and rooms take up. So making the
+ * drawing space wider, by pulling its edge or adding a template next to narrow blocks, no longer makes every name grow
+ * until it runs into its neighbours, while a plan whose rooms already fit, or whose roomy areas fill the drawing space
+ * (most plans, SKTC included), draws exactly as before. It never drops below 40% of the old size. Every reader (the map,
+ * the editor, the report) works it out the same way, from the same floor's rooms and stand-alone areas, so they agree.
+ * Malformed boxes are skipped; with no rooms it is a hundredth of the width.
+ */
+export function spatialTextUnit(viewBox: ReadonlyArray<number>, roomRects: ReadonlyArray<unknown>, areaRects: ReadonlyArray<unknown> = []): number {
+  const base = (viewBox[2] ?? Number.NaN) / 100, rooms = wellFormed(roomRects), areas = wellFormed(areaRects), room = medianWidth(rooms);
+  if (room === null || !(base > 0) || !Number.isFinite(viewBox[0])) return base;
+  const area = medianWidth(areas), roomy = area === null ? 0 : Math.min(area / 30, drawnWidth(viewBox, [...areas, ...rooms]) / 100);
+  return Math.min(base, Math.max(room / 26, roomy, base * 0.4));
+}
+
 /** A saved label as readers draw it, or null when it cannot be drawn (no text, no usable position). */
 export function readSpatialLabel(raw: unknown): SpatialLabel | null {
   if (!record(raw) || !point(raw.position)) return null;

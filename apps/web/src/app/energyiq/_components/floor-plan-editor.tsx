@@ -13,6 +13,7 @@ import { clearPlanDraft, usePlanDraft } from "./floor-plan-draft";
 import { boxOf, copyItems, everything, fitsLimits, fitsMarks, frameOf, inBox, isIn, isLocked, lockItems, markAt, moveItems, newMarkId, newRoomId, pasteClip, removeItems, reorderItems, ridersOf, roomIds, stillThere, toggled, turnItem, type Clip, type Riders } from "./floor-plan-arrange";
 import { LabelPanel, LandmarkPicker, RotationField, SymbolPanel, useKindName } from "./floor-plan-mark-panel";
 import { nextEntranceName, nextEntranceSpot, shiftLabel, shiftSymbol, withoutRejected } from "./floor-plan-mark-data";
+import { planUnit } from "./floor-plan-unit";
 import { angleFrom, frameCorners, handleSpot, MARK_LIMIT, normaliseRotation, ROTATION_STEP, type Frame, type PlanLabel, type PlanSymbol } from "./floor-plan-marks";
 import { boxBetween, centredBox, isClick, snappedBox } from "./floor-plan-geometry";
 import { floorPlanMessages } from "./floor-plan-messages";
@@ -207,12 +208,13 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   const sweep = useRef<Sweep | null>(null);
   const [sweepBox, setSweepBox] = useState<{ kind: Sweep["kind"]; rect: Rect } | null>(null);
   const [vx, vy, vw, vh] = plan.viewBox;
-  const unit = vw / 100;
+  // Text and symbol size, exactly as the saved map draws this floor (see floor-plan-unit).
+  const unit = planUnit(plan);
   // The part of the plan on screen. `screen` is a hundredth of the editor's width in plan units at this zoom (guides use
   // it); `perPx` is one screen pixel in plan units, so grips and the focus ring are a fixed size on screen however wide
   // the editor is and however far in or out the plan is zoomed (until the width is known, a 1000-pixel editor is assumed).
   const [wx, wy, ww, wh] = viewport.window;
-  const screen = unit / viewport.zoom;
+  const screen = vw / 100 / viewport.zoom;
   const perPx = viewport.fitPx > 0 ? 1 / (viewport.fitPx * viewport.zoom) : ww / 1000;
   const mac = isMac(), keyName = (letter: string) => mac ? `⌘${letter}` : `Ctrl+${letter}`;
   // Panels are optional: an area may name none (""), and it is never offered as a panel to choose.
@@ -357,13 +359,13 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     const point = spot ?? clampPoint(at ? [snap(at[0], step), snap(at[1], step)] : [wx + ww / 2, wy + wh / 2], plan.viewBox);
     let next: FloorPlan, item: Selection;
     if (isText) {
-      const key = `label-${Date.now()}`, label = shiftLabel({ key, id: newMarkId(plan, "lb"), text: t("name.text"), position: point }, 0, 0, plan.viewBox);
+      const key = `label-${Date.now()}`, label = shiftLabel({ key, id: newMarkId(plan, "lb"), text: t("name.text"), position: point }, 0, 0, plan.viewBox, unit);
       next = { ...plan, labels: [...(plan.labels ?? []), label] }; item = { kind: "label", key }; setFreshLabel(key);
     } else if (firstEntrance) {
       next = { ...plan, entrance: { label: t("name.mainEntrance"), position: point } }; item = { kind: "entrance", key: "entrance" };
     } else {
       const key = `symbol-${Date.now()}`, caption = symbolKind === "entrance" ? { label: entranceName() } : {};
-      const symbol = shiftSymbol({ key, id: newMarkId(plan, "sy"), kind: symbolKind, position: point, ...caption }, 0, 0, plan.viewBox);
+      const symbol = shiftSymbol({ key, id: newMarkId(plan, "sy"), kind: symbolKind, position: point, ...caption }, 0, 0, plan.viewBox, unit);
       next = { ...plan, symbols: [...(plan.symbols ?? []), symbol] }; item = { kind: "symbol", key };
     }
     say(placed => countText(t, placed, [item], meterName, "a11y.added", "a11y.addedMany", kindName));
@@ -383,7 +385,7 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
     const entrances = [...(plan.entrance ? [plan.entrance.position] : []), ...(plan.symbols ?? []).filter(entry => entry.kind === "entrance").map(entry => entry.position)];
     if (!entrances.length) { addMark("landmark", [vx + vw / 2, vy + vh - 40], "entrance"); return; }
     const place = (point: Point) => clampPoint([snap(point[0], step), snap(point[1], step)], plan.viewBox), label = entranceName();
-    const fits = (point: Point) => { const shown = shiftSymbol({ key: "", kind: "entrance", position: point, label }, 0, 0, plan.viewBox).position; return shown[0] === point[0] && shown[1] === point[1]; };
+    const fits = (point: Point) => { const shown = shiftSymbol({ key: "", kind: "entrance", position: point, label }, 0, 0, plan.viewBox, unit).position; return shown[0] === point[0] && shown[1] === point[1]; };
     addMark("landmark", null, "entrance", nextEntranceSpot(entrances, plan.viewBox, unit * 8, place, fits));
   };
   /**
@@ -1137,8 +1139,8 @@ export function FloorPlanEditor({ projectId, userId = "", notes, block, previous
   const selectedLabel = single?.kind === "label" ? plan.labels?.find(item => item.key === single.key) : undefined;
   const selectedSymbol = single?.kind === "symbol" ? plan.symbols?.find(item => item.key === single.key) : undefined;
   const without = <T extends object>(item: T, key: string, value: unknown): T => { const { [key]: _old, ...rest } = item as Record<string, unknown>; return (value === undefined ? rest : { ...rest, [key]: value }) as T; };
-  const updateLabel = (key: string, change: (item: PlanLabel) => PlanLabel, merge?: string) => commit({ ...plan, labels: (plan.labels ?? []).map(item => item.key === key ? shiftLabel(change(item), 0, 0, plan.viewBox) : item) }, merge ? { merge } : undefined);
-  const updateSymbol = (key: string, change: (item: PlanSymbol) => PlanSymbol, merge?: string) => commit({ ...plan, symbols: (plan.symbols ?? []).map(item => item.key === key ? shiftSymbol(change(item), 0, 0, plan.viewBox) : item) }, merge ? { merge } : undefined);
+  const updateLabel = (key: string, change: (item: PlanLabel) => PlanLabel, merge?: string) => commit({ ...plan, labels: (plan.labels ?? []).map(item => item.key === key ? shiftLabel(change(item), 0, 0, plan.viewBox, unit) : item) }, merge ? { merge } : undefined);
+  const updateSymbol = (key: string, change: (item: PlanSymbol) => PlanSymbol, merge?: string) => commit({ ...plan, symbols: (plan.symbols ?? []).map(item => item.key === key ? shiftSymbol(change(item), 0, 0, plan.viewBox, unit) : item) }, merge ? { merge } : undefined);
   /** A landmark changed into an entrance becomes the first entrance when the plan has none (and stays selected as that). */
   const changeKind = (key: string, kind: string) => {
     const changed = { ...plan, symbols: (plan.symbols ?? []).map(item => item.key === key ? { ...item, kind } : item) }, next = promoteEntrance(changed);

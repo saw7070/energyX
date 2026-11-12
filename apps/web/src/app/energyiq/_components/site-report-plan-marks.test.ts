@@ -82,6 +82,17 @@ describe("the site report's floor plan", () => {
     expect(Number(/<rect x="[^"]+" y="([^"]+)" width="14" height="14"/.exec(before)![1])).toBe(470);
   });
 
+  it("keeps text labels and lines the same size when the drawing space is made wider", () => {
+    const layout = { labels: [{ text: "Car park", position: [200, 470] }], lines: [{ id: "ln-1", points: [[24, 450], [390, 450]], style: "wall" }] };
+    const sizes = (reference: ProjectSpatialReference) => {
+      const plan = planOf(renderSiteReportHtml(buildSiteReport(DATA, reference, GENERATED, "en")));
+      return [Number(/font-size="([^"]+)"[^>]*>Car park</.exec(plan)![1]), Number(/<polyline[^>]*stroke-width="([^"]+)"/.exec(plan)![1])];
+    };
+    const before = sizes(withMarks(layout));
+    expect(before[0]).toBeCloseTo(8.6 * 1.9, 9); // a hundredth of the 860-wide space, as always
+    expect(sizes(withMarks({ ...layout, viewBox: [0, 0, 1720, 508] }))).toEqual(before);
+  });
+
   it("draws a layout without labels or landmarks exactly as before", () => {
     const before = renderSiteReportHtml(buildSiteReport(DATA, REFERENCE, GENERATED, "en"));
     const listed = renderSiteReportHtml(buildSiteReport(DATA, withMarks({ labels: [], symbols: [{ kind: "entrance", position: [430, 420], label: "Main entrance gate" }] }), GENERATED, "en"));
