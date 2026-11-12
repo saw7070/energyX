@@ -6,7 +6,7 @@
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { spatialLabels, spatialSymbols } from "@datafoundry/contracts";
+import { drawnOpeningRoom, lineWidth, openingSpan, spatialHiddenLayers, spatialLabels, spatialLevelReference, spatialLevels, spatialLines, spatialOpenings, spatialRoomTitle, spatialSymbols } from "@datafoundry/contracts";
 import { holidayName, joinText } from "./analysis-messages.js";
 import { shortDate } from "./analysis-model.js";
 import { forHoursMeaning, forOneDay, translatorFor, type EnergyIqLocale } from "./locale.js";
@@ -15,6 +15,7 @@ import { clock, hourRange, kwhText, moneyText, pctText, REPORT_COLOURS as C, typ
 import { siteReportMessages } from "./site-report-messages.js";
 import { REPORT_CSS } from "./site-report-styles.js";
 import { wrapLabel } from "./wrap-label.js";
+import { innerBox, pointsAttribute, polygonOf, spatialShapes } from "@datafoundry/contracts";
 
 export { Rich };
 
@@ -89,16 +90,31 @@ const Tip = ({ x, y, children }: { x: number; y: number; children: ReactNode }) 
 
 // ---------- 1. floor plan ----------
 const CATEGORIES = ["light", "load", "aircon", "it", "kitchen", "plug", "other"] as const;
-function FloorPlan({ report }: { report: SiteReport }) {
+/**
+ * The plan's sheets: one for a one-floor site (exactly as before floors existed), else one per floor that has an area
+ * drawn, each showing only that floor's areas, rooms, equipment, panels and entrance. Area ids are unique across the
+ * site, so each area's figures stay with it.
+ */
+export function planSheets(report: SiteReport): Array<{ level: string | null; report: SiteReport }> {
+  const levels = report.reference ? spatialLevels(report.reference.layout) : null;
+  if (!report.reference || !levels || levels.length < 2) return [{ level: null, report }];
+  return levels.map(level => {
+    const reference = spatialLevelReference(report.reference!, level.id), ids = new Set(reference.layout.zones.map(zone => zone.id));
+    return { level: level.name, report: { ...report, reference, zones: report.zones.filter(zone => ids.has(zone.key)) } };
+  }).filter(sheet => sheet.report.zones.some(zone => !zone.subgroup && zone.rect));
+}
+function FloorPlan({ report, level = null }: { report: SiteReport; level?: string | null }) {
   const t = reportText(report.locale);
   const categoryWord = (category: string) => t(`plan.category.${CATEGORIES.find(item => item === category) ?? "other"}`);
   const reference = report.reference!;
   const [vx, vy, vw, vh] = reference.layout.viewBox;
+  // Layers hidden on the shared map are hidden here too (only known layer names count; saved layouts are untrusted).
+  const hidden = spatialHiddenLayers(reference.layout);
   const areas = report.zones.filter(zone => !zone.subgroup && zone.rect);
-  const subgroups = report.zones.filter(zone => zone.subgroup);
+  const subgroups = hidden.has("equipment") ? [] : report.zones.filter(zone => zone.subgroup);
   const minX = Math.min(...areas.map(zone => zone.rect![0])) - 4, minY = Math.min(...areas.map(zone => zone.rect![1])) - 4;
   const maxX = Math.max(...areas.map(zone => zone.rect![0] + zone.rect![2])) + 4, maxY = Math.max(...areas.map(zone => zone.rect![1] + zone.rect![3])) + 4;
-  const entrance = reference.layout.entrance?.position ? reference.layout.entrance : null;
+  const entrance = reference.layout.entrance?.position && !hidden.has("symbols") ? reference.layout.entrance : null;
   const [ex = 0, ey = 0] = entrance?.position ?? [];
   const doorOnWall = !!entrance && Math.abs(ey - maxY) <= 10;
   const leftEdge = Math.max(...areas.filter(zone => zone.rect![0] + zone.rect![2] <= ex).map(zone => zone.rect![0] + zone.rect![2]), -Infinity);
@@ -120,7 +136,7 @@ function FloorPlan({ report }: { report: SiteReport }) {
   const zonesText = (zones: ReportZone[]) => t(zones.length > 1 ? "plan.zones.other" : "plan.zones.one", { ids: zones.map(zoneId).join(" + ") });
   const property = reference.property;
   const note = [t("plan.schematic"), property?.level !== undefined ? t("plan.level", { level: property.level }) : null, property?.approximateAreaM2 ? `≈${whole(property.approximateAreaM2)} m²` : null].filter(Boolean).join(" · ");
-  const legend = [...areas.map(zone => ({ label: zone.area ? `${zone.label} · ${zone.area}` : zone.label, zone })), ...subgroups.map(zone => ({ label: `${zone.label} · ${t(zone.equipment ? "plan.displayScreens" : "plan.equipment")}`, zone }))];
+  const legend = [...(hidden.has("areas") ? [] : areas).map(zone => ({ label: zone.area ? `${zone.label} · ${zone.area}` : zone.label, zone })), ...subgroups.map(zone => ({ label: `${zone.label} · ${t(zone.equipment ? "plan.displayScreens" : "plan.equipment")}`, zone }))];
   let cursor = vx + 4;
   const legendItems = legend.map(item => { const x = cursor; cursor += 22 + textWidth(item.label, 11.5) + 26; return { ...item, x }; });
   const badgeX = cursor;
@@ -129,7 +145,7 @@ function FloorPlan({ report }: { report: SiteReport }) {
   const noteOnOwnLine = cursor + textWidth(note, 10.5) > vx + vw - 4;
   // Text labels and landmarks often sit outside the building (a car park, a bus stop, a side gate): the legend goes below
   // the lowest of them too, so it is never drawn over them and the plan is tall enough to show them.
-  const marks = { labels: spatialLabels(reference.layout), symbols: spatialSymbols(reference.layout).filter(item => !item.legacy) };
+  const marks = { labels: hidden.has("labels") ? [] : spatialLabels(reference.layout), symbols: hidden.has("symbols") ? [] : spatialSymbols(reference.layout).filter(item => !item.legacy) };
   const labelFont = (size: "s" | "m" | "l" | undefined) => vw / 100 * { s: 1.3, m: 1.9, l: 2.8 }[size ?? "m"];
   const turnedBottom = (halfWidth: number, halfHeight: number, rotation = 0) => { const a = rotation * Math.PI / 180; return Math.abs(Math.sin(a)) * halfWidth + Math.abs(Math.cos(a)) * halfHeight; };
   const marksBottom = Math.max(-Infinity,
@@ -137,29 +153,46 @@ function FloorPlan({ report }: { report: SiteReport }) {
     ...marks.symbols.map(item => item.position[1] + (item.label ? (item.kind === "entrance" ? 38 : 26) : item.kind === "entrance" ? (item.rotation ? 22 : 18) : 9)));
   const legendY = Math.max(maxY + (entrance ? 50 : 24), marksBottom + 16);
   const height = Math.max(vh, legendY + (noteOnOwnLine ? 40 : 20)) - vy;
-  return <svg className="plan" viewBox={`${vx} ${vy} ${vw} ${height}`} role="img" aria-label={t("plan.aria", { name: report.projectName })}>
+  return <svg className="plan" viewBox={`${vx} ${vy} ${vw} ${height}`} role="img" aria-label={level ? t("plan.levelAria", { name: report.projectName, level }) : t("plan.aria", { name: report.projectName })}>
     {doorOnWall
       ? <><path d={`M${minX} ${maxY} V${minY} H${maxX} V${maxY}`} fill="none" stroke={C.ink} strokeWidth={2.5} /><line x1={minX} y1={maxY} x2={ex - 32} y2={maxY} stroke={C.ink} strokeWidth={2.5} /><line x1={ex + 32} y1={maxY} x2={maxX} y2={maxY} stroke={C.ink} strokeWidth={2.5} /></>
       : <rect x={minX} y={minY} width={maxX - minX} height={maxY - minY} fill="none" stroke={C.ink} strokeWidth={2.5} />}
-    {areas.map(zone => { const [x, y, w, h] = zone.rect!; return <g key={zone.key}>
-      <rect x={x} y={y} width={w} height={h} fill={zone.colour} fillOpacity={0.065} stroke={zone.colour} strokeWidth={1.5} />
-      <text className="svgt zone-title" x={x + 10} y={y + 24}>{zone.label}{zone.area ? ` · ${zone.area}` : ""}</text>
-      <text className="svgt rsub" x={x + 10} y={y + 40}>{est(zone)}</text>
+    {!hidden.has("areas") && areas.map(zone => { const [x, y, w, h] = zone.rect!, [tx, ty] = zone.points ? innerBox(zone.points) : zone.rect!; return <g key={zone.key}>
+      {/* A free-shape area (an L-shaped block) is drawn as its outline, with its title in its largest part. */}
+      {zone.points ? <polygon points={pointsAttribute(zone.points)} fill={zone.colour} fillOpacity={0.065} stroke={zone.colour} strokeWidth={1.5} strokeLinejoin="round" /> : <rect x={x} y={y} width={w} height={h} fill={zone.colour} fillOpacity={0.065} stroke={zone.colour} strokeWidth={1.5} />}
+      <text className="svgt zone-title" x={tx + 10} y={ty + 24}>{zone.label}{zone.area ? ` · ${zone.area}` : ""}</text>
+      <text className="svgt rsub" x={tx + 10} y={ty + 40}>{est(zone)}</text>
     </g>; })}
-    {reference.layout.rooms.map(room => {
-      const [x, y, w, h] = room.rect as [number, number, number, number];
-      const lines = wrapLabel(room.name, Math.max(6, Math.floor((w - 8) / 6.8)));
+    {/* Plain shapes (a lawn, a driveway): part of the drawing only, under the rooms. */}
+    {!hidden.has("shapes") && spatialShapes(reference.layout).map((shape, index) => { const [x, y, w, h] = shape.rect, fill = shape.fill ?? "#e4ebe6", line = shape.stroke === "none" ? { stroke: "none" } : { stroke: C.line, ...(shape.stroke === "dashed" ? { strokeDasharray: "6 4" } : {}) }, [lx, ly, lw, lh] = shape.points ? innerBox(shape.points) : shape.rect; return <g key={`${index}:${shape.id}`} data-shape={shape.kind}>
+      {shape.kind === "ellipse" ? <ellipse cx={x + w / 2} cy={y + h / 2} rx={w / 2} ry={h / 2} fill={fill} fillOpacity={0.5} {...line} /> : shape.points ? <polygon points={pointsAttribute(shape.points)} fill={fill} fillOpacity={0.5} strokeLinejoin="round" {...line} /> : <rect x={x} y={y} width={w} height={h} fill={fill} fillOpacity={0.5} {...line} />}
+      {shape.label && <text className="svgt rsub" x={lx + lw / 2} y={ly + lh / 2 + 4} textAnchor="middle">{shape.label}</text>}
+    </g>; })}
+    {!hidden.has("rooms") && reference.layout.rooms.map(room => {
+      // A free-shape room is drawn as its outline, its name in its largest part; malformed points fall back to the box.
+      const outline = polygonOf((room as { points?: unknown }).points, room.rect);
+      const [x, y, w, h] = outline ? innerBox(outline) : room.rect as [number, number, number, number];
+      const lines = wrapLabel(spatialRoomTitle(room), Math.max(6, Math.floor((w - 8) / 6.8)));
       const host = subgroups.find(zone => zone.parentRoom === room.name);
       const cy = y + h / 2 + (host ? 12 : 4) - (lines.length - 1) * 8;
       return <g key={room.name}>
-        <rect className="room" x={x} y={y} width={w} height={h} />
+        {outline ? <polygon className="room" points={pointsAttribute(outline)} /> : <rect className="room" x={x} y={y} width={w} height={h} />}
         <text className="svgt rlabel" x={x + w / 2} y={cy} textAnchor="middle" fontWeight={host || w * h > 30000 ? 600 : 400}>{lines.map((line, index) => <tspan key={index} x={x + w / 2} dy={index ? 16 : 0}>{line}</tspan>)}</text>
       </g>;
     })}
+    {/* Doors and windows the site drew, as simple gaps in the room walls; walls, fences and road edges as plain lines. */}
+    {!hidden.has("lines") && spatialOpenings(reference.layout).map(opening => {
+      const room = drawnOpeningRoom(reference.layout.rooms, opening);
+      if (!room) return null;
+      const { a, b } = openingSpan(room.rect as [number, number, number, number], opening);
+      return <line key={opening.id} x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} stroke="#fff" strokeWidth={3} />;
+    })}
+    {!hidden.has("lines") && spatialLines(reference.layout).map(line => <polyline key={line.id} points={line.points.map(point => point.join(",")).join(" ")} fill="none" stroke={line.style === "partition" ? C.muted : line.style === "wall" ? C.ink : C.slate} strokeWidth={+(lineWidth(line.style, line.thickness) * vw / 100).toFixed(2)} strokeLinecap="round" strokeLinejoin="round" {...(line.style === "fence" ? { strokeDasharray: "6,4" } : {})} />)}
     {subgroups.map(zone => {
       const room = reference.layout.rooms.find(item => item.name === zone.parentRoom);
       if (!room) return null;
-      const [x, y, w] = room.rect as [number, number, number, number];
+      // In a free-shape room the equipment goes in its largest part, never in the notch of an L.
+      const outline = polygonOf((room as { points?: unknown }).points, room.rect), [x, y, w] = outline ? innerBox(outline) : room.rect as [number, number, number, number];
       const count = Math.min(6, Math.max(1, zone.circuitKeys.reduce((sum, key) => sum + (report.circuits.find(circuit => circuit.key === key)?.meterIds.length ?? 0), 0)));
       const barW = Math.min(56, (w - 28 - (count - 1) * 10) / count);
       return <g key={zone.key}>
@@ -552,7 +585,7 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
         <p><Rich text={report.profile.intro} /></p>
         <div className="zones">{report.profile.zones.map(zone => <p key={zone.heading}><strong>{zone.heading}</strong>{t("doc.zoneSeparator")}<Rich text={zone.text} /></p>)}</div>
         {report.groups && <GroupTable report={report} />}
-        {report.reference ? <div className="figure"><div className="plan-wrap"><FloorPlan report={report} /></div><div className="caption">{report.profile.caption}</div></div>
+        {report.reference ? planSheets(report).map((sheet, index) => <div key={index} className="figure">{sheet.level && <h3 className="plan-level">{sheet.level}</h3>}<div className="plan-wrap"><FloorPlan report={sheet.report} level={sheet.level} /></div><div className="caption">{report.profile.caption}</div></div>)
           : report.groups ? null : <div className="table-wrap"><table><thead><tr><th>{t("doc.col.zone")}</th><th>{t("doc.col.board")}</th><th>{t("doc.col.circuits")}</th><th className="r">{estimated ? t("doc.col.zoneEstimate") : t("doc.col.recorded", { days: report.dayCount })}</th></tr></thead>
             <tbody>{report.zones.map(zone => <tr key={zone.key}><td>{zone.label}</td><td>{zone.board}</td><td>{joinText(zone.circuitKeys.map(key => report.circuits.find(circuit => circuit.key === key)?.name ?? ""), locale)}</td><td className="r">{whole(estimated ? zone.monthKwh : zone.periodKwh)}</td></tr>)}</tbody></table></div>}
       </section>

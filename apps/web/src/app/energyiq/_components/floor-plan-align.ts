@@ -61,12 +61,13 @@ export function distributeItems(plan: FloorPlan, list: Selection[], axis: "x" | 
 }
 
 /** Whether an item has a size of its own to change: an area, a room, equipment or a device drawn as a box. */
-export const sizable = (plan: FloorPlan, item: Selection) => item.kind === "area" || item.kind === "room" || (item.kind === "device" && !!plan.devices.find(entry => entry.meterId === item.key)?.size);
+export const sizable = (plan: FloorPlan, item: Selection) => item.kind === "area" || item.kind === "room" || item.kind === "shape" || (item.kind === "device" && !!plan.devices.find(entry => entry.meterId === item.key)?.size);
 /** Puts an area, room, equipment or device box in `rect` (kept inside the plan and at least MIN_SIZE). */
 export function setRect(plan: FloorPlan, item: Selection, rect: Rect): FloorPlan {
   const [x, y, w, h] = clampRect(rect, plan.viewBox);
   if (item.kind === "area") return { ...plan, areas: plan.areas.map(entry => entry.key === item.key ? { ...entry, rect: [x, y, w, h] } : entry) };
   if (item.kind === "room") return { ...plan, rooms: plan.rooms.map(entry => entry.key === item.key ? { ...entry, rect: [x, y, w, h] } : entry) };
+  if (item.kind === "shape") return { ...plan, shapes: (plan.shapes ?? []).map(entry => entry.key === item.key ? { ...entry, rect: [x, y, w, h] } : entry) };
   // A turned device box keeps all of itself inside the plan as turned.
   if (item.kind === "device") return { ...plan, devices: plan.devices.map(entry => entry.meterId === item.key && entry.size ? { ...entry, position: entry.rotation ? keepBoxInside([x + w / 2, y + h / 2], [w, h], entry.rotation, plan.viewBox) : [x + w / 2, y + h / 2], size: [w, h] } : entry) };
   return plan;

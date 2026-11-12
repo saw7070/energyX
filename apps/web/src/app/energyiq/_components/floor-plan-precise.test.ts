@@ -255,7 +255,7 @@ describe("a bigger drawing space", () => {
   });
 
   it("only grows to the right and down when the plan holds something this version cannot move", () => {
-    const saved = read({ ...sktcLike(), layout: { ...sktcLike().layout, lines: [{ points: [[10, 10], [60, 10]], style: "fence" }] } } as unknown as StoredSpatialReference);
+    const saved = read({ ...sktcLike(), layout: { ...sktcLike().layout, pipes: [{ points: [[10, 10], [60, 10]], style: "water" }] } } as unknown as StoredSpatialReference);
     const plan = planFromReference(saved);
     expect(canShift(plan)).toBe(false);
     const { plan: next, blocked } = resizeCanvasFrom(plan, "w", 2000);

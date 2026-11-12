@@ -281,3 +281,74 @@
 :global(:where(html[data-energyiq-theme="dark"])) .landmarkChoice[aria-pressed="true"] { border-color:#8bc3b9; background:#1c2a22; }
 :global(:where(html[data-energyiq-theme="dark"])) .turnLine, :global(:where(html[data-energyiq-theme="dark"])) .turnBox { stroke:#8bc3b9; }
 :global(:where(html[data-energyiq-theme="dark"])) .turnHandle { fill:#191919; stroke:#8bc3b9; }
+/* Doors, windows and lines (floor-plan-drawing-ui): a wide see-through stroke to press, the wall gap under a door, the line being drawn and its points. */
+.hit { fill:none; stroke:transparent; pointer-events:stroke; }
+.openingGap { stroke:#ffffff; }
+.linePreview { fill:none; stroke:#2a78d6; stroke-width:2; stroke-dasharray:6 4; vector-effect:non-scaling-stroke; }
+.vertex { fill:white; stroke:#1d513a; stroke-width:2; vector-effect:non-scaling-stroke; cursor:move; }
+.vertexPicked { fill:#1d513a; stroke:#1d513a; stroke-width:2; vector-effect:non-scaling-stroke; }
+.doorsField { display:grid; gap:6px; border:0; padding:0; margin:0; min-width:0; }
+.doorsField legend { font-size:12px; font-weight:600; color:#4f5f55; padding:0; margin-bottom:4px; }
+.doorList { display:flex; flex-wrap:wrap; gap:6px; list-style:none; padding:0; margin:0; }
+.doorList button { padding:3px 9px; border:1px solid #d0dbd2; border-radius:999px; background:white; color:#1d513a; font-size:12px; font-weight:600; }
+.doorList button:hover { background:#eef4ef; }
+:global(:where(html[data-energyiq-theme="dark"])) .openingGap { stroke:#1d2022; }
+:global(:where(html[data-energyiq-theme="dark"])) .linePreview { stroke:#7aaef0; }
+:global(:where(html[data-energyiq-theme="dark"])) .vertex { fill:#191919; stroke:#8bc3b9; }
+:global(:where(html[data-energyiq-theme="dark"])) .vertexPicked { fill:#8bc3b9; stroke:#8bc3b9; }
+:global(:where(html[data-energyiq-theme="dark"])) .doorsField legend { color:#b9c5be; }
+:global(:where(html[data-energyiq-theme="dark"])) .doorList button { background:#191919; border-color:#32363b; color:#8bc3b9; }
+:global(:where(html[data-energyiq-theme="dark"])) .doorList button:hover { background:#232826; }
+/* Free shapes: plain shapes on the canvas, the shape choices when adding, corner grips, and a shape being drawn. */
+.plainShape { fill:color-mix(in srgb, var(--shape) 40%, white); stroke:color-mix(in srgb, var(--shape) 65%, #2f3b35); fill-opacity:.85; }
+.plainShape[data-outline="none"] { stroke:none; }
+.plainShapeLabel { fill:#24312a; font-weight:600; font-style:italic; pointer-events:none; }
+.presets { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin-top:8px; padding:6px 8px; border:1px dashed #d0dbd2; border-radius:8px; font-size:13px; color:#1d513a; }
+.presets > span { font-weight:600; margin-right:4px; }
+.presetIcon { width:16px; height:16px; margin-right:5px; vertical-align:-3px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linejoin:round; }
+.corner { fill:white; stroke:#2a78d6; stroke-width:2; vector-effect:non-scaling-stroke; cursor:move; }
+.cornerPicked { fill:#2a78d6; }
+.corner:focus-visible { outline:none; stroke:#b58531; stroke-width:3.5; }
+.side { stroke:transparent; fill:none; vector-effect:non-scaling-stroke; cursor:copy; }
+.side:hover { stroke:rgba(42,120,214,.35); }
+.drawLine { fill:rgba(42,120,214,.08); stroke:#2a78d6; stroke-width:2; stroke-dasharray:6 4; vector-effect:non-scaling-stroke; pointer-events:none; }
+.drawCorner { fill:#2a78d6; stroke:white; stroke-width:1.5; vector-effect:non-scaling-stroke; pointer-events:none; }
+.cornerActions { display:flex; flex-wrap:wrap; gap:6px; }
+:global(:where(html[data-energyiq-theme="dark"])) .plainShape { fill:color-mix(in srgb, var(--shape) 32%, #161718); stroke:color-mix(in srgb, var(--shape) 60%, #c4cdc7); }
+:global(:where(html[data-energyiq-theme="dark"])) .plainShapeLabel { fill:#e6ede9; }
+:global(:where(html[data-energyiq-theme="dark"])) .presets { border-color:#32363b; color:#8bc3b9; }
+:global(:where(html[data-energyiq-theme="dark"])) .corner { fill:#191919; stroke:#7aaef0; }
+:global(:where(html[data-energyiq-theme="dark"])) .cornerPicked { fill:#7aaef0; }
+:global(:where(html[data-energyiq-theme="dark"])) .corner:focus-visible { stroke:#e0b458; }
+:global(:where(html[data-energyiq-theme="dark"])) .side:hover { stroke:rgba(122,174,240,.35); }
+:global(:where(html[data-energyiq-theme="dark"])) .drawLine { fill:rgba(122,174,240,.10); stroke:#7aaef0; }
+:global(:where(html[data-energyiq-theme="dark"])) .drawCorner { fill:#7aaef0; stroke:#191919; }
+.cornerPanel { display:grid; gap:6px; }
+/* Floors: tabs above the plan, the floor panel and its delete question; layers; repeat and templates. */
+.levelTabs { display:flex; flex-wrap:wrap; gap:4px; margin-top:12px; border-bottom:1px solid #e1e7e1; }
+.levelTab { min-height:32px; padding:5px 14px; border:1px solid transparent; border-bottom:0; border-radius:8px 8px 0 0; background:transparent; color:#4f5f55; font-size:13px; font-weight:600; }
+.levelTab:hover { background:#eef3ed; }
+.levelTab[aria-pressed="true"] { border-color:#e1e7e1; background:#fbfcfb; color:#1d513a; box-shadow:inset 0 2px 0 #1d513a; }
+.levelTab:focus-visible { outline:2px solid #3b8a63; outline-offset:-2px; }
+.confirm { display:grid; gap:8px; padding:10px 12px; border:1px solid #e3b4b1; border-radius:10px; background:#fff8f7; }
+.layerList { display:grid; gap:8px; margin:0; padding:0; list-style:none; }
+.layerList li { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:4px 8px; font-size:13px; color:#1f2d25; }
+.layerList li .check { grid-column:1 / -1; font-size:12px !important; }
+.layerList .tool { min-height:28px; padding:3px 9px; font-size:12px; }
+.layerOff { color:#8a948e; text-decoration:line-through; }
+.repeatGrid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:6px; }
+.repeatGrid label { display:grid; gap:4px; font-size:12px; font-weight:600; color:#4f5f55; }
+.repeatGrid input, .repeatGrid select { width:100%; min-width:0; padding:5px 6px !important; }
+.templateRow { display:flex; align-items:flex-end; gap:8px; }
+.templateRow input { width:70px; min-height:32px; padding:4px 8px; border:1px solid #d0dbd2; border-radius:7px; background:white; color:#1f2d25; font-size:13px; }
+/* The floor below, drawn faintly for lining things up; it takes no clicks. Plan tokens keep it right in every look. */
+.ghost { fill:none; stroke:var(--plan-ink-muted, #6a7570); stroke-width:1.5; stroke-dasharray:6 4; opacity:.45; pointer-events:none; vector-effect:non-scaling-stroke; }
+.ghostLabel { fill:var(--plan-ink-muted, #6a7570); opacity:.5; pointer-events:none; }
+:global(:where(html[data-energyiq-theme="dark"])) .levelTabs { border-color:#32363b; }
+:global(:where(html[data-energyiq-theme="dark"])) .levelTab { color:#b9c5be; }
+:global(:where(html[data-energyiq-theme="dark"])) .levelTab:hover { background:#232826; }
+:global(:where(html[data-energyiq-theme="dark"])) .levelTab[aria-pressed="true"] { border-color:#32363b; background:#161718; color:#8bc3b9; box-shadow:inset 0 2px 0 #8bc3b9; }
+:global(:where(html[data-energyiq-theme="dark"])) .confirm { background:#271c1c; border-color:#5a3431; }
+:global(:where(html[data-energyiq-theme="dark"])) .layerList li, :global(:where(html[data-energyiq-theme="dark"])) .repeatGrid label { color:#e6ede9; }
+:global(:where(html[data-energyiq-theme="dark"])) .layerOff { color:#6f7a74; }
+:global(:where(html[data-energyiq-theme="dark"])) .templateRow input { background:#191919; border-color:#32363b; color:#e6ede9; }

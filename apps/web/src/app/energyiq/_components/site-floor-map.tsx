@@ -1,6 +1,6 @@
 "use client";
-import { useId, type CSSProperties, type KeyboardEvent } from "react";
-import { spatialLabels, spatialRotation, spatialSymbols, type ProjectSpatialReference } from "@datafoundry/contracts";
+import { useId, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { drawnOpeningRoom, innerBox, insideSpatial, pointsAttribute, polygonOf, spatialLabels, spatialLevelOf, spatialLevelReference, spatialLevels, spatialLines, spatialOpenings, spatialRoomTitle, spatialRotation, spatialShapes, spatialSymbols, spatialZoneLevel, type ProjectSpatialReference } from "@datafoundry/contracts";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { translatorFor, type EnergyIqLocale } from "./energyiq-messages";
 import { floorMapMessages } from "./site-floor-map-messages";
@@ -12,6 +12,13 @@ import { isKnownSymbol } from "./floor-plan-marks";
 
 /** The map draws labels and landmarks in the plan style's own ink (see site-floor-map.module.css). */
 const MAP_MARKS: MarkClasses = { mark: styles.planMark!, halo: styles.planMarkHalo!, text: styles.planMarkText!, entrance: styles.planEntrance!, entranceLabel: styles.planEntranceLabel! };
+import { LineSymbol, OpeningSymbol, type LineClasses, type OpeningClasses } from "./plan-openings";
+
+/** Stylesheet classes for doors, windows and walls on the map (see plan-openings). */
+const OPENING_CLASSES: OpeningClasses = { gap: styles.planDoorGap!, leaf: styles.planDoor!, swing: styles.planDoorSwing!, window: styles.planWindow! };
+const LINE_CLASSES: LineClasses = { wall: styles.planLineWall!, partition: styles.planLinePartition!, fence: styles.planLineFence!, road: styles.planLineRoad! };
+import { PlainShapeBody } from "./plan-shapes";
+import { sharedHidden } from "./floor-plan-layers";
 
 const mapText = (locale: EnergyIqLocale) => translatorFor(floorMapMessages, locale);
 
@@ -81,13 +88,16 @@ export function mapDevices(reference: ProjectSpatialReference, meters: Array<{ i
   });
 }
 const inside = ([x, y, w, h]: number[], [px, py]: [number, number]) => px >= x && px <= x + w && py >= y && py <= y + h;
+/** A box, or an area or room that may be drawn as a free shape (its saved `points`, ignored when malformed). */
+type Spot = number[] | { rect?: number[] | undefined; points?: unknown };
+const inSpot = (spot: Spot, point: [number, number]) => Array.isArray(spot) ? inside(spot, point) : insideSpatial(spot as { rect: unknown; points?: unknown }, point);
 const escapeWords = (text: string) => text.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
 /**
  * Pin label without what the surroundings already say: the room it sits in ("Showroom TV 1" in the Showroom reads "TV 1")
  * and, inside an equipment box, the words of that box's description ("LED Display 1" in "LED panels" reads "Display 1").
  */
-export function pinLabel(name: string, position: [number, number], rooms: Array<{ name: string; rect: number[] }>, groups: Array<{ rect: number[]; equipment?: string }> = []): string {
-  const room = rooms.find(item => inside(item.rect, position));
+export function pinLabel(name: string, position: [number, number], rooms: Array<{ name: string; rect: number[]; points?: unknown }>, groups: Array<{ rect: number[]; equipment?: string }> = []): string {
+  const room = rooms.find(item => insideSpatial(item, position));
   const group = groups.find(item => inside(item.rect, position));
   let label = name;
   for (const word of (group?.equipment ?? "").split(/\s+/).filter(item => item.length >= 3)) {
@@ -125,22 +135,56 @@ export function roomDoor([rx, ry, rw, rh]: Rect, unit: number, obstacles: Rect[]
   return spot ? { ...spot, size } : null;
 }
 
+type MapProps = { reference: ProjectSpatialReference; large?: boolean; devices?: MapDevice[]; onOpenDevice?: (id: string) => void; highlight?: string[] | null; highlightDevices?: string[] | null; onSelectBoard?: (board: string, deviceId?: string) => void; focusDevice?: string | null };
+type Saved = ProjectSpatialReference & { layout: { devices?: Array<{ meterId: string }>; layers?: unknown } };
+
 /**
  * `highlight` names the boards to emphasise (others fade); `highlightDevices` says exactly which pins those are, for
  * when different groups share a name; `onSelectBoard` makes each area clickable, saying which pin it holds if any;
  * `onOpenDevice` makes each pin clickable; `focusDevice` rings one pin.
+ *
+ * A site with two floors or more gets a tab per floor above the plan, and the plan shows one floor at a time; it turns
+ * to the floor of the pin in focus, or of most of the highlighted pins or areas, so a highlight never lands on another
+ * floor. `level` shows one floor without tabs (the editor's preview of the floor being edited). A one-floor site looks
+ * exactly as before floors existed. Layers the layout hides on the shared map are not drawn.
  */
-export function SiteFloorMap({ reference, large = false, devices = [], onOpenDevice, highlight = null, highlightDevices = null, onSelectBoard, focusDevice = null }: { reference: ProjectSpatialReference; large?: boolean; devices?: MapDevice[]; onOpenDevice?: (id: string) => void; highlight?: string[] | null; highlightDevices?: string[] | null; onSelectBoard?: (board: string, deviceId?: string) => void; focusDevice?: string | null }) {
+export function SiteFloorMap(props: MapProps & { level?: string | null }) {
+  const { reference, level: fixed = null, devices = [], highlight = null, highlightDevices = null, focusDevice = null } = props;
+  const t = useMessages(floorMapMessages);
+  const [picked, setPicked] = useState<{ level: string; key: string } | null>(null);
+  const levels = spatialLevels(reference.layout), hidden = sharedHidden((reference as Saved).layout.layers);
+  const { level: _level, ...rest } = props;
+  if (!levels || levels.length < 2) return <MapSheet {...rest} hidden={hidden} />;
+  const has = (id: string | null | undefined): id is string => !!id && levels.some(item => item.id === id);
+  const deviceLevel = new Map(((reference as Saved).layout.devices ?? []).flatMap(item => item && typeof item.meterId === "string" ? [[item.meterId, spatialLevelOf(item, levels)] as const] : []));
+  const most = (found: string[]) => { const counts = new Map<string, number>(); for (const id of found) counts.set(id, (counts.get(id) ?? 0) + 1); return [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null; };
+  const wanted = focusDevice && deviceLevel.has(focusDevice) ? deviceLevel.get(focusDevice)!
+    : most((highlightDevices ?? []).flatMap(id => deviceLevel.has(id) ? [deviceLevel.get(id)!] : [])) ?? (highlight ? most(reference.layout.zones.filter(zone => zone.referenceBoard && highlight.includes(zone.referenceBoard)).map(zone => spatialZoneLevel(zone, reference.layout, levels))) : null);
+  // A tab picked by the reader holds until the highlight changes; then the map turns to the highlighted floor.
+  const key = JSON.stringify([focusDevice, highlightDevices, highlight]);
+  const shown = has(fixed) ? fixed : picked && picked.key === key && has(picked.level) ? picked.level : wanted ?? (has(picked?.level) ? picked!.level : levels[0]!.id);
+  const floor = spatialLevelReference(reference, shown), onFloor = new Set(((floor as Saved).layout.devices ?? []).map(item => item?.meterId));
+  const sheet = <MapSheet {...rest} reference={floor} colourSource={reference} devices={devices.filter(device => onFloor.has(device.id))} hidden={hidden} />;
+  if (has(fixed)) return sheet;
+  return <div className={styles.levelMap}>
+    <div className={styles.levelTabs} role="group" aria-label={t("levels")} data-level-tabs="">{levels.map(item => <button key={item.id} type="button" aria-pressed={item.id === shown} className={styles.levelTab} onClick={() => setPicked({ level: item.id, key })}>{item.name}</button>)}</div>
+    {sheet}
+  </div>;
+}
+
+/** One sheet of the plan. `colourSource` is the whole layout, so a board keeps its colour on every floor. */
+function MapSheet({ reference, large = false, devices: allDevices = [], onOpenDevice, highlight = null, highlightDevices = null, onSelectBoard, focusDevice = null, colourSource = reference, hidden = new Set() }: MapProps & { colourSource?: ProjectSpatialReference; hidden?: Set<string> }) {
   const t = useMessages(floorMapMessages), kindName = useMessages(planSymbolMessages);
+  const devices = hidden.has("devices") ? [] : allDevices;
   // Pattern ids must be unique per map on the page (the plan and its enlarged copy) and safe inside url(#…).
   const gridId = useId().replace(/[^a-zA-Z0-9]/g, "");
   const { locale } = useEnergyIqLocale();
   const [x, y, w, h] = reference.layout.viewBox;
   const unit = w / 100;
-  const colours = zoneColours(reference.layout.zones, chosenColours(reference));
+  const colours = zoneColours(colourSource.layout.zones, chosenColours(colourSource));
   const zoneOf = new Map(reference.layout.zones.map(zone => [zone.id, zone]));
   const entrance = (reference as ProjectSpatialReference & Extras).layout.entrance;
-  const areas = reference.layout.zones.filter(zone => zone.rect && zone.independentSpace !== false);
+  const areas = hidden.has("areas") ? [] : reference.layout.zones.filter(zone => zone.rect && zone.independentSpace !== false);
   const subgroups = reference.layout.zones.flatMap(zone => {
     if (zone.independentSpace !== false) return [];
     if (zone.rect) return [{ zone, box: zone.rect as Rect }];
@@ -150,21 +194,22 @@ export function SiteFloorMap({ reference, large = false, devices = [], onOpenDev
     return [{ zone, box: [rx + pad, ry + rh - bh - pad, rw - pad * 2, bh] as Rect }];
   });
   const groupBoxes = subgroups.map(({ zone, box }) => ({ rect: box, ...(zone.equipment ? { equipment: zone.equipment } : {}) }));
-  const byBoard = boardColours(reference.layout.zones.map(zone => zone.referenceBoard), chosenColours(reference));
+  const byBoard = boardColours(colourSource.layout.zones.map(zone => zone.referenceBoard), chosenColours(colourSource));
   const positions = devices.map(device => device.position);
   const text = (lines: string[], cx: number, cy: number, size: number, className: string) => <text x={cx} y={cy - (lines.length - 1) * size * 0.6} textAnchor="middle" className={className} style={{ fontSize: size }}>{lines.map((line, index) => <tspan key={index} x={cx} dy={index ? size * 1.2 : 0}>{line}</tspan>)}</text>;
   const interactive = (!!onOpenDevice && devices.length > 0) || !!onSelectBoard;
-  const pinsIn = (board: string, rect: number[]) => devices.filter(device => device.board === board && inside(rect, device.position));
+  // Where pins count as in an area or room: its box, or for a free shape (an L-shaped block) its outline, never the notch.
+  const pinsIn = (board: string, rect: Spot) => devices.filter(device => device.board === board && inSpot(rect, device.position));
   // A name alone can't say which of two same-named groups an area is, so an area holding pins goes by whose pins they are.
-  const selectedArea = (board: string, rect: number[]) => {
+  const selectedArea = (board: string, rect: Spot) => {
     if (!highlight?.includes(board)) return false;
     const pins = highlightDevices ? pinsIn(board, rect) : [];
     return !pins.length || pins.some(pin => highlightDevices!.includes(pin.id));
   };
-  const faded = (board: string, rect: number[]) => highlight !== null && !selectedArea(board, rect);
+  const faded = (board: string, rect: Spot) => highlight !== null && !selectedArea(board, rect);
   const fadedPin = (device: MapDevice) => highlightDevices ? !highlightDevices.includes(device.id) : highlight !== null && !highlight.includes(device.board);
   // An area that names no panel is part of the drawing only: there is no panel to select.
-  const clickable = (board: string, label: string, rect: number[]) => {
+  const clickable = (board: string, label: string, rect: Spot) => {
     if (!onSelectBoard || !board) return { className: faded(board, rect) ? styles.faded : undefined };
     const select = () => onSelectBoard(board, pinsIn(board, rect)[0]?.id);
     return { role: "button", tabIndex: 0, "aria-label": label, "aria-pressed": selectedArea(board, rect), className: `${styles.areaLink} ${faded(board, rect) ? styles.faded : ""}`, onClick: select, onKeyDown: (event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); select(); } } };
@@ -179,6 +224,11 @@ export function SiteFloorMap({ reference, large = false, devices = [], onOpenDev
   const look = planStyleOf((reference as ProjectSpatialReference & { layout: { style?: unknown } }).layout), drawn = look !== "blocks";
   const lookClass = look === "blueprint" ? styles.lookBlueprint : look === "blocks" ? styles.lookBlocks : styles.lookDrawing;
   const ids = { minor: `plan-grid-${gridId}`, major: `plan-grid-major-${gridId}` };
+  // Doors, windows and walls the site drew (checked: the layout is untrusted). A room with a door of its own, or with its
+  // automatic door switched off, gets no automatic door; every other room keeps the one worked out below.
+  const openings = spatialOpenings(reference.layout).flatMap(opening => { const room = drawnOpeningRoom(reference.layout.rooms, opening); return room ? [{ opening, room }] : []; });
+  const ownDoor = new Set(openings.filter(item => item.opening.kind !== "window").map(item => item.room));
+  const walls = spatialLines(reference.layout);
   return <svg viewBox={`${x} ${y} ${w} ${h + unit * 4}`} className={`${styles.map} ${lookClass} ${large ? styles.large : ""}`} data-look={look} role={interactive ? "group" : "img"} aria-label={devices.length ? t("ariaDevices", { count: devices.length }) : t("aria")}>
     {/* The sheet: drafting paper with a fine and a coarse grid, inside a drawing border. */}
     {drawn && <defs>
@@ -188,22 +238,28 @@ export function SiteFloorMap({ reference, large = false, devices = [], onOpenDev
     <rect x={x} y={y} width={w} height={h + unit * 4} className={styles.sheet} />
     {drawn && <rect x={x} y={y} width={w} height={h + unit * 4} fill={`url(#${ids.major})`} />}
     {drawn && <rect x={x + unit * 0.4} y={y + unit * 0.4} width={w - unit * 0.8} height={h + unit * 3.2} className={styles.frame} strokeWidth={unit * 0.12} />}
-    {areas.map(zone => { const [zx, zy, zw, zh] = zone.rect as Rect; const colour = colours.get(zone.id)!; return <g key={zone.id} style={area(colour)} {...clickable(zone.referenceBoard, zone.referenceBoard ? t("selectArea", { board: zone.referenceBoard, area: areaLabel(zone.id, locale) }) : areaLabel(zone.id, locale), zone.rect as Rect)}>
-      {/* Outer walls in ink; the area's colour is kept to its name plate and a band along the top wall. */}
-      {(() => { const on = selectedArea(zone.referenceBoard, zone.rect as Rect); return <rect x={zx} y={zy} width={zw} height={zh} rx={unit * (drawn ? 0.25 : 1.4)} className={`${styles.planZone} ${on ? styles.planZoneActive : ""}`} strokeWidth={unit * (drawn ? (on ? 0.8 : 0.42) : (on ? 0.4 : 0.18))} />; })()}
-      {drawn && <rect x={zx + unit * 0.25} y={zy + unit * 0.25} width={Math.max(0, zw - unit * 0.5)} height={unit * 0.45} className={styles.planBand} />}
+    {areas.map(zone => { const outline = polygonOf(zone.points, zone.rect), [zx, zy, zw, zh] = outline ? innerBox(outline) as Rect : zone.rect as Rect; const colour = colours.get(zone.id)!; return <g key={zone.id} style={area(colour)} {...clickable(zone.referenceBoard, zone.referenceBoard ? t("selectArea", { board: zone.referenceBoard, area: areaLabel(zone.id, locale) }) : areaLabel(zone.id, locale), zone)}>
+      {/* Outer walls in ink; the area's colour is kept to its name plate and a band along the top wall. A free-shape
+          area (an L-shaped block) is drawn as its outline, its name plate in its largest part, without the band. */}
+      {(() => { const on = selectedArea(zone.referenceBoard, zone), look = { className: `${styles.planZone} ${on ? styles.planZoneActive : ""}`, strokeWidth: unit * (drawn ? (on ? 0.8 : 0.42) : (on ? 0.4 : 0.18)) }; return outline ? <polygon points={pointsAttribute(outline)} strokeLinejoin="round" data-shape="outline" {...look} /> : <rect x={zx} y={zy} width={zw} height={zh} rx={unit * (drawn ? 0.25 : 1.4)} {...look} />; })()}
+      {drawn && !outline && <rect x={zx + unit * 0.25} y={zy + unit * 0.25} width={Math.max(0, zw - unit * 0.5)} height={unit * 0.45} className={styles.planBand} />}
       <rect x={zx + unit * 1.4} y={zy + unit * 1.75} width={unit * 1.3} height={unit * 1.3} rx={unit * 0.2} className={styles.planSwatch} />
       <text x={zx + unit * 3.4} y={zy + unit * 2.95} className={styles.planZoneLabel} style={{ fontSize: unit * 1.8 }}>{zone.referenceBoard ? <>{zone.referenceBoard}<tspan className={styles.planZoneSub} dx={unit * 0.8}>{areaLabel(zone.id, locale)}</tspan></> : areaLabel(zone.id, locale)}</text>
     </g>; })}
-    {reference.layout.rooms.map(room => { const [rx, ry, rw, rh] = room.rect as Rect; const colour = colours.get(room.zone); const size = Math.min(unit * 1.45, rw / 8); const board = reference.layout.zones.find(zone => zone.id === room.zone)?.referenceBoard ?? ""; const own = (room as { colour?: unknown }).colour;
-      const lines = wrapLabel(room.name, Math.max(6, Math.floor(rw / (size * 0.58))));
-      const labelY = roomHasPins(room.rect, positions) ? ry + size * 1.6 + (lines.length - 1) * size * 0.6 : ry + rh / 2 + size * 0.35;
+    {/* Plain shapes (a lawn, a driveway): part of the drawing only, over the areas and under the rooms. */}
+    {!hidden.has("shapes") && spatialShapes(reference.layout).map((shape, index) => <g key={`${index}:${shape.id}`} data-shape={shape.kind} aria-hidden="true"><PlainShapeBody kind={shape.kind} rect={shape.rect} corners={shape.points} fill={shape.fill} stroke={shape.stroke} label={shape.label} unit={unit} className={styles.planShape} labelClassName={styles.planShapeLabel} /></g>)}
+    {!hidden.has("rooms") && reference.layout.rooms.map(room => { const outline = polygonOf(room.points, room.rect), [rx, ry, rw, rh] = outline ? innerBox(outline) as Rect : room.rect as Rect; const colour = colours.get(room.zone); const size = Math.min(unit * 1.45, rw / 8); const board = reference.layout.zones.find(zone => zone.id === room.zone)?.referenceBoard ?? ""; const own = (room as { colour?: unknown }).colour;
+      const lines = wrapLabel(spatialRoomTitle(room), Math.max(6, Math.floor(rw / (size * 0.58))));
+      const labelY = positions.some(position => insideSpatial(room, position)) ? ry + size * 1.6 + (lines.length - 1) * size * 0.6 : ry + rh / 2 + size * 0.35;
       // Clear of the room's name (drawn from its first line, above the centre), its meters and any equipment inside it.
       const obstacles = [labelBox(lines, rx + rw / 2, labelY - (lines.length - 1) * size * 0.6, size), ...pinBoxes.filter(item => inside(room.rect, item.at)).flatMap(item => item.boxes),
         ...subgroups.map(item => item.box).filter(box => overlaps(box, room.rect as Rect)), ...devices.flatMap(device => device.size && inside(room.rect, device.position) ? [[device.position[0] - device.size[0] / 2, device.position[1] - device.size[1] / 2, device.size[0], device.size[1]] as Rect] : [])];
-      const door = drawn ? roomDoor(room.rect as Rect, unit, obstacles) : null;
-      return <g key={room.name} style={area(isColour(own) ? own : colour)} {...clickable(board, t("selectRoom", { board, room: room.name }), room.rect)}>
-      <rect x={rx} y={ry} width={rw} height={rh} rx={drawn ? 0 : unit * 0.8} className={`${styles.planRoom} ${isColour(own) ? styles.planRoomOwn : ""}`} strokeWidth={unit * (drawn ? 0.2 : 0.14)} />
+      // Automatic doors go in a box room's corners only: a free-shape room's corners are not where a door would be. A room
+      // with a door of its own (or autoDoor: false) has none either.
+      const door = drawn && !outline && (room as { autoDoor?: unknown }).autoDoor !== false && !ownDoor.has(room) ? roomDoor(room.rect as Rect, unit, obstacles) : null;
+      const roomLook = { className: `${styles.planRoom} ${isColour(own) ? styles.planRoomOwn : ""}`, strokeWidth: unit * (drawn ? 0.2 : 0.14) };
+      return <g key={room.name} style={area(isColour(own) ? own : colour)} {...clickable(board, t("selectRoom", { board, room: spatialRoomTitle(room) }), room)}>
+      {outline ? <polygon points={pointsAttribute(outline)} strokeLinejoin="round" data-shape="outline" {...roomLook} /> : <rect x={rx} y={ry} width={rw} height={rh} rx={drawn ? 0 : unit * 0.8} {...roomLook} />}
       {door && <>
         <line x1={door.x} y1={door.y} x2={door.x + door.along * door.size} y2={door.y} className={styles.planDoorGap} strokeWidth={unit * 0.34} />
         <line x1={door.x} y1={door.y} x2={door.x} y2={door.y + door.inward * door.size} className={styles.planDoor} strokeWidth={unit * 0.14} />
@@ -211,7 +267,8 @@ export function SiteFloorMap({ reference, large = false, devices = [], onOpenDev
       </>}
       {text(lines, rx + rw / 2, labelY, size, styles.planRoomLabel)}
     </g>; })}
-    {subgroups.map(({ zone, box }) => {
+    {openings.length > 0 && !hidden.has("lines") && <g pointerEvents="none">{openings.map(({ opening, room }) => <OpeningSymbol key={opening.id} rect={room.rect as Rect} opening={opening} unit={unit} swings={drawn} classes={OPENING_CLASSES} gapWidth={unit * (drawn ? 0.34 : 0.3)} />)}</g>}
+    {!hidden.has("equipment") && subgroups.map(({ zone, box }) => {
       const colour = colours.get(zone.id)!;
       const [gx, gy, gw, gh] = box;
       const pinned = roomHasPins(box, positions);
@@ -220,10 +277,11 @@ export function SiteFloorMap({ reference, large = false, devices = [], onOpenDev
         <text x={pinned ? gx + unit * 0.8 : gx + gw / 2} y={pinned ? gy + unit * 1.6 : gy + gh / 2 + unit * 0.6} textAnchor={pinned ? "start" : "middle"} className={styles.planEquipLabel} style={{ fontSize: unit * (pinned ? 1.1 : 1.4) }}>{zone.referenceBoard ? `${zone.referenceBoard} · ` : ""}{zone.equipment ?? t("equipmentInRoom")}</text>
       </g>;
     })}
+    {walls.length > 0 && !hidden.has("lines") && <g pointerEvents="none">{walls.map(line => <LineSymbol key={line.id} points={line.points} style={line.style} thickness={line.thickness} unit={unit} classes={LINE_CLASSES} />)}</g>}
     {/* Text labels and landmarks: drawing only, above rooms and below devices. The entrance a layout saved before
         landmarks existed is drawn exactly as it always was. */}
-    {spatialLabels(reference.layout).map((item, index) => <LabelMark key={`label-${index}`} text={item.text} position={item.position} {...(item.size ? { size: item.size } : {})} {...(item.rotation ? { rotation: item.rotation } : {})} {...(item.colour ? { colour: item.colour } : {})} bold={!!item.bold} unit={unit} classes={MAP_MARKS} />)}
-    {spatialSymbols(reference.layout).map((item, index) => {
+    {!hidden.has("labels") && spatialLabels(reference.layout).map((item, index) => <LabelMark key={`label-${index}`} text={item.text} position={item.position} {...(item.size ? { size: item.size } : {})} {...(item.rotation ? { rotation: item.rotation } : {})} {...(item.colour ? { colour: item.colour } : {})} bold={!!item.bold} unit={unit} classes={MAP_MARKS} />)}
+    {!hidden.has("symbols") && spatialSymbols(reference.layout).map((item, index) => {
       const own = { ...(item.size !== undefined ? { size: item.size } : {}), ...(item.rotation ? { rotation: item.rotation } : {}), ...(item.colour ? { colour: item.colour } : {}) };
       if (item.kind === "entrance") return <EntranceMark key={`symbol-${index}`} position={item.position} {...own} label={item.legacy ? entrance?.label ?? t("entrance") : item.label ?? t("entrance")} unit={unit} legacy={{ offset: unit * 4.4, font: unit * 1.3 }} classes={MAP_MARKS} />;
       return <g key={`symbol-${index}`}><title>{[kindName(isKnownSymbol(item.kind) ? item.kind : "other"), item.label].filter(Boolean).join(" · ")}</title><SymbolMark kind={item.kind} position={item.position} {...own} {...(item.label ? { label: item.label } : {})} unit={unit} classes={MAP_MARKS} /></g>;
@@ -267,12 +325,14 @@ export function BoardLegend({ reference }: { reference: ProjectSpatialReference 
   const colours = zoneColours(reference.layout.zones, chosenColours(reference));
   const zones = [...reference.layout.zones].sort((a, b) => a.referenceBoard.localeCompare(b.referenceBoard, undefined, { numeric: true }));
   return <ul className={styles.legend} aria-label={t("legendAria")}>{zones.map(zone => {
-    const rooms = reference.layout.rooms.filter(room => room.zone === zone.id).map(room => room.name);
+    const rooms = reference.layout.rooms.filter(room => room.zone === zone.id).map(spatialRoomTitle);
+    // The room equipment sits in, by its shown name (the stored one can carry a floor suffix, "Store (2)").
+    const parent = reference.layout.rooms.find(room => room.name === zone.physicalParentRoom), parentName = parent ? spatialRoomTitle(parent) : zone.physicalParentRoom;
     return <li key={zone.id}>
       <span className={styles.swatch} style={{ background: colours.get(zone.id) }} aria-hidden="true" />
       <div>
-        <strong>{zone.referenceBoard}<span>{zone.referenceBoard ? " · " : ""}{zone.independentSpace === false ? t("inside", { room: zone.physicalParentRoom ?? t("aRoom") }) : areaLabel(zone.id, locale)}</span></strong>
-        {zone.independentSpace === false ? <p>{t("subgroup", { equipment: zone.equipment ?? t("subgroupDefault"), room: zone.physicalParentRoom ?? t("roomAbove") })}</p> : <p className={styles.chips}>{rooms.map(room => <span key={room}>{room}</span>)}</p>}
+        <strong>{zone.referenceBoard}<span>{zone.referenceBoard ? " · " : ""}{zone.independentSpace === false ? t("inside", { room: parentName ?? t("aRoom") }) : areaLabel(zone.id, locale)}</span></strong>
+        {zone.independentSpace === false ? <p>{t("subgroup", { equipment: zone.equipment ?? t("subgroupDefault"), room: parentName ?? t("roomAbove") })}</p> : <p className={styles.chips}>{rooms.map(room => <span key={room}>{room}</span>)}</p>}
       </div>
     </li>;
   })}</ul>;

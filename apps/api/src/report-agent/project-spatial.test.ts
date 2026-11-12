@@ -33,3 +33,20 @@ describe("project spatial assets", () => {
     expect(svg).not.toContain("<script>"); expect(svg).toContain("&lt;script&gt;");
   });
 });
+describe("free shapes in the stored reference", () => {
+  const shaped = {...reference, layout: {...reference.layout,
+    zones: [{...reference.layout.zones[0], points: [[10,10],[310,10],[310,150],[160,150],[160,310],[10,310]]}, reference.layout.zones[1]],
+    shapes: [{id:"lawn",kind:"polygon",rect:[400,20,100,100],points:[[400,20],[500,20],[400,120]],fill:"#77bb77",stroke:"dashed",label:"Lawn & pond"},{id:"drive",kind:"rect",rect:[400,300,300,60],fill:"not-a-colour"},{id:"bad",kind:"star",rect:[0,0,5,5]}]}};
+  it("accepts optional points and shapes, draws polygons and plain shapes, and boxes for malformed points", () => {
+    const loaded = readProjectSpatialReference(notes(shaped), "office")!;
+    const svg = renderProjectSpatialSvg(loaded.reference);
+    expect(svg).toContain('<polygon points="10,10 310,10 310,150 160,150 160,310 10,310"');
+    expect(svg).toContain('<polygon points="400,20 500,20 400,120" fill="#77bb77"'); expect(svg).toContain('stroke-dasharray="6 4"');
+    expect(svg).toContain("Lawn &amp; pond"); expect(svg).not.toContain("not-a-colour"); expect(svg).not.toContain("star");
+    const broken = {...shaped, layout: {...shaped.layout, zones: [{...shaped.layout.zones[0], points: [[10,10],[999,10],[10,310]]}, reference.layout.zones[1]]}};
+    expect(renderProjectSpatialSvg(readProjectSpatialReference(notes(broken), "office")!.reference)).toContain('<rect x="10" y="10" width="300" height="300"');
+  });
+  it("draws a layout without free shapes exactly as before", () => {
+    expect(renderProjectSpatialSvg(readProjectSpatialReference(notes(reference), "office")!.reference)).not.toMatch(/<polygon|<ellipse/);
+  });
+});

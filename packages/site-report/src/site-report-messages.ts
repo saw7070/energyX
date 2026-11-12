@@ -88,6 +88,7 @@ export const siteReportMessages = defineMessages({
   "day.perLight.col.perLight": "kWh per light on the day",
 
   "plan.aria": "Simplified floor plan of {name}",
+  "plan.levelAria": "Simplified floor plan of {name}, {level}",
   "plan.estimate": "about {kwh} kWh per 30 days",
   "plan.alwaysOn": "always on",
   "plan.category.light": "lighting",
@@ -237,6 +238,7 @@ export const siteReportMessages = defineMessages({
     "day.perLight.col.perLight": "当天每盏灯 kWh",
 
     "plan.aria": "{name} 的简化楼层图",
+    "plan.levelAria": "{name} 的简化楼层图（{level}）",
     "plan.estimate": "约 {kwh} kWh / 30 天",
     "plan.alwaysOn": "一直开着",
     "plan.category.light": "照明",
@@ -386,6 +388,7 @@ export const siteReportMessages = defineMessages({
     "day.perLight.col.perLight": "kWh bagi setiap lampu pada hari itu",
 
     "plan.aria": "Pelan lantai ringkas {name}",
+    "plan.levelAria": "Pelan lantai ringkas {name}, {level}",
     "plan.estimate": "kira-kira {kwh} kWh setiap 30 hari",
     "plan.alwaysOn": "sentiasa hidup",
     "plan.category.light": "pencahayaan",

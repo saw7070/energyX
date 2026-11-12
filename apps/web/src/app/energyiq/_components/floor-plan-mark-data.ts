@@ -93,11 +93,12 @@ export function entranceParts(symbol: PlanSymbol, slot?: number): EntranceMarkPa
  * Which landmark is the first entrance. A legacy entrance (`at`) is the entrance symbol at the same place, if there is
  * one, so it is never drawn twice; when none is there but one carries the legacy entrance's name (`name`), that one is
  * the same entrance, moved where only `layout.entrance` was changed (by an older build, a notes edit or the advisor).
- * Without a legacy entrance the first entrance symbol is. -1 when none is.
+ * Without a legacy entrance the first entrance symbol is. -1 when none is. On a site with floors, only an entrance symbol on
+ * the legacy entrance's own floor (`sameFloor`) can stand for it: another floor's "Entrance 2" at the same spot never does.
  */
-export function firstEntrance(symbols: MarkList<PlanSymbol>["items"], at: Point | null, name?: string): number {
-  const found = symbols.findIndex(({ item }) => item.kind === "entrance" && (!at || samePoint(item.position, at)));
-  return found >= 0 || !at || !name ? found : symbols.findIndex(({ item }) => item.kind === "entrance" && item.label === name);
+export function firstEntrance(symbols: MarkList<PlanSymbol>["items"], at: Point | null, name?: string, sameFloor: (symbol: PlanSymbol) => boolean = () => true): number {
+  const found = symbols.findIndex(({ item }) => item.kind === "entrance" && (!at || (samePoint(item.position, at) && sameFloor(item))));
+  return found >= 0 || !at || !name ? found : symbols.findIndex(({ item }) => item.kind === "entrance" && item.label === name && sameFloor(item));
 }
 /** Whether the first entrance holds anything only its landmark entry can hold (so a symbol list must be saved). */
 export const entranceMarked = (entrance: EntranceMarkParts) => !!entrance.rotation || entrance.size !== undefined || !!entrance.colour || !!entrance.locked || !!entrance.id || !!entrance.mark?.extra;

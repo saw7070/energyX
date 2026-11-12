@@ -97,6 +97,7 @@ export const REPORT_CSS = `
 .eiq-report .tip{position:absolute;z-index:2;pointer-events:none;background:var(--ink);color:#fff;font-size:12px;line-height:1.4;padding:6px 9px;border-radius:4px;white-space:nowrap;transform:translate(-50%,calc(-100% - 10px));box-shadow:0 4px 12px rgba(28,37,48,.18)}
 .eiq-report .tip b{display:block;font-weight:600}
 .eiq-report .plan-wrap{overflow-x:auto}
+.eiq-report .plan-level{font-size:14px;font-weight:600;margin:0 0 10px;color:var(--ink)}
 .eiq-report .plan{display:block;width:100%;min-width:600px;height:auto}
 .eiq-report .plan .zone-title{font-size:15px;font-weight:800;fill:var(--ink)}
 .eiq-report .plan .room{fill:#fff;stroke:#8A94A0;stroke-width:1.2}
