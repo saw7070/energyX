@@ -1,6 +1,8 @@
 "use client";
 import { memo, type PointerEvent as ReactPointerEvent } from "react";
+import { labelFrame, symbolFrame, type Frame, type PlanLabel, type PlanSymbol } from "./floor-plan-marks";
 import type { PlanArea, PlanDevice, PlanEntrance, PlanRoom, Selection } from "./floor-plan-model";
+import { EntranceMark, LabelMark, SymbolMark, type MarkClasses } from "./plan-symbols";
 import { DeviceBox, wrapLabel } from "./site-floor-map";
 import mapStyles from "./site-floor-map.module.css";
 import styles from "./floor-plan-editor.module.css";
@@ -44,12 +46,37 @@ export const GroupShape = memo(function GroupShape({ item, colour, pinned, fallb
   </g>;
 });
 
+/** The editor draws labels and landmarks with the map's own symbols, in the editor's (classic) colours. */
+export const EDITOR_MARKS: MarkClasses = { mark: mapStyles.mark!, halo: mapStyles.markHalo!, text: mapStyles.markText!, entrance: mapStyles.entrance!, entranceLabel: mapStyles.entranceLabel! };
+/** An invisible box over a turned item, turned with it, so a press anywhere on it (not just on its lines) picks it. */
+const HitBox = ({ frame }: { frame: Frame }) => { const { pivot: [px, py], box: [bx, by, bw, bh], rotation } = frame; return <rect x={px + bx} y={py + by} width={bw} height={bh} fill="transparent" data-hit="1" {...(rotation ? { transform: `rotate(${rotation} ${px} ${py})` } : {})} />; };
+
+/** The first entrance: drawn exactly as before landmarks existed until it is turned, sized or coloured. */
 export const EntranceShape = memo(function EntranceShape({ entrance, selected, unit, label, onDown }: Common & { entrance: PlanEntrance; selected: boolean }) {
-  const [x, y] = entrance.position;
-  return <g className={styles.item} {...focusable("entrance:entrance", label)} onPointerDown={event => onDown(event, { kind: "entrance", key: "entrance" })}>
-    <path d={`M${x - unit * 1.4},${y + unit * 2.2} L${x},${y} L${x + unit * 1.4},${y + unit * 2.2} Z`} className={mapStyles.entrance} />
-    <text x={x} y={y + unit * 4.6} textAnchor="middle" className={mapStyles.entranceLabel} style={{ fontSize: unit * 1.6 }}>{entrance.label}</text>
-    {selected && <circle cx={x} cy={y + unit * 1.2} r={unit * 2.6} className={styles.selectRing} />}
+  const [x, y] = entrance.position, plain = entrance.size === undefined && !entrance.rotation;
+  const frame = symbolFrame({ kind: "entrance", position: entrance.position, ...(entrance.size !== undefined ? { size: entrance.size } : {}), ...(entrance.rotation ? { rotation: entrance.rotation } : {}) }, unit);
+  return <g className={itemClass(entrance.locked)} {...focusable("entrance:entrance", label)} onPointerDown={event => onDown(event, { kind: "entrance", key: "entrance" })}>
+    {!plain && <HitBox frame={frame} />}
+    <EntranceMark position={entrance.position} {...(entrance.size !== undefined ? { size: entrance.size } : {})} {...(entrance.rotation ? { rotation: entrance.rotation } : {})} {...(entrance.colour ? { colour: entrance.colour } : {})} label={entrance.label} unit={unit} legacy={{ offset: unit * 4.6, font: unit * 1.6 }} classes={EDITOR_MARKS} />
+    {selected && plain && <circle cx={x} cy={y + unit * 1.2} r={unit * 2.6} className={styles.selectRing} />}
+  </g>;
+});
+
+/** A free text label. */
+export const LabelShape = memo(function LabelShape({ item, unit, label, onDown }: Common & { item: PlanLabel }) {
+  return <g className={itemClass(item.locked)} {...focusable(`label:${item.key}`, label)} onPointerDown={event => onDown(event, { kind: "label", key: item.key })}>
+    <HitBox frame={labelFrame(item, unit)} />
+    <LabelMark text={item.text} position={item.position} {...(item.size ? { size: item.size } : {})} {...(item.rotation ? { rotation: item.rotation } : {})} {...(item.colour ? { colour: item.colour } : {})} bold={!!item.bold} unit={unit} classes={EDITOR_MARKS} />
+  </g>;
+});
+
+/** A landmark (an entrance after the first is drawn like the first). */
+export const SymbolShape = memo(function SymbolShape({ item, unit, label, fallback, onDown }: Common & { item: PlanSymbol; fallback: string }) {
+  const own = { ...(item.size !== undefined ? { size: item.size } : {}), ...(item.rotation ? { rotation: item.rotation } : {}), ...(item.colour ? { colour: item.colour } : {}) };
+  return <g className={itemClass(item.locked)} {...focusable(`symbol:${item.key}`, label)} onPointerDown={event => onDown(event, { kind: "symbol", key: item.key })}>
+    <HitBox frame={symbolFrame(item, unit)} />
+    {item.kind === "entrance" ? <EntranceMark position={item.position} {...own} label={item.label ?? fallback} unit={unit} legacy={{ offset: unit * 4.6, font: unit * 1.6 }} classes={EDITOR_MARKS} />
+      : <SymbolMark kind={item.kind} position={item.position} {...own} {...(item.label ? { label: item.label } : {})} unit={unit} classes={EDITOR_MARKS} />}
   </g>;
 });
 
@@ -58,7 +85,7 @@ export const DeviceShape = memo(function DeviceShape({ item, name, board, colour
   const [x, y] = item.position, r = unit * 1.1;
   return <g className={itemClass(item.locked)} {...focusable(`device:${item.meterId}`, label)} onPointerDown={event => onDown(event, { kind: "device", key: item.meterId })}>
     <title>{`${name} · ${board}`}</title>
-    {item.size ? <DeviceBox x={x} y={y} size={item.size} name={name} colour={colour} unit={unit} /> : <>
+    {item.size ? item.rotation ? <g transform={`rotate(${item.rotation} ${x} ${y})`}><DeviceBox x={x} y={y} size={item.size} name={name} colour={colour} unit={unit} /></g> : <DeviceBox x={x} y={y} size={item.size} name={name} colour={colour} unit={unit} /> : <>
       {selected && <circle cx={x} cy={y} r={r * 1.7} className={styles.selectRing} />}
       <circle cx={x} cy={y} r={r} className={mapStyles.pin} style={{ fill: colour }} />
       <text x={x} y={y + r + unit * 1.3} textAnchor="middle" className={mapStyles.pinLabel} style={{ fontSize: unit * 1.15 }}>{pin}</text>

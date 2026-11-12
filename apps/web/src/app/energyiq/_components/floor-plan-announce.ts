@@ -18,20 +18,25 @@ export const parseItemId = (value: string | null | undefined): Selection | null 
   const at = value ? value.indexOf(":") : -1;
   if (!value || at < 1) return null;
   const kind = value.slice(0, at), key = value.slice(at + 1);
-  return kind === "area" || kind === "room" || kind === "device" || kind === "entrance" ? { kind, key } : null;
+  return kind === "area" || kind === "room" || kind === "device" || kind === "entrance" || kind === "label" || kind === "symbol" ? { kind, key } : null;
 };
 
 /** "Area DB1 · Block 264E", or for equipment inside a room "Equipment DB3 · LED screens". */
 export const areaItemName = (t: T, area: PlanArea) => area.insideRoom ? t("a11y.group", { name: [area.board, area.equipment || t("panel.groupFallback")].filter(Boolean).join(" · ") }) : t("a11y.area", { name: [area.board, areaName(t, area.label)].filter(Boolean).join(" · ") });
-export function itemName(t: T, plan: FloorPlan, item: Selection, meterName: (id: string) => string | undefined): string {
+/** A landmark as read out: "Landmark Lift", or with its caption "Landmark Lift: Lift A". `kindName` words its kind. */
+export const symbolName = (t: T, symbol: { kind: string; label?: string }, kindName: (kind: string) => string) => symbol.label ? t("a11y.landmarkNamed", { kind: kindName(symbol.kind), name: symbol.label }) : t("a11y.landmark", { kind: kindName(symbol.kind) });
+/** `kindName` words a landmark's kind in the reader's language. */
+export function itemName(t: T, plan: FloorPlan, item: Selection, meterName: (id: string) => string | undefined, kindName: (kind: string) => string = kind => kind): string {
   if (item.kind === "area") { const area = plan.areas.find(entry => entry.key === item.key); return area ? areaItemName(t, area) : ""; }
   if (item.kind === "room") { const room = plan.rooms.find(entry => entry.key === item.key); return room ? t("a11y.room", { name: room.name }) : ""; }
   if (item.kind === "device") return t("a11y.device", { name: meterName(item.key) ?? item.key });
+  if (item.kind === "label") { const label = plan.labels?.find(entry => entry.key === item.key); return label ? t("a11y.label", { name: label.text }) : ""; }
+  if (item.kind === "symbol") { const symbol = plan.symbols?.find(entry => entry.key === item.key); return symbol ? symbolName(t, symbol, kindName) : ""; }
   return plan.entrance ? t("a11y.entrance", { name: plan.entrance.label }) : "";
 }
-export function selectionText(t: T, plan: FloorPlan, list: Selection[], meterName: (id: string) => string | undefined): string {
+export function selectionText(t: T, plan: FloorPlan, list: Selection[], meterName: (id: string) => string | undefined, kindName?: (kind: string) => string): string {
   if (!list.length) return t("a11y.none");
-  return list.length === 1 ? t("a11y.selected", { item: itemName(t, plan, list[0]!, meterName) }) : t("a11y.selectedMany", { count: list.length });
+  return list.length === 1 ? t("a11y.selected", { item: itemName(t, plan, list[0]!, meterName, kindName) }) : t("a11y.selectedMany", { count: list.length });
 }
 /** Where the items now are, from the top-left corner of the drawing space (as the position fields show it). */
 export function movedText(t: T, plan: FloorPlan, list: Selection[]): string {
@@ -41,9 +46,9 @@ export function movedText(t: T, plan: FloorPlan, list: Selection[]): string {
   return boxes.length === 1 ? t("a11y.moved", values) : t("a11y.movedMany", { ...values, count: boxes.length });
 }
 export const resizedText = (t: T, box: Rect | null) => box ? t("a11y.resized", { w: Math.round(box[2]), h: Math.round(box[3]) }) : "";
-export function countText(t: T, plan: FloorPlan, list: Selection[], meterName: (id: string) => string | undefined, one: "a11y.added" | "a11y.deleted", many: "a11y.addedMany" | "a11y.deletedMany"): string {
+export function countText(t: T, plan: FloorPlan, list: Selection[], meterName: (id: string) => string | undefined, one: "a11y.added" | "a11y.deleted", many: "a11y.addedMany" | "a11y.deletedMany", kindName?: (kind: string) => string): string {
   if (!list.length) return "";
-  return list.length === 1 ? t(one, { item: itemName(t, plan, list[0]!, meterName) }) : t(many, { count: list.length });
+  return list.length === 1 ? t(one, { item: itemName(t, plan, list[0]!, meterName, kindName) }) : t(many, { count: list.length });
 }
 
 /**
