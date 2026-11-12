@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EnergyProjectSetupDocumentDto } from "../../../lib/config-api";
-import { addGroup, groupChoices, metersInGroup, moveMetersToGroup, removeGroup, withoutEmptyLevels } from "./meter-groups-editing";
+import { addGroup, canMoveGroup, groupChoices, metersInGroup, moveGroup, moveMetersToGroup, removeGroup, withoutEmptyLevels } from "./meter-groups-editing";
 import { applyMeterEdit } from "./site-structure-editing";
 import { projectMeterName, projectMeterSubtitle } from "./project-meter-name";
 
@@ -107,5 +107,52 @@ describe("short names", () => {
     if ("error" in cleared) throw new Error(cleared.error);
     expect(projectMeterName(cleared.meter_mapping!.rows[0]!)).toBe("264F Compassvale Bow signboard");
     expect(projectMeterSubtitle(cleared.meter_mapping!.rows[0]!)).toBeNull();
+  });
+});
+
+describe("putting groups in order", () => {
+  /** A made-up estate: three blocks at the top, three groups inside Block A, two of them sharing a number. */
+  const estate = {
+    project: { name: "Estate", timezone: "Asia/Singapore" }, tier_structure_locked: true,
+    tiers: [{ id: "top", ordinal: 2, alias: "Group" }, { id: "inside", ordinal: 1, alias: "Group 2" }],
+    nodes: [
+      { id: "a", tier_definition_id: "top", name: "Block A", sort_order: 10, metadata_status: "confirmed" },
+      { id: "b", tier_definition_id: "top", name: "Block B", sort_order: 20, metadata_status: "confirmed" },
+      { id: "common", tier_definition_id: "top", name: "Common area", sort_order: 30, metadata_status: "confirmed" },
+      { id: "ground", tier_definition_id: "inside", parent_id: "a", name: "Ground floor", sort_order: 10, metadata_status: "confirmed" },
+      { id: "corridors", tier_definition_id: "inside", parent_id: "a", name: "Corridor lights", sort_order: 10, metadata_status: "confirmed" },
+      { id: "emergency", tier_definition_id: "inside", parent_id: "a", name: "Emergency lights", sort_order: 40, metadata_status: "confirmed" },
+    ],
+    meter_mapping: { schema_version: 2, source_kind: "tuya", confirmed: true, rows: [
+      { id: "lobby", source_label: "lobby", display_name: "lobby", presentation: { device_name: "Lobby lights" }, scope_id: "ground", resource: "electricity", category: "light", coverage: "partial", meter_role: "component", aggregation_usage: "official" },
+    ], official_aggregation_routes: [] },
+  } as unknown as EnergyProjectSetupDocumentDto;
+  const moved = (result: ReturnType<typeof moveGroup>) => { if ("error" in result) throw new Error(result.error); return result.document; };
+  const order = (next: EnergyProjectSetupDocumentDto, parent?: string) => next.nodes.filter(node => (node.parent_id || undefined) === parent).sort((left, right) => left.sort_order - right.sort_order).map(node => node.name);
+
+  it("moves a group one place up or down among the groups beside it, numbering them again", () => {
+    const up = moved(moveGroup(estate, "common", "up"));
+    expect(order(up)).toEqual(["Block A", "Common area", "Block B"]);
+    expect(up.nodes.filter(node => !node.parent_id).map(node => [node.id, node.sort_order])).toEqual([["a", 10], ["b", 30], ["common", 20]]);
+    // Groups inside another group are untouched, and so are meters and totals.
+    expect(order(up, "a")).toEqual(order(estate, "a"));
+    expect(up.meter_mapping).toBe(estate.meter_mapping);
+    expect(order(moved(moveGroup(up, "a", "down")))).toEqual(["Common area", "Block A", "Block B"]);
+  });
+
+  it("keeps the order the list shows when two groups share a number", () => {
+    // Ground floor and Corridor lights both have 10; the list shows them in saved order.
+    const down = moved(moveGroup(estate, "ground", "down"));
+    expect(order(down, "a")).toEqual(["Corridor lights", "Ground floor", "Emergency lights"]);
+    expect(down.nodes.filter(node => node.parent_id === "a").map(node => node.sort_order).sort((left, right) => left - right)).toEqual([10, 20, 30]);
+  });
+
+  it("knows which way a group can go, and says so in the reader's language at either end", () => {
+    expect([canMoveGroup(estate, "a", "up"), canMoveGroup(estate, "a", "down")]).toEqual([false, true]);
+    expect([canMoveGroup(estate, "common", "up"), canMoveGroup(estate, "common", "down")]).toEqual([true, false]);
+    expect(canMoveGroup(estate, "gone", "up")).toBe(false);
+    expect(moveGroup(estate, "a", "up")).toEqual({ error: "This group is already first." });
+    expect(moveGroup(estate, "emergency", "down", "zh-Hans")).toEqual({ error: "这个分组已经在最后面。" });
+    expect(moveGroup(estate, "gone", "down", "ms")).toEqual({ error: "Kumpulan ini tidak lagi tersedia. Muat semula dan cuba lagi." });
   });
 });

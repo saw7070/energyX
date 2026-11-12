@@ -7,19 +7,20 @@
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { shortDate } from "./analysis-model.js";
-import { forHoursMeaning, translatorFor } from "./locale.js";
+import { forHoursMeaning, forOneDay, translatorFor } from "./locale.js";
 import type { ProjectSpatialReference } from "@datafoundry/contracts";
 import type { AnalysisData } from "./analysis-types.js";
 import type { EnergyIqLocale } from "./locale.js";
-import { buildManagementReview, type ManagementReview, type ReviewGroup, type ReviewSectionId } from "./management-review.js";
+import { buildManagementReview, reviewGroupPct, type ManagementReview, type ReviewGroup, type ReviewSectionId } from "./management-review.js";
 import type { SiteReportStyle } from "./report-style.js";
 import { managementReviewMessages } from "./management-review-messages.js";
 import { rich, Rich } from "./rich.js";
-import { niceTicks, ProfileChart, renderSiteReportHtml, useWidth } from "./site-report-document.js";
+import { DaytimeBlock, niceTicks, NoUseBlock, PerLightTable, ProfileChart, renderSiteReportHtml, useWidth } from "./site-report-document.js";
 import { buildSiteReport, kwhText, moneyText, pctText, REPORT_COLOURS as C } from "./site-report-model.js";
 import { REPORT_CSS } from "./site-report-styles.js";
 
-const reviewText = (review: Pick<ManagementReview, "locale" | "hoursMeaning">) => forHoursMeaning(translatorFor(managementReviewMessages, review.locale), managementReviewMessages, review.hoursMeaning);
+const reviewText = (review: Pick<ManagementReview, "locale" | "hoursMeaning"> & { dayCount?: number | undefined }) =>
+  forHoursMeaning(forOneDay(translatorFor(managementReviewMessages, review.locale), managementReviewMessages, review.dayCount === 1), managementReviewMessages, review.hoursMeaning);
 const num = (value: number | null, digits = 1) => value == null ? "—" : value.toLocaleString("en-SG", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 const whole = (value: number) => Math.round(value).toLocaleString("en-SG");
 
@@ -117,10 +118,10 @@ function GroupBars({ review }: { review: ManagementReview }) {
   const groups = review.groups!;
   const max = Math.max(...groups.rows.map(row => row.kwh), 0.001);
   return <div className="figure">
-    <div className="bars">{groups.rows.map(row => <Bar key={row.key} label={<strong>{row.name}</strong>} value={`${kwhText(row.kwh)} · ${pctText(row.share)}`} fraction={row.kwh / max} colour={row.colour} />)}</div>
+    <div className="bars">{groups.rows.map(row => <Bar key={row.key} label={<strong>{row.name}</strong>} value={`${kwhText(row.kwh)} · ${reviewGroupPct(row)}`} fraction={row.kwh / max} colour={row.colour} />)}</div>
     {!groups.byCircuit && <div className="table-wrap"><table>
       <thead><tr><th>{t("groups.col.group")}</th><th className="r">{t("groups.col.used")}</th><th className="r">{t("groups.col.perDay")}</th><th className="r">{t("groups.col.share")}</th></tr></thead>
-      <tbody>{groups.rows.map(row => <tr key={row.key}><td>{row.name}</td><td className="r">{whole(row.kwh)}</td><td className="r">{num(row.perDay)}</td><td className="r">{pctText(row.share)}</td></tr>)}</tbody>
+      <tbody>{groups.rows.map(row => <tr key={row.key}><td>{row.name}</td><td className="r">{whole(row.kwh)}</td><td className="r">{num(row.perDay)}</td><td className="r">{reviewGroupPct(row)}</td></tr>)}</tbody>
     </table></div>}
   </div>;
 }
@@ -188,7 +189,7 @@ export function ManagementReviewDocument({ review, standalone }: { review: Manag
         </table></div> : <p>{t("sum.none")}</p>}
       </Section>
 
-      <Section id="total" number={numberOf("total")} title={t("sec.total")}>
+      {has("total") && <Section id="total" number={numberOf("total")} title={t("sec.total")}>
         {total.intro && <p><Rich text={total.intro} /></p>}
         {total.days.length > 0 && <DailyChart review={review} />}
         {total.standout && <div className="standout">
@@ -201,7 +202,7 @@ export function ManagementReviewDocument({ review, standalone }: { review: Manag
           <thead><tr><th>{t("total.col.projection")}</th><th className="r">{t("total.col.energy")}</th>{review.rate != null && <th className="r">{t("total.col.cost")}</th>}</tr></thead>
           <tbody>{total.rows.map(row => <tr key={row.label}><td>{row.label}</td><td className="r">{kwhText(row.kwh)}</td>{review.rate != null && <td className="r">{row.cost == null ? "—" : moneyText(row.cost, review.currency, row.kwh < 100 ? 2 : 0)}</td>}</tr>)}</tbody>
         </table></div>}
-      </Section>
+      </Section>}
 
       {has("groups") && review.groups && <Section id="groups" number={numberOf("groups")} title={review.groups.heading}>
         <p>{review.groups.intro}</p>
@@ -210,6 +211,12 @@ export function ManagementReviewDocument({ review, standalone }: { review: Manag
         {!review.groups.byCircuit && review.groups.rows.some(row => row.parts.length > 0) && <>
           <h3>{t("groups.partsTitle")}</h3>
           {review.groups.rows.filter(row => row.parts.length > 0).map(row => <GroupParts key={row.key} review={review} row={row} />)}
+        </>}
+        {review.perLight && <>
+          <h3>{review.perLight.heading}</h3>
+          <p>{review.perLight.intro}</p>
+          <PerLightTable perLight={review.perLight} locale={review.locale} oneDay={review.dayCount === 1} />
+          <p className="note">{review.perLight.note}</p>
         </>}
       </Section>}
 
@@ -220,10 +227,13 @@ export function ManagementReviewDocument({ review, standalone }: { review: Manag
 
       {has("profile") && review.profile && <Section id="profile" number={numberOf("profile")} title={t("sec.profile")}>
         <p><Rich text={review.profile.intro} /></p>
-        <ProfileChart pattern={{ hours: review.profile.hours, openFrom: review.profile.openFrom, openTo: review.profile.openTo, notes: [], caption: review.profile.caption }} report={review} standalone={standalone} />
+        <ProfileChart pattern={{ hours: review.profile.hours, openFrom: review.profile.openFrom, openTo: review.profile.openTo, notes: [], caption: review.profile.caption, lines: review.profile.lines }} report={review} standalone={standalone} />
+        {review.daytime && <DaytimeBlock daytime={review.daytime} />}
       </Section>}
 
-      <Section id="savings" number={numberOf("savings")} title={t("sec.savings")}>
+      {has("savings") && <Section id="savings" number={numberOf("savings")} title={t("sec.savings")}>
+        {/* Without an average day to sit under, the lights on in the daytime lead the savings. */}
+        {review.daytime && !(has("profile") && review.profile) && <DaytimeBlock daytime={review.daytime} />}
         <p><Rich text={savings.intro} /></p>
         {savings.rows.length > 0 && <div className="table-wrap"><table>
           <thead><tr><th>{t("sav.col.measure")}</th><th>{t("sav.col.basis")}</th><th className="r">{t("sav.col.kwh")}</th>{review.rate != null && <th className="r">{t("sav.col.cost")}</th>}</tr></thead>
@@ -234,11 +244,12 @@ export function ManagementReviewDocument({ review, standalone }: { review: Manag
         </table></div>}
         {savings.checks.length > 0 && <div className="callout"><strong>{t("sav.checks")}:</strong> {savings.checks.join(review.locale === "zh-Hans" ? "；" : "; ")}</div>}
         {savings.note && <p className="note">{savings.note}</p>}
-      </Section>
+      </Section>}
 
       <Section id="method" number={numberOf("method")} title={t("sec.method")}>
         <p>{method.intro}</p>
         <div className="table-wrap"><table><tbody>{method.rows.map(row => <tr key={row.label}><td>{row.label}</td><td>{row.value}</td></tr>)}</tbody></table></div>
+        {review.noUse && <NoUseBlock noUse={review.noUse} />}
         {method.meters.length > 0 && <>
           <h3>{t("met.metersTitle")}</h3>
           <div className="table-wrap"><table>

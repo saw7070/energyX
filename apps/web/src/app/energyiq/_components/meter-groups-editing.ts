@@ -114,6 +114,42 @@ export function moveMetersToGroup(document: EnergyProjectSetupDocumentDto, meter
   return next;
 }
 
+/**
+ * The groups beside one group (sharing its parent, or all at the top), in the order the Groups list shows them: by
+ * sort order, and groups that share a number in the order they were saved.
+ */
+function siblingsOf(document: EnergyProjectSetupDocumentDto, nodeId: string) {
+  const node = document.nodes.find(item => item.id === nodeId);
+  if (!node) return null;
+  const parent = node.parent_id || undefined;
+  return document.nodes.filter(item => (item.parent_id || undefined) === parent).sort((left, right) => left.sort_order - right.sort_order);
+}
+
+/** Whether a group can move up or down among the groups beside it (it is not already first or last). */
+export function canMoveGroup(document: EnergyProjectSetupDocumentDto, nodeId: string, direction: "up" | "down"): boolean {
+  const siblings = siblingsOf(document, nodeId);
+  if (!siblings) return false;
+  const index = siblings.findIndex(item => item.id === nodeId);
+  return direction === "up" ? index > 0 : index < siblings.length - 1;
+}
+
+/**
+ * Moves a group one place up or down among the groups beside it. The groups there are numbered again in steps of
+ * ten, so two that shared a number keep a clear order. Only the order changes: no meter moves and no total changes.
+ */
+export function moveGroup(document: EnergyProjectSetupDocumentDto, nodeId: string, direction: "up" | "down", locale: EnergyIqLocale = "en"): { document: EnergyProjectSetupDocumentDto } | { error: string } {
+  const t = translatorFor(structureMessages, locale);
+  const siblings = siblingsOf(document, nodeId);
+  if (!siblings) return { error: t("error.level") };
+  const index = siblings.findIndex(item => item.id === nodeId);
+  const target = direction === "up" ? index - 1 : index + 1;
+  if (target < 0 || target >= siblings.length) return { error: t(direction === "up" ? "group.alreadyFirst" : "group.alreadyLast") };
+  const order = siblings.map(item => item.id);
+  [order[index], order[target]] = [order[target]!, order[index]!];
+  const sortOrder = new Map(order.map((id, position) => [id, (position + 1) * 10]));
+  return { document: { ...document, nodes: document.nodes.map(node => sortOrder.has(node.id) && node.sort_order !== sortOrder.get(node.id) ? { ...node, sort_order: sortOrder.get(node.id)! } : node) } };
+}
+
 /** Every group with its full path ("Block 264F / Ground floor"), in tree order, for a "Move to…" list. */
 export function groupChoices(document: EnergyProjectSetupDocumentDto): Array<{ id: string; label: string; depth: number }> {
   const out: Array<{ id: string; label: string; depth: number }> = [];

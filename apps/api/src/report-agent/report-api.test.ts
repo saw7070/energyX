@@ -86,6 +86,17 @@ it("rejects a saved Skill with unavailable runtime references", async () => {
   expect((await call("PUT", ["settings"], { ...body, skillRefs: [{ name: "broken", version: "1", content: "Read references/missing.md" }] })).status).toBe(400);
 });
 
+it("saves a schedule that adds a daily report to the weekly and monthly ones, and nothing it does not know", async () => {
+  const { settings, call, service } = setup();
+  const { projectId, workspaceId, actorUserId, timezone, ...body } = settings;
+  expect((await call("PUT", ["settings"], { ...body, frequency: "daily-weekly-monthly", localHour: 6 })).status).toBe(200);
+  expect(service.store.settings("p")).toMatchObject({ frequency: "daily-weekly-monthly", localHour: 6 });
+  // The light schedule read that the Reports list and the Overview make.
+  expect(((await call("GET", ["context"])).body as { data: { settings: unknown } }).data.settings).toEqual({ frequency: "daily-weekly-monthly", localHour: 6, timezone: "Asia/Singapore" });
+  expect((await call("PUT", ["settings"], { ...body, revision: settings.revision + 1, frequency: "hourly" })).status).toBe(400);
+  expect(service.store.settings("p")?.frequency).toBe("daily-weekly-monthly");
+});
+
 it("accepts chat without a period, inherits its Session period, and uses presets for fresh report requests", async () => {
   const { service, settings, call } = setup();
   const first = await call("POST", ["runs"], { kind: "chat", prompt: "What should we investigate?" });

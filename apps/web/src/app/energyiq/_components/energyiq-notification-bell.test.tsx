@@ -119,6 +119,14 @@ describe("Notification bell", () => {
     expect(container.textContent).not.toContain("Mark all as read");
   });
 
+  it("does not call a meter stopped when the live check finds it online and it is simply using nothing", async () => {
+    api.getEnergyProjectMeterHealth.mockResolvedValue({ ...health, meters: health.meters.map((meter) => meter.meterPointId === "m5" ? { ...meter, name: "Pavilion fan", idleWhenQuiet: true } : meter) });
+    await openBell();
+    const rows = [...container.querySelectorAll("li")].map((row) => row.textContent ?? "");
+    expect(rows.find((row) => row.includes("stopped sending"))).toContain("Meter 06 stopped sending readings");
+    expect(rows.join(" ")).not.toContain("Pavilion fan");
+  });
+
   it("says within the hour that a meter went offline, links to Data availability and does not repeat it as stopped", async () => {
     const offline = [{ meterPointId: "m5", name: "Meter 05", since: "2026-10-03T06:15:00.000Z" }];
     api.getEnergyLiveReadings.mockResolvedValue({ connected: true, officialMeterCount: 0, reportingMeterCount: 0, meters: [], offline, intervalMinutes: 15 });

@@ -5,6 +5,7 @@
 import type { AnalysisCategory, HoursByDay, HoursMeaning } from "./analysis-model.js";
 import type { GroupedMeter, MeterGroup } from "./meter-groups.js";
 import type { NotInUseMeter } from "./meters-in-use.js";
+import type { AlwaysOnMeter } from "./always-on-by-design.js";
 
 export type TrendCell = [string, number, number | null, number, number];
 export type TrendSeries = { id: string; expectedMinutesPerHour: number; cells: TrendCell[] };
@@ -30,6 +31,13 @@ export type AnalysisData = {
   holidays: Map<string, string>; openingHours: HoursByDay | null; actions: ProjectAction[];
   /** What the published hours mean; absent means opening hours. "lights_on": lighting that should run in them, usually at night. */
   hoursMeaning?: HoursMeaning | undefined;
+  /**
+   * Meters whose quiet spell meant they were using nothing when these readings were loaded: the live check found them
+   * online and they can rightly use nothing (never lighting on a lights-on-hours site, nor a meter always on by design),
+   * and they had sent nothing since these dates ended, so the same quiet spell reaches back into them. A meter sends
+   * its total only when it moves, so such a meter is idle, not stopped. Absent on older readings.
+   */
+  idleWhenQuiet?: string[] | undefined;
   /** Missing on readings saved before groups existed; everything then falls back to the old per-space view. */
   groups?: AnalysisGroups | undefined;
   /**
@@ -37,4 +45,17 @@ export type AnalysisData = {
    * counting as complete in the site report. Absent on readings saved before this was kept, and when there are none.
    */
   notInUse?: NotInUseMeter[] | undefined;
+  /**
+   * Meters meant to run day and night (emergency lighting): someone ticked "always on" on the meter. They count in
+   * every total, but their use in the daytime is expected, so it is never called daytime use or a saving. Absent on
+   * readings saved before this was kept, and when there are none.
+   */
+  alwaysOnByDesign?: AlwaysOnMeter[] | undefined;
+  /**
+   * How many light points a meter feeds, for the meters someone recorded it on (presentation.light_count). The report
+   * shows energy per light for these only. Absent on readings saved before this was kept, and when there are none.
+   */
+  lightCounts?: LightCountMeter[] | undefined;
 };
+/** A meter and how many light points it feeds; `name` as readers know it. */
+export type LightCountMeter = { id: string; name: string; count: number };

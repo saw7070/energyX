@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EnergyOperatingCalendarEntryDto } from "../../../lib/config-api";
-import { deviceStatistics, hourlyByDay, isOpenDay, openingHoursLabel, operatingMinutes, periodDates, type HourCell } from "./device-statistics";
+import { deviceStatistics, hourlyByDay, isOpenDay, openingHoursLabel, operatingMinutes, partialHourKwhByDay, periodDates, type HourCell } from "./device-statistics";
 
 const weekday = [{ from: "09:00", to: "18:00" }];
 const calendar = [{
@@ -66,6 +66,19 @@ describe("deviceStatistics", () => {
     expect(deviceStatistics(twoMeters.map(cell => [cell[0], cell[1], cell[2], 60, 0] as HourCell), ["2026-08-11"], calendar, 120).openDayAverageKwh).toBeNull();
   });
 
+  it("gives no always-on draw for a meter with no complete day, so the Devices page never shows it as kWh a day", () => {
+    // Walkway light 1 uses about 0.19 kWh a day. It sent two evening hours on one day, each holding the 0.08 kWh it had
+    // counted since it was last read, then went offline. Its always-on draw was those hours' 0.08 kW, which the Always on
+    // tile and facts turn into 0.08 × 24 ≈ 1.9 kWh a day (and a cost a year from the same figure): ten times its real use.
+    const partDay: HourCell[] = [["2026-08-11", 19, 0.08, 60, 0], ["2026-08-11", 20, 0.08, 60, 0]];
+    const stat = deviceStatistics(partDay, ["2026-08-11", "2026-08-12", "2026-08-13"], calendar);
+    expect(stat).toMatchObject({ alwaysOnKw: null, dailyAverageKwh: null });
+    // With one complete day as well, its draw comes from the hours it sent.
+    const withFullDay = deviceStatistics([...partDay, ...day("2026-08-12", hour => hour >= 19 || hour < 7 ? 0.016 : 0)], ["2026-08-11", "2026-08-12", "2026-08-13"], calendar);
+    expect(withFullDay.alwaysOnKw).toBe(0);
+    expect(withFullDay.dailyAverageKwh).toBeCloseTo(0.192, 9);
+  });
+
   it("leaves out-of-hours empty without a calendar rather than guessing", () => {
     expect(deviceStatistics(cells, ["2026-08-11"], null).outOfHoursKwh).toBeNull();
   });
@@ -84,5 +97,10 @@ describe("hourlyByDay", () => {
     expect([...byDay.keys()]).toEqual(["2026-09-01", "2026-09-02"]);
     expect(byDay.get("2026-09-01")!.slice(8, 12)).toEqual([null, 2, 2, null]);
     expect(byDay.get("2026-09-02")!.every(value => value === null)).toBe(true);
+  });
+
+  it("keeps the kWh really recorded in an hour only partly received, so it is never overstated", () => {
+    const byDay = partialHourKwhByDay([["2026-09-01", 9, 2, 60, 0], ["2026-09-01", 10, 0.1, 30, 0], ["2026-09-01", 11, null, 0, 0]], ["2026-09-01"]);
+    expect(byDay.get("2026-09-01")!.slice(8, 12)).toEqual([null, null, 0.1, null]);
   });
 });

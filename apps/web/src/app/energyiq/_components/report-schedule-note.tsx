@@ -11,10 +11,11 @@ type Schedule = { frequency: string; localHour: number; timezone?: string };
 
 /**
  * When the next report arrives by itself. Shown wherever someone waits for one — the Reports list and
- * the Overview — so nobody wonders whether a report has to be asked for.
+ * the Overview — so nobody wonders whether a report has to be asked for. The Overview (`overview`) shows only the
+ * weekly or monthly site report, so there it counts down to those and says daily reports are kept in Reports.
  */
-export function ReportScheduleNote({ projectId, schedule: given, canSee = true, className }: {
-  projectId: string; schedule?: Schedule | null; canSee?: boolean; className?: string;
+export function ReportScheduleNote({ projectId, schedule: given, canSee = true, overview = false, className }: {
+  projectId: string; schedule?: Schedule | null; canSee?: boolean; overview?: boolean; className?: string;
 }) {
   const t = useMessages(libraryMessages);
   const { locale } = useEnergyIqLocale();
@@ -32,15 +33,21 @@ export function ReportScheduleNote({ projectId, schedule: given, canSee = true, 
   const schedule = given ?? loaded;
   if (!canSee || !schedule) return null;
   const time = `${String(schedule.localHour).padStart(2, "0")}:00`;
-  const cadence = schedule.frequency === "daily" ? "scheduleDaily"
-    : schedule.frequency === "weekly" ? "scheduleWeekly"
-    : schedule.frequency === "weekly-monthly" ? "scheduleWeeklyMonthly"
+  // On the Overview a daily report never replaces the one shown: only the weekly and monthly ones count down here.
+  const dailyElsewhere = overview && (schedule.frequency === "daily" || schedule.frequency === "daily-weekly-monthly");
+  const frequency = dailyElsewhere ? schedule.frequency === "daily" ? "off" : "weekly-monthly" : schedule.frequency;
+  const cadence = frequency === "daily" ? "scheduleDaily"
+    : frequency === "weekly" ? "scheduleWeekly"
+    : frequency === "weekly-monthly" ? "scheduleWeeklyMonthly"
+    : frequency === "daily-weekly-monthly" ? "scheduleDailyWeeklyMonthly"
     : "scheduleMonthly";
-  const next = schedule.frequency === "off" ? null
-    : nextReportRun(new Date(), schedule.timezone ?? "Asia/Singapore", schedule.frequency as ReportFrequency, schedule.localHour);
+  const next = frequency === "off" ? null
+    : nextReportRun(new Date(), schedule.timezone ?? "Asia/Singapore", frequency as ReportFrequency, schedule.localHour);
   return <p className={`${styles.librarySchedule} ${className ?? ""}`}>
     <EnergyIcon name="clock" />
-    {schedule.frequency === "off" ? t("scheduleOff") : <>{t(cadence, { time })}
+    {schedule.frequency === "off" ? t("scheduleOff")
+      : dailyElsewhere && frequency === "off" ? t("scheduleDailyInReports", { time })
+      : <>{t(cadence, { time })}{dailyElsewhere ? <> {t("scheduleDailyAlsoInReports")}</> : null}
       {next ? <> <strong>{t("nextReport", {
         date: new Date(`${next.date}T12:00:00Z`).toLocaleDateString(dateLocale(locale, "en-GB"), { timeZone: schedule.timezone ?? "Asia/Singapore", day: "numeric", month: "short", year: "numeric" }).replace("Sept", "Sep"),
         time: `${String(next.hour).padStart(2, "0")}:00`,

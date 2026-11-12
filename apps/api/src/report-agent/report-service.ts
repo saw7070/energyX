@@ -219,9 +219,14 @@ export class ReportService {
       try {
         const due = dueReportPeriods(now, settings.timezone, settings.frequency, settings.localHour);
         if (!due.length) continue;
-        // An organisation with AI off or over its monthly limit gets no automatic AI reports until that changes.
-        if (this.options.metadata.energyIq?.ai.check(settings.workspaceId, now).allowed === false) continue;
+        // The owner's access is checked before anything is written, AI or not: losing it pauses the whole schedule.
         (this.options.authorizeProject ?? authorizeReportProject)(this.options.metadata, settings.actorUserId, settings.workspaceId, settings.projectId);
+        // An organisation with AI off or over its monthly limit gets no automatic AI reports until that changes. The
+        // site's own reports below are written from the readings without AI, so they still come out.
+        if (this.options.metadata.energyIq?.ai.check(settings.workspaceId, now).allowed === false) {
+          this.startDueSiteReports(now, settings.projectId);
+          continue;
+        }
         const runSettings = this.options.resolveScheduledSkills?.(settings) ?? resolveReportSkillSelection(settings, [...requiredReportSkills(settings.projectId), ...defaultReportSkills(settings)]);
         const available = await (this.options.availablePeriod ?? availableReportPeriod)(this.options.metadata, this.options.files, settings, settings.actorUserId);
         if (this.stopped) return;
@@ -268,8 +273,8 @@ export class ReportService {
       // Re-read: the advisor pass above may just have paused this project's schedule.
       const settings = this.store.settings(projectId);
       if (!settings || this.stopped) return;
+      // Daily, weekly and monthly alike: a daily site report covers the day before, in the site's time zone.
       for (const { cadence, period } of dueReportPeriods(now, settings.timezone, settings.frequency, settings.localHour)) {
-        if (cadence !== "weekly" && cadence !== "monthly") continue;
         const key = siteReportScheduleKey(projectId, cadence, period);
         if (this.siteReports.has(key) || this.store.findByScheduleKey(key)) continue;
         const task = publishSiteReport({

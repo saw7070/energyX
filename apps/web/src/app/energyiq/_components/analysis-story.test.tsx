@@ -76,4 +76,64 @@ describe("DecisionSummary", () => {
     expect(markup).not.toContain("Public holidays");
     expect(markup).not.toContain("Weekends");
   });
+
+  it("leaves always-on meters out of the daytime share, names the lights on by day and gives kWh a day beside kW", () => {
+    // Corridor lights 3 kW at night and also from 4 pm; emergency lights 1 kW day and night, always on by design.
+    const night = (hour: number) => hour >= 19 || hour < 7;
+    const corridor = (_date: string, hour: number) => night(hour) || hour >= 16 ? 3 : 0;
+    const both = (date: string, hour: number) => corridor(date, hour) + 1;
+    const total = series("__scope__", both);
+    const kwh = total.cells.reduce((sum, cell) => sum + cell[2]!, 0);
+    const meters = [
+      { id: "corridor", name: "Corridor lights", location: "Block A", category: "light" as const, official: true, series: series("corridor", corridor) },
+      { id: "emergency", name: "Emergency lights", location: "Block A", category: "light" as const, official: true, series: series("emergency", () => 1) },
+    ];
+    const estate = scope("estate", "Estate", { total, meters, usageKwh: kwh, typeTotals: { light: kwh }, cost: { amount: kwh * 0.3, currency: "SGD", note: "0.3 SGD/kWh" } });
+    const nights = Object.fromEntries(["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].map(day => [day, [{ from: "19:00", to: "07:00" }]]));
+    const lightsData: AnalysisData = { ...data, projectName: "Estate", current: { project: estate, spaces: [{ ...estate, id: "block-a", name: "Block A" }] }, openingHours: nights, hoursMeaning: "lights_on",
+      alwaysOnByDesign: [{ id: "emergency", name: "Emergency lights" }] };
+    const markup = renderToStaticMarkup(<DecisionSummary data={lightsData} days={scopeDays(estate, lightsData.holidays)} anomalies={[]} floor={null} rate={0.3} />).replace(/<!-- -->/g, "");
+    // Only the corridor's three early hours are daytime use (63 of 483 kWh); the emergency lights' are left out.
+    const pct = Math.round(9 * 7 / kwh * 100);
+    expect(pct).toBe(13);
+    expect(markup).toContain(`S$${Math.round(9 * 7 * 0.3)} (${pct}%)</span> of it was used in the daytime, when the lights should be off.`);
+    expect(markup).toContain("<li>Corridor lights: on 4–7 pm on 7 days, 63 kWh</li>");
+    expect(markup).toContain("Always on by design, so left out of daytime use: Emergency lights.");
+    expect(markup).toContain(">Always on by design</span>");
+    expect(markup).not.toContain("Check whether Emergency lights must run in the daytime");
+    // Step 3 gives the same 13%; its bar splits every hour by the clock (30% with the emergency lights), and says so.
+    expect(markup).toContain("13% of the energy is used outside them, in the daytime. The bar below counts every hour outside them (30%), including lights that are always on by design and the 20 minutes allowed at each end.");
+    // The level that never switches off, with what it adds up to in a day (1.6 kW all day is about 38.4 kWh).
+    expect(markup).toContain("never below 1.6 kW (about 38.4 kWh a day)");
+    // Steady use in the daytime table also reads as kWh a day: 3 kW for three daytime hours is about 9 kWh.
+    expect(markup).toContain("0.75 kW <span class=\"text-slate-500\">· about 9 kWh a day</span>");
+
+    // With the corridor on only at night, the level that never switches off is all emergency lighting: marked always
+    // on, it is not offered as a cost to cut; unmarked, it is, as before.
+    const atNight = series("corridor", (_date, hour) => night(hour) ? 3 : 0);
+    const calm = { ...lightsData, current: { project: { ...estate, meters: [{ ...meters[0]!, series: atNight }, meters[1]!], total: series("__scope__", (_date, hour) => (night(hour) ? 3 : 0) + 1) }, spaces: [] } };
+    const render = (input: AnalysisData) => renderToStaticMarkup(<DecisionSummary data={input} days={scopeDays(input.current.project, input.holidays)} anomalies={[]} floor={null} rate={0.3} />);
+    expect(render(calm)).not.toContain("The load that never switches off costs");
+    expect(render({ ...calm, alwaysOnByDesign: [] })).toContain("The load that never switches off costs about S$2,628 a year on its own.");
+  });
+
+  it("never offers a light that came on and went off on time as a daytime saving", () => {
+    // A 2 kW lamp on at 18:45 and off at 07:15 every day: a quarter of an hour either side of 19:00–07:00, inside the
+    // 20-minute allowance. The report says no light was on in the daytime, so the steps below must agree.
+    const night = (hour: number) => hour >= 19 || hour < 7;
+    const lamp = (_date: string, hour: number) => night(hour) ? 2 : hour === 18 || hour === 7 ? 0.5 : 0;
+    const total = series("__scope__", lamp);
+    const kwh = total.cells.reduce((sum, cell) => sum + cell[2]!, 0);
+    const meters = [{ id: "carpark", name: "Carpark lamp", location: "Block A", category: "light" as const, official: true, series: series("carpark", lamp) }];
+    const estate = scope("estate", "Estate", { total, types: { light: series("__category__:light", lamp) }, meters, usageKwh: kwh, typeTotals: { light: kwh }, cost: { amount: kwh * 0.3, currency: "SGD", note: "0.3 SGD/kWh" } });
+    const nights = Object.fromEntries(["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].map(day => [day, [{ from: "19:00", to: "07:00" }]]));
+    const lightsData: AnalysisData = { ...data, projectName: "Estate", current: { project: estate, spaces: [{ ...estate, id: "block-a", name: "Block A" }] }, openingHours: nights, hoursMeaning: "lights_on" };
+    const markup = renderToStaticMarkup(<DecisionSummary data={lightsData} days={scopeDays(estate, lightsData.holidays)} anomalies={[]} floor={null} rate={0.3} />).replace(/<!-- -->/g, "");
+    expect(markup).toContain("No light was on in the daytime.");
+    expect(markup).not.toContain("Can likely be switched off");
+    expect(markup).not.toContain("Keep Carpark lamp off in the daytime");
+    expect(markup).not.toContain("Keep daytime use down to your own best level");
+    // Step 3 agrees: none of it is daytime use, though the clock puts 4% outside the hours.
+    expect(markup).toContain("0% of the energy is used outside them, in the daytime. The bar below counts every hour outside them (4%)");
+  });
 });

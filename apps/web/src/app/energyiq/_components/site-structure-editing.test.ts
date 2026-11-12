@@ -66,6 +66,39 @@ describe("in-page site structure edits", () => {
     expect(unticked.meter_mapping!.rows[1]!.presentation).toEqual({ device_name: "Linkway lights" });
   });
 
+  it("marks a meter always on by design and records how many lights it feeds, without asking for the totals again", () => {
+    const meter = document.meter_mapping!.rows[0]!;
+    const draft = { name: "Lobby lights", scopeId: meter.scope_id, category: meter.category, counted: true };
+    const marked = applyMeterEdit(document, meter, { ...draft, alwaysOn: true, lightCount: " 24 " });
+    if ("error" in marked) throw new Error(marked.error);
+    expect(marked.meter_mapping!.confirmed).toBe(true);
+    expect(marked.meter_mapping!.rows[0]!.presentation).toEqual({ device_name: "Lobby lights", always_on: "true", light_count: "24" });
+
+    // A rename or a move from elsewhere (neither setting in the draft) keeps both; unticking and emptying remove them.
+    const renamed = applyMeterEdit(marked, marked.meter_mapping!.rows[0]!, { ...draft, name: "Lobby emergency lights" });
+    if ("error" in renamed) throw new Error(renamed.error);
+    expect(renamed.meter_mapping!.rows[0]!.presentation).toEqual({ device_name: "Lobby emergency lights", always_on: "true", light_count: "24" });
+    const moved = applyMeterMoves(marked, [meter.id], "space-2");
+    if ("error" in moved) throw new Error(moved.error);
+    expect(moved.meter_mapping!.rows.find(row => row.id === meter.id)!.presentation).toMatchObject({ always_on: "true", light_count: "24" });
+    const cleared = applyMeterEdit(marked, marked.meter_mapping!.rows[0]!, { ...draft, alwaysOn: false, lightCount: "" });
+    if ("error" in cleared) throw new Error(cleared.error);
+    expect(cleared.meter_mapping!.rows[0]!.presentation).toEqual({ device_name: "Lobby lights" });
+  });
+
+  it("only takes a whole number of lights from 1 to 9999", () => {
+    const meter = document.meter_mapping!.rows[0]!;
+    const draft = { name: "Lobby lights", scopeId: meter.scope_id, category: meter.category, counted: true };
+    for (const lightCount of ["0", "2.5", "-3", "10000", "twelve"]) {
+      expect(applyMeterEdit(document, meter, { ...draft, lightCount })).toEqual({ error: "Number of lights must be a whole number from 1 to 9999, or left empty." });
+    }
+    const leading = applyMeterEdit(document, meter, { ...draft, lightCount: "007" });
+    expect("error" in leading ? leading.error : leading.meter_mapping!.rows[0]!.presentation?.light_count).toBe("7");
+    expect(applyMeterEdit(document, meter, { ...draft, lightCount: "9999" })).not.toHaveProperty("error");
+    expect(applyMeterEdit(document, meter, { ...draft, lightCount: "1" }, "zh-Hans")).not.toHaveProperty("error");
+    expect(applyMeterEdit(document, meter, { ...draft, lightCount: "0" }, "ms")).toEqual({ error: "Bilangan lampu mesti nombor bulat dari 1 hingga 9999, atau dibiarkan kosong." });
+  });
+
   it("moves chosen meters into an empty location by hand, keeping their names and counting", () => {
     const moved = applyMeterMoves(document, ["light", "power"], "space-2");
     if ("error" in moved) throw new Error(moved.error);

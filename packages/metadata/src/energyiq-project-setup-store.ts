@@ -46,6 +46,10 @@ export type EnergyIqMeterPresentation = {
   short_name?: string;
   /** The electrical panel the meter is wired from, kept as a detail once the meter is grouped by what it serves. */
   panel?: string;
+  /** "true": the meter is meant to run day and night (emergency lighting), so its daytime use is expected. */
+  always_on?: string;
+  /** How many light points the meter feeds: a whole number from 1 to 9999, kept as text. */
+  light_count?: string;
 };
 
 export type EnergyIqMeterMappingRow = {
@@ -1507,7 +1511,7 @@ const requiredString = (row: Record<string, unknown>, key: string): string => {
 };
 
 function normalizeMeterPresentation(value: EnergyIqMeterPresentation): EnergyIqMeterPresentation {
-  return Object.fromEntries(["device_name", "circuit_name", "group", "not_in_use", "off_with_lights", "short_name", "panel"].flatMap(key => {
+  return Object.fromEntries(["device_name", "circuit_name", "group", "not_in_use", "off_with_lights", "short_name", "panel", "always_on", "light_count"].flatMap(key => {
     const label = value[key as keyof EnergyIqMeterPresentation];
     return typeof label === "string" && label.trim() ? [[key, label.trim().slice(0, 160)]] : [];
   }));

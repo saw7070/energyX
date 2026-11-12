@@ -74,6 +74,26 @@ describe("Site alerts", () => {
         .toThrow("ENERGYIQ_ALERT_KEY_INVALID");
     });
   });
+
+  it("says only the newest daily report is ready, so daily reports never push an unread monthly one off the bell", () => {
+    withMetadata((metadata) => {
+      const day = (date: string, next: string, finishedAt: string, by: "site" | "advisor" = "site") => run(`daily-${by}-${date}`, {
+        scheduleKey: `${TUYA_OFFICE_PROJECT_ID}:${by === "site" ? "site-" : ""}daily:${date}:${next}`,
+        siteReport: by === "site" ? { cadence: "daily" } : undefined, period: { from: date, toExclusive: next }, finishedAt,
+      });
+      const reportRuns = [
+        run("monthly-report", { scheduleKey: `${TUYA_OFFICE_PROJECT_ID}:site-monthly:2026-09-01:2026-10-01`, siteReport: { cadence: "monthly" },
+          period: { from: "2026-09-01", toExclusive: "2026-10-01" }, finishedAt: "2026-09-24T22:00:00.000Z" }),
+        // A week of daily reports after it, from the site and the advisor alike.
+        ...["2026-09-24", "2026-09-25", "2026-09-26", "2026-09-27", "2026-09-28", "2026-09-29", "2026-09-30", "2026-10-01"].flatMap((date, index, dates) => {
+          const next = dates[index + 1] ?? "2026-10-02";
+          return [day(date, next, `${next}T00:00:00.000Z`), day(date, next, `${next}T00:05:00.000Z`, "advisor")];
+        }),
+      ];
+      const alerts = readSiteAlerts({ metadataStore: metadata, projectId: TUYA_OFFICE_PROJECT_ID, userId: "dev-user", includeReports: true, includeSync: false, reportRuns, now: NOW });
+      expect(alerts.reports.map((report) => [report.cadence, report.from])).toEqual([["daily", "2026-10-01"], ["monthly", "2026-09-01"]]);
+    });
+  });
 });
 
 const withMetadata = (run: (metadata: ReturnType<typeof createMetadataStore>) => void): void => {

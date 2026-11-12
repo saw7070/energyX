@@ -10,6 +10,7 @@ import { withEnergyProjectPublicationReadLock } from "./energy-project-materiali
 import { resolveEnergyPublishedMeterPoints } from "./energy-query-context.js";
 import { readSiteAlerts } from "./energy-site-alerts.js";
 import { readLiveSiteReadings } from "./energy-live-readings.js";
+import { quietMeters, readIdleWhenQuietMeters } from "./energy-idle-meters.js";
 import { siteAlertRecipients } from "./energy-recipients.js";
 
 /**
@@ -26,11 +27,12 @@ import { siteAlertRecipients } from "./energy-recipients.js";
  */
 const CHECK_INTERVAL_MS = 15 * 60_000;
 const log = logger.child({ component: "alert-email" });
-/** Mirrors STALE_METER_REPORTING_MS in energy-analysis.ts and the web's stoppedMeters(). */
-const STOPPED_AFTER_MS = 12 * 60 * 60_000;
-
 export type AlertEmail = { key: string; subject: string; text: string };
-export type MeterHealthRow = { meterPointId: string; name: string; status: string; lastReadingAt?: string };
+/**
+ * `idleWhenQuiet`: the 15-minute live check found the meter online and it can rightly use nothing (see
+ * readIdleWhenQuietMeters), so a quiet spell means it is using nothing.
+ */
+export type MeterHealthRow = { meterPointId: string; name: string; status: string; lastReadingAt?: string; idleWhenQuiet?: boolean };
 
 export const collectSiteAlertEmails = (input: {
   metadataStore: MetadataStore;
@@ -119,15 +121,13 @@ export const collectSiteAlertEmails = (input: {
 
 const formatKw = (value: number): string => `${new Intl.NumberFormat("en-SG", { maximumFractionDigits: 1 }).format(value)} kW`;
 
-/** The meters that were sending and went quiet, furthest behind first. Same rule as the Overview notice. */
-export const stoppedMeters = (meters: MeterHealthRow[]): MeterHealthRow[] => {
-  const sending = meters.filter((meter) => meter.status === "usable" && meter.lastReadingAt);
-  const newest = sending.reduce((latest, meter) => Math.max(latest, Date.parse(meter.lastReadingAt!)), 0);
-  if (!newest) return [];
-  return sending
-    .filter((meter) => newest - Date.parse(meter.lastReadingAt!) >= STOPPED_AFTER_MS)
-    .sort((left, right) => left.lastReadingAt!.localeCompare(right.lastReadingAt!));
-};
+/**
+ * The meters that were sending and went quiet, furthest behind first. Same rule as the Overview notice. A Tuya meter
+ * sends its total only when it moves, so a meter that uses nothing goes as quiet as one that lost power; one that is
+ * idle (online, and able to rightly use nothing: never lighting on a lights-on-hours site nor a meter always on by
+ * design) is left out.
+ */
+export const stoppedMeters = (meters: MeterHealthRow[]): MeterHealthRow[] => quietMeters(meters).filter((meter) => !meter.idleWhenQuiet);
 
 /** The same people as every other site alert: the site's chosen list, or the people who run it. */
 export const alertRecipients = (metadataStore: MetadataStore, projectId: string): string[] => siteAlertRecipients(metadataStore, projectId);
@@ -245,7 +245,8 @@ const alertProjectIds = (metadataStore: MetadataStore, env: NodeJS.ProcessEnv): 
   return [...ids].sort();
 };
 
-const readProjectMeterHealth = async (metadataStore: MetadataStore, projectId: string): Promise<MeterHealthRow[]> => {
+/** Each meter's latest reading and whether the live check finds it idle, as the meter health page has them. */
+export const readProjectMeterHealth = async (metadataStore: MetadataStore, projectId: string): Promise<MeterHealthRow[]> => {
   const project = metadataStore.energyIq.getProject(projectId);
   return withEnergyProjectPublicationReadLock({ metadataStore, workspaceId: project.workspace_id, projectId }, async () => {
     const snapshot = metadataStore.energyIq.findCurrentDataSnapshot(projectId);
@@ -263,11 +264,13 @@ const readProjectMeterHealth = async (metadataStore: MetadataStore, projectId: s
     const revision = metadataStore.energyIq.projectSetup.listHierarchyRevisions(projectId).find((candidate) => candidate.id === hierarchyRevisionId);
     const rows = revision ? (JSON.parse(revision.snapshot_json) as { meter_mapping?: { rows?: Array<{ id: string; display_name?: string; presentation?: { device_name?: string; short_name?: string } }> } }).meter_mapping?.rows ?? [] : [];
     const names = new Map(rows.map((row) => [row.id, row.presentation?.short_name?.trim() || row.presentation?.device_name || row.display_name || row.id]));
+    const idle = readIdleWhenQuietMeters({ metadataStore, projectId });
     return health.map((meter) => ({
       meterPointId: meter.meterPointId,
       name: names.get(meter.meterPointId) ?? meter.sourceLabel,
       status: meter.status,
       ...(meter.coverageTo ?? meter.readingTo ? { lastReadingAt: meter.coverageTo ?? meter.readingTo } : {}),
+      ...(idle.has(meter.meterPointId) ? { idleWhenQuiet: true } : {}),
     }));
   });
 };

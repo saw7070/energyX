@@ -10,6 +10,7 @@ import { EnergyIqLocaleProvider } from "./energyiq-locale";
 import { LANGUAGE_STORAGE_KEY, type EnergyIqLocale } from "./energyiq-messages";
 import { ReportLibraryView } from "./report-library";
 import { ReportAgentPanel } from "./report-agent-panel";
+import { ReportScheduleNote } from "./report-schedule-note";
 
 const library = {
   reports: [
@@ -102,6 +103,94 @@ describe("create a report", () => {
     await render(<ReportLibraryView projectId="p1" view="reports" />, "ms");
     await act(async () => button("Cipta laporan")!.click());
     expect(container.querySelector('dialog[aria-label="Cipta laporan"]')!.textContent).toContain("Semakan pengurusan");
+  });
+});
+
+describe("automatic reports: daily reports", () => {
+  it("offers daily reports alongside weekly and monthly ones, and saves the choice", async () => {
+    await render(<ReportAgentPanel projectId="p1" settingsMode="automation" />);
+    expect(container.textContent).toContain("The daily, weekly and monthly site reports are written straight from the meter readings. A daily report covers the day before.");
+    const select = container.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="Report frequency"]')!;
+    await act(async () => select.click());
+    const options = [...document.querySelectorAll<HTMLButtonElement>("[role='option']")];
+    expect(options.map(item => item.textContent)).toEqual(expect.arrayContaining(["Daily", "Weekly", "Monthly", "Weekly + monthly", "Daily + weekly + monthly"]));
+    await act(async () => options.find(item => item.textContent === "Daily + weekly + monthly")!.click());
+    await act(async () => button("Save schedule")!.click());
+    const put = mock.admin.mock.calls.find(item => item[1] === "settings" && item[2]?.method === "PUT")!;
+    expect(JSON.parse(put[2].body)).toMatchObject({ frequency: "daily-weekly-monthly", localHour: 3 });
+  });
+
+  it("names the choice in Chinese and Malay", async () => {
+    await render(<ReportAgentPanel projectId="p1" settingsMode="automation" />, "zh-Hans");
+    await act(async () => container.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="报告频率"]')!.click());
+    expect([...document.querySelectorAll("[role='option']")].map(item => item.textContent)).toContain("每天 + 每周 + 每月");
+    expect(container.textContent).toContain("每天的报告涵盖前一天");
+    await act(async () => root.unmount());
+    document.querySelectorAll("[role='listbox']").forEach(element => element.remove());
+    root = createRoot(container);
+    await render(<ReportAgentPanel projectId="p1" settingsMode="automation" />, "ms");
+    await act(async () => container.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="Kekerapan laporan"]')!.click());
+    expect([...document.querySelectorAll("[role='option']")].map(item => item.textContent)).toContain("Harian + mingguan + bulanan");
+    expect(container.textContent).toContain("Laporan harian merangkumi hari sebelumnya.");
+  });
+
+  it("lists a daily report as a site report, never as the one on the Overview", async () => {
+    mock.library.mockImplementation(async (_id: string, path = "") => path.startsWith("output/") ? { content: "<html><body>Report</body></html>" } : { ...library, reports: [
+      { id: "daily-44444444", title: "Daily Site Report — 17 August 2026", version: 1, category: "scheduled", kind: "report", source: "site", cadence: "daily", period: { from: "2026-08-17", toExclusive: "2026-08-18" }, createdAt: "2026-08-18T02:00:00Z" },
+      ...library.reports,
+    ] });
+    await render(<ReportLibraryView projectId="p1" view="reports" />);
+    const daily = container.querySelector('[aria-label="Open Daily Site Report — 17 August 2026"]')!;
+    expect(daily.textContent).toContain("Site report");
+    expect(daily.textContent).toContain("1 day");
+    expect(daily.textContent).not.toContain("Shown on your Overview");
+    // The weekly review is still the one on the Overview.
+    expect(container.querySelector('[aria-label="Open Weekly Management Review — 10 August 2026 to 16 August 2026"]')!.textContent).toContain("Shown on your Overview");
+  });
+
+  it("says when the next report comes, in every language", async () => {
+    const schedule = { frequency: "daily-weekly-monthly", localHour: 6, timezone: "Asia/Singapore" };
+    const expected = { en: "A new report is created automatically every day, with weekly and monthly ones too, around 06:00.",
+      "zh-Hans": "每天约 06:00 会自动生成一份新报告，另有每周和每月的报告。", ms: "Laporan baharu dijana secara automatik setiap hari, berserta laporan mingguan dan bulanan, sekitar 06:00." };
+    for (const locale of ["en", "zh-Hans", "ms"] as const) {
+      // The language is read when the page opens, so each language gets a fresh page.
+      await act(async () => root.unmount());
+      root = createRoot(container);
+      await render(<ReportScheduleNote projectId="p1" schedule={schedule} />, locale);
+      expect(container.textContent).toContain(expected[locale]);
+    }
+  });
+});
+
+describe("automatic reports: the note on the Overview", () => {
+  beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-09-23T08:00:00Z")); });
+  afterEach(() => { vi.useRealTimers(); });
+  const note = (frequency: string, overview: boolean) => <ReportScheduleNote projectId="p1" schedule={{ frequency, localHour: 6, timezone: "Asia/Singapore" }} overview={overview} />;
+
+  it("counts down to the weekly or monthly report the Overview shows, and says daily ones are kept in Reports", async () => {
+    // Wednesday 23 September 2026, 16:00 in Singapore. Tomorrow's daily report goes to Reports; Monday's weekly one is next here.
+    await render(note("daily-weekly-monthly", true));
+    expect(container.textContent).toBe("A new report is created automatically every week and every month, around 06:00. A daily report is kept in Reports too. Next one: 28 Sep 2026, around 06:00.");
+    await act(async () => root.render(<EnergyIqLocaleProvider>{note("daily", true)}</EnergyIqLocaleProvider>));
+    expect(container.textContent).toBe("A daily report is created automatically around 06:00 and kept in Reports.");
+    // Weekly and monthly alone read as before, and Reports itself still counts down to tomorrow's daily report.
+    await act(async () => root.render(<EnergyIqLocaleProvider>{note("weekly-monthly", true)}</EnergyIqLocaleProvider>));
+    expect(container.textContent).toBe("A new report is created automatically every week and every month, around 06:00. Next one: 28 Sep 2026, around 06:00.");
+    await act(async () => root.render(<EnergyIqLocaleProvider>{note("daily-weekly-monthly", false)}</EnergyIqLocaleProvider>));
+    expect(container.textContent).toContain("Next one: 24 Sep 2026, around 06:00.");
+  });
+
+  it("says so in Chinese and Malay", async () => {
+    const expected = { "zh-Hans": ["每天的报告也会保存在“报告”中。", "每天约 06:00 会自动生成一份报告，保存在“报告”中。"],
+      ms: ["Laporan harian juga disimpan di Laporan.", "Laporan harian dijana secara automatik sekitar 06:00 dan disimpan di Laporan."] };
+    for (const locale of ["zh-Hans", "ms"] as const) {
+      await act(async () => root.unmount());
+      root = createRoot(container);
+      await render(note("daily-weekly-monthly", true), locale);
+      expect(container.textContent).toContain(expected[locale][0]);
+      await act(async () => root.render(<EnergyIqLocaleProvider>{note("daily", true)}</EnergyIqLocaleProvider>));
+      expect(container.textContent).toContain(expected[locale][1]);
+    }
   });
 });
 

@@ -40,7 +40,7 @@ export const siteReportScheduleKey = (projectId: string, cadence: SiteReportCade
 
 /** What a reader is told this report is, in the library and in the record. Plain words, no jargon. */
 export const siteReportPrompt = (cadence: SiteReportCadence | "custom", period: SiteReportPeriod, style: SiteReportStyle = "full"): string =>
-  `${cadence === "weekly" ? "Weekly" : cadence === "monthly" ? "Monthly" : "Custom"} site ${style === "management" ? "management review" : "energy report"} for ${period.from} to ${period.toExclusive} (the end date is not included). Written by the server from the site's own meter readings.`;
+  `${cadence === "daily" ? "Daily" : cadence === "weekly" ? "Weekly" : cadence === "monthly" ? "Monthly" : "Custom"} site ${style === "management" ? "management review" : "energy report"} for ${period.from} to ${period.toExclusive} (the end date is not included). Written by the server from the site's own meter readings.`;
 
 /** Beyond this the saved readings are trimmed rather than refused; the report itself never reads the trimmed part. */
 const MAX_SNAPSHOT_BYTES = 12 * 1024 * 1024;

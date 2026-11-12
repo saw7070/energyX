@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EnergyScopeAnalysisDto } from "../../../lib/config-api";
 import type { DeviceStatistics } from "./device-statistics";
-import { boardTotalNote, cardTitle, dayCountText, legendStatus, deviceBlocks, deviceFindings, energyBreakdown, formatPeriod, fullTitle, groupBreakdown, parseDevicesView, periodDayCount, siteFindings, summariseDevices, tariffRate, topGroupOf, withShortDays, type DeviceRow } from "./site-devices";
+import { boardTotalNote, cardTitle, dayCountText, legendStatus, deviceBlocks, deviceFindings, energyBreakdown, formatPeriod, fullTitle, groupBreakdown, parseDevicesView, periodDayCount, siteFindings, summariseDevices, tariffRate, topGroupOf, withIdleDevices, withShortDays, type DeviceRow } from "./site-devices";
 import { flattenMeterGroups } from "@datafoundry/site-report";
 
 const health = (coveragePct: number, validIntervalCount = 100) => ({ coveragePct, expectedMeterIntervalCount: 100, validIntervalCount, qualityEventCount: 0 });
@@ -105,6 +105,15 @@ describe("siteFindings", () => {
     expect(findings[3]!.detail).toContain("Director Room Power");
     expect(findings[0]!.detail).toContain("in these 28 days.");
   });
+  it("never offers a meter ticked always on by design as running after hours or as a baseline cost", () => {
+    const rows = summariseDevices(analysis).rows;
+    const stat = (outOfHoursPct: number, alwaysOnKw: number) => ({ outOfHoursKwh: 300, outOfHoursPct, alwaysOnKw }) as DeviceStatistics;
+    const stats = new Map([["conow", stat(70, 0.5)], ["tv", stat(10, 0.2)]]);
+    const titles = (alwaysOn: Set<string>) => siteFindings({ rows, stats, shares: energyBreakdown(rows, new Map()), siteKwh: 2309.07, rate: 0.3191, openingHours: "Mon–Fri 09:00–18:00", alwaysOn }).map(finding => finding.title);
+    // The biggest user is still named; what never switches off moves to the next meter that could switch off.
+    expect(titles(new Set(["conow"]))).toEqual(["Showroom Conow is the biggest single user", "TV Meeting Room 2 never really switches off", "1 device sent no readings"]);
+    expect(titles(new Set(["conow", "tv"])).join(" ")).not.toMatch(/after working hours|never really switches off/);
+  });
   it("names the meters that stopped sending and when the first one went quiet", () => {
     const rows = summariseDevices({
       ...analysis,
@@ -171,6 +180,17 @@ describe("deviceFindings", () => {
     expect(findings[0]!.title).toBe("This meter stopped sending");
     expect(findings[0]!.detail).toContain("23 Sept, 4:45 pm");
     expect(findings[0]!.icon).toBe("alert");
+  });
+
+  it("says a meter ticked always on by design is expected to run day and night, and offers no saving on it", () => {
+    const busy = { ...base, outOfHoursKwh: 360, outOfHoursPct: 72, alwaysOnKw: 0.7, closedDayAverageKwh: 17 };
+    const findings = deviceFindings({ row, stat: busy, rate: 0.3, openingHours: "Mon–Fri 09:00–18:00", alwaysOnByDesign: true });
+    expect(findings.map(item => item.title)).toEqual(["Always on by design"]);
+    expect(findings[0]!.detail).toBe("It is meant to run day and night, so this is expected and not counted as a saving.");
+    expect(findings.map(item => item.detail).join(" ")).not.toMatch(/SGD|a year/);
+    // Missing readings are still said.
+    expect(deviceFindings({ row, stat: { ...busy, receivedPct: 90 }, rate: 0.3, openingHours: null, alwaysOnByDesign: true }).map(item => item.title)).toEqual(["Always on by design", "Some readings are missing"]);
+    for (const locale of ["zh-Hans", "ms"] as const) expect(deviceFindings({ row, stat: busy, rate: 0.3, openingHours: null, locale, alwaysOnByDesign: true })[0]!.title).toBe(locale === "ms" ? "Sentiasa hidup mengikut reka bentuk" : "按设计一直开着");
   });
 
   it("explains that a board total overlaps its devices", () => {
@@ -316,5 +336,51 @@ describe("legendStatus", () => {
     expect(legendStatus("gaps")).toBe("gaps");
     expect(legendStatus("stopped")).toBe("stopped");
     expect(legendStatus("silent")).toBe("stopped");
+  });
+});
+
+describe("a meter that is quiet because it uses nothing", () => {
+  // Made-up estate meters: a rarely used fan quiet since 23 Sept and a lobby TV quiet since later that day, while the
+  // rest of the site keeps reporting.
+  const quiet = {
+    context: analysis.context,
+    summary: { usageKwh: 2309.07 },
+    circuits: [circuit("fan", 486.3, 99), circuit("tv", 8.9, 86)],
+    explorerMeters: [meter("fan", "Pavilion fan"), meter("tv", "Lobby TV", { category: "light" })],
+    reportingHealth: {
+      latestReadingAt: "2026-09-24T00:45:00.000Z",
+      shortDays: [],
+      stoppedMeters: [{ meterNodeId: "fan", lastReadingAt: "2026-09-23T08:45:00.000Z" }, { meterNodeId: "tv", lastReadingAt: "2026-09-23T13:15:00.000Z" }],
+    },
+  } as unknown as EnergyScopeAnalysisDto;
+
+  it("is idle, not stopped, when the server calls it idle, keeping the status its readings earned", () => {
+    const summary = withIdleDevices(summariseDevices(quiet), new Set(["fan"]));
+    const rows = new Map(summary.rows.map(row => [row.id, row]));
+    expect(rows.get("fan")).toMatchObject({ status: "reporting", idleSince: "2026-09-23T08:45:00.000Z" });
+    expect(rows.get("fan")).not.toHaveProperty("stoppedAt");
+    // Without that answer the other quiet meter is still stopped.
+    expect(rows.get("tv")).toMatchObject({ status: "stopped", stoppedAt: "2026-09-23T13:15:00.000Z" });
+    expect([summary.reporting, summary.stopped]).toEqual([1, 1]);
+    const untouched = summariseDevices(quiet);
+    expect(withIdleDevices(untouched, new Set())).toBe(untouched);
+  });
+
+  it("is said once, calmly, among the site's findings, and not as a meter that stopped", () => {
+    const rows = withIdleDevices(summariseDevices(quiet), new Set(["fan", "tv"])).rows;
+    const findings = siteFindings({ rows, stats: new Map(), shares: energyBreakdown(rows, new Map()), siteKwh: 2309.07, rate: null, openingHours: null, timezone: "Asia/Singapore" });
+    expect(findings.some(finding => /stopped/.test(finding.title))).toBe(false);
+    const idle = findings.find(finding => finding.title.includes("used nothing"))!;
+    expect(idle.title).toBe("2 meters have used nothing since 23 Sept, 4:45 pm");
+    expect(idle.detail).toBe("Pavilion fan, Lobby TV are still online, but their readings have not changed, so no new readings come in. That is normal for things rarely used.");
+    expect(idle.icon).toBe("meter");
+  });
+
+  it("tells the device's own page since when it has used nothing, without alarm", () => {
+    const row = withIdleDevices(summariseDevices(quiet), new Set(["fan"])).rows.find(item => item.id === "fan")!;
+    const stat = { daily: [], profileKw: [], openProfileKw: [], closedProfileKw: [], openDays: 20, closedDays: 8, outOfHoursKwh: 100, outOfHoursPct: 20, alwaysOnKw: 0.01, dailyAverageKwh: 18, openDayAverageKwh: 20, closedDayAverageKwh: 5, receivedPct: 99 } as DeviceStatistics;
+    const findings = deviceFindings({ row, stat, rate: null, openingHours: null, timezone: "Asia/Singapore" });
+    expect(findings.map(item => [item.title, item.icon])).toEqual([["No use since 23 Sept, 4:45 pm", "meter"]]);
+    expect(findings[0]!.detail).toBe("It is still online, but its reading has not changed, so no new readings come in. That is normal for something rarely used.");
   });
 });
