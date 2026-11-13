@@ -5,7 +5,7 @@
  * @datafoundry/site-report, so the server can build exactly the same readings on a schedule; both are re-exported
  * here unchanged, so every page keeps importing them from this file.
  */
-import { configApi, type EnergyScopeAnalysisDto } from "../../../lib/config-api";
+import { configApi, type EnergyMeterHealthDto, type EnergyScopeAnalysisDto } from "../../../lib/config-api";
 import { type HoursByDay } from "./analysis-model";
 import { analysisComparisonDates, assembleAnalysisData, MAX_ANALYSIS_SPACES, type AnalysisData, type ProjectAction } from "@datafoundry/site-report";
 
@@ -13,6 +13,26 @@ export type { AnalysisData, LoadedPeriod, ProjectAction, ScopeCircuit, ScopeData
 export { categoryOf, toScope } from "@datafoundry/site-report";
 
 export type AnalysisRange = { kind: "latest-28" } | { kind: "all" } | { kind: "custom"; from: string; to: string };
+
+/** How far behind the newest reading a meter may fall before it is quiet: half a day (as meter health and the server). */
+const QUIET_AFTER_MS = 12 * 60 * 60_000;
+/**
+ * The meters these readings may treat as idle through their last day, sorted: quiet now (half a day behind the newest
+ * reading, and not marked not in use), idle at the latest live check (online, and a meter that can rightly use
+ * nothing), and with no reading after the last day. The browser's copy of the server's idleThroughPeriodEnd
+ * (energy-idle-meters.ts), so the Overview and Analysis judge complete days as the saved reports do.
+ */
+export function idleThroughLastDay(meters: EnergyMeterHealthDto["meters"], lastDate: string | undefined, timezone: string): string[] {
+  if (!lastDate) return [];
+  const sending = meters.filter(meter => meter.status === "usable" && meter.lastReadingAt && !meter.notInUse);
+  const newest = sending.reduce((latest, meter) => Math.max(latest, Date.parse(meter.lastReadingAt!)), 0);
+  if (!newest) return [];
+  const localDate = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" });
+  return sending
+    .filter(meter => meter.idleWhenQuiet && newest - Date.parse(meter.lastReadingAt!) >= QUIET_AFTER_MS && localDate.format(new Date(meter.lastReadingAt!)) <= lastDate)
+    .map(meter => meter.meterPointId)
+    .sort();
+}
 type ProjectInformation = {
   /**
    * `alwaysOn`: meant to run day and night (emergency lighting), kept in totals but never a daytime finding.
@@ -45,10 +65,12 @@ export async function loadAnalysis(projectId: string, range: AnalysisRange): Pro
   // All history does not depend on the dates the server picks, so it starts with the first request instead of after
   // it. It is the slowest request; it is kept only if it read the same data snapshot as the rest.
   const allHistory = range.kind === "all" ? null : execute(projectId, "project", { kind: "all" }).catch(() => null);
-  const [project, information, actions] = await Promise.all([
+  const [project, information, actions, health] = await Promise.all([
     execute(projectId, "project", range),
     configApi.getEnergyProjectInformation<ProjectInformation>(projectId).catch(() => null),
     configApi.reportActionRequest<{ actions: ProjectAction[] }>(projectId, "project-list").then(result => result.actions ?? []).catch(() => [] as ProjectAction[]),
+    // Meter health says which quiet meters are only using nothing: their silence then never makes a day incomplete.
+    configApi.getEnergyProjectMeterHealth(projectId).catch(() => null),
   ]);
   const snapshotId = project.context.dataSnapshotId ?? undefined;
   const { dates, previous } = analysisComparisonDates(project);
@@ -64,7 +86,9 @@ export async function loadAnalysis(projectId: string, range: AnalysisRange): Pro
   ]);
   const history = !earlyHistory || !snapshotId || earlyHistory.context.dataSnapshotId === snapshotId ? earlyHistory
     : await execute(projectId, "project", { kind: "all" }, snapshotId).catch(() => null);
-  const data = assembleAnalysisData({ projectId, project, spaces, spaceCurrent, previousProject, spacePrevious, history, information, actions });
+  const assembled = assembleAnalysisData({ projectId, project, spaces, spaceCurrent, previousProject, spacePrevious, history, information, actions });
+  const idle = idleThroughLastDay(health?.meters ?? [], assembled.current.project.dates.at(-1), assembled.timezone);
+  const data: AnalysisData = idle.length ? { ...assembled, idleWhenQuiet: idle } : assembled;
   const key = recentKey(projectId, range);
   recent.delete(key);
   recent.set(key, data);

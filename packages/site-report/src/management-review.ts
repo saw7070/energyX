@@ -21,7 +21,7 @@ import { forHoursMeaning, forOneDay, translatorFor, type EnergyIqLocale, type Tr
 import { managementReviewMessages, type ManagementReviewKey } from "./management-review-messages.js";
 import { analysisGroupTree, inSavedOrder, type MeterGroupNode } from "./meter-groups.js";
 import { comparableGroups, groupParts, LIKE_CLOSE_SHARE, metersWithNoUse, mustRunIds, partKey, partLabel, type ProfileLine } from "./group-insights.js";
-import { notInUseIds, withMetersInUse, type NotInUseMeter } from "./meters-in-use.js";
+import { idleIds as idleMeterIds, silentByDesignIds, withMetersInUse, type NotInUseMeter } from "./meters-in-use.js";
 import { formatPeriod } from "./report-period.js";
 import type { StandoutReport } from "./standout-report.js";
 import { alwaysOnByDesignIds } from "./always-on-by-design.js";
@@ -118,9 +118,8 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
   const t = reviewText(locale, meaning, oneDay);
   const list = (items: string[]) => listText(items, locale);
   const paragraph = (parts: string[]) => sentences(parts, locale);
-  const notInUse = notInUseIds(data);
-  // The same days as the full report: a meter marked not in use never makes a day incomplete.
-  const project = withMetersInUse(data.current.project, notInUse, data.current.spaces);
+  // The same days as the full report: a meter marked not in use, or idle, never makes a day incomplete.
+  const project = withMetersInUse(data.current.project, silentByDesignIds(data), data.current.spaces, idleMeterIds(data));
   const days = scopeDays(project, data.holidays);
   const dates = project.dates;
   const { rate, currency } = base;

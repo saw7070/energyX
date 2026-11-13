@@ -15,7 +15,7 @@ import { formatPeriod } from "./report-period.js";
 import { analysisGroupTree, biggestMeterGroup, inSavedOrder, type MeterGroupNode, type MeterGroupTree } from "./meter-groups.js";
 import { comparableGroups, energyPerLight, groupBreakdown, groupProfileLines, LIKE_CLOSE_SHARE, likeForLike, meterSeries, metersWithNoUse, mustRunIds, NO_USE_KWH, type BreakdownRow, type ProfileLine } from "./group-insights.js";
 import { DAY_PARTS, siteReportModelMessages, type SiteReportModelKey } from "./site-report-model-messages.js";
-import { notInUseIds, withMetersInUse } from "./meters-in-use.js";
+import { idleIds as idleMeterIds, notInUseIds, silentByDesignIds, withMetersInUse } from "./meters-in-use.js";
 import { standoutReport, type StandoutReport } from "./standout-report.js";
 import { alwaysOnByDesignIds, alwaysOnByDesignKw } from "./always-on-by-design.js";
 import { allowedShare, daytimeUse, onTime, ON_TIME_MARGIN_MINUTES, type DaytimeUse } from "./daytime-use.js";
@@ -331,8 +331,9 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const inl = (name: string) => en ? inline(name) : name;
   const theName = (name: string) => en ? `${/^\d/.test(name) ? "the " : ""}${inline(name)}` : name;
   const reference = referenceInput as SpatialExtras | null;
-  // A meter marked "not in use" is expected to be silent: the days and hours it misses still count as complete.
-  const project = withMetersInUse(data.current.project, notInUseIds(data), data.current.spaces);
+  // A meter marked "not in use", or idle when the readings were loaded, is expected to be silent: the days and hours it
+  // misses still count as complete.
+  const project = withMetersInUse(data.current.project, silentByDesignIds(data), data.current.spaces, idleMeterIds(data));
   const dates = project.dates;
   const dateSet = new Set(dates);
   const days = scopeDays(project, data.holidays);
