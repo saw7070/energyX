@@ -32,6 +32,17 @@ export type EnergyTuyaSyncWindow = {
   endTime: number;
 };
 
+/**
+ * The server's resident memory (MB) at each step of one sync pass, and the most it reached during the pass, so the
+ * nightly log shows which step is heavy. Absent when the pass was an exact repeat and did no work.
+ */
+export type EnergyTuyaSyncPassMemory = {
+  peakRssMb: number;
+  fetchedRssMb: number;
+  factsRssMb?: number;
+  overviewRssMb?: number;
+};
+
 export type EnergyTuyaSyncResult = {
   run: EnergyIqSourceSyncRunRecord;
   batch: EnergyIqImportBatchRecord;
@@ -39,6 +50,47 @@ export type EnergyTuyaSyncResult = {
   activeSourceSha256: string[];
   duplicate: boolean;
   materializationDuplicate: boolean;
+  memory?: EnergyTuyaSyncPassMemory;
+};
+
+/**
+ * One sync pass at a time across the whole server. The server-configured site and the sites connected in the app have
+ * their own schedulers, and both start at the same hour: two full rebuilds and Overview projections at once took the
+ * API past its container memory limit and got it killed mid-sync. Every pass, scheduled or manual, waits here for the
+ * one before it, first come first served; a pass that fails still lets the next one go. With a `signal`, a pass whose
+ * deadline passed while it waited does not start, and one abandoned at its deadline lets the next go even if it never
+ * settles, so one stuck request cannot hold every other site's sync behind it.
+ */
+let syncPassQueue: Promise<void> = Promise.resolve();
+export const runOneSyncPassAtATime = <T>(pass: () => Promise<T>, signal?: AbortSignal): Promise<T> => {
+  const turn = syncPassQueue;
+  const result = turn.then(async (): Promise<T> => {
+    if (signal?.aborted) throw new Error("ENERGYIQ_TUYA_REQUEST_ABORTED");
+    return await pass();
+  });
+  const settledOrAbandoned: Promise<unknown> = signal ? Promise.race([result, abortedOnce(signal)]) : result;
+  syncPassQueue = turn.then(() => settledOrAbandoned).then(() => undefined, () => undefined);
+  return result;
+};
+
+const abortedOnce = (signal: AbortSignal): Promise<void> => new Promise((resolve) => {
+  if (signal.aborted) resolve();
+  else signal.addEventListener("abort", () => resolve(), { once: true });
+});
+
+const rssMb = (): number => Math.round(process.memoryUsage.rss() / 1_048_576);
+
+/** Samples resident memory while a pass runs; `mark` records it at a step. */
+const trackPassMemory = () => {
+  let peak = rssMb();
+  const sampler = setInterval(() => { peak = Math.max(peak, rssMb()); }, 250);
+  if (typeof sampler.unref === "function") sampler.unref();
+  const mark = (): number => {
+    const now = rssMb();
+    peak = Math.max(peak, now);
+    return now;
+  };
+  return { mark, stop: (): number => { clearInterval(sampler); return Math.max(peak, rssMb()); } };
 };
 
 export type EnergyTuyaPostMaterialization = (
@@ -131,14 +183,23 @@ const resolveSingaporeCalendarMonthStart = (completeDayEndMs: number): number =>
   ) - SINGAPORE_OFFSET_MS;
 };
 
+type EnergyTuyaSyncRunInput = {
+  connector: EnergyTuyaProjectConnector;
+  actorUserId: string;
+  trigger: EnergyIqSourceSyncTrigger;
+  window: EnergyTuyaSyncWindow;
+  signal?: AbortSignal;
+};
+
 export const createEnergyTuyaSyncRunner = (dependencies: EnergyTuyaSyncRunnerDependencies) => ({
-  async run(input: {
-    connector: EnergyTuyaProjectConnector;
-    actorUserId: string;
-    trigger: EnergyIqSourceSyncTrigger;
-    window: EnergyTuyaSyncWindow;
-    signal?: AbortSignal;
-  }): Promise<EnergyTuyaSyncResult> {
+  run: (input: EnergyTuyaSyncRunInput): Promise<EnergyTuyaSyncResult> =>
+    runOneSyncPassAtATime(() => runSyncPass(dependencies, input), input.signal),
+});
+
+const runSyncPass = async (
+  dependencies: EnergyTuyaSyncRunnerDependencies,
+  input: EnergyTuyaSyncRunInput,
+): Promise<EnergyTuyaSyncResult> => {
     const now = dependencies.now ?? Date.now;
     const createId = dependencies.id ?? randomUUID;
     const project = dependencies.context.metadataStore.energyIq.getProject(input.connector.projectId);
@@ -173,6 +234,9 @@ export const createEnergyTuyaSyncRunner = (dependencies: EnergyTuyaSyncRunnerDep
     });
     if (claim.reused) return readCompletedResult(dependencies.context, claim.run);
 
+    const memory = trackPassMemory();
+    let factsRssMb: number | undefined;
+    let overviewRssMb: number | undefined;
     try {
       const artifact = await dependencies.syncTuyaEnergyReadings({
         startTime: input.window.startTime,
@@ -181,6 +245,7 @@ export const createEnergyTuyaSyncRunner = (dependencies: EnergyTuyaSyncRunnerDep
         ...(input.connector.credentials ? { credentials: input.connector.credentials } : {}),
         ...(input.signal ? { signal: input.signal } : {}),
       });
+      const fetchedRssMb = memory.mark();
       assertArtifactWindow(artifact, input.window);
       const batch = persistTuyaImportArtifact({
         context: dependencies.context,
@@ -210,13 +275,17 @@ export const createEnergyTuyaSyncRunner = (dependencies: EnergyTuyaSyncRunnerDep
           ? { readingsOnly: true }
           : {}),
         publishProjection: async (candidate, beforePublish) => {
+          factsRssMb = memory.mark();
           const publication = await dependencies.afterMaterialization?.(candidate, beforePublish);
+          overviewRssMb = memory.mark();
           if (!publication?.projectionRef?.trim()) {
             throw new Error("ENERGYIQ_OVERVIEW_PROJECTION_NOT_READY");
           }
           return publication;
         },
       });
+      // A readings-only site has no Overview step: its facts are written once the publication returns.
+      factsRssMb ??= memory.mark();
       const activeSourceSha256 = resolveEnergyIqSnapshotFactScope(materialized.snapshot).sourceSha256;
       const run = dependencies.context.metadataStore.energyIq.sourceSync.completeSuccess({
         run_id: claim.run.id,
@@ -232,6 +301,12 @@ export const createEnergyTuyaSyncRunner = (dependencies: EnergyTuyaSyncRunnerDep
         activeSourceSha256,
         duplicate: false,
         materializationDuplicate: materialized.duplicate,
+        memory: {
+          peakRssMb: memory.stop(),
+          fetchedRssMb,
+          factsRssMb,
+          ...(overviewRssMb === undefined ? {} : { overviewRssMb }),
+        },
       };
     } catch (error) {
       dependencies.context.metadataStore.energyIq.sourceSync.completeFailure({
@@ -240,9 +315,10 @@ export const createEnergyTuyaSyncRunner = (dependencies: EnergyTuyaSyncRunnerDep
         completed_at: new Date(now()).toISOString(),
       });
       throw error;
+    } finally {
+      memory.stop();
     }
-  },
-});
+};
 
 export const persistTuyaImportArtifact = (input: {
   context: Required<ConfigApiContext>;
