@@ -11,7 +11,7 @@ import {
   type AnalysisCategory, type AnalysisDay, type AnalysisDayType, type PeakHour,
 } from "./analysis-model";
 import { forHoursMeaning } from "@datafoundry/site-report";
-import { loadAnalysis, recentAnalysis, type AnalysisData, type AnalysisRange, type ScopeData, type ScopeMeter, type TrendSeries } from "./analysis-data";
+import { inUseScope, loadAnalysis, recentAnalysis, type AnalysisData, type AnalysisRange, type ScopeData, type ScopeMeter, type TrendSeries } from "./analysis-data";
 import { categoryLabel, dayTypeLabel, dayTypeWord, holidayName, joinText, rich, tariffNote } from "./analysis-messages";
 import { viewMessages } from "./analysis-view-messages";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
@@ -74,7 +74,9 @@ const examplesFor = (data: AnalysisData, category: AnalysisCategory) => data.cir
 
 type Derived = ReturnType<typeof derive>;
 function derive(data: AnalysisData) {
-  const days = scopeDays(data.current.project, data.holidays);
+  // Complete days as the Overview and the reports judge them: a meter marked not in use, or idle, is expected to be
+  // silent, so its quiet days still count.
+  const days = scopeDays(inUseScope(data, data.current.project, data.current.spaces), data.holidays);
   const previousDays = data.previous ? scopeDays(data.previous.project, data.holidays) : [];
   // One usual day for the whole page: the median of complete days of the same kind in these dates, the same figure the
   // "why was this day different" explanations use. Every day is one kind at a lights-on site.
@@ -83,7 +85,7 @@ function derive(data: AnalysisData) {
   const baselines = usualDayBaselines(days, lighting);
   const spaces = data.current.spaces.map(space => {
     const previous = data.previous?.spaces.find(item => item.id === space.id) ?? null;
-    const spaceDays = scopeDays(space, data.holidays);
+    const spaceDays = scopeDays(inUseScope(data, space), data.holidays);
     const spaceBaselines = usualDayBaselines(spaceDays, lighting);
     return { scope: space, previous, days: spaceDays, calibration: spaceDays, baselines: spaceBaselines, anomalies: findAnomalies(spaceDays, spaceBaselines) };
   });

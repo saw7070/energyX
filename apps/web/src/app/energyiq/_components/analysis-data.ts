@@ -7,12 +7,21 @@
  */
 import { configApi, type EnergyMeterHealthDto, type EnergyScopeAnalysisDto } from "../../../lib/config-api";
 import { type HoursByDay } from "./analysis-model";
-import { analysisComparisonDates, assembleAnalysisData, MAX_ANALYSIS_SPACES, type AnalysisData, type ProjectAction } from "@datafoundry/site-report";
+import { analysisComparisonDates, assembleAnalysisData, idleIds, MAX_ANALYSIS_SPACES, silentByDesignIds, withMetersInUse, type AnalysisData, type ProjectAction, type ScopeData } from "@datafoundry/site-report";
 
 export type { AnalysisData, LoadedPeriod, ProjectAction, ScopeCircuit, ScopeData, ScopeMeter, TrendCell, TrendSeries } from "@datafoundry/site-report";
 export { categoryOf, toScope } from "@datafoundry/site-report";
 
 export type AnalysisRange = { kind: "latest-28" } | { kind: "all" } | { kind: "custom"; from: string; to: string };
+
+/**
+ * A scope of these readings with complete days judged as the reports judge them: a meter marked not in use, or idle
+ * when the readings were loaded (online, using nothing), never makes a day incomplete. Its energy is unchanged.
+ * `sources` are searched for the meters' own hourly readings when the scope does not carry them (a site's meters
+ * usually carry theirs in the spaces).
+ */
+export const inUseScope = (data: AnalysisData, scope: ScopeData, sources: readonly ScopeData[] = []): ScopeData =>
+  withMetersInUse(scope, silentByDesignIds(data), sources, idleIds(data));
 
 /** How far behind the newest reading a meter may fall before it is quiet: half a day (as meter health and the server). */
 const QUIET_AFTER_MS = 12 * 60 * 60_000;

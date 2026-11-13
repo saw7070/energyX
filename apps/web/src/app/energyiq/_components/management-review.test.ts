@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildManagementReview, buildSiteReport, comparableGroups, groupKind, buildMeterGroupTree, type AnalysisData, type ScopeData, type ScopeMeter, type TrendSeries } from "@datafoundry/site-report";
+import { buildManagementReview, buildSiteReport, comparableGroups, groupKind, buildMeterGroupTree, scopeDays, type AnalysisData, type ScopeData, type ScopeMeter, type TrendSeries } from "@datafoundry/site-report";
+import { inUseScope } from "./analysis-data";
 import { renderManagementReviewHtml, renderStyledSiteReportHtml } from "@datafoundry/site-report/management-review-document";
 import { translatorFor } from "./energyiq-messages";
 import { dataAvailabilityMessages } from "./data-availability-messages";
@@ -221,6 +222,24 @@ describe("meters marked not in use", () => {
     const strip = (scopeData: ScopeData): ScopeData => ({ ...scopeData, meters: scopeData.meters.map(meter => meter.id === "fan" ? { ...meter, series: null } : meter) });
     const stripped: AnalysisData = { ...withoutSeries, current: { project: strip(withoutSeries.current.project), spaces: withoutSeries.current.spaces.map(strip) } };
     expect(buildSiteReport(stripped, null, GENERATED).benchmark.days.every(day => day.complete)).toBe(true);
+  });
+
+  it("the Analysis tab counts the same complete days: an idle or not-in-use meter never blanks a day, for the site or its area", () => {
+    const quietFan: Record<string, Def> = { ...LIGHTING, fan: { name: "Pavilion fan", group: "common", category: "other", kwh: () => null } };
+    const days = (data: AnalysisData) => ({
+      site: scopeDays(inUseScope(data, data.current.project, data.current.spaces), data.holidays),
+      area: scopeDays(inUseScope(data, data.current.spaces.find(space => space.meters.some(meter => meter.id === "fan"))!), data.holidays),
+    });
+    const before = days(site(quietFan, { meaning: "lights_on" }));
+    expect(before.site.some(day => day.complete)).toBe(false);
+    expect(before.area.some(day => day.complete)).toBe(false);
+    for (const data of [site(quietFan, { meaning: "lights_on", idle: ["fan"] }), site(quietFan, { meaning: "lights_on", notInUse: ["fan"] })]) {
+      const after = days(data);
+      expect(after.site.every(day => day.complete)).toBe(true);
+      expect(after.area.every(day => day.complete)).toBe(true);
+      // Only the complete-day check changes, never the energy.
+      expect(after.site.map(day => day.totalKwh)).toEqual(before.site.map(day => day.totalKwh));
+    }
   });
 
   it("are listed in Method and data, and never reported as stopped", () => {
