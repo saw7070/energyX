@@ -416,6 +416,42 @@ it("lights up only the chosen group's meters when groups in different places sha
   } finally { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); }
 });
 
+it("opens the floor plan in its own colours and lights a group only once someone picks one", async () => {
+  vi.stubGlobal("React", React); globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
+  const row = (id: string, name: string, scope: string) => ({ id, source_label: id, display_name: id, presentation: { device_name: name }, scope_id: scope, navigation_scope_id: scope, resource: "electricity", category: "light", coverage: "partial", meter_role: "component", aggregation_usage: "official" });
+  const node = (id: string, name: string, order: number, parent?: string) => ({ id, tier_definition_id: "area", name, sort_order: order, metadata_status: "confirmed", ...(parent ? { parent_id: parent } : {}) });
+  const doc = { project: { name: "Estate", timezone: "Asia/Singapore" }, tier_structure_locked: true, tiers: [{ id: "area", ordinal: 1, alias: "Area" }],
+    nodes: [node("a", "Block A", 10), node("b", "Block B", 20), node("a-gf", "Ground floor", 10, "a"), node("b-gf", "Lobby", 10, "b")],
+    meter_mapping: { schema_version: 2, source_kind: "tuya", confirmed: true, rows: [row("west", "West lobby", "a-gf"), row("east", "East lobby", "b-gf")], virtual_meters: [] } };
+  const setup = { project: { id: "estate", has_unpublished_changes: false, root_scope_id: "root" }, draft: { revision: 3, document: doc } } as unknown as EnergyProjectSetupDto;
+  const plan = { schemaVersion: 1, projectId: "estate", provenance: { file: "plan", status: "drawn" }, layout: { viewBox: [0, 0, 500, 300],
+    zones: [{ id: "W", referenceBoard: "Block A", rect: [10, 10, 200, 200] }, { id: "E", referenceBoard: "Block B", rect: [220, 10, 200, 200] }],
+    rooms: [{ name: "West", zone: "W", rect: [20, 40, 180, 160] }, { name: "East", zone: "E", rect: [230, 40, 180, 160] }],
+    devices: [{ meterId: "west", position: [100, 100] }, { meterId: "east", position: [320, 100] }] } };
+  const pinFaded = (name: string) => host.querySelector(`g[aria-label="Open ${name}"]`)!.getAttribute("class")!.includes("faded");
+  const areaPressed = (label: string) => host.querySelector(`g[aria-label="Select ${label}"]`)!.getAttribute("aria-pressed");
+  const button = (text: string) => Array.from(host.querySelectorAll("button")).find(item => item.textContent?.startsWith(text));
+  try {
+    await act(async () => root.render(<ProjectConfigurationView setup={setup} notes={"```json\n" + JSON.stringify(plan) + "\n```"} policies={null} projectId="estate" />));
+    // The list still opens on its first group with meters, but the plan shows the whole site in its own colours.
+    expect(host.querySelector("#meter-row-west")).not.toBeNull();
+    expect([pinFaded("West lobby"), pinFaded("East lobby")]).toEqual([false, false]);
+    expect([areaPressed("Block A, Area W"), areaPressed("Block B, Area E")]).toEqual(["false", "false"]);
+    expect(button("Show whole plan")).toBeUndefined();
+    // Picking a group lights it up and fades the rest.
+    await act(async () => button("Lobby")!.click());
+    expect([pinFaded("East lobby"), pinFaded("West lobby")]).toEqual([false, true]);
+    expect(areaPressed("Block B, Area E")).toBe("true");
+    // "Show whole plan" puts the colours back without losing the chosen group in the list.
+    await act(async () => button("Show whole plan")!.click());
+    expect([pinFaded("West lobby"), pinFaded("East lobby")]).toEqual([false, false]);
+    expect(areaPressed("Block B, Area E")).toBe("false");
+    expect(host.querySelector("#meter-row-east")).not.toBeNull();
+    expect(button("Show whole plan")).toBeUndefined();
+  } finally { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); }
+});
+
 it("lets a plan area stand for a whole block: offered as its panel, lit while a group inside is chosen, and selecting the block when clicked", async () => {
   vi.stubGlobal("React", React); globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
