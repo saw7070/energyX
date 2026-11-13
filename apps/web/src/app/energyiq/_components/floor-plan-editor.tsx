@@ -68,7 +68,7 @@ export { clearPlanDraft };
  * The floor plan inside the Floor layout workspace: the selected location's boards stand out, and clicking an area
  * or a device selects it in the Locations list.
  */
-export function FloorPlanView({ reference, meters, highlight, highlightDevices = null, focusDevice, canEdit, onEdit, onSelectBoard, onSelectDevice }: { reference: StoredSpatialReference | null; meters: PlanMeter[]; highlight: string[] | null; highlightDevices?: string[] | null; focusDevice: string | null; canEdit: boolean; onEdit: () => void; onSelectBoard: (board: string, deviceId?: string) => void; onSelectDevice: (id: string) => void }) {
+export function FloorPlanView({ reference, meters, highlight, highlightDevices = null, focusDevice, canEdit, onEdit, onSelectBoard, onSelectDevice, onShowAll }: { reference: StoredSpatialReference | null; meters: PlanMeter[]; highlight: string[] | null; highlightDevices?: string[] | null; focusDevice: string | null; canEdit: boolean; onEdit: () => void; onSelectBoard: (board: string, deviceId?: string) => void; onSelectDevice: (id: string) => void; onShowAll?: () => void }) {
   const [open, setOpen] = useState(() => { try { return window.localStorage.getItem("energyiq.floorPlanOpen") !== "false"; } catch { return true; } });
   const toggle = () => setOpen(current => { try { window.localStorage.setItem("energyiq.floorPlanOpen", String(!current)); } catch { /* per-browser convenience only */ } return !current; });
   const t = useMessages(floorPlanMessages);
@@ -78,6 +78,7 @@ export function FloorPlanView({ reference, meters, highlight, highlightDevices =
     <header className={styles.embeddedHeader}>
       <div><h4>{t("view.title")}</h4><p>{reference ? t("view.summary", { placed: placed.length, total: meters.length }) : t("view.empty")}</p><p>{t("view.drawingOnly")}</p></div>
       <div className={styles.actions}>
+        {reference && open && highlight && onShowAll && <button type="button" className={styles.secondary} onClick={onShowAll}>{t("view.showAll")}</button>}
         {canEdit && <button type="button" className={styles.secondary} onClick={onEdit}><EnergyIcon name="map" />{reference ? t("view.edit") : t("view.draw")}</button>}
         {reference && open && <button type="button" className={styles.secondary} onClick={() => setLarge(true)}>⤢ {t("enlarge.open")}</button>}
         {reference && <button type="button" className={styles.secondary} aria-expanded={open} onClick={toggle}>{open ? t("view.hide") : t("view.show")}</button>}

@@ -75,7 +75,7 @@ export const TOUR_PAGES: TourPage[] = [
     { title: "Facility tabs", text: "Each part of the setup has its own tab. A number shows how many items a tab holds." },
     { title: "Suggestions", text: "Appears when something could be clearer, for example meters that could be sorted by what they power, so charts can show where the energy goes by type." },
     { title: "Groups", text: "Meters grouped by what they serve, such as Block lighting inside a block, with how many each group has. Click one to see its meters. People who can change the setup can add groups, put one inside another, move a group with Move up or Move down, drag a meter to another group, or choose Arrange from a spreadsheet. Edit on a meter sets its short name, Always on by design and Number of lights." },
-    { title: "Floor plan", text: "A sketch of where each board and device sits. Click a group in the list and its meters light up here. View larger opens it full screen. Edit layout lets administrators draw the site and place devices. Totals and shares come from Groups, not from this drawing." },
+    { title: "Floor plan", text: "A sketch of where each board and device sits. Click a group in the list and its meters light up here; Show whole plan puts every area back in its own colours. View larger opens it full screen. Edit layout lets administrators draw the site and place devices. Totals and shares come from Groups, not from this drawing." },
   ] },
   { id: "devices", href: `${FACILITY}?tab=devices`, title: "Devices", where: "Main menu → Facility → Devices", intro: "What every device uses, what it costs and when it runs.", parts: [
     { title: "Show", text: "The whole site, one distribution board, or a single device: choose Open a device and search for it by name. A device's own page gives its Always on draw in kW and what it comes to in a day." },
@@ -207,7 +207,7 @@ const TOUR_TEXT: Record<Exclude<EnergyIqLocale, "en">, TourText[]> = {
       { title: "场地设施标签页", text: "设置的每个部分都有自己的标签页，数字表示该标签页中的项目数。" },
       { title: "建议", text: "在可以改进时出现，例如有些电表可按所供电的设备分类，这样图表就能按用途显示用电去向。" },
       { title: "分组", text: "按用途整理的电表（例如楼栋里的 Block lighting），以及每个分组的电表数量。点击一个分组即可查看其电表。可更改设置的人可以新建分组、把分组放进另一个分组、用“上移”“下移”调整分组位置、把电表拖到别的分组，或选择“从表格整理分组”。电表上的“修改”可设置简称、“按设计一直开着”和“灯的数量”。" },
-      { title: "平面图", text: "显示每个配电箱和设备所在位置的示意图。点击列表中的分组，其电表会在图上高亮显示。“放大查看”可全屏查看。“修改布局”供管理员绘制场地和放置设备。合计和占比来自分组，而不是这张图。" },
+      { title: "平面图", text: "显示每个配电箱和设备所在位置的示意图。点击列表中的分组，其电表会在图上高亮显示；“显示整张平面图”可让所有区域恢复原来的颜色。“放大查看”可全屏查看。“修改布局”供管理员绘制场地和放置设备。合计和占比来自分组，而不是这张图。" },
     ] },
     { title: "设备", where: "主菜单 → 场地设施 → 设备", intro: "每台设备的用电量、费用以及运行时间。", parts: [
       { title: "显示", text: "整个站点、某个配电箱，或单台设备：选择“打开设备”并按名称搜索。单台设备页会显示“持续用电”的千瓦数，以及每天约多少度电。" },
@@ -337,7 +337,7 @@ const TOUR_TEXT: Record<Exclude<EnergyIqLocale, "en">, TourText[]> = {
       { title: "Tab premis", text: "Setiap bahagian tetapan mempunyai tab sendiri. Nombor menunjukkan bilangan item dalam tab itu." },
       { title: "Cadangan", text: "Muncul apabila sesuatu boleh dijelaskan lagi, contohnya meter yang boleh diisih mengikut apa yang dikuasakan, supaya carta dapat menunjukkan ke mana tenaga pergi mengikut jenis." },
       { title: "Kumpulan", text: "Meter yang dikumpulkan mengikut apa yang dibekalkannya, seperti Block lighting di dalam blok, dengan bilangan meter setiap kumpulan. Klik satu untuk melihat meternya. Mereka yang boleh mengubah tetapan boleh menambah kumpulan, meletakkan kumpulan di dalam kumpulan lain, mengalihkan kumpulan dengan Naikkan atau Turunkan, menyeret meter ke kumpulan lain, atau memilih Susun daripada hamparan. Ubah pada meter menetapkan nama ringkas, Sentiasa hidup mengikut reka bentuk dan Bilangan lampu." },
-      { title: "Pelan lantai", text: "Lakaran lokasi setiap papan dan peranti. Klik kumpulan dalam senarai dan meternya diserlahkan di sini. Lihat lebih besar membukanya dalam skrin penuh. Ubah susun atur membolehkan pentadbir melukis tapak dan meletakkan peranti. Jumlah dan bahagian datang daripada Kumpulan, bukan lukisan ini." },
+      { title: "Pelan lantai", text: "Lakaran lokasi setiap papan dan peranti. Klik kumpulan dalam senarai dan meternya diserlahkan di sini; Tunjukkan seluruh pelan mengembalikan warna asal setiap kawasan. Lihat lebih besar membukanya dalam skrin penuh. Ubah susun atur membolehkan pentadbir melukis tapak dan meletakkan peranti. Jumlah dan bahagian datang daripada Kumpulan, bukan lukisan ini." },
     ] },
     { title: "Peranti", where: "Menu utama → Premis → Peranti", intro: "Berapa banyak tenaga yang digunakan setiap peranti, kosnya dan bila ia beroperasi.", parts: [
       { title: "Tunjuk", text: "Seluruh premis, satu papan agihan atau satu peranti: pilih Buka peranti dan cari mengikut nama. Halaman satu peranti menunjukkan kuasa Sentiasa hidupnya dalam kW dan jumlahnya sehari." },
