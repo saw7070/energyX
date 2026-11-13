@@ -16,19 +16,31 @@ export type NotInUseMeter = { id: string; name: string; reason: string };
 /** The ids of the meters marked not in use in a set of readings. */
 export const notInUseIds = (data: { notInUse?: NotInUseMeter[] | undefined }): Set<string> => new Set((data.notInUse ?? []).map(meter => meter.id));
 
+/** The ids of the meters that were idle when the readings were loaded: online, using nothing, so sending nothing. */
+export const idleIds = (data: { idleWhenQuiet?: string[] | undefined }): Set<string> => new Set(data.idleWhenQuiet ?? []);
+
+/**
+ * Meters whose silence is expected, so it never makes a day incomplete: the ones marked not in use, and the ones idle
+ * when the readings were loaded (a rarely used fan whose total has not moved sends nothing; it used nothing).
+ */
+export const silentByDesignIds = (data: { notInUse?: NotInUseMeter[] | undefined; idleWhenQuiet?: string[] | undefined }): Set<string> =>
+  new Set([...notInUseIds(data), ...idleIds(data)]);
+
 /**
  * The scope's total with completeness judged only on the meters in use. A not-in-use meter that is part of the total
  * has its own readings taken back out of each hour's count. If its own hourly readings are not in the readings
  * (`sources` are searched as well, since a site's meters usually carry their series in the spaces), the total is
  * returned as it was: without them its share of the count cannot be told apart.
  */
-export function inUseTotal(scope: ScopeData, notInUse: ReadonlySet<string>, sources: readonly ScopeData[] = []): TrendSeries | null {
+export function inUseTotal(scope: ScopeData, notInUse: ReadonlySet<string>, sources: readonly ScopeData[] = [], sentNothing: ReadonlySet<string> = new Set()): TrendSeries | null {
   const total = scope.total;
   if (!total || !notInUse.size) return total;
   const excluded = scope.meters.filter(meter => meter.official && meter.category !== "overall" && notInUse.has(meter.id));
   if (!excluded.length) return total;
   const seriesOf = (id: string) => [scope, ...sources].flatMap(item => item.meters).find(meter => meter.id === id && meter.series)?.series ?? null;
-  const parts = excluded.map(meter => seriesOf(meter.id));
+  // An idle meter with no hourly readings at all sent nothing in these dates: none of the total's minutes are its own,
+  // and it was expected for its one meter's worth (each meter is expected for 60 minutes an hour).
+  const parts = excluded.map(meter => seriesOf(meter.id) ?? (sentNothing.has(meter.id) ? { expectedMinutesPerHour: 60, cells: [] as TrendSeries["cells"] } : null));
   if (parts.some(part => !part)) return total;
   const expected = total.expectedMinutesPerHour - parts.reduce((sum, part) => sum + part!.expectedMinutesPerHour, 0);
   if (expected <= 0) return total;
@@ -48,7 +60,7 @@ export function inUseTotal(scope: ScopeData, notInUse: ReadonlySet<string>, sour
 }
 
 /** The scope with its total judged on the meters in use (see inUseTotal); the same object when nothing changes. */
-export function withMetersInUse(scope: ScopeData, notInUse: ReadonlySet<string>, sources: readonly ScopeData[] = []): ScopeData {
-  const total = inUseTotal(scope, notInUse, sources);
+export function withMetersInUse(scope: ScopeData, notInUse: ReadonlySet<string>, sources: readonly ScopeData[] = [], sentNothing: ReadonlySet<string> = new Set()): ScopeData {
+  const total = inUseTotal(scope, notInUse, sources, sentNothing);
   return total === scope.total ? scope : { ...scope, total };
 }

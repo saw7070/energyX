@@ -45,7 +45,7 @@ function scope(defs: Record<string, Def>, name: string, ids: string[], rate: num
     meters: ids.map(id => ({ id, name: defs[id]!.name, location: name, category: defs[id]!.category, official: true, series: series(id, defs[id]!.kwh) })),
     cost: rate == null ? null : { amount: usage * rate, currency: "SGD", note: `${rate} SGD/kWh before tax` } };
 }
-function site(defs: Record<string, Def>, options: { groups?: typeof GROUPS | null; hours?: AnalysisData["openingHours"]; meaning?: "lights_on"; rate?: number | null; notInUse?: string[] } = {}): AnalysisData {
+function site(defs: Record<string, Def>, options: { groups?: typeof GROUPS | null; hours?: AnalysisData["openingHours"]; meaning?: "lights_on"; rate?: number | null; notInUse?: string[]; idle?: string[] } = {}): AnalysisData {
   const ids = Object.keys(defs);
   const groups = options.groups === undefined ? GROUPS : options.groups;
   const rate = options.rate === undefined ? 0.3 : options.rate;
@@ -58,6 +58,7 @@ function site(defs: Record<string, Def>, options: { groups?: typeof GROUPS | nul
     ...(options.meaning ? { hoursMeaning: options.meaning } : {}),
     ...(groups ? { groups: { list: groups, meters: ids.map(id => ({ id, name: defs[id]!.name, groupId: defs[id]!.group, kwh: kwhOf(id) })) } } : {}),
     ...(options.notInUse ? { notInUse: options.notInUse.map(id => ({ id, name: defs[id]!.name, reason: "reason:spare" })) } : {}),
+    ...(options.idle ? { idleWhenQuiet: options.idle } : {}),
   };
 }
 const GENERATED = "2026-08-10T02:00:00Z";
@@ -203,6 +204,23 @@ describe("meters marked not in use", () => {
     expect(after.standout.note).not.toMatch(/Readings were missing/);
     // The energy is the same either way: only the complete-day check changes.
     expect(after.benchmark.days.map(day => day.kwh)).toEqual(before.benchmark.days.map(day => day.kwh));
+  });
+
+  it("a meter idle when the readings were loaded (a rarely used fan) never blanks complete days either", () => {
+    // Nobody switched the fan on all week, so its total never moved and it sent nothing.
+    const quietFan: Record<string, Def> = { ...LIGHTING, fan: { name: "Pavilion fan", group: "common", category: "other", kwh: () => null } };
+    const before = buildSiteReport(site(quietFan, { meaning: "lights_on" }), null, GENERATED);
+    expect(before.benchmark.days.some(day => day.complete)).toBe(false);
+    const after = buildSiteReport(site(quietFan, { meaning: "lights_on", idle: ["fan"] }), null, GENERATED);
+    expect(after.benchmark.days.every(day => day.complete)).toBe(true);
+    expect(after.benchmark.weekdayAvg).not.toBeNull();
+    expect(after.benchmark.days.map(day => day.kwh)).toEqual(before.benchmark.days.map(day => day.kwh));
+    expect(buildManagementReview(site(quietFan, { meaning: "lights_on", idle: ["fan"] }), null, GENERATED).total.days.every(day => day.complete)).toBe(true);
+    // Also when the readings carry no hours at all for it: it sent nothing, and was expected for one meter's worth.
+    const withoutSeries = site(quietFan, { meaning: "lights_on", idle: ["fan"] });
+    const strip = (scopeData: ScopeData): ScopeData => ({ ...scopeData, meters: scopeData.meters.map(meter => meter.id === "fan" ? { ...meter, series: null } : meter) });
+    const stripped: AnalysisData = { ...withoutSeries, current: { project: strip(withoutSeries.current.project), spaces: withoutSeries.current.spaces.map(strip) } };
+    expect(buildSiteReport(stripped, null, GENERATED).benchmark.days.every(day => day.complete)).toBe(true);
   });
 
   it("are listed in Method and data, and never reported as stopped", () => {
