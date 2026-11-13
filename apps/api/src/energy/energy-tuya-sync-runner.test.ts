@@ -26,6 +26,7 @@ import {
   persistTuyaImportArtifact,
   resolveLatestCompleteSingaporeDayEnd,
   resolveScheduledTuyaSyncWindow,
+  runOneSyncPassAtATime,
   sourceSyncErrorCode,
   sourceSyncErrorDetail,
 } from "./energy-tuya-sync-runner.js";
@@ -461,7 +462,17 @@ describe("Energy Tuya sync runner", () => {
         window: firstWindow,
       });
       expect(first.duplicate).toBe(false);
+      // A pass that did the work reports the server's memory at each step and at its peak; a repeat did none.
+      expect(first.memory).toEqual({
+        peakRssMb: expect.any(Number),
+        fetchedRssMb: expect.any(Number),
+        factsRssMb: expect.any(Number),
+        overviewRssMb: expect.any(Number),
+      });
+      expect(first.memory!.peakRssMb).toBeGreaterThanOrEqual(Math.max(
+        first.memory!.fetchedRssMb, first.memory!.factsRssMb!, first.memory!.overviewRssMb!));
       expect(repeated).toMatchObject({ duplicate: true, run: { id: first.run.id } });
+      expect(repeated.memory).toBeUndefined();
       expect(state.providerCalls).toBe(1);
       expect(readRefCalls()).toBe(1);
       expect(state.materializedOverviewSnapshots).toEqual([first.snapshot.id]);
@@ -582,6 +593,97 @@ describe("Energy Tuya sync runner", () => {
       metadata.close();
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
+  });
+
+  it("runs one sync pass at a time across the server, and a failed pass does not hold up the next", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-tuya-one-at-a-time-"));
+    const previousDuckDbPath = process.env.ENERGYIQ_DUCKDB_PATH;
+    process.env.ENERGYIQ_DUCKDB_PATH = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const files = new LocalFileAssetService(metadata, { storageRoot: join(root, "files") });
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const connector = connectorFor(metadata);
+      const context = {
+        metadataStore: metadata,
+        dataGateway: new LocalDataGateway(metadata),
+        fileAssetService: files,
+        userId: "dev-user",
+        workspaceId: TUYA_OFFICE_WORKSPACE_ID,
+      } as unknown as Required<ConfigApiContext>;
+      const steps: string[] = [];
+      let firstEntered!: () => void;
+      const entered = new Promise<void>((resolve) => { firstEntered = resolve; });
+      let releaseFirst!: () => void;
+      const release = new Promise<void>((resolve) => { releaseFirst = resolve; });
+      // Two runners, as the two nightly schedulers have, started in the same moment.
+      const first = createEnergyTuyaSyncRunner({
+        context,
+        id: () => "one-at-a-time-first",
+        syncTuyaEnergyReadings: async () => {
+          steps.push("first started");
+          firstEntered();
+          await release;
+          steps.push("first finished");
+          throw new Error("ENERGYIQ_TUYA_HTTP_ERROR:503");
+        },
+      }).run({
+        connector,
+        actorUserId: "dev-user",
+        trigger: "manual",
+        window: { startTime: Date.parse("2026-08-19T01:00:00.000Z"), endTime: Date.parse("2026-08-19T01:30:00.000Z") },
+      });
+      const second = createEnergyTuyaSyncRunner({
+        context,
+        id: () => "one-at-a-time-second",
+        syncTuyaEnergyReadings: async () => {
+          steps.push("second started");
+          throw new Error("ENERGYIQ_TUYA_HTTP_ERROR:503");
+        },
+      }).run({
+        connector,
+        actorUserId: "dev-user",
+        trigger: "manual",
+        window: { startTime: Date.parse("2026-08-19T01:30:00.000Z"), endTime: Date.parse("2026-08-19T02:00:00.000Z") },
+      });
+      const settled = Promise.allSettled([first, second]);
+      await entered;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(steps).toEqual(["first started"]);
+      releaseFirst();
+      const [firstOutcome, secondOutcome] = await settled;
+      expect(firstOutcome.status).toBe("rejected");
+      expect(secondOutcome).toMatchObject({ status: "rejected", reason: expect.objectContaining({ message: expect.stringContaining("ENERGYIQ_TUYA_HTTP_ERROR:503") }) });
+      expect(steps).toEqual(["first started", "first finished", "second started"]);
+    } finally {
+      if (previousDuckDbPath === undefined) delete process.env.ENERGYIQ_DUCKDB_PATH;
+      else process.env.ENERGYIQ_DUCKDB_PATH = previousDuckDbPath;
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
+  it("lets the next pass go when one is abandoned at its deadline, and skips a pass whose deadline passed while it waited", async () => {
+    const steps: string[] = [];
+    const stuckDeadline = new AbortController();
+    // A request that ignores its abort and never answers.
+    void runOneSyncPassAtATime(() => {
+      steps.push("stuck started");
+      return new Promise<never>(() => undefined);
+    }, stuckDeadline.signal);
+    const lateDeadline = new AbortController();
+    const late = runOneSyncPassAtATime(async () => { steps.push("late started"); }, lateDeadline.signal);
+    const next = runOneSyncPassAtATime(async () => {
+      steps.push("next started");
+      return "next";
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(steps).toEqual(["stuck started"]);
+    lateDeadline.abort();
+    stuckDeadline.abort();
+    await expect(late).rejects.toThrow("ENERGYIQ_TUYA_REQUEST_ABORTED");
+    await expect(next).resolves.toBe("next");
+    expect(steps).toEqual(["stuck started", "next started"]);
   });
 
   it("retries a scheduled sync once after the process died, then waits instead of crash-looping", async () => {
