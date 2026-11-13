@@ -466,11 +466,18 @@ describe("Energy Tuya sync runner", () => {
       expect(first.memory).toEqual({
         peakRssMb: expect.any(Number),
         fetchedRssMb: expect.any(Number),
+        fetchPeakRssMb: expect.any(Number),
         factsRssMb: expect.any(Number),
+        factsPeakRssMb: expect.any(Number),
         overviewRssMb: expect.any(Number),
+        overviewPeakRssMb: expect.any(Number),
       });
-      expect(first.memory!.peakRssMb).toBeGreaterThanOrEqual(Math.max(
-        first.memory!.fetchedRssMb, first.memory!.factsRssMb!, first.memory!.overviewRssMb!));
+      // Each step's peak is at least where it ended, and the pass's peak at least every step's.
+      const memory = first.memory!;
+      expect(memory.fetchPeakRssMb).toBeGreaterThanOrEqual(memory.fetchedRssMb);
+      expect(memory.factsPeakRssMb!).toBeGreaterThanOrEqual(memory.factsRssMb!);
+      expect(memory.overviewPeakRssMb!).toBeGreaterThanOrEqual(memory.overviewRssMb!);
+      expect(memory.peakRssMb).toBeGreaterThanOrEqual(Math.max(memory.fetchPeakRssMb, memory.factsPeakRssMb!, memory.overviewPeakRssMb!));
       expect(repeated).toMatchObject({ duplicate: true, run: { id: first.run.id } });
       expect(repeated.memory).toBeUndefined();
       expect(state.providerCalls).toBe(1);

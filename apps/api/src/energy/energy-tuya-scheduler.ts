@@ -191,8 +191,11 @@ export const createEnergyTuyaDailyScheduler = (input: {
             ...(result.memory ? {
               peak_rss_mb: result.memory.peakRssMb,
               fetched_rss_mb: result.memory.fetchedRssMb,
+              fetch_peak_rss_mb: result.memory.fetchPeakRssMb,
               ...(result.memory.factsRssMb === undefined ? {} : { facts_rss_mb: result.memory.factsRssMb }),
+              ...(result.memory.factsPeakRssMb === undefined ? {} : { facts_peak_rss_mb: result.memory.factsPeakRssMb }),
               ...(result.memory.overviewRssMb === undefined ? {} : { overview_rss_mb: result.memory.overviewRssMb }),
+              ...(result.memory.overviewPeakRssMb === undefined ? {} : { overview_peak_rss_mb: result.memory.overviewPeakRssMb }),
             } : {}),
           });
         }
