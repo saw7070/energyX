@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { EnergyProjectSetupDocumentDto } from "../../../lib/config-api";
 import {
   arrangeChangesNothing, arrangeGroups, detectLayout, floorPlanWithGroupAreas, groupPath, headerRole, matchRows, matchScore, matchSummary,
-  parseDelimitedText, previewTree, readRows, sheetFromCells, templateCsv, withColumnRole, withPick, type ArrangeRow,
+  parseDelimitedText, parseLights, previewTree, readRows, sheetFromCells, templateCsv, withColumnRole, withPick, type ArrangeRow,
 } from "./spreadsheet-arrange-model";
 import { planFromReference, referenceFromPlan, starterPlan, type StoredSpatialReference } from "./floor-plan-model";
 
@@ -34,7 +34,7 @@ const estate = () => ({
   ] },
 }) as unknown as EnergyProjectSetupDocumentDto;
 
-const row = (meterName: string, path: string[] = [], extra: Partial<ArrangeRow> = {}): ArrangeRow => ({ row: 2, path, meterName, deviceName: "", shortName: "", ...extra });
+const row = (meterName: string, path: string[] = [], extra: Partial<ArrangeRow> = {}): ArrangeRow => ({ row: 2, path, meterName, deviceName: "", shortName: "", lights: "", ...extra });
 const ok = <T,>(value: T | { error: string }): T => { if (value && typeof value === "object" && "error" in value) throw new Error(value.error); return value as T; };
 
 describe("recognising columns", () => {
@@ -95,8 +95,8 @@ describe("reading the file", () => {
     const cells = [["Group", "Meter name", "Short name"], ["Block 12A > Ground floor", "12A GF Lobby Lighting", "Lift lobby 1"], ["Common area>Gazebo › Seats", "Gazebo DL & Fan", ""]];
     const rows = readRows(cells, detectLayout(cells)!);
     expect(rows).toEqual([
-      { row: 2, path: ["Block 12A", "Ground floor"], meterName: "12A GF Lobby Lighting", deviceName: "", shortName: "Lift lobby 1" },
-      { row: 3, path: ["Common area", "Gazebo", "Seats"], meterName: "Gazebo DL & Fan", deviceName: "", shortName: "" },
+      { row: 2, path: ["Block 12A", "Ground floor"], meterName: "12A GF Lobby Lighting", deviceName: "", shortName: "Lift lobby 1", lights: "" },
+      { row: 3, path: ["Common area", "Gazebo", "Seats"], meterName: "Gazebo DL & Fan", deviceName: "", shortName: "", lights: "" },
     ]);
   });
 
@@ -240,13 +240,50 @@ describe("the change", () => {
   });
 });
 
+describe("number of lights", () => {
+  it("knows the heading in English, Chinese and Malay, and not words that only look like it", () => {
+    expect(["Number of lights", "No. of lights", "No of light points", "Lights", "Light count", "Qty of fittings", "Lamps", "灯的数量", "灯具数量", "Bilangan lampu"].map(headerRole)).toEqual(Array(10).fill("lights"));
+    expect(["Lighting", "Light type", "Lights on time"].map(headerRole)).toEqual(Array(3).fill("ignore"));
+  });
+
+  it("reads whole numbers with the unit words installers add, and refuses anything else", () => {
+    expect(["12", " 6 ", "12 nos", "4 pcs", "8 lights", "3盏", "10 biji", "20.0"].map(parseLights)).toEqual([12, 6, 12, 4, 8, 3, 10, 20]);
+    expect(["", "-", "—"].map(parseLights)).toEqual([undefined, undefined, undefined]);
+    expect(["0", "about 10", "2.5", "10000", "12-14", "twelve"].map(parseLights)).toEqual(Array(6).fill(null));
+  });
+
+  it("sets each matched meter's number of lights, leaves empty cells alone and reports cells it cannot read", () => {
+    const document = estate();
+    const sheet = [
+      row("GF Lobby Lighting", [], { lights: "6", row: 2 }),
+      row("Emergency Lighting", [], { lights: "", row: 3 }),
+      row("Gazebo DL & Fan", [], { lights: "about 4", row: 4 }),
+      row("Gazebo walkway 1", [], { lights: "2 nos", row: 5 }),
+    ].map((item, index) => index < 2 ? { ...item, path: ["12A"] } : item);
+    const result = ok(arrangeGroups(document, "maple", sheet, matchRows(sheet, document), { removeEmptied: false }));
+    const lightsOf = (id: string) => result.document.meter_mapping!.rows.find(item => item.id === id)!.presentation?.light_count;
+    expect(result.lightCounts).toEqual([{ meterId: "a-lobby", count: 6 }, { meterId: "c-walk", count: 2 }]);
+    expect([lightsOf("a-lobby"), lightsOf("a-emergency"), lightsOf("c-gazebo"), lightsOf("c-walk")]).toEqual(["6", undefined, undefined, "2"]);
+    expect(result.badLights).toEqual([{ row: 4, text: "about 4" }]);
+    // Names, groups and totals stay as they were; only the counts change.
+    expect(result.moved).toEqual([]);
+    expect(result.document.meter_mapping!.rows.find(item => item.id === "a-lobby")!.presentation?.device_name).toBe("12A GF Lobby Lighting");
+    expect(arrangeChangesNothing(result)).toBe(false);
+    // The same file again changes nothing.
+    const again = ok(arrangeGroups(result.document, "maple", sheet, matchRows(sheet, result.document), { removeEmptied: false }));
+    expect(again.lightCounts).toEqual([]);
+    expect(arrangeChangesNothing(again)).toBe(true);
+  });
+});
+
 describe("template and floor plan", () => {
   it("offers a template with the headings it reads and two made-up rows", () => {
     const csv = templateCsv();
-    expect(csv).toBe("Group,Meter name,Short name\r\nBlock A > Ground floor,Block A GF Lobby Lighting,Lift lobby 1\r\nCommon area > Pavilion,Pavilion linkway 1,Pavilion 1\r\n");
+    expect(csv).toBe("Group,Meter name,Short name,Number of lights\r\nBlock A > Ground floor,Block A GF Lobby Lighting,Lift lobby 1,6\r\nCommon area > Pavilion,Pavilion linkway 1,Pavilion 1,4\r\n");
     const cells = parseDelimitedText(csv);
     const layout = detectLayout(cells)!;
-    expect(layout.columns.map(column => column.role)).toEqual(["group", "meter", "short"]);
+    expect(layout.columns.map(column => column.role)).toEqual(["group", "meter", "short", "lights"]);
+    expect(readRows(cells, layout).map(item => item.lights)).toEqual(["6", "4"]);
     expect(readRows(cells, layout).map(item => item.path)).toEqual([["Block A", "Ground floor"], ["Common area", "Pavilion"]]);
   });
 

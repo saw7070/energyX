@@ -1,6 +1,6 @@
 /**
  * Arranging a site's groups from the installer's spreadsheet: one row per meter, saying which group it belongs in and,
- * optionally, its short name. Everything here runs in the browser on the file the person chose; the result is an
+ * optionally, its short name and how many lights it feeds. Everything here runs in the browser on the file the person chose; the result is an
  * ordinary edit of the setup draft, made with the same group and meter edits as the Groups editor.
  *
  * Nothing in the file is sent anywhere. A device ID column is recognised only so it is never mistaken for a name, and
@@ -15,11 +15,12 @@ import { DEFAULT_VIEWBOX, MAX_COORD, MAX_PLAN_SIZE, contentExtent, hiddenZones, 
 import type { EnergyIqLocale } from "./energyiq-messages";
 
 /** What a column holds. Several columns may be groups (read left to right); the others are used once each. */
-export type ColumnRole = "ignore" | "group" | "device" | "meter" | "short";
+export type ColumnRole = "ignore" | "group" | "device" | "meter" | "short" | "lights";
 export type SheetColumn = { index: number; header: string; sample: string; role: ColumnRole; idColumn: boolean };
 export type SheetLayout = { headerRow: number; columns: SheetColumn[] };
 /** One meter row of the file. `row` is its row number in the sheet, from 1. */
-export type ArrangeRow = { row: number; path: string[]; meterName: string; deviceName: string; shortName: string };
+/** `lights` is the number-of-lights cell as written; it is checked only when the change is worked out. */
+export type ArrangeRow = { row: number; path: string[]; meterName: string; deviceName: string; shortName: string; lights: string };
 export type MatchConfidence = "exact" | "close" | "guess";
 export type RowMatch = { meterId: string | null; confidence: MatchConfidence | "picked" | null; score: number };
 
@@ -29,6 +30,23 @@ const PATH_SEPARATOR = /\s*(?:>|›|»|→)\s*/u;
 export const ARRANGE_MAX_ROWS = 1000;
 /** Short names are kept short, like the meter form's limit. */
 const SHORT_NAME_MAX = 60;
+/** The most light points one meter can be said to feed, as in the meter form. */
+const LIGHTS_MAX = 9999;
+/** "12", "12 nos", "12 pcs", "12 lights", "12盏" or "12 biji": the count, with a unit word installers often add. */
+const LIGHTS_CELL = /^(\d{1,5})(?:\.0+)?\s*(?:nos?\.?|pcs?\.?|pieces?|units?|lights?|lamps?|fittings?|points?|盏|个|只|套|biji|unit|buah|lampu)?$/iu;
+
+/**
+ * A number-of-lights cell: undefined when empty or "-" (nothing to change), the count when it is a whole number from 1
+ * to 9999, and null when it is something else ("about 10", "0", "2.5"), so the meter's own count is left alone.
+ */
+export function parseLights(text: string): number | undefined | null {
+  const value = cleanText(text);
+  if (!value || /^[-–—]$/u.test(value)) return undefined;
+  const match = LIGHTS_CELL.exec(value);
+  if (!match) return null;
+  const count = Number(match[1]);
+  return count >= 1 && count <= LIGHTS_MAX ? count : null;
+}
 
 const cleanText = (value: string) => value.normalize("NFKC").replace(/\s+/gu, " ").trim();
 /** Same name, ignoring case and spacing. */
@@ -71,6 +89,7 @@ export function parseDelimitedText(text: string): string[][] {
 }
 
 const HEADER_ROLES: Array<[Exclude<ColumnRole, "ignore">, RegExp]> = [
+  ["lights", /^(?:(?:no\.?|nos\.?|number|num|count|qty|quantity|total)\s*(?:of\s*)?(?:lights?|lamps?|light\s*points?|lighting\s*points?|fittings?|light\s*fittings?|luminaires?)|(?:lights?|lamps?|light\s*points?|fittings?|light\s*fittings?|luminaires?)\s*(?:count|qty|quantity|no\.?|nos\.?|number|total)?|灯(?:的|具)?(?:数量|数|盏数)|灯具|bilangan\s*(?:mata\s*)?lampu|jumlah\s*lampu)$/iu],
   ["short", /^(?:short(?:\s*(?:name|label))?|nick\s*name|alias|friendly\s*name|display\s*name|简称|短名称|显示名称|nama\s*(?:pendek|ringkas|paparan))$/iu],
   ["device", /^(?:tuya(?:\s*device)?(?:\s*name)?|device(?:\s*name)?|设备(?:名称)?|涂鸦设备(?:名称)?|nama\s*peranti|peranti)$/iu],
   ["meter", /^(?:meter(?:\s*(?:name|label))?|name|label|circuit(?:\s*name)?|load\s*name|电表(?:名称)?|名称|回路(?:名称)?|nama(?:\s*meter)?|meter\s*nama)$/iu],
@@ -174,7 +193,7 @@ export function readRows(cells: string[][], layout: SheetLayout): ArrangeRow[] {
     for (const part of groups.flatMap(value => value.split(PATH_SEPARATOR)).map(cleanText).filter(Boolean)) {
       if (key(part) !== key(path.at(-1) ?? "")) path.push(part);
     }
-    rows.push({ row: index + 1, path, meterName, deviceName, shortName: cell(row, "short").slice(0, SHORT_NAME_MAX).trim() });
+    rows.push({ row: index + 1, path, meterName, deviceName, shortName: cell(row, "short").slice(0, SHORT_NAME_MAX).trim(), lights: cell(row, "lights") });
   }
   return rows;
 }
@@ -304,6 +323,10 @@ export type ArrangeResult = {
   /** Meters that change group: where they were and where they go. */
   moved: Array<{ meterId: string; from: string[]; to: string[] }>;
   shortNames: Array<{ meterId: string; name: string }>;
+  /** Meters whose number of lights the file sets or changes. */
+  lightCounts: Array<{ meterId: string; count: number }>;
+  /** Matched rows whose number of lights is not a whole number from 1 to 9999; those meters keep their own. */
+  badLights: Array<{ row: number; text: string }>;
   /** Groups that held meters before and hold none afterwards. */
   emptied: Array<{ id: string; path: string[] }>;
   /** Of those, the ones removed (only when asked, and only when nothing at all is attached to them). */
@@ -312,13 +335,14 @@ export type ArrangeResult = {
 
 /**
  * Applies the file to the draft: creates the groups it names (reusing any with the same name in the same place), moves
- * each matched meter into its group and sets the short names given. Meters are never removed; a meter a row gives no
- * group stays where it is, and an empty short-name cell keeps the meter's short name. Groups left with no meters are
+ * each matched meter into its group and sets the short names and numbers of lights given. Meters are never removed; a
+ * meter a row gives no group stays where it is, and an empty short-name or number-of-lights cell keeps what it has. Groups left with no meters are
  * removed only with `removeEmptied`, since a group with no meters cannot go live.
  */
 export function arrangeGroups(document: EnergyProjectSetupDocumentDto, projectId: string, rows: ArrangeRow[], matches: RowMatch[], options: { removeEmptied: boolean }, locale: EnergyIqLocale = "en"): ArrangeResult | { error: string } {
   let next = document;
   const created: ArrangeResult["created"] = [], moved: ArrangeResult["moved"] = [], shortNames: ArrangeResult["shortNames"] = [];
+  const lightCounts: ArrangeResult["lightCounts"] = [], badLights: ArrangeResult["badLights"] = [];
   const childrenOf = (parentId: string | undefined) => {
     const ids = new Set(next.nodes.map(node => node.id));
     return next.nodes.filter(node => (node.parent_id && ids.has(node.parent_id) ? node.parent_id : undefined) === parentId);
@@ -360,6 +384,15 @@ export function arrangeGroups(document: EnergyProjectSetupDocumentDto, projectId
       next = result;
       shortNames.push({ meterId, name: shortName });
     }
+    const lights = parseLights(row.lights);
+    if (lights === null) badLights.push({ row: row.row, text: row.lights });
+    const counted = next.meter_mapping!.rows.find(item => item.id === meterId)!;
+    if (lights && String(lights) !== (counted.presentation?.light_count ?? "")) {
+      const result = applyMeterEdit(next, counted, { name: projectMeterFullName(counted), scopeId: counted.scope_id, category: counted.category, counted: counted.aggregation_usage === "official", lightCount: String(lights) }, locale);
+      if ("error" in result) return result;
+      next = result;
+      lightCounts.push({ meterId, count: lights });
+    }
   }
   const emptied = document.nodes
     .filter(node => metersInGroup(document, node.id) > 0 && next.nodes.some(item => item.id === node.id) && metersInGroup(next, node.id) === 0)
@@ -377,11 +410,11 @@ export function arrangeGroups(document: EnergyProjectSetupDocumentDto, projectId
       removed.push(group.id);
     }
   }
-  return { document: next, created, moved, shortNames, emptied, removed };
+  return { document: next, created, moved, shortNames, lightCounts, badLights, emptied, removed };
 }
 
 /** True when applying would change nothing. */
-export const arrangeChangesNothing = (result: ArrangeResult) => !result.created.length && !result.moved.length && !result.shortNames.length && !result.removed.length;
+export const arrangeChangesNothing = (result: ArrangeResult) => !result.created.length && !result.moved.length && !result.shortNames.length && !result.lightCounts.length && !result.removed.length;
 
 export type PreviewGroup = { id: string; name: string; isNew: boolean; meters: EnergyMeterMappingRowDto[]; children: PreviewGroup[] };
 /** The tree after the change, with the meters in each group, for the preview. */
@@ -409,9 +442,9 @@ const csvCell = (value: string) => /[",\r\n]/u.test(value) ? `"${value.replaceAl
 /** The headings EnergyX looks for, with two made-up example rows. */
 export function templateCsv(): string {
   const rows = [
-    ["Group", "Meter name", "Short name"],
-    ["Block A > Ground floor", "Block A GF Lobby Lighting", "Lift lobby 1"],
-    ["Common area > Pavilion", "Pavilion linkway 1", "Pavilion 1"],
+    ["Group", "Meter name", "Short name", "Number of lights"],
+    ["Block A > Ground floor", "Block A GF Lobby Lighting", "Lift lobby 1", "6"],
+    ["Common area > Pavilion", "Pavilion linkway 1", "Pavilion 1", "4"],
   ];
   return `${rows.map(row => row.map(csvCell).join(",")).join("\r\n")}\r\n`;
 }

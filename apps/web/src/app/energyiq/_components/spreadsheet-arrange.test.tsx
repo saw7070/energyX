@@ -132,7 +132,7 @@ describe("Arrange from a spreadsheet", () => {
     await act(async () => button("Download a template")!.click());
     expect(names).toEqual(["groups-template.csv"]);
     const text = await (create.mock.calls[0]![0] as Blob).text();
-    expect(text.replace(/^﻿/u, "")).toBe("Group,Meter name,Short name\r\nBlock A > Ground floor,Block A GF Lobby Lighting,Lift lobby 1\r\nCommon area > Pavilion,Pavilion linkway 1,Pavilion 1\r\n");
+    expect(text.replace(/^﻿/u, "")).toBe("Group,Meter name,Short name,Number of lights\r\nBlock A > Ground floor,Block A GF Lobby Lighting,Lift lobby 1,6\r\nCommon area > Pavilion,Pavilion linkway 1,Pavilion 1,4\r\n");
 
     await choose(new File(["old"], "meters.xls"));
     expect(panel()!.querySelector('[role="alert"]')!.textContent).toContain(".xls");
