@@ -307,12 +307,17 @@ function overviewAiArtifactParams(
 }
 
 export type ReportModelProtocol = "openai-completions" | "anthropic-messages";
-export type ReportModelProfile = { apiProtocol?: ReportModelProtocol; id: string; name: string; modelName: string; baseUrl: string; hasSecret: boolean; revision: number; compatible: boolean; testedAt: string | null };
+export type ReportModelSpeed = "standard" | "fast";
+export type ReportModelProfile = { apiProtocol?: ReportModelProtocol; speed?: ReportModelSpeed; id: string; name: string; modelName: string; baseUrl: string; hasSecret: boolean; revision: number; compatible: boolean; testedAt: string | null };
 export type ReportModelsState = { current: { configured: boolean; available?: boolean; modelName?: string; name?: string; sourceProfileId?: string; revision?: number }; profiles: ReportModelProfile[] };
 export const configApi = {
   getReportModels(): Promise<ReportModelsState> { return requestEnvelope("/api/v1/report-models"); },
-  createReportModel(body: { apiProtocol?: ReportModelProtocol; name: string; modelName: string; baseUrl: string; apiKey: string }): Promise<ReportModelProfile> {
+  createReportModel(body: { apiProtocol?: ReportModelProtocol; speed?: ReportModelSpeed; name: string; modelName: string; baseUrl: string; apiKey: string }): Promise<ReportModelProfile> {
     return requestEnvelope("/api/v1/report-models", { method: "POST", body: JSON.stringify(body) });
+  },
+  /** A new configuration with the same endpoint and saved key as an existing one; the key never reaches the browser. */
+  copyReportModel(id: string, revision: number, body: { name: string; modelName: string; speed?: ReportModelSpeed }): Promise<ReportModelProfile> {
+    return requestEnvelope(`/api/v1/report-models/${encodeURIComponent(id)}/copy`, { method: "POST", body: JSON.stringify({ ...body, revision }) });
   },
   testReportModel(id: string, revision: number): Promise<ReportModelProfile> {
     return requestEnvelope(`/api/v1/report-models/${encodeURIComponent(id)}/test`, { method: "POST", body: JSON.stringify({ revision }) });

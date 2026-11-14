@@ -1,21 +1,47 @@
 import { reportChatRequest } from "./report-chat-request.js";
 
 export type ReportModelProtocol = "openai-completions" | "anthropic-messages";
-export type ReportTransportModel = { model: string; baseUrl: string; apiKey: string; apiProtocol?: ReportModelProtocol };
+/** "fast" asks Claude for fast mode (Claude Opus 5.5: faster output at twice the price). Absent means standard speed. */
+export type ReportModelSpeed = "fast";
+export type ReportTransportModel = { model: string; baseUrl: string; apiKey: string; apiProtocol?: ReportModelProtocol; speed?: ReportModelSpeed | undefined };
 export function reportModelProtocol(value: unknown): ReportModelProtocol {
   if (value === undefined || value === "openai-completions") return "openai-completions";
   if (value === "anthropic-messages") return value;
   throw new Error("REPORT_MODEL_PROTOCOL_UNSUPPORTED");
+}
+/** Fast mode exists only on the Anthropic protocol; anything else is refused rather than silently ignored. */
+export function reportModelSpeed(value: unknown, protocol: ReportModelProtocol): ReportModelSpeed | undefined {
+  if (value === undefined || value === null || value === "" || value === "standard") return undefined;
+  if (value === "fast" && protocol === "anthropic-messages") return value;
+  throw new Error("REPORT_MODEL_SPEED_UNSUPPORTED");
+}
+/**
+ * Claude models whose thinking is always on and whose thinking blocks are tied to the conversation ("preserved
+ * thinking"). The advisor's agent compacts long sessions by summarising older turns, which changes the history those
+ * blocks were made in; "drop_block" lets the API drop such a block instead of refusing the whole request.
+ * Whole IDs only: "claude-opus-5" must not match "claude-opus-5-5".
+ */
+const PRESERVED_THINKING_MODELS = new Set(["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1", "claude-fable-5-2"]);
+const THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01";
+function anthropicBody(model: ReportTransportModel, body: Record<string, unknown>): { body: Record<string, unknown>; beta?: string } {
+  const next: Record<string, unknown> = { ...body, model: model.model };
+  if (model.speed === "fast") next.speed = "fast";
+  if (!PRESERVED_THINKING_MODELS.has(model.model)) return { body: next };
+  // Thinking cannot be turned off on these models ("disabled" is a 400), so anything but adaptive becomes adaptive.
+  const thinking = body.thinking && typeof body.thinking === "object" && (body.thinking as { type?: unknown }).type === "adaptive" ? body.thinking as Record<string, unknown> : {};
+  next.thinking = { ...thinking, type: "adaptive", block_binding: { prefix_mismatch_behavior: "drop_block" } };
+  return { body: next, beta: THINKING_BINDING_BETA };
 }
 /** Only the trusted host chooses the upstream URL and authentication. */
 export function reportModelRequest(model: ReportTransportModel, body: Record<string, unknown>) {
   const anthropic = reportModelProtocol(model.apiProtocol) === "anthropic-messages";
   const base = model.baseUrl.replace(/\/$/, "");
   const url = anthropic ? base.replace(/\/v1$/, "") + "/v1/messages" : base + "/chat/completions";
-  const headers: Record<string, string> = anthropic
-    ? { "content-type": "application/json", "x-api-key": model.apiKey, "anthropic-version": "2023-06-01" }
-    : { "content-type": "application/json", authorization: `Bearer ${model.apiKey}` };
-  return { url, headers, body: anthropic ? { ...body, model: model.model } : reportChatRequest(model, body) };
+  if (!anthropic) return { url, headers: { "content-type": "application/json", authorization: `Bearer ${model.apiKey}` } as Record<string, string>, body: reportChatRequest(model, body) };
+  const native = anthropicBody(model, body);
+  const headers: Record<string, string> = { "content-type": "application/json", "x-api-key": model.apiKey, "anthropic-version": "2023-06-01",
+    ...(native.beta ? { "anthropic-beta": native.beta } : {}) };
+  return { url, headers, body: native.body };
 }
 
 /** Incremental SSE parsing, shared by native probes and the forwarding boundary. */
@@ -60,6 +86,9 @@ export async function probeAnthropicReportModel(model: ReportTransportModel, fet
         const block = blocks.get(data.index); if (!block) throw new Error("REPORT_MODEL_STREAM_INCOMPLETE");
         if (data.delta.type === "text_delta") block.text = (block.text ?? "") + data.delta.text;
         if (data.delta.type === "input_json_delta") json.set(data.index, (json.get(data.index) ?? "") + data.delta.partial_json);
+        // Thinking blocks go back unchanged in the second request, signature included, or Claude refuses them.
+        if (data.delta.type === "thinking_delta") block.thinking = (block.thinking ?? "") + data.delta.thinking;
+        if (data.delta.type === "signature_delta") block.signature = (block.signature ?? "") + data.delta.signature;
       }
     });
     const reader = response.body.getReader(); let bytes = 0;

@@ -36,6 +36,43 @@ describe("native Anthropic report transport", () => {
     }) as typeof fetch;
     await probeAnthropicReportModel(model, fetcher); expect(count).toBe(2);
   });
+  it("asks for fast mode only when the configuration says so", () => {
+    expect(reportModelRequest({ ...model, speed: "fast" }, { stream: true }).body.speed).toBe("fast");
+    expect(reportModelRequest(model, { stream: true, speed: "fast" }).body.speed).toBe("fast");
+    expect(reportModelRequest(model, { stream: true }).body).not.toHaveProperty("speed");
+  });
+  it("keeps thinking adaptive and lets Claude Opus 5.5 drop a thinking block after compaction instead of refusing", () => {
+    const opus55 = { ...model, model: "claude-opus-5-5" };
+    for (const thinking of [undefined, { type: "disabled" }, { type: "adaptive", display: "summarized" }]) {
+      const req = reportModelRequest(opus55, { stream: true, ...(thinking ? { thinking } : {}) });
+      expect(req.headers["anthropic-beta"]).toBe("thinking-binding-controls-2026-08-01");
+      expect(req.body.thinking).toMatchObject({ type: "adaptive", block_binding: { prefix_mismatch_behavior: "drop_block" } });
+    }
+    expect(reportModelRequest(opus55, { thinking: { type: "adaptive", display: "summarized" } }).body.thinking).toMatchObject({ display: "summarized" });
+    // Whole IDs only: Claude Opus 5 keeps its request exactly as the worker sent it.
+    const opus5 = reportModelRequest({ ...model, model: "claude-opus-5" }, { stream: true });
+    expect(opus5.headers["anthropic-beta"]).toBeUndefined();
+    expect(opus5.body).not.toHaveProperty("thinking");
+  });
+  it("sends a thinking block back with its signature in the connection test", async () => {
+    let count = 0;
+    const fetcher = (async (_url, options) => {
+      const body = JSON.parse(String(options?.body));
+      expect(body.speed).toBe("fast");
+      if (++count === 1) return response([
+        { type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "", signature: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "Use the tool." } },
+        { type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: "sig-1" } },
+        { type: "content_block_start", index: 1, content_block: { type: "tool_use", id: "check", name: "energyiq_connection_check", input: {} } },
+        { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '{"marker":"energyiq-ok"}' } },
+        { type: "message_stop" },
+      ]);
+      expect(body.messages[1].content[0]).toEqual({ type: "thinking", thinking: "Use the tool.", signature: "sig-1" });
+      return response([{ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "energyiq-ok" } }, { type: "message_stop" }]);
+    }) as typeof fetch;
+    await probeAnthropicReportModel({ ...model, model: "claude-opus-5-5", speed: "fast" }, fetcher); expect(count).toBe(2);
+  });
   it("fails closed on provider error, missing terminator and text-only replies", async () => {
     await expect(probeAnthropicReportModel(model, (async () => new Response("host-secret", { status: 401 })) as typeof fetch)).rejects.toThrow("REPORT_MODEL_TEST_FAILED");
     await expect(probeAnthropicReportModel(model, (async () => response([{ type: "error", error: { message: "host-secret" } }])) as typeof fetch)).rejects.toThrow("REPORT_MODEL_TEST_FAILED");
