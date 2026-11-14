@@ -15,7 +15,7 @@ import { projectMeterName, projectMeterSubtitle } from "./project-meter-name";
 import facility from "./project-configuration-view.module.css";
 import styles from "./spreadsheet-arrange.module.css";
 
-const ROLES: ColumnRole[] = ["ignore", "group", "meter", "device", "short"];
+const ROLES: ColumnRole[] = ["ignore", "group", "meter", "device", "short", "lights"];
 const PATH = " › ";
 type Loaded = { file: string; cells: string[][]; layout: SheetLayout };
 type ArrangeKey = Extract<keyof (typeof spreadsheetArrangeMessages)["en"], string>;
@@ -154,6 +154,7 @@ export function SpreadsheetArrange({ doc, projectId, notes, block, previous, can
         <h5 id="arrange-preview">{t("preview.title")}</h5>
         {result && "error" in result ? <p role="alert" className={facility.editorError}>{result.error}</p> : arranged && <>
           <p className={styles.counts}>{arrangeChangesNothing(arranged) ? t("preview.nothing") : changeCounts(arranged, t)}</p>
+          {arranged.badLights.length > 0 && <p className={styles.note}>{t(arranged.badLights.length === 1 ? "preview.badLightsOne" : "preview.badLightsMany", { rows: arranged.badLights.map(item => item.row).join(", ") })}</p>}
           <ul className={styles.tree} aria-label={t("preview.treeAria")}>{tree.map(group => <PreviewNode key={group.id} group={group} result={arranged} />)}</ul>
           {arranged.emptied.length > 0 && <div className={styles.option}>
             <p>{t(arranged.emptied.length === 1 ? "preview.emptiedOne" : "preview.emptiedMany", { count: arranged.emptied.length, names: arranged.emptied.map(group => group.path.join(PATH)).join(", ") })}</p>
@@ -176,10 +177,10 @@ export function SpreadsheetArrange({ doc, projectId, notes, block, previous, can
   </section>;
 }
 
-/** "2 new groups · 12 meters move · 8 short names set", leaving out what does not change. */
+/** "2 new groups · 12 meters move · 8 short names set · 19 numbers of lights set", leaving out what does not change. */
 function changeCounts(result: ArrangeResult, t: Translate<ArrangeKey>): string {
-  const part = (count: number, one: "preview.groupsOne" | "preview.movesOne" | "preview.shortOne", many: "preview.groupsMany" | "preview.movesMany" | "preview.shortMany") => count ? t(count === 1 ? one : many, { count }) : "";
-  return [part(result.created.length, "preview.groupsOne", "preview.groupsMany"), part(result.moved.length, "preview.movesOne", "preview.movesMany"), part(result.shortNames.length, "preview.shortOne", "preview.shortMany")].filter(Boolean).join(" · ");
+  const part = (count: number, one: "preview.groupsOne" | "preview.movesOne" | "preview.shortOne" | "preview.lightsOne", many: "preview.groupsMany" | "preview.movesMany" | "preview.shortMany" | "preview.lightsMany") => count ? t(count === 1 ? one : many, { count }) : "";
+  return [part(result.created.length, "preview.groupsOne", "preview.groupsMany"), part(result.moved.length, "preview.movesOne", "preview.movesMany"), part(result.shortNames.length, "preview.shortOne", "preview.shortMany"), part(result.lightCounts.length, "preview.lightsOne", "preview.lightsMany")].filter(Boolean).join(" · ");
 }
 
 function MatchStep({ rows, matches, summary, meters, disabled, onPick }: {
@@ -201,7 +202,7 @@ function MatchStep({ rows, matches, summary, meters, disabled, onPick }: {
       <thead><tr><th scope="col">{t("match.rowColumn")}</th><th scope="col">{t("match.fileColumn")}</th><th scope="col">{t("match.groupColumn")}</th><th scope="col">{t("match.meterColumn")}</th></tr></thead>
       <tbody>{rows.map((row, index) => { const match = matches[index]!; const confidence = match.confidence ?? "none"; return <tr key={row.row} data-confidence={confidence}>
         <td className={styles.rowNumber}>{row.row}</td>
-        <td><span className={styles.fileName}>{row.meterName || row.deviceName}</span>{row.shortName && <small>{t("match.short", { name: row.shortName })}</small>}</td>
+        <td><span className={styles.fileName}>{row.meterName || row.deviceName}</span>{row.shortName && <small>{t("match.short", { name: row.shortName })}</small>}{row.lights && <small>{t("match.lights", { count: row.lights })}</small>}</td>
         <td>{row.path.length ? row.path.join(PATH) : <span className={styles.muted}>{t("match.noGroup")}</span>}</td>
         <td><div className={styles.matchCell}>
           <select aria-label={t("match.selectAria", { row: row.row })} value={match.meterId ?? ""} disabled={disabled} onChange={event => onPick(index, event.target.value || null)}>
@@ -220,13 +221,15 @@ function PreviewNode({ group, result }: { group: PreviewGroup; result: ArrangeRe
   const t = useMessages(spreadsheetArrangeMessages);
   const moved = new Map(result.moved.map(item => [item.meterId, item]));
   const named = new Map(result.shortNames.map(item => [item.meterId, item.name]));
+  const lit = new Map(result.lightCounts.map(item => [item.meterId, item.count]));
   return <li>
     <div className={styles.groupLine}><strong>{group.name}</strong>{group.isNew && <span className={styles.newBadge}>{t("preview.new")}</span>}{!group.meters.length && !group.children.length && <small className={styles.muted}>{t("preview.empty")}</small>}</div>
     {(group.meters.length > 0 || group.children.length > 0) && <ul>
-      {group.meters.map(meter => { const move = moved.get(meter.id); const shortName = named.get(meter.id); return <li key={meter.id} className={`${styles.meter} ${move || shortName ? styles.changed : ""}`}>
+      {group.meters.map(meter => { const move = moved.get(meter.id); const shortName = named.get(meter.id), lights = lit.get(meter.id); return <li key={meter.id} className={`${styles.meter} ${move || shortName || lights ? styles.changed : ""}`}>
         <span>{projectMeterName(meter)}</span>
         {move && <small>{move.from.length ? t("preview.movesFrom", { from: move.from.join(PATH) }) : t("preview.movesHere")}</small>}
         {shortName && <small>{t("preview.shortName", { name: shortName })}</small>}
+        {lights && <small>{t("preview.lights", { count: lights })}</small>}
       </li>; })}
       {group.children.map(child => <PreviewNode key={child.id} group={child} result={result} />)}
     </ul>}
