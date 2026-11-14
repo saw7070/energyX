@@ -33,14 +33,19 @@ export type EnergyTuyaSyncWindow = {
 };
 
 /**
- * The server's resident memory (MB) at each step of one sync pass, and the most it reached during the pass, so the
- * nightly log shows which step is heavy. Absent when the pass was an exact repeat and did no work.
+ * The server's resident memory (MB) at the end of each step of one sync pass, the most it reached during each step,
+ * and the most during the whole pass, so the nightly log shows which step is heavy: a step can end low after a burst.
+ * The steps are fetching from Tuya, writing the facts, and the Overview projection (only for a site that has one).
+ * Absent when the pass was an exact repeat and did no work.
  */
 export type EnergyTuyaSyncPassMemory = {
   peakRssMb: number;
   fetchedRssMb: number;
+  fetchPeakRssMb: number;
   factsRssMb?: number;
+  factsPeakRssMb?: number;
   overviewRssMb?: number;
+  overviewPeakRssMb?: number;
 };
 
 export type EnergyTuyaSyncResult = {
@@ -80,17 +85,28 @@ const abortedOnce = (signal: AbortSignal): Promise<void> => new Promise((resolve
 
 const rssMb = (): number => Math.round(process.memoryUsage.rss() / 1_048_576);
 
-/** Samples resident memory while a pass runs; `mark` records it at a step. */
+/**
+ * Samples resident memory while a pass runs. `mark` ends a step: memory now, and the most it reached since the step
+ * began (the previous mark); the next step starts there. `stop` gives the most for the whole pass.
+ */
 const trackPassMemory = () => {
   let peak = rssMb();
-  const sampler = setInterval(() => { peak = Math.max(peak, rssMb()); }, 250);
-  if (typeof sampler.unref === "function") sampler.unref();
-  const mark = (): number => {
+  let stepPeak = peak;
+  const sample = (): number => {
     const now = rssMb();
     peak = Math.max(peak, now);
+    stepPeak = Math.max(stepPeak, now);
     return now;
   };
-  return { mark, stop: (): number => { clearInterval(sampler); return Math.max(peak, rssMb()); } };
+  const sampler = setInterval(sample, 250);
+  if (typeof sampler.unref === "function") sampler.unref();
+  const mark = (): { rssMb: number; peakRssMb: number } => {
+    const now = sample();
+    const step = { rssMb: now, peakRssMb: stepPeak };
+    stepPeak = now;
+    return step;
+  };
+  return { mark, stop: (): number => { clearInterval(sampler); sample(); return peak; } };
 };
 
 export type EnergyTuyaPostMaterialization = (
@@ -235,8 +251,8 @@ const runSyncPass = async (
     if (claim.reused) return readCompletedResult(dependencies.context, claim.run);
 
     const memory = trackPassMemory();
-    let factsRssMb: number | undefined;
-    let overviewRssMb: number | undefined;
+    let facts: { rssMb: number; peakRssMb: number } | undefined;
+    let overview: { rssMb: number; peakRssMb: number } | undefined;
     try {
       const artifact = await dependencies.syncTuyaEnergyReadings({
         startTime: input.window.startTime,
@@ -245,7 +261,7 @@ const runSyncPass = async (
         ...(input.connector.credentials ? { credentials: input.connector.credentials } : {}),
         ...(input.signal ? { signal: input.signal } : {}),
       });
-      const fetchedRssMb = memory.mark();
+      const fetched = memory.mark();
       assertArtifactWindow(artifact, input.window);
       const batch = persistTuyaImportArtifact({
         context: dependencies.context,
@@ -275,9 +291,9 @@ const runSyncPass = async (
           ? { readingsOnly: true }
           : {}),
         publishProjection: async (candidate, beforePublish) => {
-          factsRssMb = memory.mark();
+          facts = memory.mark();
           const publication = await dependencies.afterMaterialization?.(candidate, beforePublish);
-          overviewRssMb = memory.mark();
+          overview = memory.mark();
           if (!publication?.projectionRef?.trim()) {
             throw new Error("ENERGYIQ_OVERVIEW_PROJECTION_NOT_READY");
           }
@@ -285,7 +301,7 @@ const runSyncPass = async (
         },
       });
       // A readings-only site has no Overview step: its facts are written once the publication returns.
-      factsRssMb ??= memory.mark();
+      facts ??= memory.mark();
       const activeSourceSha256 = resolveEnergyIqSnapshotFactScope(materialized.snapshot).sourceSha256;
       const run = dependencies.context.metadataStore.energyIq.sourceSync.completeSuccess({
         run_id: claim.run.id,
@@ -303,9 +319,11 @@ const runSyncPass = async (
         materializationDuplicate: materialized.duplicate,
         memory: {
           peakRssMb: memory.stop(),
-          fetchedRssMb,
-          factsRssMb,
-          ...(overviewRssMb === undefined ? {} : { overviewRssMb }),
+          fetchedRssMb: fetched.rssMb,
+          fetchPeakRssMb: fetched.peakRssMb,
+          factsRssMb: facts.rssMb,
+          factsPeakRssMb: facts.peakRssMb,
+          ...(overview ? { overviewRssMb: overview.rssMb, overviewPeakRssMb: overview.peakRssMb } : {}),
         },
       };
     } catch (error) {
