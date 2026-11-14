@@ -5,7 +5,7 @@ import type { ConfigResourceRecord } from "@datafoundry/metadata";
 import type { ConfigApiContext, ConfigApiResponse } from "./routes/types.js";
 import { resolveEnergyAccessContext } from "./energy/energy-query-context.js";
 import { workspaceDefaultModelProfileDto } from "./workspace-model-profile-api.js";
-import { probeAnthropicReportModel, reportModelProtocol, type ReportModelProtocol } from "./report-model-transport.js";
+import { probeAnthropicReportModel, reportModelProtocol, reportModelSpeed, type ReportModelProtocol, type ReportModelSpeed } from "./report-model-transport.js";
 import { reportChatRequest } from "./report-chat-request.js";
 
 type Context = Pick<Required<ConfigApiContext>, "metadataStore" | "userId" | "workspaceId">;
@@ -19,7 +19,9 @@ export function reportModelEndpoint(value: unknown): string {
   return url.toString().replace(/\/$/, "");
 }
 function fingerprint(r: ConfigResourceRecord): string {
-  return createHash("sha256").update(JSON.stringify([r.payload.modelName, r.payload.baseUrl, r.secret_ref, ...(r.payload.apiProtocol ? [r.payload.apiProtocol] : [])])).digest("hex");
+  // Speed is added only when set, so profiles tested before it existed keep their test.
+  return createHash("sha256").update(JSON.stringify([r.payload.modelName, r.payload.baseUrl, r.secret_ref, ...(r.payload.apiProtocol ? [r.payload.apiProtocol] : []),
+    ...(r.payload.speed ? [r.payload.speed] : [])])).digest("hex");
 }
 /** A model that passed the report connection test and is still enabled: the only kind a client may be given. */
 export function compatible(r: ConfigResourceRecord): boolean {
@@ -27,7 +29,7 @@ export function compatible(r: ConfigResourceRecord): boolean {
 }
 function dto(r: ConfigResourceRecord) {
   return { id: r.id, name: r.name, modelName: r.payload.modelName ?? r.payload.model, baseUrl: r.payload.baseUrl,
-    apiProtocol: reportModelProtocol(r.payload.apiProtocol), hasSecret: Boolean(r.secret_ref), revision: r.revision, compatible: compatible(r),
+    apiProtocol: reportModelProtocol(r.payload.apiProtocol), speed: r.payload.speed === "fast" ? "fast" : "standard", hasSecret: Boolean(r.secret_ref), revision: r.revision, compatible: compatible(r),
     testedAt: r.payload.reportPiTestedAt ?? null };
 }
 async function body(request: IncomingMessage): Promise<Record<string, unknown>> {
@@ -45,6 +47,13 @@ export async function handleReportModelsRequest(request: IncomingMessage, segmen
   if (access.role !== "admin") invalid("ENERGYIQ_ADMIN_REQUIRED");
   const store = context.metadataStore;
   const scope = { workspace_id: "default", user_id: context.userId, kind: "model-profile" as const };
+  const saveProfile = (profile: { name: string; modelName: string; baseUrl: string; apiProtocol: ReportModelProtocol; speed?: ReportModelSpeed | undefined; apiKey: string }) => {
+    const id = "report-model-" + randomUUID();
+    const secret = store.secrets.put({ ...scope, owner_kind: "model-profile", owner_id: id, value: { apiKey: profile.apiKey } });
+    return store.configResources.upsert({ ...scope, id, name: profile.name, payload: { provider: profile.apiProtocol === "anthropic-messages" ? "anthropic" : "openai-compatible",
+      apiProtocol: profile.apiProtocol, modelName: profile.modelName, baseUrl: profile.baseUrl, ...(profile.speed ? { speed: profile.speed } : {}) },
+      secret_ref: secret, default_enabled: true, status: "untested" });
+  };
   const state = () => ({
     current: workspaceDefaultModelProfileDto({ context: context as Required<ConfigApiContext>, isAdmin: true }),
     profiles: store.configResources.list(scope).map(dto),
@@ -55,20 +64,26 @@ export async function handleReportModelsRequest(request: IncomingMessage, segmen
   if (!segments.length) {
     const name = text(input.name), modelName = text(input.modelName), baseUrl = reportModelEndpoint(input.baseUrl), apiKey = text(input.apiKey, 8192);
     const apiProtocol = reportModelProtocol(input.apiProtocol);
-    const id = "report-model-" + randomUUID();
-    const secret = store.secrets.put({ ...scope, owner_kind: "model-profile", owner_id: id, value: { apiKey } });
-    const record = store.configResources.upsert({ ...scope, id, name, payload: { provider: apiProtocol === "anthropic-messages" ? "anthropic" : "openai-compatible", apiProtocol, modelName, baseUrl },
-      secret_ref: secret, default_enabled: true, status: "untested" });
-    return success(dto(record));
+    return success(dto(saveProfile({ name, modelName, baseUrl, apiProtocol, speed: reportModelSpeed(input.speed, apiProtocol), apiKey })));
   }
   const [id, action] = segments;
-  if (!id || !action || segments.length !== 2 || !["test", "activate"].includes(action)) return invalid("REPORT_MODEL_ACTION_INVALID");
+  if (!id || !action || segments.length !== 2 || !["test", "activate", "copy"].includes(action)) return invalid("REPORT_MODEL_ACTION_INVALID");
   const record = store.configResources.get({ ...scope, id });
   if (input.revision !== record.revision) return invalid("REPORT_MODEL_REVISION_CHANGED");
+  if (action === "copy") {
+    // A new configuration that reuses this one's saved key, so nobody has to paste the key again. The key stays tied
+    // to the endpoint it was saved for: protocol and base URL are copied, never taken from the request.
+    if (!record.secret_ref) return invalid("REPORT_MODEL_NOT_CONFIGURED");
+    const key = store.secrets.get({ ref: record.secret_ref, workspace_id: "default", user_id: context.userId });
+    const apiProtocol = reportModelProtocol(record.payload.apiProtocol);
+    return success(dto(saveProfile({ name: text(input.name), modelName: text(input.modelName), baseUrl: reportModelEndpoint(record.payload.baseUrl), apiProtocol,
+      speed: reportModelSpeed(input.speed, apiProtocol), apiKey: text(key.apiKey ?? key.api_key, 8192) })));
+  }
   if (action === "test") {
     if (!record.secret_ref) return invalid("REPORT_MODEL_NOT_CONFIGURED");
     const key = store.secrets.get({ ref: record.secret_ref, workspace_id: "default", user_id: context.userId });
-    await probeReportModel({ apiProtocol: reportModelProtocol(record.payload.apiProtocol), baseUrl: reportModelEndpoint(record.payload.baseUrl), model: text(record.payload.modelName ?? record.payload.model), apiKey: text(key.apiKey ?? key.api_key, 8192) }, fetcher);
+    const apiProtocol = reportModelProtocol(record.payload.apiProtocol);
+    await probeReportModel({ apiProtocol, speed: reportModelSpeed(record.payload.speed, apiProtocol), baseUrl: reportModelEndpoint(record.payload.baseUrl), model: text(record.payload.modelName ?? record.payload.model), apiKey: text(key.apiKey ?? key.api_key, 8192) }, fetcher);
     const tested = store.configResources.upsert({ ...record, ...scope, payload: { ...record.payload,
       reportPiTest: fingerprint(record), reportPiTestedAt: new Date().toISOString() }, status: "connected", expected_revision: record.revision });
     return success(dto(tested));
@@ -83,7 +98,7 @@ export async function handleReportModelsRequest(request: IncomingMessage, segmen
 }
 
 /** Probe the same Chat Completions + streamed tool protocol used by the Pi bridge. No project data. */
-export async function probeReportModel(model: { baseUrl: string; model: string; apiKey: string; apiProtocol?: ReportModelProtocol }, fetcher: typeof fetch = fetch): Promise<void> {
+export async function probeReportModel(model: { baseUrl: string; model: string; apiKey: string; apiProtocol?: ReportModelProtocol; speed?: ReportModelSpeed | undefined }, fetcher: typeof fetch = fetch): Promise<void> {
   if (reportModelProtocol(model.apiProtocol) === "anthropic-messages") return probeAnthropicReportModel(model, fetcher);
   const signal = AbortSignal.timeout(60000);
   const tools = [{ type: "function", function: { name: "energyiq_connection_check", description: "Return a connection test marker.",

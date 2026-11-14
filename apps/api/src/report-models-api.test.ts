@@ -48,6 +48,51 @@ describe("Admin report models", () => {
     await expect(probeReportModel(model, (async () => new Response("private-provider-message", { status: 401 })) as typeof fetch)).rejects.toThrow("REPORT_MODEL_TEST_FAILED");
     await expect(probeReportModel(model, (async () => new Response('data: {"choices":[]}\n\n')) as typeof fetch)).rejects.toThrow("REPORT_MODEL_STREAM_INCOMPLETE");
   });
+  it("copies a saved Claude configuration with the fast setting, keeping its key and endpoint", async () => {
+    const root = mkdtempSync(join(tmpdir(), "report-models-copy-"));
+    const store = createMetadataStore({ database_path: join(root, "metadata.sqlite"), secret_master_key: "test-key" });
+    try {
+      store.workspaces.upsert({ id: "default", owner_user_id: "dev-user", name: "System", kind: "personal" });
+      store.energyIq.upsertUserRole({ user_id: "dev-user", role: "admin" });
+      const context = { metadataStore: store, userId: "dev-user", workspaceId: "default" };
+      const data = (response: Awaited<ReturnType<typeof handleReportModelsRequest>>) => (response.body as { data: any }).data;
+      await expect(handleReportModelsRequest(request({ name: "GPT", modelName: "gpt", baseUrl: "https://api.test/v1", apiKey: "k", speed: "fast" }), [], context)).rejects.toThrow("SPEED_UNSUPPORTED");
+      const opus5 = data(await handleReportModelsRequest(request({ name: "Claude Opus 5", modelName: "claude-opus-5", baseUrl: "https://api.anthropic.com", apiKey: "private-secret", apiProtocol: "anthropic-messages" }), [], context));
+      expect(opus5.speed).toBe("standard");
+      await expect(handleReportModelsRequest(request({ revision: opus5.revision + 1, name: "x", modelName: "claude-opus-5-5" }), [opus5.id, "copy"], context)).rejects.toThrow("REVISION_CHANGED");
+      // The base URL, protocol and key always come from the saved configuration, never from the request.
+      const copy = data(await handleReportModelsRequest(request({ revision: opus5.revision, name: "Claude Opus 5.5 fast", modelName: "claude-opus-5-5", speed: "fast",
+        baseUrl: "https://elsewhere.test", apiProtocol: "openai-completions", apiKey: "other-key" }), [opus5.id, "copy"], context));
+      expect(copy).toMatchObject({ name: "Claude Opus 5.5 fast", modelName: "claude-opus-5-5", baseUrl: "https://api.anthropic.com", apiProtocol: "anthropic-messages", speed: "fast", hasSecret: true, compatible: false });
+      expect(copy.id).not.toBe(opus5.id);
+      expect(JSON.stringify(copy)).not.toContain("private-secret");
+      const seen: Array<{ url: string; headers: Record<string, string>; body: any }> = [];
+      const anthropic = (async (url: unknown, options: RequestInit) => {
+        const body = JSON.parse(String(options.body));
+        seen.push({ url: String(url), headers: options.headers as Record<string, string>, body });
+        const events = seen.length === 1
+          ? [{ type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "check", name: "energyiq_connection_check", input: {} } },
+            { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"marker":"energyiq-ok"}' } }, { type: "message_stop" }]
+          : [{ type: "content_block_start", index: 0, content_block: { type: "text", text: "energyiq-ok" } }, { type: "message_stop" }];
+        return new Response(events.map(event => "data: " + JSON.stringify(event) + "\n\n").join(""));
+      }) as typeof fetch;
+      const tested = data(await handleReportModelsRequest(request({ revision: copy.revision }), [copy.id, "test"], context, anthropic));
+      expect(tested.compatible).toBe(true);
+      expect(seen).toHaveLength(2);
+      for (const call of seen) {
+        expect(call.url).toBe("https://api.anthropic.com/v1/messages");
+        expect(call.headers["x-api-key"]).toBe("private-secret");
+        expect(call.body).toMatchObject({ model: "claude-opus-5-5", speed: "fast" });
+      }
+      await handleReportModelsRequest(request({ revision: tested.revision, bindingRevision: 0 }), [copy.id, "activate"], context);
+      expect(resolvePiReportModel(store)).toMatchObject({ model: "claude-opus-5-5", speed: "fast", apiKey: "private-secret", apiProtocol: "anthropic-messages" });
+      // Changing the speed afterwards needs a new test before the configuration can be chosen again.
+      const record = store.configResources.get({ id: copy.id, workspace_id: "default", user_id: "dev-user", kind: "model-profile" });
+      const { speed: _speed, ...standard } = record.payload;
+      const slowed = store.configResources.upsert({ ...record, payload: standard });
+      await expect(handleReportModelsRequest(request({ revision: slowed.revision, bindingRevision: 1 }), [copy.id, "activate"], context)).rejects.toThrow("TEST_REQUIRED");
+    } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+  });
   it("keeps candidates separate, gates activation, freezes a running model, and rejects other owners", async () => {
     const root = mkdtempSync(join(tmpdir(), "report-models-"));
     const store = createMetadataStore({ database_path: join(root, "metadata.sqlite"), secret_master_key: "test-key" });

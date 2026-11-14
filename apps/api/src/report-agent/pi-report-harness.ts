@@ -10,10 +10,10 @@ import { join, dirname } from "node:path";
 import type { ConfigResourceRecord, MetadataStore } from "@datafoundry/metadata";
 import { compatible } from "../report-models-api.js";
 import { resolveWorkspaceDefaultModelProfileSnapshot } from "../workspace-model-profile-resolver.js";
-import { reportModelProtocol, reportModelRequest, ReportModelStream, type ReportModelProtocol } from "../report-model-transport.js";
+import { reportModelProtocol, reportModelRequest, reportModelSpeed, ReportModelStream, type ReportModelProtocol, type ReportModelSpeed } from "../report-model-transport.js";
 import type { ReportHarness } from "./report-harness.js";
 
-export type PiReportModel = { apiProtocol?: ReportModelProtocol; model: string; baseUrl: string; apiKey: string; contextWindow?: number; maxTokens?: number };
+export type PiReportModel = { apiProtocol?: ReportModelProtocol; speed?: ReportModelSpeed; model: string; baseUrl: string; apiKey: string; contextWindow?: number; maxTokens?: number };
 /**
  * The model a report run uses: the one an administrator chose for the run's organisation, otherwise the platform
  * default. A chosen model that is no longer usable stops the run rather than quietly sending the organisation's data
@@ -37,7 +37,8 @@ export function resolvePiReportModel(metadata: MetadataStore, workspaceId?: stri
   const apiKey = credentials.apiKey ?? credentials.api_key;
   const model = payload.modelName ?? payload.model;
   if (typeof apiKey !== "string" || !apiKey || typeof model !== "string" || !model) throw new Error("REPORT_MODEL_NOT_CONFIGURED");
-  return { apiProtocol: reportModelProtocol(payload.apiProtocol), model, baseUrl: url.toString().replace(/\/$/, ""), apiKey };
+  const apiProtocol = reportModelProtocol(payload.apiProtocol);
+  return { apiProtocol, ...(reportModelSpeed(payload.speed, apiProtocol) ? { speed: "fast" as const } : {}), model, baseUrl: url.toString().replace(/\/$/, ""), apiKey };
 }
 const REVIEW_METHOD = readFileSync(new URL("../../../../packages/skills/builtin/report-review/SKILL.md", import.meta.url), "utf8") + "\n\n" + ANNUAL_BENEFIT_REVIEW + "\n\n" + ANALYSIS_PACKAGE_INSTRUCTIONS;
 /** The advisor worker image this server runs unless ENERGYIQ_REPORT_AGENT_IMAGE names another. */
