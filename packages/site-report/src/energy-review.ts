@@ -158,8 +158,11 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
   const typicalKwh = base.total.typicalKwh;
   const meterCount = base.total.meterCount;
   const tree: MeterGroupTree | null = analysisGroupTree(data, t("groups.unmetered"));
-  const series = meterSeries([project]);
-  const allMeters: ScopeMeter[] = project.meters.filter(meter => meter.series);
+  // A site's meters carry their hour-by-hour readings in the areas (spaces) they belong to; the site's own list often
+  // names them without readings. Every meter once, with its readings, wherever they are.
+  const scopes = [project, ...data.current.spaces];
+  const series = meterSeries(scopes);
+  const allMeters: ScopeMeter[] = [...new Map(scopes.flatMap(scope => scope.meters).filter(meter => meter.series).map(meter => [meter.id, meter] as const).reverse()).values()].reverse();
   const notInUse = data.notInUse ?? [];
   const notInUseIds = new Set(notInUse.map(item => item.id));
   const idle = new Set(data.idleWhenQuiet ?? []);
@@ -225,7 +228,11 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
   const sortedTop = [...topRows].map((row, index) => ({ row, pct: topShares[index]! })).sort((a, b) => b.row.kwh - a.row.kwh);
   const groups: EnergyReview["groups"] = topRows.length > 1 ? {
     heading: groupNames.length <= 4 ? list(groupNames) : t("q.groups"),
-    intro: paragraph([
+    // Two groups within a point of each other are "about the same", not first and second.
+    intro: sortedTop.length > 1 && sortedTop[0]!.pct - sortedTop[1]!.pct <= 1 ? paragraph([
+      t("groups.introTie", { a: sortedTop[0]!.row.name, b: sortedTop[1]!.row.name, pct: `${sortedTop[1]!.pct}%` }),
+      sortedTop.length > 2 ? t("groups.introRest", { items: list(sortedTop.slice(2).map(item => t("groups.item", { name: item.row.name, pct: `${item.pct}%` }))) }) : "",
+    ]) : paragraph([
       t(sortedTop[0]!.pct >= 45 ? "groups.introHalf" : "groups.introLead", { name: sortedTop[0]!.row.name, pct: `${sortedTop[0]!.pct}%` }),
       t("groups.introRest", { items: list(sortedTop.slice(1).map(item => t("groups.item", { name: item.row.name, pct: `${item.pct}%` }))) }),
     ]),
@@ -293,7 +300,8 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
         const higher = totals[0]! >= totals[1]! ? 0 : 1;
         const extra = [...keyed[higher]!.entries()].filter(([key]) => !shared.includes(key)).map(([, part]) => part).sort((a, b) => b.kwh - a.kwh)[0];
         intro = paragraph([
-          gaps.length ? t("cmp.introApart", { items: list(gaps.map(item => item.gap >= 1 ? t("cmp.gapTimes", { part: item.row.name, a: item.hi, b: item.lo, times: (item.gap + 1).toFixed(1) }) : t("cmp.gapPct", { part: item.row.name, a: item.hi, b: item.lo, pct: pctText(item.gap) }))) }) : t("cmp.introClose"),
+          gaps.length ? t("cmp.introApart", { items: list(gaps.map(item => item.gap >= 0.95 && item.gap < 1.05 ? t("cmp.gapTwice", { part: item.row.name, a: item.hi, b: item.lo })
+            : item.gap >= 1.05 ? t("cmp.gapTimes", { part: item.row.name, a: item.hi, b: item.lo, times: (item.gap + 1).toFixed(1) }) : t("cmp.gapPct", { part: item.row.name, a: item.hi, b: item.lo, pct: pctText(item.gap) }))) }) : t("cmp.introClose"),
           gaps.length ? t("cmp.worthALook") : "",
         ]);
         const extraPerDay = extra ? perDayOf(extra.kwh) : 0;
@@ -460,11 +468,16 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
   // timer, finding the daytime use, and trimming the timers. Opening hours: the management review's own plan.
   const yearOf = (kwhPerDay: number) => kwhPerDay * 365;
   const lightingRows: EnergyReviewSaving[] = [];
+  // The one measure worth a trial before it is relied on: dimming (or an earlier step-down) on one block.
+  let trialRow: EnergyReviewSaving | null = null;
   if (lighting && profileLayers.length) {
     const corridor = alike && switching.find(layer => layer.key.startsWith("like:"));
     if (corridor) {
       const kwhYear = yearOf(sum(corridor.hours)) * DIMMING_SHARE;
-      if (kwhYear >= 1) lightingRows.push({ title: t("sav.dim.title", { name: inSentence(corridor.name, locale) }), basis: t("sav.dim.basis", { pct: pctText(DIMMING_SHARE), name: inSentence(corridor.name, locale) }), kwhYear, costYear: cost(kwhYear) });
+      if (kwhYear >= 1) {
+        trialRow = { title: t("sav.dim.title", { name: inSentence(corridor.name, locale) }), basis: t("sav.dim.basis", { pct: pctText(DIMMING_SHARE), name: inSentence(corridor.name, locale) }), kwhYear, costYear: cost(kwhYear) };
+        lightingRows.push(trialRow);
+      }
     }
     const usedInDay = daytimeUse(data, withMetersInUse(project, silentByDesignIds(data), data.current.spaces, idleMeterIds(data)));
     const daytimePerDay = usedInDay.kwh / Math.max(readDays.length, 1);
@@ -513,7 +526,10 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
   for (const item of poweredWithLights.slice(0, 1)) steps.push({ action: t("step.powered", { name: item.meter.name }), who: t("who.contractor"), when: t("when.convenient") });
   const sendRate = rate == null, sendCounts = missingCounts;
   if (sendRate || sendCounts) steps.push({ action: t(sendRate && sendCounts ? "step.sendBoth" : sendRate ? "step.sendRate" : "step.sendCounts"), who: client, when: t("when.available") });
-  if (savingRows[0]) steps.push({ action: t("step.trial", { measure: savingRows[0].title.replace(/[.。]$/, "") }), who: t("who.clientContractor", { client }), when: t("when.nextMonth") });
+  // Lights-on sites trial the dimming only; the daytime standby and timers are fixed, not trialled. Opening-hours sites
+  // trial the largest measure of the management review's plan.
+  const trial = lighting ? trialRow : savingRows[0] ?? null;
+  if (trial) steps.push({ action: t("step.trial", { measure: trial.title.replace(/[.。]$/, "") }), who: t("who.clientContractor", { client }), when: t("when.nextMonth") });
   steps.push({ action: t("step.review"), who: t("who.us", { client }), when: t("when.nextReview") });
   const nextSteps = steps.slice(0, MAX_STEPS);
 
