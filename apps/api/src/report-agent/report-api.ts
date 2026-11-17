@@ -22,12 +22,12 @@ const settingsSchema = z.object({
   skillRefs: z.array(z.object({ name: z.string().min(1).max(100), version: z.string().min(1).max(100), content: z.string().min(1).max(50000), scope: z.enum(["general", "project"]).optional(), category: z.enum(["analysis", "presentation", "other"]).optional(), sourceRunId: z.string().uuid().optional(), sourceSessionId: z.string().uuid().optional() })).max(5).optional(),
   skillSourceRunId: z.string().uuid().optional(),
   // Which site report the schedule writes. Left out by older pages, which keeps whatever was saved before.
-  siteReportStyle: z.enum(["full", "management"]).optional(),
+  siteReportStyle: z.enum(["full", "management", "review"]).optional(),
 });
 /** A site report on chosen dates, straight from the readings: the end date is the day after the last day included. */
 const siteReportSchema = z.object({
   period: z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), toExclusive: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }),
-  style: z.enum(["full", "management"]).optional(),
+  style: z.enum(["full", "management", "review"]).optional(),
 });
 const runSchema = z.object({
   skillSelection: skillSelectionSchema.optional(),

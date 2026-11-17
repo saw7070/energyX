@@ -175,6 +175,21 @@ describe("the report the Overview shows", () => {
     } finally { await page.unmount(); }
   });
 
+  it("shows the energy review as the full report for a site set to it, and downloads that review", async () => {
+    vi.spyOn(configApi, "reportLibraryRequest").mockResolvedValue({ reports: [{ id: "advisor-1", source: "advisor" }], siteReportStyle: "review" });
+    vi.spyOn(configApi, "reportAgentRequest").mockResolvedValue({ settings: { contextNotes: "" } });
+    mock.load.mockResolvedValue(data);
+    const page = await overview();
+    try {
+      const panel = page.host.querySelector('section[aria-label="Energy report"]')!;
+      expect(panel.querySelector("h2")?.textContent).toBe("The full report");
+      expect(panel.textContent).toContain("3–16 Aug 2026 · The energy review: answers to the questions raised at installation");
+      expect(panel.querySelector("article.eiq-energy-review h1")?.textContent).toBe("Harbour Office energy review");
+      expect(panel.textContent).toContain("Answers at a glance");
+      expect(panel.querySelector("article.eiq-report")).toBeNull();
+    } finally { await page.unmount(); }
+  });
+
   it("never puts a daily report on the Overview: it shows the weekly one, or builds its own", async () => {
     // Newest first: yesterday's daily report, then last week's. This project's Overview is monthly, and none is saved.
     const library = vi.spyOn(configApi, "reportLibraryRequest").mockImplementation(async (_projectId: string, action = "") =>

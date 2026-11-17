@@ -155,3 +155,47 @@ it("links each site's own report, in its chosen style, from the scheduled email"
   expect(text).toContain("- Harbour Estate (management review): https://energy.example.test/energyiq/library?projectId=project&reportId=");
   expect(reportEmailText(portfolio, schedule, period, "https://energy.example.test")).not.toContain("Each site's own report");
 });
+
+it("writes the energy review when the site chooses it, tells the Overview, and keeps a one-day report as the management review", async () => {
+  const { service, settings, root, api, library } = setup();
+  const saved = service.store.saveSettings(settings);
+  expect((await api("PUT", ["settings"], { ...saved, siteReportStyle: "review" })).status).toBe(200);
+  expect(service.store.settings("project")?.siteReportStyle).toBe("review");
+  // The library tells the Overview the site's style, so it shows the energy review as the full report.
+  expect(((await library()).body as { data: { siteReportStyle?: string } }).data.siteReportStyle).toBe("review");
+  const weekly = await publishSiteReport({ metadata: {} as never, dataGateway: {} as never, store: service.store, root, settings: service.store.settings("project")!, cadence: "weekly", period: PERIOD, generatedAt: "2026-08-17T02:00:00Z", loadData: async () => ({ data: analysisData(), dataSnapshotId: null }) });
+  expect(weekly.run.siteReport).toEqual({ cadence: "weekly", style: "review" });
+  expect(weekly.run.prompt).toContain("Weekly site energy review");
+  const page = readFileSync(join(root, weekly.run.id, "accepted-output.txt"), "utf8").replace(/<[^>]+>/g, " ");
+  expect(page).toContain("Harbour Estate energy review");
+  expect(page).toContain("Answers at a glance");
+  expect(page).toContain("Block 12A against Block 12B");
+  expect(parseSiteReportSnapshot(JSON.parse(readFileSync(join(root, weekly.run.id, "outputs", "site-report-input.json"), "utf8"))).style).toBe("review");
+  const listed = ((await library()).body as { data: { reports: Array<Record<string, unknown>> } }).data.reports.find(report => report.id === weekly.run.id)!;
+  expect(listed).toMatchObject({ style: "review", title: expect.stringContaining("Energy Review") });
+  // A daily report has one day to read: it is written, and marked, as the management review.
+  const day = DATES[3]!;
+  const oneDay = analysisData();
+  for (const scopeData of [oneDay.current.project, ...oneDay.current.spaces]) {
+    scopeData.dates = [day];
+    for (const item of [scopeData.total!, ...scopeData.meters.map(meter => meter.series!)]) item.cells = item.cells.filter(cell => cell[0] === day);
+  }
+  const daily = await publishSiteReport({ metadata: {} as never, dataGateway: {} as never, store: service.store, root, settings: service.store.settings("project")!, cadence: "daily", period: { from: day, toExclusive: DATES[4]! }, generatedAt: "2026-08-14T02:00:00Z", loadData: async () => ({ data: oneDay, dataSnapshotId: null }) });
+  expect(daily.run.siteReport).toEqual({ cadence: "daily", style: "management" });
+  expect(readFileSync(join(root, daily.run.id, "accepted-output.txt"), "utf8")).toContain("Harbour Estate Energy Review");
+});
+
+it("creates a custom energy review and names it in the scheduled email", async () => {
+  const { api, library, service, settings, root, metadata } = setup();
+  const created = await api("POST", ["site-reports"], { period: PERIOD, style: "review" }, "reader");
+  expect(created.status).toBe(201);
+  const id = (created.body as { data: { id: string } }).data.id;
+  const listed = ((await library()).body as { data: { reports: Array<Record<string, unknown>> } }).data.reports.find(report => report.id === id)!;
+  expect(listed).toMatchObject({ category: "custom", style: "review", title: "Custom Energy Review — 10 August 2026 to 16 August 2026" });
+  await publishSiteReport({ metadata: {} as never, dataGateway: {} as never, store: service.store, root, settings: { ...settings, siteReportStyle: "review" }, cadence: "weekly", period: PERIOD, generatedAt: "2026-08-17T02:00:00Z", loadData: async () => ({ data: analysisData(), dataSnapshotId: null }) });
+  const portfolio = { workspaceName: "Harbour Town Council", sites: [{ projectId: "project", name: "Harbour Estate" }], totals: { usageKwh: 100, previousUsageKwh: 0, costByCurrency: {}, carbonKg: 40, sitesOverBudget: 0, sitesAtRisk: 0 } } as never;
+  const period = { from: "2026-08-10", to: "2026-08-16", key: "week:2026-08-10", dueDate: "2026-08-17" };
+  const links = siteReportLinks(metadata, portfolio, "weekly", period, "https://energy.example.test/");
+  expect(links[0]).toMatchObject({ style: "review" });
+  expect(reportEmailText(portfolio, { name: "Weekly summary", frequency: "weekly" } as never, period, "https://energy.example.test", links)).toContain("- Harbour Estate (energy review): ");
+});

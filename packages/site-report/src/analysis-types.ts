@@ -56,6 +56,16 @@ export type AnalysisData = {
    * shows energy per light for these only. Absent on readings saved before this was kept, and when there are none.
    */
   lightCounts?: LightCountMeter[] | undefined;
+  /**
+   * The tax on the electricity price (Singapore's 9% GST) from the site's tariff for these dates. The energy review
+   * quotes costs including it when the rate is published before tax. Absent on older readings and with no tax set.
+   */
+  tariffTax?: { name: string; ratePct: number } | undefined;
+  /**
+   * The site's grid emission factor: the one set in Facility → Budget & carbon, or the country's official figure. The
+   * energy review shows carbon with it. Absent on older readings.
+   */
+  carbon?: { kgCo2ePerKwh: number; year: number; source: string } | undefined;
 };
 /** A meter and how many light points it feeds; `name` as readers know it. */
 export type LightCountMeter = { id: string; name: string; count: number };

@@ -1,4 +1,4 @@
-import type { MetadataStore, EnergyIqMeterPresentation, EnergyIqProjectSetupDocument } from "@datafoundry/metadata";
+import { gridEmissionFactorFor, type MetadataStore, type EnergyIqMeterPresentation, type EnergyIqProjectSetupDocument } from "@datafoundry/metadata";
 import { resolveEnergyProjectCapabilities } from "./energy-project-capabilities.js";
 import { resolveEnergyPublishedHierarchyNodes } from "./energy-query-context.js";
 
@@ -63,6 +63,8 @@ export function readEnergyProjectInformation(metadata: MetadataStore, userId: st
   const tariff = tariffVersion ? readPolicy(() => policies.getTariffSchedule(tariffVersion)) : null;
   if ((calendar && calendar.project_id !== projectId) || (tariff && tariff.project_id !== projectId)) throw Error("ENERGYIQ_PROJECT_POLICY_FORBIDDEN");
   const ownerName = (owner: { kind: "project" } | { kind: "scope"; scope_id: string }) => owner.kind === "project" ? document.project.name : names.get(owner.scope_id) ?? "Location";
+  // The grid emission factor the site's carbon figures use: the one set in Facility → Budget & carbon, else the country's.
+  const carbonSetting = (() => { try { return metadata.energyIq.targets.getTargets(projectId).carbon ?? gridEmissionFactorFor(project.region); } catch { return gridEmissionFactorFor(project.region); } })();
   return {
     projectId, name: document.project.name, timezone: document.project.timezone, basis: "published" as const,
     // `sortOrder`: the order someone saved among the groups beside it, so reports list groups the same way.
@@ -83,6 +85,7 @@ export function readEnergyProjectInformation(metadata: MetadataStore, userId: st
       weekly: Object.fromEntries(Object.entries(entry.weekly).map(([day, ranges]) => [day, ranges.map(range => ({ from: range.from, to: range.to }))])),
       exceptions: (entry.exceptions ?? []).map(item => ({ date: item.date, label: item.label ?? item.classification ?? "Exception", ...(item.classification ? { classification: item.classification } : {}), operating: item.operating.map(range => ({ from: range.from, to: range.to })) })),
     })) } : null,
+    carbon: { kgCo2ePerKwh: carbonSetting.kgCo2ePerKwh, year: carbonSetting.year, source: carbonSetting.source },
     tariff: tariff ? { version: tariff.version_id, entries: tariff.entries.map(entry => ({
       location: ownerName(entry.owner), from: entry.effective_from, toExclusive: entry.effective_to ?? null,
       currency: entry.currency, ratePerKwh: entry.rate_per_kwh, taxBasis: entry.rate_basis ?? null,

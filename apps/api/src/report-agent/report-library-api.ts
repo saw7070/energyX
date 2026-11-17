@@ -88,8 +88,8 @@ export async function handleReportLibraryApi(request: IncomingMessage, segments:
         // Site reports are written by the server from the site's own meter readings; advisor reports are written for it.
         source: run.siteReport ? "site" as const : "advisor" as const,
         ...(run.siteReport?.cadence ? { cadence: run.siteReport.cadence } : {}),
-        // Only the management review is marked; a site report without a style is the full report.
-        ...(run.siteReport?.style === "management" ? { style: "management" as const } : {}),
+        // Only the management review and the energy review are marked; a site report without a style is the full report.
+        ...(run.siteReport?.style === "management" || run.siteReport?.style === "review" ? { style: run.siteReport.style } : {}),
         ...(run.finishedAt ? { finishedAt: run.finishedAt } : {}), ...(run.parentRunId ? { parentRunId: run.parentRunId } : {}) };
     });
     // Supporting files belong to the reader's own recent runs, the ones the advisor panel lists.
@@ -102,6 +102,8 @@ export async function handleReportLibraryApi(request: IncomingMessage, segments:
     return { status: 200, headers, body: createSuccessResult({ reports, artifacts, skills, tools: canChat ? reportTools : [], canChat, canManageProject,
       // Which of this project's site reports the Overview shows, so the page and this list agree on one report.
       overviewCadence: overviewCadence(context.metadataStore, projectId),
+      // The style the site chose; a site set to the energy review sees it as the full report on its Overview.
+      ...(settings?.workspaceId === context.workspaceId && settings.siteReportStyle === "review" ? { siteReportStyle: "review" as const } : {}),
       canUseActions:canUseActions(context.metadataStore,{userId:context.userId,workspaceId:context.workspaceId,projectId}) }) };
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
@@ -123,11 +125,11 @@ function overviewCadence(metadata: MetadataStore, projectId: string): "monthly" 
   } catch { return "monthly"; }
 }
 
-function reportTitle(category: "scheduled" | "custom", period: { from: string; toExclusive: string }, siteReport?: { cadence?: "daily" | "weekly" | "monthly"; style?: "management" }): string {
+function reportTitle(category: "scheduled" | "custom", period: { from: string; toExclusive: string }, siteReport?: { cadence?: "daily" | "weekly" | "monthly"; style?: "management" | "review" }): string {
   const format = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
   const start = format.format(new Date(period.from));
   const end = format.format(new Date(Date.parse(period.toExclusive) - 86400000));
-  const what = siteReport?.style === "management" ? "Management Review" : "Site Report";
+  const what = siteReport?.style === "management" ? "Management Review" : siteReport?.style === "review" ? "Energy Review" : "Site Report";
   const kind = siteReport?.cadence ? `${siteReport.cadence === "daily" ? "Daily" : siteReport.cadence === "weekly" ? "Weekly" : "Monthly"} ${what}`
     : siteReport ? `Custom ${what}` : `${category === "scheduled" ? "Scheduled" : "Custom"} Energy Report`;
   return `${kind} — ${start === end ? start : `${start} to ${end}`}`;

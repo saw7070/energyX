@@ -51,6 +51,10 @@ type ProjectInformation = {
   /** The Locations tree the groups come from; the project itself has no parent. `sortOrder`: the saved order among siblings. */
   locations?: Array<{ id: string; name: string; parentId: string | null; sortOrder?: number }>;
   calendar: null | { entries: Array<{ location: string; from: string; toExclusive: string | null; weekly: HoursByDay; hoursMeaning?: string; exceptions: Array<{ date: string; label: string; classification?: string }> }> };
+  /** The tariff's tax on the price, which the energy review adds to its costs. */
+  tariff?: null | { entries: Array<{ location: string; from: string; toExclusive: string | null; taxBasis?: string | null; tax?: { name: string; ratePct: number } | null }> };
+  /** The grid emission factor the energy review's carbon figures use. */
+  carbon?: { kgCo2ePerKwh: number; year: number; source: string };
 };
 
 // "all-available" means the server picks the window, so it must not be sent with a period or explicit dates.

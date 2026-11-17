@@ -1,0 +1,211 @@
+/**
+ * The energy review: the site report written as answers to the questions the site asked at installation. An estate
+ * with two alike blocks and a common area, lights on 19:00–07:00, two weeks of readings. One common-area meter stops
+ * reporting, one is powered with its lights, and the pavilion fan is used on a single evening. All names are made up.
+ */
+import { describe, expect, it } from "vitest";
+import { buildEnergyReview, type AnalysisData, type ScopeMeter, type TrendSeries } from "@datafoundry/site-report";
+import { renderEnergyReviewHtml, renderEnergyReviewMarkup } from "@datafoundry/site-report/energy-review-document";
+import { renderStyledSiteReportHtml } from "@datafoundry/site-report/management-review-document";
+
+const DATES = Array.from({ length: 14 }, (_, index) => new Date(Date.parse("2026-11-02T00:00:00Z") + index * 86_400_000).toISOString().slice(0, 10));
+const night = (hour: number) => hour >= 19 || hour < 7;
+type Profile = (date: string, hour: number) => number;
+const lit = (perDay: number, day = 0): Profile => (_date, hour) => night(hour) ? perDay / 12 : day;
+type Meter = { name: string; group: string; kwh: Profile; category?: "light" | "load"; stopAfter?: string; nightOnly?: boolean };
+const METERS: Record<string, Meter> = {
+  "a-lobby": { name: "Block A lift lobby", group: "a-gf", kwh: lit(3.6) },
+  "a-gate": { name: "Riverside gate lighting", group: "a-gf", kwh: lit(4.2) },
+  "a-high": { name: "Block A L7-L12 corridors", group: "a-lighting", kwh: lit(8) },
+  "a-low": { name: "Block A L1-L6 corridors", group: "a-lighting", kwh: lit(3.4, 0.01) },
+  "a-emergency": { name: "Block A emergency lights", group: "a-emergency", kwh: () => 0.1 },
+  "b-lobby": { name: "Block B lift lobby", group: "b-gf", kwh: lit(3.2) },
+  "b-high": { name: "Block B L7-L12 corridors", group: "b-lighting", kwh: lit(8.2) },
+  "b-low": { name: "Block B L1-L6 corridors", group: "b-lighting", kwh: lit(3.3) },
+  "b-emergency": { name: "Block B emergency lights", group: "b-emergency", kwh: () => 0.1 },
+  driveway: { name: "Driveway lamp", group: "common", kwh: lit(4) },
+  linkway: { name: "Linkway lights", group: "common", kwh: lit(1.8), stopAfter: "2026-11-04T18" },
+  shelter: { name: "Shelter lights", group: "common", kwh: lit(0.3), nightOnly: true },
+  playground: { name: "Playground lights", group: "common", kwh: lit(0.2) },
+  fan: { name: "Pavilion fan", group: "common", category: "load", kwh: (date, hour) => date === "2026-11-05" && hour >= 19 && hour < 23 ? 0.2 : 0 },
+};
+const GROUPS = [
+  { id: "a", name: "Block A", parentId: null, order: 10 },
+  { id: "a-gf", name: "Ground floor", parentId: "a", order: 10 }, { id: "a-lighting", name: "Block lighting", parentId: "a", order: 20 }, { id: "a-emergency", name: "Emergency lights", parentId: "a", order: 30 },
+  { id: "b", name: "Block B", parentId: null, order: 20 },
+  { id: "b-gf", name: "Ground floor", parentId: "b", order: 10 }, { id: "b-lighting", name: "Block lighting", parentId: "b", order: 20 }, { id: "b-emergency", name: "Emergency lights", parentId: "b", order: 30 },
+  { id: "common", name: "Common area", parentId: null, order: 30 },
+];
+const NIGHTS = Object.fromEntries(["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].map(day => [day, [{ from: "19:00", to: "07:00" }]]));
+const ids = Object.keys(METERS);
+const cellOf = (id: string, date: string, hour: number): TrendSeries["cells"][number] => {
+  const meter = METERS[id]!;
+  if (meter.stopAfter && `${date}T${String(hour).padStart(2, "0")}` > meter.stopAfter) return [date, hour, null, 0, 0];
+  if (meter.nightOnly && !night(hour)) return [date, hour, null, 0, 0];
+  return [date, hour, meter.kwh(date, hour), 60, 0];
+};
+const series = (id: string): TrendSeries => ({ id, expectedMinutesPerHour: 60, cells: DATES.flatMap(date => Array.from({ length: 24 }, (_, hour) => cellOf(id, date, hour))) });
+const periodKwh = (id: string) => series(id).cells.reduce((sum, cell) => sum + (cell[2] ?? 0), 0);
+const TOTAL = ids.reduce((sum, id) => sum + periodKwh(id), 0);
+
+function estate(extra: Partial<AnalysisData> = {}): AnalysisData {
+  const meters = ids.map((id): ScopeMeter => ({ id, name: METERS[id]!.name, location: METERS[id]!.group, category: METERS[id]!.category ?? "light", official: true, series: series(id) }));
+  const total: TrendSeries = { id: "__scope__", expectedMinutesPerHour: ids.length * 60, cells: DATES.flatMap(date => Array.from({ length: 24 }, (_, hour) => {
+    const cells = ids.map(id => cellOf(id, date, hour));
+    return [date, hour, cells.reduce((sum, cell) => sum + (cell[2] ?? 0), 0), cells.reduce((sum, cell) => sum + cell[3], 0), 0] as TrendSeries["cells"][number];
+  })) };
+  return {
+    projectId: "estate", projectName: "Riverside", timezone: "Asia/Singapore", snapshotId: null,
+    current: { project: { id: "estate", name: "Riverside", dates: DATES, timezone: "Asia/Singapore", total, types: {}, meters, usageKwh: TOTAL, peakKw: null, peakAt: null,
+      cost: { amount: TOTAL * 0.3, currency: "SGD", note: "0.3 SGD/kWh before tax", rates: [0.3], basis: "tax_exclusive" }, typeTotals: {}, coverage: 95 }, spaces: [] },
+    previous: null, history: null, circuits: [], holidays: new Map(), openingHours: NIGHTS, actions: [], hoursMeaning: "lights_on",
+    groups: { list: GROUPS, meters: ids.map(id => ({ id, name: METERS[id]!.name, groupId: METERS[id]!.group, kwh: periodKwh(id) })) },
+    alwaysOnByDesign: [{ id: "a-emergency", name: "Block A emergency lights" }, { id: "b-emergency", name: "Block B emergency lights" }],
+    lightCounts: [{ id: "playground", name: "Playground lights", count: 4 }],
+    tariffTax: { name: "GST", ratePct: 9 },
+    carbon: { kgCo2ePerKwh: 0.402, year: 2024, source: "Energy Market Authority" },
+    ...extra,
+  };
+}
+const GENERATED = "2026-11-17T02:00:00Z";
+const review = buildEnergyReview(estate(), null, GENERATED);
+const plain = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&#x27;/g, "'").replace(/\s+/g, " ");
+
+describe("the energy review answers the site's questions in order", () => {
+  it("asks all eight questions and answers each at a glance", () => {
+    expect(review.style).toBe("review");
+    expect(review.questions).toEqual(["total", "groups", "largest", "comparison", "profile", "littleUse", "perLight", "savings"]);
+    expect(review.summary.answers.map(answer => answer.question)).toEqual([
+      "Total energy and cost", "Block A, Block B and Common area", "Largest circuit in each group", "Block A against Block B",
+      "24-hour profile", "Pavilion fan", "Energy per lighting point", "Saving potential",
+    ]);
+    for (const answer of review.summary.answers) expect(answer.answer).not.toMatch(/undefined|NaN|\{\w+\}/);
+    expect(review.cover).toMatchObject({ title: "Riverside energy review", preparedFor: ["Riverside"] });
+    expect(review.cover.period[0]).toBe("2–15 Nov 2026");
+  });
+
+  it("quotes costs including GST and carbon from the site's emission factor", () => {
+    const typical = review.total!.projection[0]!;
+    expect(review.rate).toBeCloseTo(0.3 * 1.09, 9);
+    expect(typical.cost).toBeCloseTo(typical.kwh * 0.3 * 1.09, 9);
+    expect(typical.co2Kg).toBeCloseTo(typical.kwh * 0.402, 9);
+    expect(review.costBasis).toBe("incl. GST");
+    expect(review.summary.figures.map(figure => figure.label)).toEqual(["Typical day", "Projected month (30 days)", "Projected monthly bill, incl. GST", "Projected per year"]);
+    expect(review.summary.note).toBe("Monthly and yearly figures are projections from 14 days. Costs use S$0.3000 per kWh before 9% GST, and include the GST.");
+    expect(review.method.assumptions.map(row => [row.label, row.value])).toEqual(expect.arrayContaining([["GST", "9%"], ["Grid emission factor, 2024", "0.402 kg CO₂ per kWh"]]));
+  });
+
+  it("uses the price as published, and leaves carbon out, when the site has neither tax nor factor", () => {
+    const bare = buildEnergyReview(estate({ tariffTax: undefined, carbon: undefined }), null, GENERATED);
+    expect(bare.rate).toBeCloseTo(0.3, 9);
+    expect(bare.costBasis).toBe("");
+    expect(bare.carbonFactor).toBeNull();
+    expect(bare.summary.figures.map(figure => figure.label)).not.toContain("Projected per year");
+    expect(plain(renderEnergyReviewMarkup(bare))).not.toMatch(/CO₂|incl\. GST/);
+  });
+
+  it("splits the site by top-level group with whole percentages that add up to 100", () => {
+    const slices = review.groups!.slices;
+    expect(slices.map(slice => slice.name)).toEqual(["Block A", "Block B", "Common area"]);
+    expect(slices.reduce((sum, slice) => sum + Math.round(slice.share * 100), 0)).toBe(100);
+  });
+
+  it("names the largest circuit in each group, once for a circuit that leads in both blocks", () => {
+    expect(review.largest!.blocks.map(block => [block.name, block.slices[0]!.name])).toEqual([["Block A", "L7-L12 corridors"], ["Block B", "L7-L12 corridors"], ["Common area", "Driveway lamp"]]);
+    expect(review.summary.answers[2]!.answer).toMatch(/^L7-L12 corridors \(\d+% of Block A and \d+% of Block B\) and Driveway lamp \(\d+% of Common area\)\.$/);
+  });
+
+  it("compares the blocks circuit for circuit and says what only the larger one has", () => {
+    const comparison = review.comparison!;
+    expect(comparison.heading).toBe("Block A against Block B");
+    expect(comparison.rows.map(row => row.name)).toEqual(["L7-L12 corridors", "lift lobby", "L1-L6 corridors", "emergency lights"].map(name => expect.stringMatching(new RegExp(name, "i"))));
+    expect(comparison.callout).toContain("Block A's larger total comes mainly from Riverside gate lighting");
+    expect(review.summary.answers[3]!.answer).toContain("Block A is higher overall because of Riverside gate lighting.");
+  });
+
+  it("stacks the average day by kind, the always-on emergency lights at the bottom, and says when the lights run", () => {
+    const profile = review.profile!;
+    expect(profile.layers[0]!.name).toBe("Emergency lights");
+    expect(profile.layers.map(layer => layer.name)).toEqual(expect.arrayContaining(["Block lighting", "Ground floor", "Common area"]));
+    expect(profile.intro).toContain("Lights switch on at about 7 pm and off at about 7 am.");
+    expect(profile.intro).toContain("mostly emergency lights");
+    expect(review.summary.answers[4]!.answer).toMatch(/^Lights on from about 7 pm to 7 am, peaking near \d\.\d kW\. 2 items need checking \(section 5\)\.$/);
+  });
+
+  it("lists what to check on site: a meter that stopped and one powered with its lights", () => {
+    expect(review.checks.map(check => check.title)).toEqual(["Linkway lights has stopped reporting.", "Shelter lights is powered with its lights."]);
+    expect(review.checks[0]!.text).toContain("No readings since 4 Nov, 6 pm");
+    expect(review.checks[1]!.text).toContain("It reports from about 7 pm to 7 am");
+    expect(review.total!.intro).toContain("From 4 Nov the total is lower because Linkway lights stopped reporting");
+  });
+
+  it("names the one meter that was barely used as its own question", () => {
+    expect(review.littleUse!.heading).toBe("Pavilion fan");
+    expect(review.littleUse!.text).toBe("Very little use. The meter recorded 0.80 kWh in total, on 1 of 14 days, last until about 5 Nov, 11 pm. It is mostly not used.");
+    expect(review.summary.answers[5]!.answer).toBe("Very little use: 0.80 kWh in total, none since 5 Nov.");
+  });
+
+  it("gives energy per light where a count is known and asks for the rest", () => {
+    expect(review.perLight!.text).toContain("Playground lights (4 lights): **0.050 kWh per light per day**");
+    expect(review.perLight!.text).toContain("For the other circuits we need the number of fittings");
+  });
+
+  it("costs the lighting measures and sets out next steps", () => {
+    const titles = review.savings!.rows.map(row => row.title);
+    expect(titles[0]).toBe("Motion-sensor dimming on block lighting, or start the night step-down earlier");
+    expect(titles).toContain("Fine-tune light timers and photocells");
+    const dimming = review.savings!.rows[0]!;
+    expect(dimming.basis).toBe("About 30% of block lighting");
+    expect(dimming.costYear).toBeCloseTo(dimming.kwhYear * 0.3 * 1.09, 9);
+    expect(review.savings!.intro).toMatch(/worth about \*\*S\$[\d,]+\*\* a year incl\. GST and [\d.]+ tonnes of CO₂\./);
+    expect(review.nextSteps.map(step => step.action)).toEqual([
+      "Check Linkway lights: breaker, meter power, gateway pairing and fittings",
+      "Give Shelter lights an always-on supply",
+      "Send the number of light fittings per circuit",
+      `Trial: ${titles[0]}`,
+      "Review the next full month of readings and confirm the projections",
+    ]);
+    expect(review.nextSteps[2]!.who).toBe("Riverside");
+  });
+
+  it("lists every meter's typical day in the appendix, by group in the saved order", () => {
+    const groups = review.method.meters.map(meter => meter.group);
+    expect(groups.indexOf("Block B")).toBeGreaterThan(groups.lastIndexOf("Block A"));
+    expect(groups.indexOf("Common area")).toBeGreaterThan(groups.lastIndexOf("Block B"));
+    expect(review.method.meters.find(meter => meter.name === "Shelter lights")!.basis).toBe("Reports only while its lights are on");
+  });
+});
+
+describe("the energy review as a page", () => {
+  it("renders every section in every language with no gaps", () => {
+    for (const locale of ["en", "zh-Hans", "ms"] as const) {
+      const html = renderEnergyReviewHtml(buildEnergyReview(estate(), null, GENERATED, locale));
+      expect(plain(html)).not.toMatch(/undefined|NaN|\{\w+\}/);
+      for (const id of ["summary", "q-total", "q-groups", "q-largest", "q-comparison", "q-profile", "checks", "q-littleUse", "q-perLight", "q-savings", "method"]) expect(html).toContain(`id="${id}"`);
+    }
+    const page = plain(renderEnergyReviewHtml(review));
+    expect(page).toContain("Riverside Energy Review · 2–15 Nov 2026");
+    expect(page).toContain("Question 8 Energy-saving projection");
+    expect(page).toContain("Recommended next steps");
+  });
+
+  it("is what the server saves for the energy review style, except a one-day report, which stays the management review", () => {
+    expect(plain(renderStyledSiteReportHtml("review", estate(), null, GENERATED))).toContain("Answers at a glance");
+    const day = DATES[5]!;
+    const oneDay = estate();
+    oneDay.current.project.dates = [day];
+    for (const item of [oneDay.current.project.total!, ...oneDay.current.project.meters.map(meter => meter.series!)]) item.cells = item.cells.filter(cell => cell[0] === day);
+    const page = plain(renderStyledSiteReportHtml("review", oneDay, null, GENERATED));
+    expect(page).not.toContain("Answers at a glance");
+    expect(page).toContain("Riverside Energy Review");
+  });
+
+  it("leaves out what an opening-hours site with no groups cannot answer", () => {
+    const office = estate({ hoursMeaning: undefined, groups: undefined, lightCounts: undefined, openingHours: Object.fromEntries(["monday", "tuesday", "wednesday", "thursday", "friday"].map(day => [day, [{ from: "09:00", to: "18:00" }]])) });
+    const built = buildEnergyReview(office, null, GENERATED);
+    expect(built.questions).not.toContain("groups");
+    expect(built.questions).not.toContain("comparison");
+    expect(built.questions).not.toContain("perLight");
+    expect(plain(renderEnergyReviewMarkup(built))).not.toMatch(/undefined|NaN|\{\w+\}/);
+  });
+});

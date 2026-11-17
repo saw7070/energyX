@@ -49,7 +49,7 @@ describe("create a report", () => {
     expect(dialog.textContent).toContain("From your meter readings");
     const radios = [...dialog.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
     // Today's full report stays the default.
-    expect(radios.map(radio => [radio.value, radio.checked])).toEqual([["full", true], ["management", false]]);
+    expect(radios.map(radio => [radio.value, radio.checked])).toEqual([["full", true], ["management", false], ["review", false]]);
     const [from, to] = [...dialog.querySelectorAll<HTMLInputElement>('input[type="date"]')];
     await setValue(from!, "2026-08-10");
     await setValue(to!, "2026-08-16");
