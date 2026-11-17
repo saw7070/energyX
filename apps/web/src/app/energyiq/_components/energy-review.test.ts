@@ -38,28 +38,41 @@ const GROUPS = [
 ];
 const NIGHTS = Object.fromEntries(["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].map(day => [day, [{ from: "19:00", to: "07:00" }]]));
 const ids = Object.keys(METERS);
-const cellOf = (id: string, date: string, hour: number): TrendSeries["cells"][number] => {
-  const meter = METERS[id]!;
+const cellOf = (id: string, date: string, hour: number, meters: Record<string, Meter> = METERS): TrendSeries["cells"][number] => {
+  const meter = meters[id]!;
   if (meter.stopAfter && `${date}T${String(hour).padStart(2, "0")}` > meter.stopAfter) return [date, hour, null, 0, 0];
   if (meter.nightOnly && !night(hour)) return [date, hour, null, 0, 0];
   return [date, hour, meter.kwh(date, hour), 60, 0];
 };
-const series = (id: string): TrendSeries => ({ id, expectedMinutesPerHour: 60, cells: DATES.flatMap(date => Array.from({ length: 24 }, (_, hour) => cellOf(id, date, hour))) });
-const periodKwh = (id: string) => series(id).cells.reduce((sum, cell) => sum + (cell[2] ?? 0), 0);
+const series = (id: string, meters: Record<string, Meter> = METERS): TrendSeries => ({ id, expectedMinutesPerHour: 60, cells: DATES.flatMap(date => Array.from({ length: 24 }, (_, hour) => cellOf(id, date, hour, meters))) });
+const periodKwh = (id: string, meters: Record<string, Meter> = METERS) => series(id, meters).cells.reduce((sum, cell) => sum + (cell[2] ?? 0), 0);
 const TOTAL = ids.reduce((sum, id) => sum + periodKwh(id), 0);
+const TOP_OF: Record<string, string> = { a: "Block A", b: "Block B", common: "Common area" };
 
-function estate(extra: Partial<AnalysisData> = {}): AnalysisData {
-  const meters = ids.map((id): ScopeMeter => ({ id, name: METERS[id]!.name, location: METERS[id]!.group, category: METERS[id]!.category ?? "light", official: true, series: series(id) }));
-  const total: TrendSeries = { id: "__scope__", expectedMinutesPerHour: ids.length * 60, cells: DATES.flatMap(date => Array.from({ length: 24 }, (_, hour) => {
-    const cells = ids.map(id => cellOf(id, date, hour));
+/**
+ * `byArea`: as on a live site, each meter's hour-by-hour readings come with the area it belongs to (data.current.spaces)
+ * and the site's own meter list names the meters without readings.
+ */
+function estate(extra: Partial<AnalysisData> = {}, options: { meters?: Record<string, Meter>; byArea?: boolean } = {}): AnalysisData {
+  const table = options.meters ?? METERS;
+  const keys = Object.keys(table);
+  const meterOf = (id: string, withSeries: boolean): ScopeMeter => ({ id, name: table[id]!.name, location: table[id]!.group, category: table[id]!.category ?? "light", official: true, series: withSeries ? series(id, table) : null });
+  const meters = keys.map(id => meterOf(id, !options.byArea));
+  const total: TrendSeries = { id: "__scope__", expectedMinutesPerHour: keys.length * 60, cells: DATES.flatMap(date => Array.from({ length: 24 }, (_, hour) => {
+    const cells = keys.map(id => cellOf(id, date, hour, table));
     return [date, hour, cells.reduce((sum, cell) => sum + (cell[2] ?? 0), 0), cells.reduce((sum, cell) => sum + cell[3], 0), 0] as TrendSeries["cells"][number];
   })) };
+  const totalKwh = keys.reduce((sum, id) => sum + periodKwh(id, table), 0);
+  const spaces = options.byArea ? Object.entries(TOP_OF).map(([prefix, name]) => ({
+    id: prefix, name, dates: DATES, timezone: "Asia/Singapore", total: null, types: {}, typeTotals: {}, coverage: null, usageKwh: null, peakKw: null, peakAt: null, cost: null,
+    meters: keys.filter(id => (prefix === "common" ? table[id]!.group === "common" : table[id]!.group.startsWith(`${prefix}-`))).map(id => meterOf(id, true)),
+  })) : [];
   return {
     projectId: "estate", projectName: "Riverside", timezone: "Asia/Singapore", snapshotId: null,
-    current: { project: { id: "estate", name: "Riverside", dates: DATES, timezone: "Asia/Singapore", total, types: {}, meters, usageKwh: TOTAL, peakKw: null, peakAt: null,
-      cost: { amount: TOTAL * 0.3, currency: "SGD", note: "0.3 SGD/kWh before tax", rates: [0.3], basis: "tax_exclusive" }, typeTotals: {}, coverage: 95 }, spaces: [] },
+    current: { project: { id: "estate", name: "Riverside", dates: DATES, timezone: "Asia/Singapore", total, types: {}, meters, usageKwh: totalKwh, peakKw: null, peakAt: null,
+      cost: { amount: totalKwh * 0.3, currency: "SGD", note: "0.3 SGD/kWh before tax", rates: [0.3], basis: "tax_exclusive" }, typeTotals: {}, coverage: 95 }, spaces },
     previous: null, history: null, circuits: [], holidays: new Map(), openingHours: NIGHTS, actions: [], hoursMeaning: "lights_on",
-    groups: { list: GROUPS, meters: ids.map(id => ({ id, name: METERS[id]!.name, groupId: METERS[id]!.group, kwh: periodKwh(id) })) },
+    groups: { list: GROUPS, meters: keys.map(id => ({ id, name: table[id]!.name, groupId: table[id]!.group, kwh: periodKwh(id, table) })) },
     alwaysOnByDesign: [{ id: "a-emergency", name: "Block A emergency lights" }, { id: "b-emergency", name: "Block B emergency lights" }],
     lightCounts: [{ id: "playground", name: "Playground lights", count: 4 }],
     tariffTax: { name: "GST", ratePct: 9 },
@@ -209,3 +222,34 @@ describe("the energy review as a page", () => {
     expect(plain(renderEnergyReviewMarkup(built))).not.toMatch(/undefined|NaN|\{\w+\}/);
   });
 });
+
+describe("the energy review on a live site's readings", () => {
+  it("reads each meter's hours from its area when the site's own list has none", () => {
+    const live = buildEnergyReview(estate({}, { byArea: true }), null, GENERATED);
+    // The same answers as when the site's list carries the readings: the layers, the checks, little use and the dimming.
+    expect(live.profile!.layers.map(layer => layer.name)).toEqual(review.profile!.layers.map(layer => layer.name));
+    expect(live.checks.map(check => check.title)).toEqual(["Linkway lights has stopped reporting.", "Shelter lights is powered with its lights."]);
+    expect(live.littleUse!.heading).toBe("Pavilion fan");
+    expect(live.savings!.rows[0]!.title).toBe("Motion-sensor dimming on block lighting, or start the night step-down earlier");
+    expect(live.summary.intro).toContain("Block lighting is the largest single load");
+    expect(live.perLight!.text).toContain("For the other circuits we need the number of fittings");
+  });
+
+  it("says two groups that use the same are about the same, and a circuit twice another's is twice", () => {
+    const even: Record<string, Meter> = { ...METERS, "a-gate": { ...METERS["a-gate"]!, group: "common" },
+      "b-lobby": { ...METERS["b-lobby"]!, kwh: lit(3.6) }, "b-high": { ...METERS["b-high"]!, kwh: lit(8) }, "b-low": { ...METERS["b-low"]!, kwh: lit(3.4, 0.01) },
+      "b-deco": { name: "Block B decorative light", group: "b-gf", kwh: lit(0.15) }, "a-deco": { name: "Block A decorative light", group: "a-gf", kwh: lit(0.3) } };
+    const built = buildEnergyReview(estate({}, { meters: even }), null, GENERATED);
+    expect(built.groups!.intro).toMatch(/^Block A and Block B use about the same, \d+% of the energy each\. Then Common area \d+%\.$/);
+    expect(built.comparison!.intro).toContain("Block A's decorative light uses twice as much as Block B's");
+  });
+
+  it("trials only the dimming, never the daytime standby or the timers", () => {
+    const trials = review.nextSteps.filter(step => step.action.startsWith("Trial:"));
+    expect(trials.map(step => step.action)).toEqual(["Trial: Motion-sensor dimming on block lighting, or start the night step-down earlier"]);
+    // No alike blocks, so nothing to dim: no trial at all.
+    const single = buildEnergyReview(estate({ groups: { list: GROUPS.filter(group => !group.id.startsWith("b")), meters: [] } }), null, GENERATED);
+    expect(single.nextSteps.some(step => step.action.startsWith("Trial:"))).toBe(false);
+  });
+});
+

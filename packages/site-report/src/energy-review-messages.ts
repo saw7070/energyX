@@ -91,6 +91,7 @@ const en = {
 
   "groups.introHalf": "{name} accounts for almost half of the energy ({pct}).",
   "groups.introLead": "{name} uses the most, {pct} of the energy.",
+  "groups.introTie": "{a} and {b} use about the same, {pct} of the energy each.",
   "groups.introRest": "Then {items}.",
   "groups.item": "{name} {pct}",
   "groups.unit": "kWh / month",
@@ -108,6 +109,7 @@ const en = {
   "cmp.introApart": "Circuit for circuit, the groups are close except: {items}.",
   "cmp.gapPct": "{a}'s {part} uses {pct} more than {b}'s",
   "cmp.gapTimes": "{a}'s {part} is {times} times {b}'s",
+  "cmp.gapTwice": "{a}'s {part} uses twice as much as {b}'s",
   "cmp.worthALook": "These are worth a look at the fittings and timer settings.",
   "cmp.title": "Same circuits, kWh per day",
   "cmp.likeSame": "The groups' own circuits are almost the same: **{a} {aKwh}** and **{b} {bKwh}** a day.",
@@ -335,6 +337,7 @@ export const energyReviewMessages = defineMessages(en, {
 
     "groups.introHalf": "{name} 占了将近一半的用电（{pct}）。",
     "groups.introLead": "{name} 用电最多，占 {pct}。",
+    "groups.introTie": "{a}和{b}的用电量差不多，各占 {pct}。",
     "groups.introRest": "其次是 {items}。",
     "groups.item": "{name} {pct}",
     "groups.unit": "kWh / 月",
@@ -352,6 +355,7 @@ export const energyReviewMessages = defineMessages(en, {
     "cmp.introApart": "逐个回路对比，各分组都相近，除了：{items}。",
     "cmp.gapPct": "{a} 的{part}比 {b} 多用 {pct}",
     "cmp.gapTimes": "{a} 的{part}是 {b} 的 {times} 倍",
+    "cmp.gapTwice": "{a} 的{part}是 {b} 的两倍",
     "cmp.worthALook": "这些值得检查一下灯具和定时器设置。",
     "cmp.title": "相同回路，每天 kWh",
     "cmp.likeSame": "两组共有回路的用电几乎一样：每天分别为 **{a} {aKwh}** 和 **{b} {bKwh}**。",
@@ -577,6 +581,7 @@ export const energyReviewMessages = defineMessages(en, {
 
     "groups.introHalf": "{name} menyumbang hampir separuh daripada tenaga ({pct}).",
     "groups.introLead": "{name} menggunakan paling banyak, {pct} daripada tenaga.",
+    "groups.introTie": "{a} dan {b} menggunakan lebih kurang sama, {pct} tenaga setiap satu.",
     "groups.introRest": "Diikuti oleh {items}.",
     "groups.item": "{name} {pct}",
     "groups.unit": "kWh / bulan",
@@ -594,6 +599,7 @@ export const energyReviewMessages = defineMessages(en, {
     "cmp.introApart": "Litar demi litar, kumpulan-kumpulan ini hampir sama kecuali: {items}.",
     "cmp.gapPct": "{part} di {a} menggunakan {pct} lebih daripada di {b}",
     "cmp.gapTimes": "{part} di {a} ialah {times} kali ganda berbanding di {b}",
+    "cmp.gapTwice": "{part} di {a} menggunakan dua kali ganda berbanding di {b}",
     "cmp.worthALook": "Lampu dan tetapan pemasa bagi litar ini wajar diperiksa.",
     "cmp.title": "Litar yang sama, kWh sehari",
     "cmp.likeSame": "Litar yang ada dalam kedua-dua kumpulan hampir sama: **{a} {aKwh}** dan **{b} {bKwh}** sehari.",
