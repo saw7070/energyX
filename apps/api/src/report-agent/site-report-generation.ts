@@ -8,8 +8,10 @@
  * Two things are saved together: the finished page, and the readings it was built from. The page is written in
  * English; the readings let the web app build the very same report again in the reader's own language.
  *
- * The page is written in the style the site chose: the full report (the default, as before) or the management review,
- * a short plain report organised by group. Both come from the same readings and the same model.
+ * The page is written in the style the site chose: the full report (the default, as before), the management review (a
+ * short plain report organised by group) or the energy review (answers to the questions the site asked at
+ * installation). All come from the same readings and the same model. A one-day report in the energy review style is
+ * written as the management review (writtenStyleOf).
  */
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -27,6 +29,7 @@ import {
   type SiteReportStyle,
 } from "@datafoundry/site-report";
 import { renderStyledSiteReportHtml } from "@datafoundry/site-report/management-review-document";
+import { writtenStyleOf } from "@datafoundry/site-report";
 import { loadSiteReportData, type SiteReportPeriod } from "./site-report-data.js";
 import type { ReportRun, ReportSettings, ReportStore } from "./report-store.js";
 import { validateReportPeriod } from "./report-calendar.js";
@@ -40,7 +43,7 @@ export const siteReportScheduleKey = (projectId: string, cadence: SiteReportCade
 
 /** What a reader is told this report is, in the library and in the record. Plain words, no jargon. */
 export const siteReportPrompt = (cadence: SiteReportCadence | "custom", period: SiteReportPeriod, style: SiteReportStyle = "full"): string =>
-  `${cadence === "daily" ? "Daily" : cadence === "weekly" ? "Weekly" : cadence === "monthly" ? "Monthly" : "Custom"} site ${style === "management" ? "management review" : "energy report"} for ${period.from} to ${period.toExclusive} (the end date is not included). Written by the server from the site's own meter readings.`;
+  `${cadence === "daily" ? "Daily" : cadence === "weekly" ? "Weekly" : cadence === "monthly" ? "Monthly" : "Custom"} site ${style === "management" ? "management review" : style === "review" ? "energy review" : "energy report"} for ${period.from} to ${period.toExclusive} (the end date is not included). Written by the server from the site's own meter readings.`;
 
 /** Beyond this the saved readings are trimmed rather than refused; the report itself never reads the trimmed part. */
 const MAX_SNAPSHOT_BYTES = 12 * 1024 * 1024;
@@ -108,16 +111,18 @@ async function writeSiteReport(input: Omit<PublishSiteReportInput, "cadence"> & 
   const reference = readProjectSpatialReference(input.settings.contextNotes ?? "", input.settings.projectId)?.reference ?? null;
   // English for now. The readings saved beside the page let the web app word the same report in any language.
   const html = renderStyledSiteReportHtml(input.style, data, reference, generatedAt, "en");
+  // What the page actually is: a one-day report in the energy review style is the management review.
+  const written = writtenStyleOf(input.style, data.current.project.dates.length);
 
   const snapshot: SiteReportSnapshot = {
     schemaVersion: SITE_REPORT_SNAPSHOT_VERSION, projectId: input.settings.projectId, cadence: input.cadence,
     period: input.period, generatedAt, language: "en", reference, historyOmitted: true, data,
     // The full report needs no mark, so reports saved before the choice existed and the full report read the same.
-    ...(input.style === "management" ? { style: input.style } : {}),
+    ...(written !== "full" ? { style: written } : {}),
   };
   const siteReport: NonNullable<ReportRun["siteReport"]> = {
     ...(input.cadence === "custom" ? {} : { cadence: input.cadence }),
-    ...(input.style === "management" ? { style: input.style } : {}),
+    ...(written !== "full" ? { style: written } : {}),
   };
   const id = randomUUID();
   const directory = join(input.root, id);
@@ -127,7 +132,7 @@ async function writeSiteReport(input: Omit<PublishSiteReportInput, "cadence"> & 
     writeFileSync(join(directory, "accepted-output.txt"), html, { flag: "wx" });
     const saved = input.store.insertCompleted({
       settings: input.settings, period: input.period, reportingPeriod: input.period,
-      prompt: siteReportPrompt(input.cadence, input.period, input.style), actorUserId: input.actorUserId,
+      prompt: siteReportPrompt(input.cadence, input.period, written), actorUserId: input.actorUserId,
       ...(input.scheduleKey ? { scheduleKey: input.scheduleKey } : { custom: true }), siteReport, id,
     });
     // Someone else published this period while we were building it; theirs is the one readers already have.

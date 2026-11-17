@@ -24,7 +24,7 @@ import { ReportScheduleNote } from "./report-schedule-note";
 import { SiteReportCreateDialog } from "./site-report-create";
 // `source` says who wrote a report: "site" reports are the ones the server writes for the whole site on the schedule
 // and the Overview shows; "advisor" reports are the ones somebody asked for.
-type Report = { canDiscuss?: boolean; previousReportId?: string; id: string; kind: "report"; period: { from: string; toExclusive: string }; createdAt: string; finishedAt?: string; parentRunId?: string; category: "scheduled" | "custom"; version: number; title: string; source?: "site" | "advisor"; cadence?: "daily" | "weekly" | "monthly"; style?: "management" };
+type Report = { canDiscuss?: boolean; previousReportId?: string; id: string; kind: "report"; period: { from: string; toExclusive: string }; createdAt: string; finishedAt?: string; parentRunId?: string; category: "scheduled" | "custom"; version: number; title: string; source?: "site" | "advisor"; cadence?: "daily" | "weekly" | "monthly"; style?: "management" | "review" };
 type Skill = { id?: string; revision?: number; isDefault?: boolean; required?: boolean; readOnly?: boolean; scope?: "general" | "project" | "personal"; category?: "analysis" | "presentation" | "other"; name: string; version: string; content: string; sourceRunId?: string; sourceSessionId?: string; projectId: string };
 export type Artifact = { runId: string; filename: string; mimeType: string; bytes: number; encoding: "utf8" | "base64"; createdAt: string };
 export type ReportLibrary = { reports: Report[]; skills: Skill[]; tools: Array<{ name: string; description: string }>; canChat: boolean; canManageProject?: boolean; canUseActions?: boolean; artifacts?: Artifact[]; overviewCadence?: "weekly" | "monthly" };
@@ -143,7 +143,7 @@ function ProjectLibrary({ projectId, view }: { projectId: string; view: "reports
               {featured && <span className={styles.eyebrow}>{t("latestReport")}</span>}
               <strong>{report.title}</strong>
               <span className={styles.reportPeriod}><b className={styles.coverage}>{coverageLabel(report.period.from, report.period.toExclusive, locale)}</b>{formatPeriod(report.period.from, shiftDate(report.period.toExclusive,-1), locale)}</span>
-              <span className={styles.reportTags}><span className={report.category === "scheduled" ? styles.tagAutomatic : undefined}>{report.category === "scheduled" ? t("automatic") : t("custom")}</span>{report.source === "site" && <span className={report.id === overviewReportId ? styles.tagAutomatic : undefined}>{report.id === overviewReportId ? t("onOverview") : t("siteReport")}</span>}{report.style === "management" && <span>{t("managementReview")}</span>}<span>v{report.version ?? 1}</span><span>{t("generatedAt", { time: generated })}</span></span>
+              <span className={styles.reportTags}><span className={report.category === "scheduled" ? styles.tagAutomatic : undefined}>{report.category === "scheduled" ? t("automatic") : t("custom")}</span>{report.source === "site" && <span className={report.id === overviewReportId ? styles.tagAutomatic : undefined}>{report.id === overviewReportId ? t("onOverview") : t("siteReport")}</span>}{report.style === "management" && <span>{t("managementReview")}</span>}{report.style === "review" && <span>{t("energyReview")}</span>}<span>v{report.version ?? 1}</span><span>{t("generatedAt", { time: generated })}</span></span>
               <span className={styles.reportCta}>{t("openShort")}</span>
             </span>
           </button>

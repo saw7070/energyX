@@ -28,7 +28,7 @@ export type ReportSettings = {
   frequency: ReportFrequency;
   localHour: number;
   scheduledPrompt: string;
-  /** Which site report the schedule writes: the full report (absent, as before) or the management review. */
+  /** Which site report the schedule writes: the full report (absent, as before), the management review or the energy review. */
   siteReportStyle?: SiteReportStyle | undefined;
 };
 export type ReportRun = {
@@ -40,7 +40,7 @@ export type ReportRun = {
    * Present when the server wrote this report itself from the site's own readings, instead of the advisor writing it.
    * `cadence` is absent for a custom report somebody asked for on chosen dates; `style` is absent for the full report.
    */
-  siteReport?: { cadence?: "daily" | "weekly" | "monthly"; style?: "management" };
+  siteReport?: { cadence?: "daily" | "weekly" | "monthly"; style?: "management" | "review" };
   scheduleKey?: string;
   id: string;
   sessionId?: string;

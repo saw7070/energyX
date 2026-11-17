@@ -2,7 +2,7 @@
 /**
  * "Create a report" on the Reports page. Two ways to get one:
  * - a site report on the dates you choose, written straight from the meter readings in a few seconds (no AI), in the
- *   style you choose: the full report (the default, as on the Overview) or the management review;
+ *   style you choose: the full report (the default, as on the Overview), the management review or the energy review;
  * - or a question for the energy advisor, which opens the advisor as before.
  */
 import { useEffect, useRef, useState } from "react";
@@ -13,7 +13,7 @@ import { useFriendlyError } from "./friendly-error";
 import { shiftDate } from "./report-period";
 import styles from "./site-report-create.module.css";
 
-export type SiteReportStyleChoice = "full" | "management";
+export type SiteReportStyleChoice = "full" | "management" | "review";
 
 export const siteReportCreateMessages = defineMessages({
   title: "Create a report",
@@ -27,6 +27,8 @@ export const siteReportCreateMessages = defineMessages({
   styleFullHint: "Every chart, table and check, as on the Overview.",
   styleManagement: "Management review",
   styleManagementHint: "Short and plain, organised by group, with the things worth deciding. For management.",
+  styleReview: "Energy review",
+  styleReviewHint: "Answers to the questions raised at installation, question by question, with costs, carbon and next steps.",
   create: "Create report",
   creating: "Writing the report…",
   endAfterStart: "Choose an end date on or after the start date.",
@@ -49,6 +51,8 @@ export const siteReportCreateMessages = defineMessages({
     styleFullHint: "包含所有图表、表格和检查，与概览中的相同。",
     styleManagement: "管理层回顾",
     styleManagementHint: "简短易懂，按分组整理，并列出值得决定的事项。适合管理层阅读。",
+    styleReview: "能耗评估",
+    styleReviewHint: "逐一回答安装时提出的问题，并附上费用、碳排放和下一步行动。",
     create: "创建报告",
     creating: "正在生成报告…",
     endAfterStart: "请选择不早于开始日期的结束日期。",
@@ -71,6 +75,8 @@ export const siteReportCreateMessages = defineMessages({
     styleFullHint: "Setiap carta, jadual dan semakan, seperti di Gambaran keseluruhan.",
     styleManagement: "Semakan pengurusan",
     styleManagementHint: "Ringkas dan mudah, disusun mengikut kumpulan, dengan perkara yang perlu diputuskan. Untuk pihak pengurusan.",
+    styleReview: "Semakan tenaga",
+    styleReviewHint: "Jawapan kepada soalan yang dibangkitkan semasa pemasangan, satu demi satu, dengan kos, karbon dan langkah seterusnya.",
     create: "Cipta laporan",
     creating: "Sedang menulis laporan…",
     endAfterStart: "Pilih tarikh akhir pada atau selepas tarikh mula.",
@@ -136,7 +142,7 @@ export function SiteReportCreateDialog({ projectId, canAskAdvisor, onCreated, on
         </div>
         <fieldset className={styles.styles}>
           <legend>{t("style")}</legend>
-          {([["full", "styleFull", "styleFullHint"], ["management", "styleManagement", "styleManagementHint"]] as const).map(([value, label, hint]) => <label key={value} className={styles.style}>
+          {([["full", "styleFull", "styleFullHint"], ["management", "styleManagement", "styleManagementHint"], ["review", "styleReview", "styleReviewHint"]] as const).map(([value, label, hint]) => <label key={value} className={styles.style}>
             <input type="radio" name="site-report-style" value={value} checked={style === value} onChange={() => setStyle(value)} />
             <strong>{t(label)}</strong>
             <span>{t(hint)}</span>

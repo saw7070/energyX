@@ -162,7 +162,8 @@ export function meterUsualDay(series: TrendSeries | null | undefined, dates: rea
 }
 
 /** A meter's average kW in each hour of the day over `dates`, from complete hours only; 0 for an hour with none. */
-function meterHours(series: TrendSeries | undefined, dates: ReadonlySet<string>): number[] {
+/** A meter's average kWh in each hour of the day, from complete hours on the given dates. */
+export function meterHours(series: TrendSeries | undefined, dates: ReadonlySet<string>): number[] {
   const byHour: number[][] = Array.from({ length: 24 }, () => []);
   if (series) for (const cell of series.cells) if (dates.has(cell[0]) && completeHour(series, cell)) byHour[cell[1]]!.push(cell[2]!);
   return byHour.map(values => mean(values) ?? 0);

@@ -5,7 +5,7 @@
  *
  * The React documents are deliberately NOT re-exported here, so importing the model never pulls react-dom/server into a
  * browser bundle. Import them from "@datafoundry/site-report/site-report-document" and
- * "@datafoundry/site-report/management-review-document" instead.
+ * "@datafoundry/site-report/management-review-document" and "@datafoundry/site-report/energy-review-document" instead.
  */
 export * from "./locale.js";
 export * from "./analysis-types.js";
@@ -25,6 +25,8 @@ export * from "./site-report-model-messages.js";
 export * from "./site-report-model.js";
 export * from "./management-review-messages.js";
 export * from "./management-review.js";
+export * from "./energy-review-messages.js";
+export * from "./energy-review.js";
 export * from "./site-report-styles.js";
 export * from "./standout-days.js";
 export * from "./standout-messages.js";

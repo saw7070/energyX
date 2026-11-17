@@ -9,11 +9,15 @@
  * server can save the same document on a schedule. This file keeps the page's side of it: the hook that loads the
  * readings, the panel chrome, and the plain-wording helpers the Overview cards use. Everything the rest of the app
  * imported from here is still exported from here.
+ *
+ * A site set to the energy review (Reports → settings → Site report style) sees that review as its full report: the
+ * questions it asked at installation, answered from the same readings. The Overview cards still read the full report.
  */
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { readProjectSpatialReference, type ProjectSpatialReference } from "@datafoundry/contracts";
-import { parseSiteReportSnapshot, type SiteReportCadence } from "@datafoundry/site-report";
+import { buildEnergyReview, parseSiteReportSnapshot, writtenStyleOf, type EnergyReview, type SiteReportCadence } from "@datafoundry/site-report";
+import { ENERGY_REVIEW_CSS, EnergyReviewDocument, energyReviewFileName, renderEnergyReviewHtml } from "@datafoundry/site-report/energy-review-document";
 import { renderSiteReportHtml, siteReportFileName, SiteReportDocument } from "@datafoundry/site-report/site-report-document";
 import { configApi } from "../../../lib/config-api";
 import { loadAnalysis, type AnalysisData } from "./analysis-data";
@@ -43,13 +47,15 @@ export const standaloneReportHtml = (_article: HTMLElement, report: SiteReport) 
 type Period = { from: string; to: string } | null;
 /** Why a report could not be prepared, in words the reader can act on. */
 export type ReportProblem = { title: string; steps: string[]; fixTab?: string };
-export type SiteReportState = { report: SiteReport } | { error: ReportProblem } | null;
+/** `review`: the energy review, for a site set to it; the panel shows it in place of the full report. */
+export type SiteReportState = { report: SiteReport; review?: EnergyReview | undefined } | { error: ReportProblem } | null;
 /**
  * The saved report the Overview is showing: which one it is, the dates it covers, when the server wrote it and how
  * much of the readings it had. Absent when no report has been saved yet and the page had to build one itself.
  */
 export type SavedSiteReport = { reportId: string; cadence: SiteReportCadence; period: { from: string; toExclusive: string }; generatedAt: string; coverage: number | null };
-type Readings = { data: AnalysisData; reference: ProjectSpatialReference | null; generatedAt: string; saved: SavedSiteReport | null; dataToExclusive: string | null };
+/** `review`: the site is set to the energy review, or the saved report was written as one. */
+type Readings = { data: AnalysisData; reference: ProjectSpatialReference | null; generatedAt: string; saved: SavedSiteReport | null; dataToExclusive: string | null; review: boolean };
 type Loaded = Readings | { error: ReportProblem } | null;
 /** One report as the Reports library lists it; site reports are the ones the server writes on the schedule. */
 type LibraryReport = { id: string; source?: "site" | "advisor"; cadence?: SiteReportCadence };
@@ -58,15 +64,16 @@ type LibraryReport = { id: string; source?: "site" | "advisor"; cadence?: SiteRe
  * The newest saved site report for the cadence this project's Overview shows, with the readings it was built from.
  * Returns null when nothing has been saved yet, so the page can fall back to building one itself.
  */
-async function loadSavedSiteReport(projectId: string): Promise<Readings | null> {
-  const library = await configApi.reportLibraryRequest<{ reports?: LibraryReport[]; overviewCadence?: SiteReportCadence }>(projectId);
+async function loadSavedSiteReport(projectId: string): Promise<{ readings: Readings | null; review: boolean }> {
+  const library = await configApi.reportLibraryRequest<{ reports?: LibraryReport[]; overviewCadence?: SiteReportCadence; siteReportStyle?: "review" }>(projectId);
+  const review = library.siteReportStyle === "review";
   const reports = library.reports ?? [];
   // The list is newest first. The project's own cadence wins; any weekly or monthly site report still beats building one
   // here. A daily report covers a single day, and a custom site report (somebody's own dates) has no cadence: neither is
   // ever the Overview's.
   const chosen = reports.find(item => item.source === "site" && item.cadence === (library.overviewCadence === "weekly" ? "weekly" : "monthly"))
     ?? reports.find(item => item.source === "site" && (item.cadence === "weekly" || item.cadence === "monthly"));
-  if (!chosen) return null;
+  if (!chosen) return { readings: null, review };
   const [saved, dates] = await Promise.all([
     configApi.reportLibraryRequest<{ snapshot: unknown }>(projectId, `snapshot/${encodeURIComponent(chosen.id)}`),
     // How far the readings now run, so the page can say when a report has been overtaken by newer readings.
@@ -74,9 +81,9 @@ async function loadSavedSiteReport(projectId: string): Promise<Readings | null> 
       .then(result => result.periodOptions?.availablePeriod?.toExclusive ?? null).catch(() => null),
   ]);
   const snapshot = parseSiteReportSnapshot(saved.snapshot);
-  if (snapshot.cadence === "custom" || snapshot.cadence === "daily") return null;
-  return { data: snapshot.data, reference: snapshot.reference, generatedAt: snapshot.generatedAt, dataToExclusive: dates,
-    saved: { reportId: chosen.id, cadence: snapshot.cadence, period: snapshot.period, generatedAt: snapshot.generatedAt, coverage: snapshot.data.current.project.coverage } };
+  if (snapshot.cadence === "custom" || snapshot.cadence === "daily") return { readings: null, review };
+  return { review, readings: { data: snapshot.data, reference: snapshot.reference, generatedAt: snapshot.generatedAt, dataToExclusive: dates, review: review || snapshot.style === "review",
+    saved: { reportId: chosen.id, cadence: snapshot.cadence, period: snapshot.period, generatedAt: snapshot.generatedAt, coverage: snapshot.data.current.project.coverage } } };
 }
 /**
  * Turns an engine error into something a reader can act on. The engine reports the location by id, so the project's
@@ -134,7 +141,7 @@ export function useSiteReport(projectId: string, period: Period, enabled = true)
     setLoaded(cached && Date.now() - cached.at < REPORT_CACHE_MS ? cached.value : null);
     const keep = (value: Exclude<Loaded, null>) => { if (!("error" in value)) reportCache.set(cacheKey, { at: Date.now(), value }); };
     // The saved report comes first: it is the one in Reports, and everyone opening the page sees the same one.
-    loadSavedSiteReport(projectId).catch(() => null).then(saved => {
+    loadSavedSiteReport(projectId).catch(() => ({ readings: null, review: false })).then(({ readings: saved, review }) => {
       if (cancelled) return;
       if (saved) { keep(saved); setLoaded(saved); return null; }
       return Promise.all([
@@ -144,7 +151,7 @@ export function useSiteReport(projectId: string, period: Period, enabled = true)
       ]).then(([data, notes]) => {
         if (cancelled) return;
         if (!data.current.project.dates.length || !data.current.project.total) { setLoaded({ error: { title: t("problem.noReadings"), steps: [t("problem.noReadingsStep")] } }); return; }
-        const built = { data, reference: readProjectSpatialReference(notes, projectId)?.reference ?? null, generatedAt: new Date().toISOString(), saved: null, dataToExclusive: null };
+        const built = { data, reference: readProjectSpatialReference(notes, projectId)?.reference ?? null, generatedAt: new Date().toISOString(), saved: null, dataToExclusive: null, review };
         keep(built);
         setLoaded(built);
       });
@@ -156,7 +163,12 @@ export function useSiteReport(projectId: string, period: Period, enabled = true)
   }, [projectId, from, to, retry, enabled]);
   const state = useMemo<SiteReportState>(() => {
     if (!loaded || "error" in loaded) return loaded;
-    try { return { report: buildSiteReport(loaded.data, loaded.reference, loaded.generatedAt, locale) }; } catch { return { error: { title: t("problem.unexpected"), steps: [t("problem.unexpectedStep")] } }; }
+    try {
+      const report = buildSiteReport(loaded.data, loaded.reference, loaded.generatedAt, locale);
+      // A one-day report has nothing to compare or project, so it stays the full report (see writtenStyleOf).
+      const review = loaded.review && writtenStyleOf("review", loaded.data.current.project.dates.length) === "review" ? buildEnergyReview(loaded.data, loaded.reference, loaded.generatedAt, locale) : undefined;
+      return { report, review };
+    } catch { return { error: { title: t("problem.unexpected"), steps: [t("problem.unexpectedStep")] } }; }
   }, [loaded, locale]);
   // The heading and the document are the same report, so what is said about one is true of the other.
   const shown = loaded && !("error" in loaded) && state && "report" in state ? loaded : null;
@@ -173,20 +185,21 @@ export function SiteReportPanel({ state, onRetry, projectId, saved }: { state: S
   const t = useMessages(siteReportMessages);
   const { locale } = useEnergyIqLocale();
   const report = state && "report" in state ? state.report : null;
+  const review = state && "report" in state ? state.review ?? null : null;
   // The file is rendered from the report, not from what is on screen, so a saved copy is the same document wherever
   // it was made — on this page, or by the server on a schedule.
   const download = () => {
     if (!report) return;
     const link = document.createElement("a");
-    link.href = URL.createObjectURL(new Blob([renderSiteReportHtml(report)], { type: "text/html" }));
-    link.download = siteReportFileName(report);
+    link.href = URL.createObjectURL(new Blob([review ? renderEnergyReviewHtml(review) : renderSiteReportHtml(report)], { type: "text/html" }));
+    link.download = review ? energyReviewFileName(review) : siteReportFileName(report);
     link.click();
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   };
   return <section className={styles.fullReport} aria-label={t("panel.aria")}>
-    <style>{REPORT_CSS}</style>
+    <style>{review ? ENERGY_REVIEW_CSS : REPORT_CSS}</style>
     <header>
-      <div><h2>{t("panel.title")}</h2><p>{report ? t("panel.summaryPeriod", { period: report.masthead.period }) : t("panel.summary")}</p>
+      <div><h2>{t("panel.title")}</h2><p>{report ? t(review ? "panel.summaryReview" : "panel.summaryPeriod", { period: report.masthead.period }) : t("panel.summary")}</p>
         {/* Which report this is: the saved one everybody can open again, or one built here because none exists yet. */}
         <p className={styles.reportNotSaved}>{saved ? t("panel.savedNote", { date: writtenOn(saved.generatedAt, locale) }) : t("panel.liveNote")}</p></div>
       <div className={styles.reportActions}>
@@ -199,7 +212,7 @@ export function SiteReportPanel({ state, onRetry, projectId, saved }: { state: S
         <p>{state.error.fixTab && projectId ? <Link href={`/energyiq/project-configuration?${new URLSearchParams({ projectId, tab: state.error.fixTab })}`}>{t("problem.openFacility")}</Link> : null}<button type="button" onClick={onRetry}>{t("panel.retry")}</button></p>
       </div>
       : !report ? <p role="status" className={styles.reportMessage}>{t("panel.loading")}</p>
-      : <div><SiteReportDocument report={report} /></div>}
+      : <div>{review ? <EnergyReviewDocument review={review} /> : <SiteReportDocument report={report} />}</div>}
   </section>;
 }
 

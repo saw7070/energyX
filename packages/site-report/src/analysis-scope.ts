@@ -41,6 +41,10 @@ export type ProjectInformationSource = {
   /** The project's Locations tree; the project itself has no parent. `sortOrder`: the saved order among siblings. Older servers leave it out. */
   locations?: Array<{ id: string; name: string; parentId?: string | null | undefined; sortOrder?: number | undefined }> | undefined;
   calendar: null | { entries: Array<{ location: string; from: string; toExclusive: string | null; weekly: unknown; hoursMeaning?: string | undefined; exceptions: Array<{ date: string; label: string; classification?: string | undefined }> }> };
+  /** The tariff's entries; only each entry's tax is read here (the energy review quotes costs including it). Older servers leave it out. */
+  tariff?: null | { entries: Array<{ location: string; from: string; toExclusive: string | null; taxBasis?: string | null | undefined; tax?: { name: string; ratePct: number } | null | undefined }> } | undefined;
+  /** The site's grid emission factor (kg CO2e per kWh). Older servers leave it out. */
+  carbon?: { kgCo2ePerKwh: number; year: number; source: string } | null | undefined;
 } | null;
 
 const CATEGORY_OF: Record<string, AnalysisCategory | "overall"> = { light: "light", load: "load", aircon: "aircon", it: "it", kitchen: "kitchen", plug: "plug", overall: "overall" };
@@ -208,6 +212,11 @@ export function assembleAnalysisData(input: {
   // How many light points a meter feeds, when someone recorded it: the report's energy per light.
   const lightCounts = (information?.meters ?? []).filter(meter => typeof meter.lightCount === "number" && Number.isInteger(meter.lightCount) && meter.lightCount > 0)
     .map(meter => ({ id: meter.id, name: meterNames.get(meter.id) ?? meter.name ?? meter.id, count: meter.lightCount! }));
+  // The tax on the price in the project's own tariff entry for the last date, as the calendar entry is chosen above.
+  const tariffEntries = information?.tariff?.entries ?? [];
+  const tariffEntry = tariffEntries.find(entry => entry.location === information?.name && entry.from <= lastDate && (!entry.toExclusive || entry.toExclusive > lastDate)) ?? tariffEntries.find(entry => entry.location === information?.name);
+  const tariffTax = tariffEntry?.tax && Number.isFinite(tariffEntry.tax.ratePct) && tariffEntry.tax.ratePct > 0 ? { name: tariffEntry.tax.name, ratePct: tariffEntry.tax.ratePct } : null;
+  const carbon = information?.carbon && Number.isFinite(information.carbon.kgCo2ePerKwh) ? { kgCo2ePerKwh: information.carbon.kgCo2ePerKwh, year: information.carbon.year, source: information.carbon.source } : null;
   const loadedSpaces = input.spaceCurrent.filter((item): item is AnalysisSource => !!item);
   const period = (project: AnalysisSource, loaded: Array<AnalysisSource | null>): LoadedPeriod => ({
     project: toScope(project, locations),
@@ -227,6 +236,8 @@ export function assembleAnalysisData(input: {
     ...(notInUse.length ? { notInUse } : {}),
     ...(alwaysOnByDesign.length ? { alwaysOnByDesign } : {}),
     ...(lightCounts.length ? { lightCounts } : {}),
+    ...(tariffTax ? { tariffTax } : {}),
+    ...(carbon ? { carbon } : {}),
   };
 }
 

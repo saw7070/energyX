@@ -127,7 +127,7 @@ const recipientGroups = (metadataStore: MetadataStore, schedule: EnergyIqReportS
 };
 
 /** One site's own report for the same week or month, in the style that site chose for its automatic reports. */
-export type SiteReportLink = { name: string; style: "full" | "management"; url: string };
+export type SiteReportLink = { name: string; style: "full" | "management" | "review"; url: string };
 
 /**
  * Each site's own report for the period, where it has already been written: the full report or the management review,
@@ -143,7 +143,7 @@ export const siteReportLinks = (metadataStore: MetadataStore, portfolio: Portfol
     const run = store.findByScheduleKey(siteReportScheduleKey(site.projectId, frequency, { from: period.from, toExclusive }));
     if (!run || run.status !== "succeeded" || !run.siteReport) return [];
     const url = base ? `${base}/energyiq/library?${new URLSearchParams({ projectId: site.projectId, reportId: run.id })}` : "";
-    return [{ name: site.name, style: run.siteReport.style === "management" ? "management" as const : "full" as const, url }];
+    return [{ name: site.name, style: run.siteReport.style === "management" || run.siteReport.style === "review" ? run.siteReport.style : "full" as const, url }];
   });
 };
 
@@ -164,7 +164,7 @@ export const reportEmailText = (portfolio: Portfolio, schedule: EnergyIqReportSc
     "The attached PDF compares every site.",
     ...(siteReports.length
       ? ["", `Each site's own report for this ${schedule.frequency === "weekly" ? "week" : "month"}:`,
-        ...siteReports.map((site) => `- ${site.name} (${site.style === "management" ? "management review" : "full report"})${site.url ? `: ${site.url}` : ""}`)]
+        ...siteReports.map((site) => `- ${site.name} (${site.style === "management" ? "management review" : site.style === "review" ? "energy review" : "full report"})${site.url ? `: ${site.url}` : ""}`)]
       : []),
     ...(publicBaseUrl ? ["", `Open in EnergyX: ${publicBaseUrl.replace(/\/$/u, "")}/energyiq/portfolio`] : []),
     "",

@@ -12,7 +12,9 @@ import type { ProjectSpatialReference } from "@datafoundry/contracts";
 import type { AnalysisData } from "./analysis-types.js";
 import type { EnergyIqLocale } from "./locale.js";
 import { buildManagementReview, reviewGroupPct, type ManagementReview, type ReviewGroup, type ReviewSectionId } from "./management-review.js";
-import type { SiteReportStyle } from "./report-style.js";
+import { writtenStyleOf, type SiteReportStyle } from "./report-style.js";
+import { buildEnergyReview } from "./energy-review.js";
+import { renderEnergyReviewHtml } from "./energy-review-document.js";
 import { managementReviewMessages } from "./management-review-messages.js";
 import { rich, Rich } from "./rich.js";
 import { DaytimeBlock, niceTicks, NoUseBlock, PerLightTable, ProfileChart, renderSiteReportHtml, useWidth } from "./site-report-document.js";
@@ -277,11 +279,13 @@ export function renderManagementReviewHtml(review: ManagementReview) {
 export const managementReviewFileName = (review: ManagementReview) => `${review.projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-energy-review-${review.from}-to-${review.to}.html`;
 
 /**
- * The saved page for a site report in the chosen style, from the readings: the full report or the management review.
- * The server uses this for scheduled and custom reports, so both styles come from one place.
+ * The saved page for a site report in the chosen style, from the readings: the full report, the management review or
+ * the energy review (a one-day report in the energy review style is written as the management review; see
+ * writtenStyleOf). The server uses this for scheduled and custom reports, so every style comes from one place.
  */
 export function renderStyledSiteReportHtml(style: SiteReportStyle, data: AnalysisData, reference: ProjectSpatialReference | null, generatedAt: string, locale: EnergyIqLocale = "en") {
-  return style === "management"
-    ? renderManagementReviewHtml(buildManagementReview(data, reference, generatedAt, locale))
+  const written = writtenStyleOf(style, data.current.project.dates.length);
+  return written === "review" ? renderEnergyReviewHtml(buildEnergyReview(data, reference, generatedAt, locale))
+    : written === "management" ? renderManagementReviewHtml(buildManagementReview(data, reference, generatedAt, locale))
     : renderSiteReportHtml(buildSiteReport(data, reference, generatedAt, locale));
 }
