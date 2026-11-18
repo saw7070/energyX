@@ -327,8 +327,8 @@
 :global(:where(html[data-energyiq-theme="dark"])) .heatName { color:#b5c5bd; }
 :global(:where(html[data-energyiq-theme="dark"])) .heatCell { border-radius:3px; }
 :global(:where(html[data-energyiq-theme="dark"])) .heatEmpty { background:repeating-linear-gradient(135deg,#1d1f1d 0 3px,#191919 3px 6px) !important; }
-:global(:where(html[data-energyiq-theme="dark"])) .heatOff { background:#232723; color:#8d9a92; }
-:global(:where(html[data-energyiq-theme="dark"])) .heatUsedWhileOff { background:#d63c2f; color:white; box-shadow:inset 0 0 0 2px #f3908b; }
+:global(:where(html[data-energyiq-theme="dark"])) .heatOff { background:#1e201e; color:#92a098; }
+:global(:where(html[data-energyiq-theme="dark"])) .heatUsedWhileOff { background:#d63c2f; color:white; box-shadow:inset 0 0 0 2px #7a1d14; }
 :global(:where(html[data-energyiq-theme="dark"])) .heatActive { outline:2px solid #1f2d25; }
 :global(:where(html[data-energyiq-theme="dark"])) .heatScale { border-radius:5px; }
 :global(:where(html[data-energyiq-theme="dark"])) .allDevices .tableWrap { border:1px solid #323632; border-radius:12px; }
