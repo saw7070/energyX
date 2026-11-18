@@ -95,6 +95,11 @@ function SiteQuestion({projectId,point,notes}:{projectId:string;point:Point;note
     </details>
   </section>;
 }
+/** The average day's figures ("47 kWh", "S$13") in the brand colour, so the eye lands on the numbers. */
+export function figures(text: string) {
+  const parts = text.split(/((?:[A-Z]{0,3}\$|RM\s?)?\d[\d,.]*(?:\s?(?:kWh|MWh))?)/);
+  return parts.length === 1 ? text : <>{parts.map((part, index) => index % 2 ? <em key={index}>{part}</em> : part)}</>;
+}
 /** A translated sentence with one placeholder shown in bold, e.g. the report date. */
 function withBold(sentence: string, placeholder: string, value: string) {
   const [before, after = ""] = sentence.split(placeholder);
@@ -137,9 +142,12 @@ export function KeyPoints({projectId}:{projectId:string}) {
       <section className={styles.hero}><p className={styles.heroEyebrow}>{metrics?.projectName ?? activeProject?.name ?? t("yourProject")}</p>
         {/* The first view: energy each day, then the site's average day and its month, then where it goes by group. */}
         {report && <DailyEnergyChart report={report} />}
-        <h2>{averageDay ? averageDay.text : report ? <>{report.title.before}<span>{report.title.emphasis}</span></> : site.state && publication?.selection.summary ? plain(publication.selection.summary) : t("fallbackHeadline")}</h2>
-        {averageDay && <p className={styles.heroMonth}>{averageDay.cost != null ? t("monthEstimate", { kwh: kwhText(averageDay.kwh * 30), cost: moneyText(averageDay.cost * 30, report?.currency ?? "SGD") }) : t("monthEstimatePlain", { kwh: kwhText(averageDay.kwh * 30) })}</p>}
-        {split && <GroupSplit rows={split} />}
+        {(() => {
+          const headline = <h2>{averageDay ? figures(averageDay.text) : report ? <>{report.title.before}<span>{report.title.emphasis}</span></> : site.state && publication?.selection.summary ? plain(publication.selection.summary) : t("fallbackHeadline")}</h2>;
+          const month = averageDay && <p className={styles.heroMonth}>{averageDay.cost != null ? t("monthEstimate", { kwh: kwhText(averageDay.kwh * 30), cost: moneyText(averageDay.cost * 30, report?.currency ?? "SGD") }) : t("monthEstimatePlain", { kwh: kwhText(averageDay.kwh * 30) })}</p>;
+          // With groups, the average day and where it goes sit side by side on a wide screen, one above the other on a narrow one.
+          return split ? <div className={styles.heroBody}><div className={styles.heroSummary}>{headline}{month}</div><GroupSplit rows={split} /></div> : headline;
+        })()}
         {averageDay && report && <p className={styles.heroFinding}>{report.title.before}<span>{report.title.emphasis}</span></p>}
         {/* The sentence under the headline only when it adds something: often it is the headline again. */}
         {report?.headline ? (() => { const rest = afterTitle(report.headline, `${report.title.before}${report.title.emphasis}`); return rest ? <p>{rest}</p> : null; })() : null}
