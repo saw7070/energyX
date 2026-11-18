@@ -362,6 +362,13 @@ const drawSummary = (writer: ReportWriter, portfolio: Portfolio): void => {
   writer.y += height;
 };
 
+/** A site's average day, saying which average it is: an average full day, as on its Overview, or of days with readings. */
+const averageDayText = (site: PortfolioSite): string => {
+  if (!(site.averageDailyKwh > 0)) return "";
+  if (site.averageBasis === "reading-days") return `, an average of ${formatKwh(site.averageDailyKwh)} kWh a day over the days with readings (no day had every reading)`;
+  return `, about ${formatKwh(site.averageDailyKwh)} kWh on an average full day`;
+};
+
 /** The few things a manager should notice first, worked out from the figures. */
 export const keyPoints = (portfolio: Portfolio): string[] => {
   const withData = portfolio.sites.filter((site) => site.status === "ok" && site.usageKwh > 0);
@@ -371,7 +378,7 @@ export const keyPoints = (portfolio: Portfolio): string[] => {
   if (top && withData.length > 1 && total > 0) {
     points.push(`${pdfText(top.name)} used the most energy: ${formatKwh(top.usageKwh)} kWh, ${formatNumber((top.usageKwh / total) * 100, 0)}% of the portfolio.`);
   } else if (top) {
-    points.push(`${pdfText(top.name)} used ${formatKwh(top.usageKwh)} kWh, about ${formatKwh(top.averageDailyKwh)} kWh a day.`);
+    points.push(`${pdfText(top.name)} used ${formatKwh(top.usageKwh)} kWh${averageDayText(top)}.`);
   }
   if (portfolio.totals.previousUsageKwh > 0) {
     const change = changePct(total, portfolio.totals.previousUsageKwh);

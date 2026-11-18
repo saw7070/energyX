@@ -21,6 +21,7 @@ import {
   readEnergyCurrentOverviewPeriod,
   readEnergyFactCoverage,
   readEnergyReportingCoverage,
+  parseEnergyDailyMeterFacts,
   readEnergyOverviewHeadline,
   resolveEnergyFactStorePath,
 } from "./energy-scoped-datasource.js";
@@ -423,6 +424,107 @@ describe("Energy scoped datasource Snapshot guard", () => {
           && (error.code === "EPERM" || error.code === "EBUSY"))) throw error;
       }
     }
+  });
+
+  it("reads each official meter's day only when asked: read on time, sent late, minutes and problems", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-overview-headline-days-"));
+    const databasePath = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      metadata.workspaces.upsert({ id: "workspace-1", owner_user_id: "dev-user", name: "Workspace", kind: "customer" });
+      metadata.energyIq.upsertProject({ id: "project-1", workspace_id: "workspace-1", name: "Project", status: "draft" });
+      createBatch(metadata, "batch-a", "sha-a");
+      const materializations = [{ batch_id: "batch-a", summary: summary("sha-a") }];
+      const prepared = metadata.energyIq.prepareProjectManifestMaterialization({
+        project_id: "project-1",
+        materializations,
+        source_manifest_sha256: ["sha-a"],
+      });
+      const base = factWrite("batch-a", "sha-a", "2026-05-01T00:00:00.000Z").intervalFacts[0]!;
+      const at = (meterPointId: string, intervalStart: string, qualityStatus: string, usageKwh: number) => ({
+        ...base,
+        meterPointId,
+        sourceLabel: meterPointId,
+        intervalStart,
+        intervalEnd: new Date(Date.parse(intervalStart) + 900_000).toISOString(),
+        usageKwh,
+        rawDeltaKwh: usageKwh,
+        averageKw: usageKwh * 4,
+        qualityStatus,
+        localDate: intervalStart.slice(0, 10),
+        localHour: 0,
+      });
+      const persisted = await writeEnergyFactProjectMaterialization({
+        databasePath,
+        projectId: "project-1",
+        timezone: "UTC",
+        expectedPreviousDataSnapshotId: prepared.expected_previous_snapshot_id,
+        snapshotFactScope: prepared.fact_scope,
+        batches: [projectBatch({
+          importBatchId: "batch-a",
+          sourceSha256: "sha-a",
+          rawReadings: [],
+          normalizedReadings: [],
+          intervalFacts: [
+            at("meter-a", "2026-05-01T00:00:00.000Z", "ok", 1),
+            at("meter-a", "2026-05-01T00:15:00.000Z", "ok", 1),
+            // Sent late after an outage: real energy, but not read on time.
+            at("meter-b", "2026-05-01T00:00:00.000Z", "gap", 2),
+            at("meter-a", "2026-05-02T00:00:00.000Z", "rejected", 3),
+            at("meter-b", "2026-05-02T00:00:00.000Z", "ok", 0.5),
+            // Not an official meter: left out like everywhere else in the headline.
+            at("meter-c", "2026-05-02T00:00:00.000Z", "ok", 9),
+          ],
+          qualityEvents: [],
+        })],
+      });
+      metadata.energyIq.completeProjectManifestMaterialization({
+        project_id: "project-1",
+        materializations,
+        project_audit: persisted.projectAudit,
+        source_manifest_sha256: ["sha-a"],
+        expected_snapshot_id: prepared.expected_snapshot_id,
+        expected_previous_snapshot_id: prepared.expected_previous_snapshot_id,
+      });
+      const read = (includeDailyMeterFacts?: boolean) => readEnergyOverviewHeadline({
+        metadataStore: metadata,
+        databasePath,
+        workspaceId: "workspace-1",
+        projectId: "project-1",
+        dataSnapshotId: prepared.expected_snapshot_id,
+        resource: "electricity",
+        meterPointIds: ["meter-a", "meter-b"],
+        from: "2026-05-01T00:00:00.000Z",
+        to: "2026-05-03T00:00:00.000Z",
+        ...(includeDailyMeterFacts ? { includeDailyMeterFacts } : {}),
+      });
+
+      const plain = await read();
+      expect(plain.usageKwh).toBe(4.5);
+      expect(plain.dailyMeterFacts).toBeUndefined();
+      expect((await read(true)).dailyMeterFacts).toEqual([
+        { localDate: "2026-05-01", meterPointId: "meter-a", usageKwh: 2, recoveredKwh: 0, validMinutes: 30, qualityEventCount: 0 },
+        { localDate: "2026-05-01", meterPointId: "meter-b", usageKwh: 0, recoveredKwh: 2, validMinutes: 0, qualityEventCount: 1 },
+        { localDate: "2026-05-02", meterPointId: "meter-a", usageKwh: 0, recoveredKwh: 0, validMinutes: 0, qualityEventCount: 1 },
+        { localDate: "2026-05-02", meterPointId: "meter-b", usageKwh: 0.5, recoveredKwh: 0, validMinutes: 15, qualityEventCount: 0 },
+      ]);
+    } finally {
+      metadata.close();
+      try {
+        rmSync(root, { recursive: true, force: true });
+      } catch (error) {
+        if (!(process.platform === "win32" && error instanceof Error && "code" in error
+          && (error.code === "EPERM" || error.code === "EBUSY"))) throw error;
+      }
+    }
+  });
+
+  it("checks every daily meter fact it is given", () => {
+    expect(parseEnergyDailyMeterFacts('[{"d":"2026-05-01","m":"meter-a","k":1.5,"gap":0,"mins":1440.0,"events":0}]'))
+      .toEqual([{ localDate: "2026-05-01", meterPointId: "meter-a", usageKwh: 1.5, recoveredKwh: 0, validMinutes: 1440, qualityEventCount: 0 }]);
+    expect(parseEnergyDailyMeterFacts(null)).toEqual([]);
+    expect(() => parseEnergyDailyMeterFacts('[{"d":"2026-05-01","m":"meter-a","k":null,"gap":0,"mins":0,"events":0}]')).toThrow("ENERGYIQ_DAILY_METER_FACT_INVALID:0");
+    expect(() => parseEnergyDailyMeterFacts('{"d":"2026-05-01"}')).toThrow("ENERGYIQ_DAILY_METER_FACTS_INVALID");
   });
 
   it("reads a historical fact store with the writer revision pinned by its Snapshot", async () => {

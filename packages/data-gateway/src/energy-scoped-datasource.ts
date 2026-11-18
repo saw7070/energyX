@@ -149,6 +149,24 @@ export type EnergyOverviewHeadlineRead = {
   averageKwMismatchCount: number;
   invalidIntervalDurationCount: number;
   intervals: Array<{ start: string; end_exclusive: string; usage_kwh: number }>;
+  /** Only when asked for (includeDailyMeterFacts): see EnergyDailyMeterFact. */
+  dailyMeterFacts?: EnergyDailyMeterFact[];
+};
+
+/**
+ * One official meter's readings on one of the site's local dates, from the same facts as the headline: the kWh read on
+ * time, the kWh it sent late after being offline (quality 'gap'), the minutes read on time, and the intervals that were
+ * not read on time. A meter with no row on a date sent nothing that day. These are the daily sums of the hourly cells the
+ * Analysis page and the reports judge complete days on, so a day can be judged here exactly as there: every expected
+ * minute read on time, and no interval that was not.
+ */
+export type EnergyDailyMeterFact = {
+  localDate: string;
+  meterPointId: string;
+  usageKwh: number;
+  recoveredKwh: number;
+  validMinutes: number;
+  qualityEventCount: number;
 };
 
 export const resolveEnergyFactStorePath = (
@@ -695,6 +713,8 @@ export const readEnergyOverviewHeadline = async (input: {
   from: string;
   to: string;
   databasePath?: string;
+  /** Also read each meter's daily facts (the Portfolio's average full day); off unless asked for. */
+  includeDailyMeterFacts?: boolean;
 }): Promise<EnergyOverviewHeadlineRead> => {
   const databasePath = input.databasePath
     ? normalizeEnergyFactStorePath(input.databasePath)
@@ -781,7 +801,25 @@ export const readEnergyOverviewHeadline = async (input: {
           from_ms := EPOCH_MS(interval_start),
           to_ms := EPOCH_MS(interval_end),
           usage_kwh := usage_kwh
-        ) ORDER BY interval_start, interval_end)) FROM scope_intervals), '[]') AS intervals_json
+        ) ORDER BY interval_start, interval_end)) FROM scope_intervals), '[]') AS intervals_json${input.includeDailyMeterFacts ? `,
+        COALESCE((SELECT TO_JSON(LIST(STRUCT_PACK(
+          d := local_date_text,
+          m := meter_node_id,
+          k := usage_kwh,
+          gap := recovered_kwh,
+          mins := valid_minutes,
+          events := quality_event_count
+        ) ORDER BY local_date_text, meter_node_id)) FROM (
+          SELECT
+            CAST(local_date AS VARCHAR) AS local_date_text,
+            meter_node_id,
+            COALESCE(SUM(usage_kwh) FILTER (WHERE quality_status = 'ok'), 0) AS usage_kwh,
+            COALESCE(SUM(usage_kwh) FILTER (WHERE quality_status = 'gap'), 0) AS recovered_kwh,
+            COALESCE(SUM(elapsed_minutes) FILTER (WHERE quality_status = 'ok'), 0) AS valid_minutes,
+            COUNT(*) FILTER (WHERE quality_status <> 'ok') AS quality_event_count
+          FROM current_facts
+          GROUP BY local_date, meter_node_id
+        )), '[]') AS daily_meter_facts_json` : ""}
     `);
     return {
       usageKwh: numericValue(row.usage_kwh) ?? 0,
@@ -797,6 +835,7 @@ export const readEnergyOverviewHeadline = async (input: {
       averageKwMismatchCount: numericValue(row.average_kw_mismatch_count) ?? 0,
       invalidIntervalDurationCount: numericValue(row.invalid_interval_duration_count) ?? 0,
       intervals: parseEnergyOverviewIntervals(row.intervals_json),
+      ...(input.includeDailyMeterFacts ? { dailyMeterFacts: parseEnergyDailyMeterFacts(row.daily_meter_facts_json) } : {}),
     };
   } finally {
     await duckDbClose(connection).catch(ignoreAlreadyClosed);
@@ -1274,6 +1313,23 @@ const parseEnergyOverviewIntervals = (
       end_exclusive: new Date(toMs).toISOString(),
       usage_kwh: usageKwh,
     };
+  });
+};
+
+export const parseEnergyDailyMeterFacts = (value: unknown): EnergyDailyMeterFact[] => {
+  const parsed = JSON.parse(typeof value === "string" ? value : "[]") as unknown;
+  if (!Array.isArray(parsed)) throw new Error("ENERGYIQ_DAILY_METER_FACTS_INVALID");
+  return parsed.map((item, index) => {
+    const record = typeof item === "object" && item !== null && !Array.isArray(item) ? item as Record<string, unknown> : {};
+    const localDate = typeof record.d === "string" ? record.d.slice(0, 10) : "";
+    const usageKwh = numericValue(record.k);
+    const recoveredKwh = numericValue(record.gap);
+    const validMinutes = numericValue(record.mins);
+    const qualityEventCount = numericValue(record.events);
+    if (!/^\d{4}-\d{2}-\d{2}$/u.test(localDate) || typeof record.m !== "string" || usageKwh === null || recoveredKwh === null || validMinutes === null || qualityEventCount === null) {
+      throw new Error(`ENERGYIQ_DAILY_METER_FACT_INVALID:${index}`);
+    }
+    return { localDate, meterPointId: record.m, usageKwh, recoveredKwh, validMinutes, qualityEventCount };
   });
 };
 

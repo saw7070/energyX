@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { extractText, getDocumentProxy } from "unpdf";
 
 import type { Portfolio, PortfolioSite } from "./energy-portfolio.js";
-import { pdfText, portfolioPdfFileName, renderPortfolioPdf } from "./energy-portfolio-pdf.js";
+import { keyPoints, pdfText, portfolioPdfFileName, renderPortfolioPdf } from "./energy-portfolio-pdf.js";
 
 const SG_FACTOR: PortfolioSite["carbonFactor"] = {
   kgCo2ePerKwh: 0.402,
@@ -25,6 +25,8 @@ const site = (overrides: Partial<PortfolioSite> & Pick<PortfolioSite, "projectId
   status: "ok",
   usageKwh: 1000,
   averageDailyKwh: 33.3,
+  averageBasis: "full-days",
+  fullDays: 30,
   readingDays: 30,
   dailyKwh: [],
   peakKw: 12.5,
@@ -123,6 +125,7 @@ const threeSites = (): Portfolio => portfolioOf([
     reason: "ENERGYIQ_NO_READINGS",
     usageKwh: 0,
     averageDailyKwh: 0,
+    fullDays: 0,
     readingDays: 0,
     peakKw: 0,
     previousUsageKwh: 0,
@@ -213,6 +216,16 @@ describe("portfolio PDF", () => {
     expect(text).toContain("Quarterly energy review");
     expect(text).toContain("No sites in this report.");
     expect(text).toContain("No budgets set");
+  });
+});
+
+describe("portfolio PDF key points", () => {
+  it("gives a lone site's average day as its average full day, or says it is over the days with readings", () => {
+    const one = (overrides: Partial<PortfolioSite>) => keyPoints(portfolioOf([site({ projectId: "p-sktc", name: "SKTC", usageKwh: 1316, ...overrides })]))[0];
+    expect(one({ averageDailyKwh: 47.02, averageBasis: "full-days" })).toBe("SKTC used 1,316 kWh, about 47.0 kWh on an average full day.");
+    expect(one({ averageDailyKwh: 46.04, averageBasis: "reading-days", fullDays: 0 }))
+      .toBe("SKTC used 1,316 kWh, an average of 46.0 kWh a day over the days with readings (no day had every reading).");
+    expect(one({ averageDailyKwh: 0, fullDays: 0, readingDays: 0.4 })).toBe("SKTC used 1,316 kWh.");
   });
 });
 

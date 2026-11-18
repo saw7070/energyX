@@ -13,9 +13,24 @@ import styles from "./portfolio.module.css";
 
 type SortKey = "name" | "usageKwh" | "averageDailyKwh" | "changePct" | "cost" | "peakKw" | "afterHoursSharePct" | "kwhPerSqm" | "carbonKg";
 
-/** A site's kWh on an average day, or null when it has less than a day of readings (an older server sends no day count). */
-export const averageOf = (site: EnergyPortfolioSiteDto): number | null =>
-  site.status !== "ok" ? null : site.readingDays === undefined ? (site.averageDailyKwh > 0 ? site.averageDailyKwh : null) : site.readingDays >= 1 ? site.averageDailyKwh : null;
+/**
+ * Which average a site's averageDailyKwh is, as a newer server sends it (the API's PortfolioSite): its average full day,
+ * the same figure as its Overview ("full-days"), or the average of days with readings when no day had every reading
+ * ("reading-days"); and how many complete days the period had. Both are absent from an older server.
+ */
+export type PortfolioSiteAverage = { averageBasis?: "full-days" | "reading-days"; fullDays?: number };
+type PortfolioSite = EnergyPortfolioSiteDto & PortfolioSiteAverage;
+
+/**
+ * A site's kWh on an average day, or null when there is none: no complete day and less than a day of readings. An
+ * older server says neither which average it sends nor (sometimes) the day count.
+ */
+export const averageOf = (site: PortfolioSite): number | null => {
+  if (site.status !== "ok") return null;
+  if (site.averageBasis) return site.averageDailyKwh;
+  if (site.fullDays !== undefined) return null;
+  return site.readingDays === undefined ? (site.averageDailyKwh > 0 ? site.averageDailyKwh : null) : site.readingDays >= 1 ? site.averageDailyKwh : null;
+};
 /** Every local date from the period's first to its last day. */
 const periodDates = (period: { from: string; to: string }) => {
   const dates: string[] = [];
@@ -31,8 +46,15 @@ export function PortfolioView({ portfolio }: { portfolio: EnergyPortfolioDto }) 
   const format = useMemo(() => formatters(intlLocale(locale)), [locale]);
   const { totals } = portfolio;
   const change = totals.previousUsageKwh > 0 ? ((totals.usageKwh - totals.previousUsageKwh) / totals.previousUsageKwh) * 100 : null;
+  // The tile adds up each site's average day: say whether those are average full days, as on each site's Overview.
+  const averaged = (portfolio.sites as PortfolioSite[]).filter(site => averageOf(site) !== null && site.averageBasis);
+  const fromReadingDays = averaged.filter(site => site.averageBasis === "reading-days").length;
+  const averageNote = !averaged.length ? t("tile.averageNote")
+    : fromReadingDays === 0 ? t("tile.averageFullDays")
+      : fromReadingDays === averaged.length ? t("tile.averageReadingDays")
+        : t("tile.averageMixed", { count: fromReadingDays });
   const budgeted = portfolio.sites.filter(site => site.budget);
-  const sites = useMemo(() => sortSites(portfolio.sites, sort.key, sort.descending), [portfolio.sites, sort]);
+  const sites = useMemo(() => sortSites(portfolio.sites as PortfolioSite[], sort.key, sort.descending), [portfolio.sites, sort]);
   const largest = Math.max(1, ...portfolio.sites.map(site => site.usageKwh));
   const showIntensity = portfolio.sites.some(site => site.kwhPerSqm !== undefined);
   const factors = uniqueFactors(portfolio.sites);
@@ -86,7 +108,7 @@ export function PortfolioView({ portfolio }: { portfolio: EnergyPortfolioDto }) 
     <div className={styles.stack}>
       <section className={styles.tiles} aria-label={t("title")}>
         <Tile icon="bolt" iconTone="energy" chip={change === null ? undefined : format.signedPct(change)} chipTone={change !== null && change > 0 ? "up" : "down"} label={t("tile.energy")} value={`${format.kwh(totals.usageKwh)} kWh`} note={change === null ? t("tile.sites", { count: totals.sitesWithData }) : t("tile.change", { change: format.signedPct(change) })} />
-        <Tile icon="calendar" iconTone="energy" label={t("tile.average")} value={totals.averageDailyKwh ? `${format.kwh(totals.averageDailyKwh)} kWh` : "—"} note={t("tile.averageNote")} />
+        <Tile icon="calendar" iconTone="energy" label={t("tile.average")} value={totals.averageDailyKwh ? `${format.kwh(totals.averageDailyKwh)} kWh` : "—"} note={averageNote} />
         <Tile icon="dollar" iconTone="cost" label={t("tile.cost")} value={Object.keys(totals.costByCurrency).length
           ? Object.entries(totals.costByCurrency).map(([currency, amount]) => withCurrency(currency, format.money(amount))).join(" + ")
           : "—"} note={Object.keys(totals.costByCurrency).length ? undefined : t("tile.noCost")} />
@@ -137,8 +159,11 @@ export function PortfolioView({ portfolio }: { portfolio: EnergyPortfolioDto }) 
                     <td className={styles.numeric}>{format.kwh(site.usageKwh)}</td>
                     <td className={styles.numeric}>
                       {averageOf(site) === null ? "—" : format.kwh(averageOf(site)!)}
-                      {/* A site connected part-way through, or with days lost, says how many days the average is over. */}
-                      {site.readingDays !== undefined && site.readingDays >= 1 && site.readingDays <= dates.length - 1 && <small className={styles.cellNote}>{t("readingDays", { days: format.days(site.readingDays) })}</small>}
+                      {/* Which average it is: an average full day, as on the site's Overview, or of days with readings. An older
+                          server does not say; there a site connected part-way through, or with days lost, gives its days of readings. */}
+                      {site.averageBasis
+                        ? <small className={styles.cellNote}>{t(site.averageBasis === "full-days" ? "average.fullDay" : "average.readingDays")}</small>
+                        : site.fullDays === undefined && site.readingDays !== undefined && site.readingDays >= 1 && site.readingDays <= dates.length - 1 && <small className={styles.cellNote}>{t("readingDays", { days: format.days(site.readingDays) })}</small>}
                     </td>
                     <td className={styles.trendCell}>
                       <Sparkline values={site.dailyKwh ?? []} average={averageOf(site)} label={trendLabel(site.dailyKwh ?? [])} pointLabel={pointLabel(site.dailyKwh ?? [])} keysHint={t("trendKeys")} />
@@ -295,8 +320,8 @@ function BudgetBadge({ site }: { site: EnergyPortfolioSiteDto }) {
   return <span className={`${styles.badge} ${styles[budget.status]}`} title={tip}>{t(`budget.${budget.status}`)}{tip && <span className={styles.srOnly}>: {tip}</span>}</span>;
 }
 
-const sortSites = (sites: EnergyPortfolioSiteDto[], key: SortKey, descending: boolean): EnergyPortfolioSiteDto[] => {
-  const value = (site: EnergyPortfolioSiteDto): number | string | undefined => key === "name" ? site.name
+const sortSites = (sites: PortfolioSite[], key: SortKey, descending: boolean): PortfolioSite[] => {
+  const value = (site: PortfolioSite): number | string | undefined => key === "name" ? site.name
     : key === "cost" ? site.cost?.amount
     : key === "changePct" ? site.changePct ?? undefined
     : key === "averageDailyKwh" ? averageOf(site) ?? undefined

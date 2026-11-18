@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ScopeData, TrendCell } from "./analysis-data";
 import {
-  aboveBenchmarkWhenClosed, alwaysOnKw, categoryTotals, closedUseBreakdown, dayTypeBaselines, findAnomalies, hourlyProfile, isOpenHour,
+  aboveBenchmarkWhenClosed, alwaysOnKw, averageFullDay, categoryTotals, closedUseBreakdown, dayTypeBaselines, findAnomalies, hourlyProfile, isOpenHour,
   localDayType, lowestNightKw, meterHeatmap, openingLabel, overnightFloor, percentChange, savingsPlan, statusFor, storyProfile, timeBuckets, topHours, weekdayWindows, type AnalysisDay,
 } from "./analysis-model";
 
@@ -21,6 +21,16 @@ describe("analysis calculations", () => {
       { dayType: "weekend", samples: 2, expectedKwh: null },
       { dayType: "public_holiday", samples: 0, expectedKwh: null },
     ]);
+  });
+
+  it("leads with an average full day: a week of five weekdays and two days off, or every complete day alike for lights", () => {
+    const days = [day("2026-06-01", "weekday", 50), day("2026-06-02", "weekday", 50), day("2026-06-03", "weekday", 50), day("2026-06-04", "weekday", 999, false),
+      day("2026-06-06", "weekend", 20), day("2026-06-07", "weekend", 999, false), day("2026-06-08", "public_holiday", 26)];
+    // Weekdays 50, days off (a weekend day and a public holiday) 23: not the plain mean of the complete days.
+    expect(averageFullDay(days)).toBeCloseTo((50 * 5 + 23 * 2) / 7, 6);
+    expect(averageFullDay(days, "lights_on")).toBeCloseTo((50 * 3 + 20 + 26) / 5, 6);
+    expect(averageFullDay(days.filter(item => item.dayType === "weekday"))).toBe(50);
+    expect(averageFullDay([day("2026-06-04", "weekday", 999, false)])).toBeNull();
   });
 
   it("flags complete days more than 15% above their day-type level and ignores days without a level", () => {
