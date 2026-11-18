@@ -22,7 +22,9 @@ function ticks(top: number): number[] {
 }
 
 /** How many devices the hover box lists before "and N more". */
-const TIP_DEVICES = 6;
+const TIP_DEVICES = 5;
+/** The hover box's width: wide enough that a device name rarely wraps. */
+const TIP_WIDTH = 300;
 /** A bar with rounded top corners only, so it stands on the baseline. */
 const barPath = (x: number, top: number, w: number, h: number) => {
   if (h <= 0) return "";
@@ -79,6 +81,10 @@ export function DailyEnergyChart({ report }: { report: SiteReport }) {
   const names = lateNames(outage, locale, count => t("dailyOutageMore", { count }));
   const outageText = { dates: outage.map(item => shortDay(item.date, locale)).join(", "), kwh: `${num(outage.reduce((sum, item) => sum + item.recoveredKwh, 0))} kWh` };
   const tipX = hover == null ? 0 : m.l + band * (hover + 0.5);
+  // The hover box opens beside the day, from the top of the chart, so a long list of devices grows down over the
+  // chart instead of up under the page header. Right of the day when it fits, else left, else inside the chart.
+  const tipAt = tipX - (box.current?.scrollLeft ?? 0), tipGap = band / 2 + 8, tipW = Math.min(TIP_WIDTH, width);
+  const tipLeft = tipAt + tipGap + tipW <= width ? tipAt + tipGap : tipAt - tipGap - tipW >= 0 ? tipAt - tipGap - tipW : Math.max(0, Math.min(width - tipW, tipAt - tipW / 2));
   const against = day && typical != null && typical > 0 ? day.kwh / typical - 1 : null;
   return <figure className={styles.daily}>
     <figcaption className={styles.dailyHead}>
@@ -122,7 +128,7 @@ export function DailyEnergyChart({ report }: { report: SiteReport }) {
           </g>}
         </svg>
       </div>
-      {day && <div className={`${styles.dailyTip}${tipX < 120 ? ` ${styles.dailyTipLeft}` : tipX > width - 120 ? ` ${styles.dailyTipRight}` : ""}`} role="status" style={{ left: tipX - (box.current?.scrollLeft ?? 0), top: Math.max(y(valueOf(day.kwh)), 8) }}>
+      {day && <div className={styles.dailyTip} role="status" style={{ left: tipLeft, top: 0, width: tipW }}>
         <b>{day.dow} {shortDay(day.date, locale)}</b>
         <span><i>{t("dailyEnergy")}</i><strong>{num(day.kwh)} kWh</strong></span>
         {rate != null && <span><i>{t("dailyCost")}</i><strong>{moneyText(day.kwh * rate, report.currency, 2)}</strong></span>}
