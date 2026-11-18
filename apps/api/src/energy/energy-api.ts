@@ -424,6 +424,10 @@ export const handleEnergyApiRequest = async (
       const { handleActionApi } = await import("../report-agent/action-api.js");
       return handleActionApi(request, segments.slice(1), context);
     }
+    if (segments[0] === "report-feedback") {
+      const { handleReportFeedbackApi } = await import("../report-agent/report-feedback-api.js");
+      return handleReportFeedbackApi(request, segments.slice(1), context);
+    }
     if (segments[0] === "report-library") {
       const { handleReportLibraryApi } = await import("../report-agent/report-library-api.js");
       return handleReportLibraryApi(request, segments.slice(1), context);

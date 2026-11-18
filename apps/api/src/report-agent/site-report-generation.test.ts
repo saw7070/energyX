@@ -328,3 +328,31 @@ it("keeps every weekly, monthly and custom report listed however many daily repo
   expect(dailyListed).toHaveLength(92);
   expect(dailyListed).toEqual(daily.slice(-92));
 });
+
+it("checks report feedback follow-ups in the background after a scheduled weekly or monthly report, never holding it up", async () => {
+  const { publish, settings } = setup();
+  const reviewFollowUps = vi.fn(() => new Promise<unknown>(() => undefined));
+  const weekly = await publish({ reviewFollowUps });
+  expect(weekly.created).toBe(true);
+  expect(reviewFollowUps).toHaveBeenCalledTimes(1);
+  expect(reviewFollowUps).toHaveBeenCalledWith(expect.objectContaining({
+    workspaceId: "workspace", projectId: "project", actorUserId: settings.actorUserId, cadence: "weekly", generatedAt: "2026-08-17T02:00:00Z",
+    data: expect.objectContaining({ projectName: "Tuya Office" }), reference: null,
+  }));
+  // The same period again publishes nothing, so nothing is checked again.
+  await publish({ reviewFollowUps });
+  expect(reviewFollowUps).toHaveBeenCalledTimes(1);
+  // A daily report does not spend an AI request on follow-ups.
+  await publish({ reviewFollowUps, cadence: "daily", period: { from: "2026-08-16", toExclusive: "2026-08-17" } });
+  expect(reviewFollowUps).toHaveBeenCalledTimes(1);
+});
+
+it("still publishes the report when checking follow-ups fails", async () => {
+  const { publish } = setup();
+  vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  const rejected = await publish({ reviewFollowUps: async () => { throw new Error("AI down"); } });
+  expect(rejected.created).toBe(true);
+  const thrown = await publish({ cadence: "monthly", period: { from: "2026-07-01", toExclusive: "2026-08-01" }, reviewFollowUps: () => { throw new Error("not even started"); } });
+  expect(thrown.created).toBe(true);
+  expect(thrown.run.status).toBe("succeeded");
+});
