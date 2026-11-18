@@ -49,6 +49,7 @@ export const PAYLOAD_SCHEMAS = {
   meter_not_in_use: z.object({ meterId, meterName, reason: z.string().trim().min(1).max(160) }).strict(),
   meter_in_use: z.object({ meterId, meterName }).strict(),
   meter_always_on: z.object({ meterId, meterName, alwaysOn: z.boolean() }).strict(),
+  meter_never_used: z.object({ meterId, meterName, neverUsed: z.boolean() }).strict(),
   light_count: z.object({ meterId, meterName, count: z.number().int().min(1).max(9999) }).strict(),
   holiday: z.object({
     date: dateText, label: z.string().trim().min(1).max(80), closed: z.literal(true),
@@ -75,6 +76,8 @@ export type SuggestionPayloads = {
   meter_not_in_use: { meterId: string; meterName: string; reason: string };
   meter_in_use: { meterId: string; meterName: string };
   meter_always_on: { meterId: string; meterName: string; alwaysOn: boolean };
+  /** `neverUsed` true: the meter should never use power, so any use raises an alert. */
+  meter_never_used: { meterId: string; meterName: string; neverUsed: boolean };
   light_count: { meterId: string; meterName: string; count: number };
   holiday: { date: string; label: string; closed: true; classification: "public_holiday" | "special_closure" };
   electricity_rate: { ratePerKwh: number; effectiveFrom: string; currency: string };
@@ -130,6 +133,15 @@ export function normalizeSuggestion(kind: unknown, rawPayload: unknown, context:
       return {
         kind: "meter_always_on", payload: { meterId: meter.id, meterName: meter.name, alwaysOn: value.alwaysOn },
         label: value.alwaysOn ? `Mark ${meter.name} as always on by design` : `Mark ${meter.name} as not always on`,
+      };
+    }
+    case "meter_never_used": {
+      const value = parsed.data as z.infer<typeof PAYLOAD_SCHEMAS.meter_never_used>;
+      const meter = meterOf(value.meterId);
+      if (!meter || !!meter.neverUsed === value.neverUsed) return null;
+      return {
+        kind: "meter_never_used", payload: { meterId: meter.id, meterName: meter.name, neverUsed: value.neverUsed },
+        label: value.neverUsed ? `Alert when ${meter.name} uses any power (it should never use power)` : `Stop alerting when ${meter.name} uses power`,
       };
     }
     case "light_count": {

@@ -68,6 +68,34 @@ it("keeps a meter's always-on mark and number of lights through the setup HTTP b
   } finally {metadata.close();rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:100});}
 });
 
+it("keeps a meter's \"should never use power\" mark through the setup HTTP boundary as a yes/no", async () => {
+  const root = mkdtempSync(join(tmpdir(), "energy-presentation-"));
+  const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+  const put = async (body: unknown) => {
+    const stream = new PassThrough();
+    Object.assign(stream,{method:"PUT",headers:{}});
+    stream.end(JSON.stringify(body));
+    return handleEnergyApiRequest(stream as unknown as IncomingMessage,["projects",TUYA_OFFICE_PROJECT_ID,"setup","draft"],{
+      metadataStore:metadata,dataGateway:new LocalDataGateway(metadata),userId:"dev-user",workspaceId:TUYA_OFFICE_WORKSPACE_ID,
+    } as unknown as Required<ConfigApiContext>);
+  };
+  try {
+    ensureEnergyIqBootstrap(metadata);
+    const draft = metadata.energyIq.projectSetup.getDraft({ project_id: TUYA_OFFICE_PROJECT_ID, user_id: "dev-user" });
+    const document = structuredClone(draft.document);
+    document.meter_mapping!.rows[0]!.presentation = { device_name: "Pavilion fan", never_used: " true " } as never;
+    document.meter_mapping!.rows[1]!.presentation = { device_name: "Corridor lights", never_used: "no" } as never;
+    expect((await put({ expectedRevision: draft.revision, document })).status).toBe(200);
+    const saved = metadata.energyIq.projectSetup.getDraft({ project_id: TUYA_OFFICE_PROJECT_ID, user_id: "dev-user" });
+    expect(saved.document.meter_mapping!.rows[0]!.presentation).toEqual({ device_name: "Pavilion fan", never_used: "true" });
+    expect(saved.document.meter_mapping!.rows[1]!.presentation).toEqual({ device_name: "Corridor lights" });
+
+    const invalid = structuredClone(saved.document);
+    invalid.meter_mapping!.rows[0]!.presentation = { device_name: "Pavilion fan", never_used: true } as never;
+    expect(await put({ expectedRevision: saved.revision, document: invalid })).toMatchObject({ status: 400, body: { error: { message: "ENERGYIQ_METER_PRESENTATION_INVALID:never_used" } } });
+  } finally {metadata.close();rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:100});}
+});
+
 it("groups all Tuya meters and keeps DB2 Other strictly within the Power boundary", () => {
   const mapping = buildTuyaOfficeSetup().meter_mapping!;
   expect(mapping.rows).toHaveLength(20);

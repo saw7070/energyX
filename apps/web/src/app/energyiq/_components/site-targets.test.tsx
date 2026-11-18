@@ -2,10 +2,15 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { EnergyProjectTargetsDto } from "../../../lib/config-api";
+import { configApi, type EnergyProjectTargetsDto } from "../../../lib/config-api";
 import { SiteTargetsView } from "./site-targets";
 
-beforeEach(() => { vi.stubGlobal("React", React); (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true; });
+const meterAlertSettings = { projectId: "kl", patternAlerts: true, hardwareEmails: [], maxHardwareEmails: 5, canEditPattern: true, canEditRecipients: false };
+beforeEach(() => {
+  vi.stubGlobal("React", React); (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  vi.spyOn(configApi, "meterAlertSettingsRequest").mockImplementation(async (_projectId, init) =>
+    (init?.method === "PUT" ? { ...meterAlertSettings, ...JSON.parse(String(init.body)) } : meterAlertSettings) as never);
+});
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); document.body.innerHTML = ""; });
 
 const official = { basis: "grid" as const, grid: "MY-PENINSULAR" as const, kgCo2ePerKwh: 0.74, year: 2024, source: "Energy Commission Malaysia, Grid Emission Factor (Peninsular)", provisional: true };
@@ -109,5 +114,26 @@ it("shows this month's peak against the limit, saves a new limit, and builds the
   await setValue(other, "Charles@Client.com ");
   await act(async () => Array.from(alerts.querySelectorAll("button")).find(button => button.textContent === "Add")!.click());
   expect(onSave).toHaveBeenLastCalledWith({ alertEmails: ["charles@client.com"] });
+  await act(async () => root.unmount());
+});
+
+it("switches unusual hourly use alerts off and on for the site, kept apart from the targets", async () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const onSave = vi.fn();
+  await act(async () => root.render(<SiteTargetsView targets={targets} busy={false} error={null} notice={null} onSave={onSave} />));
+  await act(async () => undefined);
+  const card = Array.from(host.querySelectorAll("section section")).find(candidate => candidate.textContent?.includes("Unusual hourly use"))!;
+  expect(card.textContent).toContain("compared with its usual use over the last three weeks");
+  expect(card.textContent).toContain("Should never use power");
+  const toggle = card.querySelector('button[role="switch"]') as HTMLButtonElement;
+  expect(toggle.getAttribute("aria-checked")).toBe("true");
+  await act(async () => toggle.click());
+  await act(async () => undefined);
+  expect(configApi.meterAlertSettingsRequest).toHaveBeenLastCalledWith("kl", { method: "PUT", body: JSON.stringify({ patternAlerts: false }) });
+  expect(toggle.getAttribute("aria-checked")).toBe("false");
+  expect(card.textContent).toContain("Unusual hourly use alerts are off for this site.");
+  expect(onSave).not.toHaveBeenCalled();
   await act(async () => root.unmount());
 });

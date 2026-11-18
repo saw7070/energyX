@@ -45,6 +45,32 @@ export function applyMeterNotInUse(document: EnergyProjectSetupDocumentDto, mete
   };
 }
 
+/** Whether a meter is marked "should never use power" (presentation.never_used, "true" or absent). */
+export const meterNeverUsed = (document: EnergyProjectSetupDocumentDto, meterId: string): boolean =>
+  (document.meter_mapping?.rows.find(row => row.id === meterId)?.presentation as { never_used?: string } | undefined)?.never_used === "true";
+
+/**
+ * Mark a meter as one that should never use power (any use then raises an alert), or clear the mark. Nothing that
+ * decides readings changes.
+ */
+export function applyMeterNeverUsed(document: EnergyProjectSetupDocumentDto, meterId: string, neverUsed: boolean): EnergyProjectSetupDocumentDto {
+  const mapping = document.meter_mapping;
+  if (!mapping) return document;
+  return {
+    ...document,
+    meter_mapping: {
+      ...mapping,
+      rows: mapping.rows.map(row => {
+        if (row.id !== meterId) return row;
+        const { never_used: _previous, ...rest } = (row.presentation ?? {}) as NonNullable<typeof row.presentation> & { never_used?: string };
+        const presentation = neverUsed ? { ...rest, never_used: "true" } : rest;
+        const { presentation: _old, ...withoutPresentation } = row;
+        return Object.keys(presentation).length ? { ...withoutPresentation, presentation } : withoutPresentation;
+      }),
+    },
+  };
+}
+
 /** An ISO instant as the site's own date and time, "2026-09-03 14:00", for the spreadsheet. */
 export const siteDateTime = (iso: string, timezone: string): string => {
   const parts = Object.fromEntries(new Intl.DateTimeFormat("en-GB", {

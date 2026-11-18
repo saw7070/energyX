@@ -23,6 +23,7 @@ export type SuggestionKind =
   | "meter_not_in_use"
   | "meter_in_use"
   | "meter_always_on"
+  | "meter_never_used"
   | "light_count"
   | "holiday"
   | "electricity_rate"
@@ -261,6 +262,7 @@ function localSuggestionLabel(suggestion: SuggestionDto, locale: EnergyIqLocale,
     }
     case "meter_in_use": return name ? t("label.meterInUse", { name }) : null;
     case "meter_always_on": return name && typeof payload.alwaysOn === "boolean" ? t(payload.alwaysOn ? "label.alwaysOn" : "label.notAlwaysOn", { name }) : null;
+    case "meter_never_used": return name && typeof payload.neverUsed === "boolean" ? t(payload.neverUsed ? "label.neverUsed" : "label.notNeverUsed", { name }) : null;
     case "light_count": {
       const count = payload.count;
       return name && typeof count === "number" && Number.isInteger(count) && count > 0 ? t("label.lightCount", { name, count: count.toLocaleString(intlLocale(locale)) }) : null;

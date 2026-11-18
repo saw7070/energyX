@@ -5,6 +5,7 @@ import { createMailDelivery, type MailDelivery } from "../email/mail-delivery.js
 import { defineBackgroundJob } from "../observability/background-jobs.js";
 import { logger } from "../observability/logger.js";
 import { sendPendingAlertEmails, type AlertEmail } from "./energy-alert-emails.js";
+import { runMeterAlerts, type MeterAlertReadings } from "./energy-meter-alerts.js";
 import { evaluateSiteChecks, localDate, shiftDate, type OvernightFinding, type PeakDemandStatus, type PortfolioBudgetStatus } from "./energy-portfolio.js";
 import { readerForWorkspace, siteAlertRecipients } from "./energy-recipients.js";
 
@@ -12,6 +13,10 @@ import { readerForWorkspace, siteAlertRecipients } from "./energy-recipients.js"
  * Once a day per site, after the night's readings are in: is the month heading over budget, was last night's use
  * unusually high, and did demand reach the site's limit or set a new high? Each finding becomes an alert in the bell
  * (kept, so it is shown once per person) and, unless turned off, one email to the site's alert recipients.
+ *
+ * Every hour, too, each site with new readings since its last check (the nightly update, its hourly retries, an
+ * upload) is checked for meter alerts: meters that stopped sending, a meter that used power it never should, and
+ * unusual hourly use (energy-meter-alerts.ts). Off with ENERGYIQ_METER_ALERTS_ENABLED=false.
  */
 const CHECK_INTERVAL_MS = 60 * 60_000;
 /** Late enough that the nightly update (02:00) and the morning's live readings are in. */
@@ -87,12 +92,15 @@ export const createEnergyTargetsMonitor = (input: {
   delivery?: MailDelivery;
   fallbackReaderUserId?: string;
   now?: () => Date;
+  /** Reads a site's meter readings for the meter alerts; tests pass their own. */
+  readMeterAlertReadings?: (metadataStore: MetadataStore, projectId: string, now: Date) => Promise<MeterAlertReadings>;
 }): EnergyTargetsMonitor => {
   const env = input.env ?? process.env;
   const now = input.now ?? (() => new Date());
   const delivery = input.delivery ?? createMailDelivery(env);
   const emailsOn = env.ENERGYIQ_TARGET_ALERT_EMAILS?.trim().toLowerCase() !== "false";
   const publicBaseUrl = loadPasswordAuthConfig(env).publicBaseUrl;
+  const meterAlertsOn = env.ENERGYIQ_METER_ALERTS_ENABLED?.trim().toLowerCase() !== "false";
   /** The local day each site was last checked, so the hourly tick does the work once a day. */
   const checked = new Map<string, string>();
   const job = defineBackgroundJob("target-alert", { staleAfterMs: 3 * CHECK_INTERVAL_MS });
@@ -108,6 +116,25 @@ export const createEnergyTargetsMonitor = (input: {
         .filter((candidate) => candidate.status === "published");
       for (const project of projects) {
         const at = now();
+        // Meter alerts follow new readings, at any hour; a failure here never stops the daily checks below.
+        if (meterAlertsOn) {
+          try {
+            const run = await runMeterAlerts({
+              metadataStore: input.metadataStore,
+              projectId: project.id,
+              now: at,
+              env,
+              ...(delivery.mode !== "off" ? { send: delivery.send } : {}),
+              publicBaseUrl,
+              ...(input.readMeterAlertReadings ? { read: input.readMeterAlertReadings } : {}),
+            });
+            if (run.opened.length || run.resolved.length || run.emailed.length || run.emailFailures) {
+              log.info("meter-alerts", { project_id: project.id, opened: run.opened.length, resolved: run.resolved.length, emailed: run.emailed.length, email_failures: run.emailFailures });
+            }
+          } catch (error) {
+            log.error("meter-alerts-failed", { project_id: project.id, code: error instanceof Error ? error.message.slice(0, 160) : "unknown" });
+          }
+        }
         const local = localDate(at, project.timezone);
         const hour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: project.timezone, hour: "2-digit", hourCycle: "h23" }).format(at));
         if (checked.get(project.id) === local || hour < CHECK_FROM_LOCAL_HOUR) continue;

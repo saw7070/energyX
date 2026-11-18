@@ -25,7 +25,7 @@ export const CALENDAR_DAY: Record<WeekDay, EnergyIqOperatingDay> = {
   mon: "monday", tue: "tuesday", wed: "wednesday", thu: "thursday", fri: "friday", sat: "saturday", sun: "sunday",
 };
 
-export type FeedbackSiteMeter = { id: string; name: string; group: string; notInUse?: string; alwaysOn?: true; lightCount?: number };
+export type FeedbackSiteMeter = { id: string; name: string; group: string; notInUse?: string; alwaysOn?: true; neverUsed?: true; lightCount?: number };
 
 export type FeedbackSite = {
   projectName: string;
@@ -106,6 +106,7 @@ export function readFeedbackSite(metadata: MetadataStore, projectId: string, now
       id: meter.id, name: meter.name, group: meter.location,
       ...(meter.notInUse ? { notInUse: meter.notInUse } : {}),
       ...(meter.alwaysOn ? { alwaysOn: true as const } : {}),
+      ...(meter.neverUsed ? { neverUsed: true as const } : {}),
       ...(meter.lightCount ? { lightCount: meter.lightCount } : {}),
     }));
   } catch {

@@ -420,6 +420,11 @@ export const handleEnergyApiRequest = async (
       const response = await handlePortfolioApi(request, segments, context, user, { readJsonBody });
       if (response) return response;
     }
+    if (segments[0] === "projects" && segments[2] === "meter-alerts") {
+      const { handleMeterAlertsApi } = await import("./energy-meter-alerts-api.js");
+      const response = await handleMeterAlertsApi(request, segments, context, user, { readJsonBody });
+      if (response) return response;
+    }
     if (segments[0] === "report-actions") {
       const { handleActionApi } = await import("../report-agent/action-api.js");
       return handleActionApi(request, segments.slice(1), context);
@@ -2005,6 +2010,8 @@ export const handleEnergyApiRequest = async (
             userId: user.id,
             includeReports: capabilities.readReports,
             includeSync: capabilities.publishConfiguration,
+            // Meters that stopped sending are for the people who look after the hardware, not everyone who runs the site.
+            includeHardware: capabilities.manageLiveConnection,
             reportRuns,
           })),
         };
@@ -5009,7 +5016,7 @@ const AUDIT_CATEGORIES: Record<string, { categories?: string[]; eventTypes?: str
   access: { categories: ["energyiq.user_", "energyiq.team_", "energyiq.role_", "energyiq.organisation_"] },
   projects: { categories: ["energyiq.project_", "energyiq.electricity_rate", "energyiq.hours_", "energyiq.policy_", "energyiq.setup_",
     "energyiq.changes_made_live", "energyiq.data_import", "energyiq.live_connection", "energyiq.locations_", "energyiq.analysis_rules",
-    "energyiq.overview_layout", "energyiq.budget_carbon", "energyiq.report_"] },
+    "energyiq.overview_layout", "energyiq.budget_carbon", "energyiq.meter_alerts", "energyiq.report_"] },
   ai: { categories: ["energyiq.ai_"] },
   platform: { categories: ["energyiq.platform_", "energyiq.support_", "energyiq.audit_"] },
 };
@@ -5437,12 +5444,12 @@ const MAX_METER_LIGHT_COUNT = 9999;
 
 const parseMeterPresentation = (value: unknown) => {
   const presentation = requireRecord(value, "ENERGYIQ_METER_PRESENTATION_INVALID");
-  return Object.fromEntries(["device_name", "circuit_name", "group", "not_in_use", "off_with_lights", "short_name", "panel", "always_on", "light_count"].flatMap(key => {
+  return Object.fromEntries(["device_name", "circuit_name", "group", "not_in_use", "off_with_lights", "short_name", "panel", "always_on", "light_count", "never_used"].flatMap(key => {
     if (presentation[key] === undefined) return [];
     if (typeof presentation[key] !== "string") throw new Error(`ENERGYIQ_METER_PRESENTATION_INVALID:${key}`);
     const label = presentation[key].trim().slice(0, 160);
-    // Always on is a yes/no: "true" keeps it, anything else (an unticked box) leaves it out.
-    if (key === "always_on") return label === "true" ? [[key, label]] : [];
+    // Always on and should never use power are yes/no: "true" keeps them, anything else (an unticked box) leaves them out.
+    if (key === "always_on" || key === "never_used") return label === "true" ? [[key, label]] : [];
     if (key === "light_count" && label) {
       const count = /^\d+$/u.test(label) ? Number(label) : Number.NaN;
       if (!(count >= 1 && count <= MAX_METER_LIGHT_COUNT)) throw new Error(`ENERGYIQ_METER_PRESENTATION_INVALID:${key}`);

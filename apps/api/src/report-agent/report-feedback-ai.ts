@@ -59,6 +59,7 @@ const SUGGESTION_GUIDE = `Suggestion kinds and their payloads (use only these):
 - "meter_not_in_use": {"meterId":"<id from meters>","reason":"<why, up to 160 characters>"}
 - "meter_in_use": {"meterId":"<id from meters>"} (only for a meter now marked not in use)
 - "meter_always_on": {"meterId":"<id from meters>","alwaysOn":true|false} (true: meant to run day and night, like emergency lighting)
+- "meter_never_used": {"meterId":"<id from meters>","neverUsed":true|false} (true: the meter should never use power, so any use raises an alert; for example "the pavilion fan must never run")
 - "light_count": {"meterId":"<id from meters>","count":<whole number 1 to 9999>} (how many light points the meter feeds)
 - "holiday": {"date":"YYYY-MM-DD","label":"<name>","closed":true,"classification":"public_holiday"|"special_closure"}
 - "electricity_rate": {"ratePerKwh":<number>,"effectiveFrom":"YYYY-MM-DD"} (in the current rate's currency)`;
@@ -71,7 +72,7 @@ Rules:
 - You change nothing yourself. Suggestions are only applied if an administrator chooses to.
 - Use only meter ids from site.meters. Never invent or guess a meter id. If you cannot tell which meter is meant, do not suggest a meter change; remember the feedback instead.
 - Suggest only the kinds listed below. When unsure, prefer memory over a suggestion.
-- Memory is for lasting facts about the site, rules that must hold (for example "the pavilion fan must never run"), and explanations of past readings (for example why a day was low). Do not repeat what is already in memory.
+- Memory is for lasting facts about the site, rules that must hold (for example "the pavilion fan must never run"; when such a rule says a meter in site.meters must never use power, also suggest "meter_never_used" for it), and explanations of past readings (for example why a day was low). Do not repeat what is already in memory.
 - Add a follow-up only when something should be checked in a later report, for example whether a repair worked.
 - Use dismissChecks only when the feedback says a point to check in the report is expected or not a problem. checkKey must be a key from user_data.report_context.checks or user_data.about; the report words the point itself.
 - Write the reply, memory and follow-ups in the same language as the feedback, in plain words and short sentences.

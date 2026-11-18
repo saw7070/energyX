@@ -1,24 +1,26 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { configApi, type EnergyLiveReadingsDto, type EnergyMeterHealthDto, type EnergyProjectAlertsDto } from "../../../lib/config-api";
+import { configApi, type EnergyLiveReadingsDto, type EnergyMeterHealthDto } from "../../../lib/config-api";
 import { EnergyIcon } from "./icons";
 import styles from "./energyiq-top-bar.module.css";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { intlLocale } from "./energyiq-messages";
 import { friendlyErrorMessages } from "./friendly-error-messages";
 import { meterHealth, stoppedMeters } from "./meter-health-notice";
+import { meterAlertEntries, type ProjectAlertsWithMetersDto } from "./meter-alerts-model";
 import { withCurrency } from "./money";
 import { notificationMessages } from "./notification-messages";
 
 type Notice = { actionId: string; title: string; runId: string };
 
-export type BellKind = "overnight" | "budget" | "peak" | "meters" | "sync" | "report" | "action";
+export type BellKind = "overnight" | "budget" | "peak" | "meters" | "sync" | "report" | "action" | "meter-offline" | "never-used" | "pattern";
 export type BellEntry = { key: string; tone: "warning" | "info"; kind: BellKind; title: string; detail: string; href: string; at?: string; readKey?: string; runId?: string };
 
 /** The icon and colour each kind of alert gets in the list, so a reader can tell them apart at a glance. */
 const KIND_ICON: Record<BellKind, Parameters<typeof EnergyIcon>[0]["name"]> = {
   overnight: "alert", budget: "dollar", peak: "bolt", meters: "meter-off", sync: "alert", report: "document", action: "spark",
+  "meter-offline": "meter-off", "never-used": "alert", pattern: "bolt",
 };
 
 /** "Today, 6:05 am", "Yesterday, 11:00 pm", "Wednesday, 4:15 pm" within a week, then "8 Oct, 4:15 pm". Singapore time. */
@@ -60,7 +62,7 @@ export function EnergyIqNotificationBell({ projectId }: { projectId: string }) {
   const tf = useMessages(friendlyErrorMessages);
   const tn = useMessages(notificationMessages);
   const [items, setItems] = useState<Notice[]>([]);
-  const [alerts, setAlerts] = useState<EnergyProjectAlertsDto | null>(null);
+  const [alerts, setAlerts] = useState<ProjectAlertsWithMetersDto | null>(null);
   const [health, setHealth] = useState<EnergyMeterHealthDto | null>(null);
   const [offline, setOffline] = useState<NonNullable<EnergyLiveReadingsDto["offline"]>>([]);
   const [readNow, setReadNow] = useState<Set<string>>(new Set());
@@ -133,8 +135,12 @@ export function EnergyIqNotificationBell({ projectId }: { projectId: string }) {
         href: `/energyiq/project-configuration?${new URLSearchParams({ projectId, tab: "availability" })}`,
       });
     }
-    // A meter already shown as offline now is not repeated as stopped.
-    const stopped = health ? stoppedMeters(health.meters).filter((meter) => !offline.some((item) => item.meterPointId === meter.meterPointId)) : [];
+    // Meter alerts the server keeps: stopped meters for the hardware people, use that should not happen for the site.
+    const meterEntries = meterAlertEntries(alerts?.meterAlerts ?? [], { t: tn, locale, projectId });
+    const quietInAlerts = new Set(meterEntries.flatMap((entry) => entry.quietMeterIds));
+    for (const entry of meterEntries) list.push({ key: entry.key, readKey: entry.readKey, tone: entry.tone, kind: entry.kind, at: entry.at, title: entry.title, detail: entry.detail, href: entry.href });
+    // A meter already shown as offline now, or in a stopped-sending alert above, is not repeated as stopped.
+    const stopped = health ? stoppedMeters(health.meters).filter((meter) => !offline.some((item) => item.meterPointId === meter.meterPointId) && !quietInAlerts.has(meter.meterPointId)) : [];
     if (stopped.length) {
       const key = stoppedKey(stopped);
       const first = stopped[0]!;

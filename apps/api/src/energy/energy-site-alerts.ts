@@ -1,10 +1,13 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { MetadataStore } from "@datafoundry/metadata";
 
+import { MeterAlertStore, type MeterAlertAudience, type MeterAlertKind } from "./energy-meter-alert-store.js";
+
 /**
  * What the notification bell tells a site's readers besides action results: automatic reports that are ready, budget,
  * and overnight-use alerts, and, for administrators, a daily live update that did not finish. Stopped meters come from the meter-health read the
- * pages already make. Each alert has a key; a reader who opens or dismisses it does not see that key again.
+ * pages already make. The meter alerts (energy-meter-alerts.ts) come with them, each for its own readers. Each alert has
+ * a key; a reader who opens or dismisses it does not see that key again.
  */
 export type SiteAlertReport = {
   key: string;
@@ -29,16 +32,35 @@ export type SiteAlertTarget = {
   details: Record<string, unknown>;
 };
 
+/**
+ * A meter alert (energy-meter-alerts.ts): meters that stopped sending (for the people who look after the hardware), a
+ * meter that used power it never should, and unusual hourly use (for the people who run the site). `readKey` is the key
+ * a reader marks read: for meters that are sending again it is a new one, so the news that they are back is shown once.
+ */
+export type SiteAlertMeter = {
+  key: string;
+  readKey: string;
+  kind: MeterAlertKind;
+  status: "open" | "resolved";
+  openedAt: string;
+  resolvedAt?: string;
+  details: Record<string, unknown>;
+};
+
 export type SiteAlerts = {
   reports: SiteAlertReport[];
   targets: SiteAlertTarget[];
+  meterAlerts: SiteAlertMeter[];
   sync?: SiteAlertSync;
   readKeys: string[];
 };
 
 /** Only recent reports are news; older ones live in Reports. */
 const REPORT_NEWS_MS = 14 * 24 * 60 * 60_000;
-const KEY_PATTERN = /^(?:meters|report|sync|offline|budget|overnight):[\w:.,@\-]{1,400}$/u;
+const KEY_PATTERN = /^(?:meters|report|sync|offline|budget|overnight|peak|meter-offline|never-used|usage-pattern|usage-pattern-more):[\w:.,@\-]{1,400}$/u;
+/** Meters back from being quiet are news for three days; other meter alerts stay listed while open or for two weeks. */
+const BACK_NEWS_MS = 3 * 24 * 60 * 60_000;
+const MAX_METER_ALERTS = 10;
 
 type ReportRunLike = {
   id: string;
@@ -58,6 +80,8 @@ export const readSiteAlerts = (input: {
   userId: string;
   includeReports: boolean;
   includeSync: boolean;
+  /** Meters that stopped sending: only for the people who look after the hardware (platform admins and live-connection editors). */
+  includeHardware?: boolean;
   reportRuns?: ReportRunLike[];
   now?: number;
 }): SiteAlerts => {
@@ -97,7 +121,18 @@ export const readSiteAlerts = (input: {
     ? input.metadataStore.energyIq.targets.listRecentAlerts(input.projectId, new Date(now - REPORT_NEWS_MS).toISOString(), 5)
       .map((alert): SiteAlertTarget => ({ key: alert.key, kind: alert.kind, createdAt: alert.createdAt, details: alert.payload }))
     : [];
-  return { reports, targets, ...(sync ? { sync } : {}), readKeys: readKeys(input.metadataStore.db, input.userId, input.projectId) };
+  // Never-use and unusual-use alerts go to the same readers as the budget and overnight alerts.
+  const audiences: MeterAlertAudience[] = [...(input.includeHardware ? ["hardware" as const] : []), ...(input.includeReports ? ["operators" as const] : [])];
+  // What is never shown (unusual use only counted in a summary, a resolved summary, meters quiet that did not come back
+  // or were over before the site's first check) is left out in the query, before its limit.
+  const meterAlerts = new MeterAlertStore(input.metadataStore.db)
+    .listForBell(input.projectId, audiences, new Date(now - REPORT_NEWS_MS).toISOString(), MAX_METER_ALERTS, new Date(now - BACK_NEWS_MS).toISOString())
+    .map((alert): SiteAlertMeter => ({
+      key: alert.key, kind: alert.kind, status: alert.status, openedAt: alert.openedAt, ...(alert.resolvedAt ? { resolvedAt: alert.resolvedAt } : {}), details: alert.payload,
+      // Meters sending again are their own news, shown once.
+      readKey: alert.kind === "meter_offline" && alert.status === "resolved" ? `${alert.key}:back` : alert.key,
+    }));
+  return { reports, targets, meterAlerts, ...(sync ? { sync } : {}), readKeys: readKeys(input.metadataStore.db, input.userId, input.projectId) };
 };
 
 export const markSiteAlertRead = (input: { db: DatabaseSync; userId: string; projectId: string; key: unknown; now?: number }): void => {
