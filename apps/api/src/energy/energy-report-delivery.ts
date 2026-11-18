@@ -78,6 +78,8 @@ export const deliverScheduledReport = async (input: {
         period: { from: input.period.from, to: input.period.to },
         projectIds: group.projectIds,
         budgetAsOf: shiftDate(input.period.to, 1),
+        // The PDF says a site's average day only when it covers one site.
+        averageDays: "lone-site",
         now,
       });
       const frequencyLabel = input.schedule.frequency === "weekly" ? "Weekly report" : "Monthly report";

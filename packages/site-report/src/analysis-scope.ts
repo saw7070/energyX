@@ -187,6 +187,25 @@ export function analysisComparisonDates(project: AnalysisSource): { dates: strin
   return { dates, previous: dates.length ? { from: shiftScopeDate(dates[0]!, -dates.length), to: shiftScopeDate(dates[0]!, -1) } : null };
 }
 
+/**
+ * The site's public holidays and planned closures from its published calendar, by date, with the name the reports
+ * give each day. Days on this list count with the weekend when the reports work out an average day.
+ */
+export function calendarHolidays(information: ProjectInformationSource): Map<string, string> {
+  const holidays = new Map<string, string>();
+  for (const entry of information?.calendar?.entries ?? []) for (const item of entry.exceptions) if (item.classification === "public_holiday" || item.classification === "special_closure") holidays.set(item.date, item.classification === "special_closure" ? `${item.label}${PLANNED_CLOSURE_SUFFIX}` : item.label);
+  return holidays;
+}
+
+/**
+ * The project's own calendar entry on a date (its weekly hours and what they mean): the one in force then, else the
+ * project's entry from any date, else the first entry there is.
+ */
+export function projectCalendarEntry(information: ProjectInformationSource, date: string) {
+  const entries = information?.calendar?.entries ?? [];
+  return entries.find(entry => entry.location === information?.name && entry.from <= date && (!entry.toExclusive || entry.toExclusive > date)) ?? entries.find(entry => entry.location === information?.name) ?? entries[0];
+}
+
 /** Everything the readings are made of, once the caller has loaded each piece. Order of spaces follows childScopes. */
 export function assembleAnalysisData(input: {
   projectId: string;
@@ -201,11 +220,9 @@ export function assembleAnalysisData(input: {
 }): AnalysisData {
   const { project, information, spaces } = input;
   const locations = new Map((information?.meters ?? []).map(meter => [meter.id, meter.location]));
-  const holidays = new Map<string, string>();
-  for (const entry of information?.calendar?.entries ?? []) for (const item of entry.exceptions) if (item.classification === "public_holiday" || item.classification === "special_closure") holidays.set(item.date, item.classification === "special_closure" ? `${item.label}${PLANNED_CLOSURE_SUFFIX}` : item.label);
-  const entries = information?.calendar?.entries ?? [];
+  const holidays = calendarHolidays(information);
   const lastDate = analysisScopeDates(project).at(-1) ?? "";
-  const projectEntry = entries.find(entry => entry.location === information?.name && entry.from <= lastDate && (!entry.toExclusive || entry.toExclusive > lastDate)) ?? entries.find(entry => entry.location === information?.name) ?? entries[0];
+  const projectEntry = projectCalendarEntry(information, lastDate);
   const hasPrevious = !!input.previousProject && input.previousProject.summary.validIntervalCount > 0;
   const groups = analysisGroups(project, information);
   // Meters someone said are not in use: named as readers know them, with the reason they gave.

@@ -81,6 +81,20 @@ export function dayTypeBaselines(days: AnalysisDay[]): AnalysisBaseline[] {
   });
 }
 
+/**
+ * The average day the reports and the Overview lead with ("Uses about 47 kWh a day"), from complete days only. With
+ * lights-on hours every complete day counts alike, since the lights run every night. Otherwise it is a week of five
+ * weekdays and two weekend days (public holidays count with the weekend), so a stretch with more of one kind of day
+ * does not tilt it. Null with no complete day. The Portfolio uses the same rule, so a site reads the same in both.
+ */
+export function averageFullDay(days: ReadonlyArray<Pick<AnalysisDay, "complete" | "dayType" | "totalKwh">>, meaning: HoursMeaning = "opening"): number | null {
+  const complete = days.filter(day => day.complete);
+  if (meaning === "lights_on") return average(complete.map(day => day.totalKwh));
+  const weekday = average(complete.filter(day => day.dayType === "weekday").map(day => day.totalKwh));
+  const weekend = average(complete.filter(day => day.dayType !== "weekday").map(day => day.totalKwh));
+  return weekday != null && weekend != null ? (weekday * 5 + weekend * 2) / 7 : weekday ?? weekend;
+}
+
 /** Complete days whose use exceeds their day-type expectation by more than the threshold. */
 export function findAnomalies(days: AnalysisDay[], baselines: AnalysisBaseline[], thresholdPct = ANOMALY_THRESHOLD_PCT): AnalysisAnomaly[] {
   const expected = new Map(baselines.map(item => [item.dayType, item.expectedKwh]));

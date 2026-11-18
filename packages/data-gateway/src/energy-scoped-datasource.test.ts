@@ -21,6 +21,7 @@ import {
   readEnergyCurrentOverviewPeriod,
   readEnergyFactCoverage,
   readEnergyReportingCoverage,
+  parseEnergyDailyMeterFacts,
   readEnergyOverviewHeadline,
   resolveEnergyFactStorePath,
 } from "./energy-scoped-datasource.js";
@@ -423,6 +424,126 @@ describe("Energy scoped datasource Snapshot guard", () => {
           && (error.code === "EPERM" || error.code === "EBUSY"))) throw error;
       }
     }
+  });
+
+  it("reads the official meters' days only when asked, listing only the meter-days that were not a whole clean day", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-overview-headline-days-"));
+    const databasePath = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      metadata.workspaces.upsert({ id: "workspace-1", owner_user_id: "dev-user", name: "Workspace", kind: "customer" });
+      metadata.energyIq.upsertProject({ id: "project-1", workspace_id: "workspace-1", name: "Project", status: "draft" });
+      createBatch(metadata, "batch-a", "sha-a");
+      const materializations = [{ batch_id: "batch-a", summary: summary("sha-a") }];
+      const prepared = metadata.energyIq.prepareProjectManifestMaterialization({
+        project_id: "project-1",
+        materializations,
+        source_manifest_sha256: ["sha-a"],
+      });
+      const base = factWrite("batch-a", "sha-a", "2026-05-01T00:00:00.000Z").intervalFacts[0]!;
+      const at = (meterPointId: string, intervalStart: string, qualityStatus: string, usageKwh: number) => ({
+        ...base,
+        meterPointId,
+        sourceLabel: meterPointId,
+        intervalStart,
+        intervalEnd: new Date(Date.parse(intervalStart) + 900_000).toISOString(),
+        usageKwh,
+        rawDeltaKwh: usageKwh,
+        averageKw: usageKwh * 4,
+        qualityStatus,
+        localDate: intervalStart.slice(0, 10),
+        localHour: 0,
+      });
+      const quarterHoursOf = (meterPointId: string, date: string) => Array.from({ length: 96 }, (_, index) =>
+        at(meterPointId, new Date(Date.parse(`${date}T00:00:00.000Z`) + index * 900_000).toISOString(), "ok", 0.25));
+      const persisted = await writeEnergyFactProjectMaterialization({
+        databasePath,
+        projectId: "project-1",
+        timezone: "UTC",
+        expectedPreviousDataSnapshotId: prepared.expected_previous_snapshot_id,
+        snapshotFactScope: prepared.fact_scope,
+        batches: [projectBatch({
+          importBatchId: "batch-a",
+          sourceSha256: "sha-a",
+          rawReadings: [],
+          normalizedReadings: [],
+          intervalFacts: [
+            at("meter-a", "2026-05-01T00:00:00.000Z", "ok", 1),
+            at("meter-a", "2026-05-01T00:15:00.000Z", "ok", 1),
+            // Sent late after an outage: real energy, but not read on time.
+            at("meter-b", "2026-05-01T00:00:00.000Z", "gap", 2),
+            at("meter-a", "2026-05-02T00:00:00.000Z", "rejected", 3),
+            at("meter-b", "2026-05-02T00:00:00.000Z", "ok", 0.5),
+            // Not an official meter: left out like everywhere else in the headline.
+            at("meter-c", "2026-05-02T00:00:00.000Z", "ok", 9),
+            // 3 May: both meters read the whole day. 4 May: only meter A did; meter B sent nothing.
+            ...quarterHoursOf("meter-a", "2026-05-03"), ...quarterHoursOf("meter-b", "2026-05-03"), ...quarterHoursOf("meter-a", "2026-05-04"),
+          ],
+          qualityEvents: [],
+        })],
+      });
+      metadata.energyIq.completeProjectManifestMaterialization({
+        project_id: "project-1",
+        materializations,
+        project_audit: persisted.projectAudit,
+        source_manifest_sha256: ["sha-a"],
+        expected_snapshot_id: prepared.expected_snapshot_id,
+        expected_previous_snapshot_id: prepared.expected_previous_snapshot_id,
+      });
+      const read = (includeDailyMeterFacts?: boolean) => readEnergyOverviewHeadline({
+        metadataStore: metadata,
+        databasePath,
+        workspaceId: "workspace-1",
+        projectId: "project-1",
+        dataSnapshotId: prepared.expected_snapshot_id,
+        resource: "electricity",
+        meterPointIds: ["meter-a", "meter-b"],
+        from: "2026-05-01T00:00:00.000Z",
+        to: "2026-05-05T00:00:00.000Z",
+        ...(includeDailyMeterFacts ? { includeDailyMeterFacts } : {}),
+      });
+
+      const plain = await read();
+      expect(plain.usageKwh).toBe(76.5);
+      expect(plain.dailyMeterFacts).toBeUndefined();
+      expect((await read(true)).dailyMeterFacts).toEqual({
+        days: [
+          { localDate: "2026-05-01", usageKwh: 2, recoveredKwh: 2, validMinutes: 30, qualityEventCount: 1 },
+          { localDate: "2026-05-02", usageKwh: 0.5, recoveredKwh: 0, validMinutes: 15, qualityEventCount: 1 },
+          { localDate: "2026-05-03", usageKwh: 48, recoveredKwh: 0, validMinutes: 2880, qualityEventCount: 0 },
+          { localDate: "2026-05-04", usageKwh: 24, recoveredKwh: 0, validMinutes: 1440, qualityEventCount: 0 },
+        ],
+        // Whole clean meter-days (both on 3 May, meter A on 4 May) are not listed; a meter that sent nothing is.
+        meterExceptions: [
+          { localDate: "2026-05-01", meterPointId: "meter-a", validMinutes: 30, qualityEventCount: 0 },
+          { localDate: "2026-05-01", meterPointId: "meter-b", validMinutes: 0, qualityEventCount: 1 },
+          { localDate: "2026-05-02", meterPointId: "meter-a", validMinutes: 0, qualityEventCount: 1 },
+          { localDate: "2026-05-02", meterPointId: "meter-b", validMinutes: 15, qualityEventCount: 0 },
+          { localDate: "2026-05-04", meterPointId: "meter-b", validMinutes: 0, qualityEventCount: 0 },
+        ],
+      });
+    } finally {
+      metadata.close();
+      try {
+        rmSync(root, { recursive: true, force: true });
+      } catch (error) {
+        if (!(process.platform === "win32" && error instanceof Error && "code" in error
+          && (error.code === "EPERM" || error.code === "EBUSY"))) throw error;
+      }
+    }
+  });
+
+  it("reads the compact daily rows back with each date and meter named, and checks every row", () => {
+    // 20,574 days after 1 January 1970 is 1 May 2026; meter 1 is the second meter asked for.
+    expect(parseEnergyDailyMeterFacts("[[20574.0,47.5,1.5,2850.0,2.0]]", "[[20574.0,1.0,1410.0,2.0]]", ["meter-a", "meter-b"])).toEqual({
+      days: [{ localDate: "2026-05-01", usageKwh: 47.5, recoveredKwh: 1.5, validMinutes: 2850, qualityEventCount: 2 }],
+      meterExceptions: [{ localDate: "2026-05-01", meterPointId: "meter-b", validMinutes: 1410, qualityEventCount: 2 }],
+    });
+    expect(parseEnergyDailyMeterFacts(null, null, ["meter-a"])).toEqual({ days: [], meterExceptions: [] });
+    expect(() => parseEnergyDailyMeterFacts("[[20574,1,0,1440]]", "[]", ["meter-a"])).toThrow("ENERGYIQ_DAILY_METER_TOTALS_ROW_INVALID:0");
+    expect(() => parseEnergyDailyMeterFacts("[[20574,1,0,1440,null]]", "[]", ["meter-a"])).toThrow("ENERGYIQ_DAILY_METER_TOTALS_ROW_INVALID:0");
+    expect(() => parseEnergyDailyMeterFacts("[]", "[[20574,3,0,0]]", ["meter-a"])).toThrow("ENERGYIQ_DAILY_METER_EXCEPTIONS_ROW_INVALID:0");
+    expect(() => parseEnergyDailyMeterFacts('{"d":1}', "[]", ["meter-a"])).toThrow("ENERGYIQ_DAILY_METER_TOTALS_INVALID");
   });
 
   it("reads a historical fact store with the writer revision pinned by its Snapshot", async () => {

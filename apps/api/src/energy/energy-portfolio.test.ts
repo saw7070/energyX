@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EnergyIqAnalysisInterval } from "@datafoundry/metadata";
-import { dailyUsage, evaluatePeakDemand, findUnusualNight, halfHourDemand, parsePortfolioPeriod, projectMonthEnd } from "./energy-portfolio.js";
+import { dailyUsage, evaluatePeakDemand, findUnusualNight, halfHourDemand, parsePortfolioPeriod, projectMonthEnd, siteAverageDay, wantsAverageDays } from "./energy-portfolio.js";
 
 /** Hourly intervals in Singapore time (UTC+8) for the given local dates, with kW chosen per local hour. */
 const hourly = (dates: string[], kwAt: (date: string, hour: number) => number): EnergyIqAnalysisInterval[] =>
@@ -147,5 +147,28 @@ describe("peak demand", () => {
     expect(status.peakKw).toBe(30);
     expect(status.limitStatus).toBeUndefined();
     expect(status.newHigh).toBe(false);
+  });
+});
+
+describe("a site's average day on the Portfolio", () => {
+  const daily = { averageDailyKwh: 46.04, readingDays: 30, dailyKwh: [] };
+  const average = (readFullDays: () => Promise<{ averageDailyKwh: number | null; fullDays: number }>, readings = daily) =>
+    siteAverageDay({ projectId: "sktc", daily: readings, readFullDays });
+
+  it("is the site's average full day when it has complete days, else the average of days with readings", async () => {
+    await expect(average(async () => ({ averageDailyKwh: 47.02, fullDays: 25 }))).resolves.toEqual({ averageDailyKwh: 47.02, averageBasis: "full-days", fullDays: 25 });
+    await expect(average(async () => ({ averageDailyKwh: null, fullDays: 0 }))).resolves.toEqual({ averageDailyKwh: 46.04, averageBasis: "reading-days", fullDays: 0 });
+    await expect(average(async () => ({ averageDailyKwh: null, fullDays: 0 }), { ...daily, averageDailyKwh: 0, readingDays: 0.4 })).resolves.toEqual({ averageDailyKwh: 0, fullDays: 0 });
+  });
+
+  it("is worked out for every site on the page, and for the PDF only when it covers one site", () => {
+    expect([wantsAverageDays(undefined, 30), wantsAverageDays("every-site", 30), wantsAverageDays("lone-site", 1), wantsAverageDays("lone-site", 30)])
+      .toEqual([true, true, true, false]);
+  });
+
+  it("keeps the site and falls back to the average of days with readings when its days cannot be judged", async () => {
+    const failing = async (): Promise<never> => { throw new Error("ENERGYIQ_PUBLISHED_MAPPING_REVISION_REQUIRED:rev-1"); };
+    await expect(average(failing)).resolves.toEqual({ averageDailyKwh: 46.04, averageBasis: "reading-days" });
+    await expect(average(failing, { ...daily, averageDailyKwh: 0, readingDays: 0 })).resolves.toEqual({ averageDailyKwh: 0 });
   });
 });

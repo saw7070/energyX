@@ -8,7 +8,7 @@
  */
 import { polygonOf, spatialRoomTitle, type ProjectSpatialReference } from "@datafoundry/contracts";
 import type { AnalysisData, ScopeData, ScopeMeter, TrendSeries } from "./analysis-types.js";
-import { alwaysOnKw, effectiveHours, hoursRangeLabel, isOvernight, localDayType, openWindowStart, quietHours, scopeDays, shortDate, timeBuckets, weekdayShort, type AnalysisCategory, type AnalysisDay, type HoursMeaning } from "./analysis-model.js";
+import { alwaysOnKw, averageFullDay, effectiveHours, hoursRangeLabel, isOvernight, localDayType, openWindowStart, quietHours, scopeDays, shortDate, timeBuckets, weekdayShort, type AnalysisCategory, type AnalysisDay, type HoursMeaning } from "./analysis-model.js";
 import { listText } from "./analysis-messages.js";
 import { forHoursMeaning, forOneDay, translatorFor, type EnergyIqLocale, type Translate } from "./locale.js";
 import { formatPeriod } from "./report-period.js";
@@ -497,9 +497,9 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   // Groups: the meters filed by what they serve. When the readings carry them, the profile, the shares and the
   // comparison follow the groups, wherever each meter is wired from; a floor layout is then only a drawing.
   const groupTree = analysisGroupTree(data, t("group.unmetered"));
-  // The average day: every complete day for lights-on hours, a week of five weekdays and two weekend days otherwise.
-  const averageDayKwh = lighting ? mean(days.filter(day => day.complete).map(day => day.totalKwh))
-    : weekdayAvg != null && weekendAvg != null ? (weekdayAvg * 5 + weekendAvg * 2) / 7 : weekdayAvg ?? weekendAvg;
+  // The average day: every complete day for lights-on hours, a week of five weekdays and two weekend days otherwise
+  // (averageFullDay, which the Portfolio uses too).
+  const averageDayKwh = averageFullDay(days, meaning);
   const averageDayCost = averageDayKwh == null ? null : cost(averageDayKwh);
   const averageDay = averageDayKwh == null ? null : { kwh: averageDayKwh, cost: averageDayCost,
     text: t(averageDayCost != null ? "avgDay.cost" : "avgDay.plain", { kwh: kwhText(averageDayKwh), cost: averageDayCost != null ? money(averageDayCost, averageDayCost < 10 ? 2 : 0) : "" }) };

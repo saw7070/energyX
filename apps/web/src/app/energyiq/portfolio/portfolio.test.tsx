@@ -3,14 +3,16 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EnergyPortfolioDto, EnergyPortfolioSiteDto, EnergyReportSchedulesDto } from "../../../lib/config-api";
+import { EnergyIqLocaleProvider } from "../_components/energyiq-locale";
+import { LANGUAGE_STORAGE_KEY } from "../_components/energyiq-messages";
 import { presetPeriod } from "./portfolio-client";
-import { PortfolioView } from "./portfolio-view";
+import { PortfolioView, type PortfolioSiteAverage } from "./portfolio-view";
 import { ReportSchedulesView } from "./report-schedules";
 
 vi.mock("next/link", () => ({ default: ({ href, children, ...props }: { href: string; children: React.ReactNode }) => <a href={href} {...props}>{children}</a> }));
 
 beforeEach(() => { vi.stubGlobal("React", React); (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true; });
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); document.body.innerHTML = ""; });
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); document.body.innerHTML = ""; localStorage.clear(); });
 
 const render = async (node: React.ReactNode) => {
   const host = document.createElement("div");
@@ -134,6 +136,56 @@ describe("Portfolio view", () => {
     await act(async () => office.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true })));
     expect(office.querySelector('[aria-live="polite"]')?.textContent).toBe("Tue, 1 Sep: no readings");
     await act(async () => root.unmount());
+  });
+
+  it("leads each site with its average full day, as on its Overview, and says which average each figure is", async () => {
+    // What a newer server adds to each site; the shared response type does not list it yet.
+    const averaged = (overrides: Partial<EnergyPortfolioSiteDto> & PortfolioSiteAverage) => site(overrides as Partial<EnergyPortfolioSiteDto>);
+    const sites = [
+      // Overview: "Uses about 47 kWh a day", from the 25 days every meter read in full.
+      averaged({ projectId: "sktc", name: "SKTC", usageKwh: 1380, averageDailyKwh: 47.02, averageBasis: "full-days", fullDays: 25, readingDays: 30, dailyKwh: Array(30).fill(46) }),
+      // Connected three days ago with a meter that keeps dropping out: no complete day yet.
+      averaged({ projectId: "new", name: "New Depot", usageKwh: 40, averageDailyKwh: 12.5, averageBasis: "reading-days", fullDays: 0, readingDays: 3.2, dailyKwh: [...Array(27).fill(null), 12, 13, 12] }),
+      // Not even a day of readings: no average at all.
+      averaged({ projectId: "late", name: "Late Site", usageKwh: 2, averageDailyKwh: 0, fullDays: 0, readingDays: 0.4, dailyKwh: [...Array(29).fill(null), 2] }),
+    ];
+    const newer: EnergyPortfolioDto = { ...portfolio, sites, totals: { ...portfolio.totals, usageKwh: 1422, averageDailyKwh: 59.52 } };
+    const row = (host: HTMLElement, name: string) => Array.from(host.querySelectorAll("tbody tr")).find(item => item.querySelector("th")?.textContent?.includes(name))!;
+    const tileValue = (host: HTMLElement) => Array.from(host.querySelectorAll("strong")).find(value => value.parentElement?.textContent?.includes("Average a day"))!.textContent;
+
+    const mixed = await render(<PortfolioView portfolio={newer} />);
+    expect(row(mixed.host, "SKTC").querySelectorAll("td")[1]!.textContent).toBe("47.0an average full day");
+    expect(row(mixed.host, "New Depot").querySelectorAll("td")[1]!.textContent).toBe("12.5average of days with readings");
+    expect(row(mixed.host, "Late Site").querySelectorAll("td")[1]!.textContent).toBe("—");
+    // The all-sites tile adds up each site's average day, and says one of them is not an average full day.
+    expect(tileValue(mixed.host)).toBe("59.5 kWh");
+    expect(mixed.host.textContent).toContain("All sites together on an average full day (1 of them from the average of days with readings)");
+    // The dashed line and the latest-day words use the same average full day as the figure.
+    expect(row(mixed.host, "SKTC").querySelectorAll("td")[2]!.lastElementChild?.textContent).toBe("Latest day 46.0 kWhabout average");
+    await act(async () => mixed.root.unmount());
+
+    const allFull = await render(<PortfolioView portfolio={{ ...newer, sites: [sites[0]!], totals: { ...newer.totals, averageDailyKwh: 47.02 } }} />);
+    expect(allFull.host.textContent).toContain("All sites together on an average full day");
+    expect(allFull.host.textContent).not.toContain("days with readings");
+    await act(async () => allFull.root.unmount());
+
+    const allReadings = await render(<PortfolioView portfolio={{ ...newer, sites: [sites[1]!], totals: { ...newer.totals, averageDailyKwh: 12.5 } }} />);
+    expect(allReadings.host.textContent).toContain("All sites together, from the average of days with readings");
+    await act(async () => allReadings.root.unmount());
+
+    // The same words in Chinese and Malay.
+    for (const [locale, fullDay, readingDays, tile] of [
+      ["zh-Hans", "按完整日平均", "按有读数的日子平均", "所有场地合计，按完整日平均每天的用电（其中 1 个按有读数的日子平均）"],
+      ["ms", "purata hari penuh", "purata hari yang ada bacaan", "Semua tapak bersama pada purata hari penuh (1 tapak menggunakan purata hari yang ada bacaan)"],
+    ] as const) {
+      localStorage.setItem(LANGUAGE_STORAGE_KEY, locale);
+      const translated = await render(<EnergyIqLocaleProvider><PortfolioView portfolio={newer} /></EnergyIqLocaleProvider>);
+      await act(async () => { await Promise.resolve(); });
+      expect(row(translated.host, "SKTC").querySelectorAll("td")[1]!.textContent).toContain(fullDay);
+      expect(row(translated.host, "New Depot").querySelectorAll("td")[1]!.textContent).toContain(readingDays);
+      expect(translated.host.textContent).toContain(tile);
+      await act(async () => translated.root.unmount());
+    }
   });
 
   it("copes with an older server that sends no daily figures", async () => {

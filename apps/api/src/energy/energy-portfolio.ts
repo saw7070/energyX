@@ -9,9 +9,15 @@ import {
   type MetadataStore,
   type UserRecord,
 } from "@datafoundry/metadata";
+import { calendarHolidays, projectCalendarEntry } from "@datafoundry/site-report";
 
+import { logger } from "../observability/logger.js";
+import { readProjectMeterHealth } from "./energy-alert-emails.js";
 import { executeEnergySiteFiguresProjection, type EnergySiteFiguresProjection } from "./energy-analysis.js";
-import { siteDailyFigures } from "./energy-portfolio-daily.js";
+import { localDayStartMs } from "./energy-data-availability.js";
+import { idleThroughPeriodEnd, readIdleWhenQuietMeters } from "./energy-idle-meters.js";
+import { siteDailyFigures, siteFullDays, type SiteDailyFigures } from "./energy-portfolio-daily.js";
+import { buildEnergyProjectInformation } from "./energy-project-information.js";
 import { withEnergyProjectPublicationReadLock } from "./energy-project-materialization.js";
 import { resolveEnergyAccessContext, resolveEnergyPublishedHierarchyNodes } from "./energy-query-context.js";
 import { resolvePublishedEnergyQueryContext } from "./project-analysis-resolver.js";
@@ -53,11 +59,18 @@ export type PortfolioSite = {
   reason?: string;
   usageKwh: number;
   /**
-   * kWh on an average day: the kWh read divided by the days of readings, so a site connected part-way through the
-   * period counts from its first reading. 0 with less than a day of readings (see energy-portfolio-daily).
+   * kWh on an average day, as the site's Overview says it ("Uses about … a day"): its average full day, from the days
+   * every meter read in full (averageBasis "full-days"). With no such day, or when the days could not be judged, the
+   * average of days with readings: the kWh read divided by the days of readings, so a site connected part-way through
+   * counts from its first reading ("reading-days"). 0 with neither, and 0 when the caller did not ask for averages
+   * (buildPortfolio's averageDays; see energy-portfolio-daily).
    */
   averageDailyKwh: number;
-  /** Days of readings behind averageDailyKwh, to one decimal. */
+  /** Which average averageDailyKwh is; absent when there is none. */
+  averageBasis?: "full-days" | "reading-days";
+  /** Complete days in the period (behind a "full-days" average); absent when they were not worked out. */
+  fullDays?: number;
+  /** Days of readings, to one decimal (behind a "reading-days" average). */
   readingDays: number;
   /** Each local date's kWh from period.from to period.to, for the trend line; null on a day with no readings. */
   dailyKwh: Array<number | null>;
@@ -88,7 +101,7 @@ export type Portfolio = {
   totals: {
     usageKwh: number;
     previousUsageKwh: number;
-    /** All sites together on an average day: each site's own average a day, added up. */
+    /** All sites together on an average day: each site's own average a day (its average full day where it has one), added up. */
     averageDailyKwh: number;
     carbonKg: number;
     /** Money is never added across currencies. */
@@ -124,6 +137,9 @@ export const portfolioProjectIds = (input: { metadataStore: MetadataStore; user:
     .map((project) => project.id);
 };
 
+/** Whether a portfolio of this many sites works out each site's average day (see buildPortfolio's averageDays). */
+export const wantsAverageDays = (mode: "every-site" | "lone-site" = "every-site", siteCount: number): boolean => mode === "every-site" || siteCount === 1;
+
 export const buildPortfolio = async (input: {
   metadataStore: MetadataStore;
   user: UserRecord;
@@ -133,15 +149,22 @@ export const buildPortfolio = async (input: {
   includeBudget?: boolean;
   /** For a report about a past period: judge budgets as of the day after it ends. */
   budgetAsOf?: string;
+  /**
+   * Which sites get an average day. "every-site" (the default): the Portfolio page, which shows one for every site.
+   * "lone-site": the PDF, which only says it for a portfolio of one site, so a PDF of several sites reads none of the
+   * daily facts behind it.
+   */
+  averageDays?: "every-site" | "lone-site";
   now?: Date;
 }): Promise<Portfolio> => {
   const now = input.now ?? new Date();
   const visible = portfolioProjectIds(input);
   const projectIds = input.projectIds ? visible.filter((id) => input.projectIds!.includes(id)) : visible;
+  const averageDays = wantsAverageDays(input.averageDays, projectIds.length);
   const sites: PortfolioSite[] = [];
   // One site at a time: all of a company's sites share one readings database.
   for (const projectId of projectIds) {
-    sites.push(await readPortfolioSite({ ...input, projectId, now }));
+    sites.push(await readPortfolioSite({ ...input, projectId, averageDays, now }));
   }
   sites.sort((left, right) => right.usageKwh - left.usageKwh || left.name.localeCompare(right.name));
   const workspace = input.metadataStore.workspaces.list().find((candidate) => candidate.id === input.workspaceId);
@@ -176,6 +199,7 @@ const readPortfolioSite = async (input: {
   period: PortfolioPeriod;
   includeBudget?: boolean;
   budgetAsOf?: string;
+  averageDays: boolean;
   now: Date;
 }): Promise<PortfolioSite> => {
   const project = input.metadataStore.energyIq.getProject(input.projectId);
@@ -190,7 +214,12 @@ const readPortfolioSite = async (input: {
   };
   let site: PortfolioSite;
   try {
-    const { figures, floorAreaSqm, timezone } = await readSiteFigures({ ...input, from: input.period.from, to: input.period.to });
+    const { figures, floorAreaSqm, timezone, hierarchyRevisionId } = await readSiteFigures({
+      ...input,
+      from: input.period.from,
+      to: input.period.to,
+      ...(input.averageDays ? { includeDailyMeterFacts: true } : {}),
+    });
     const { headline, offHours } = figures;
     const usageKwh = headline.summary.usageKwh;
     const daily = siteDailyFigures({ intervals: figures.intervals, timezone, period: input.period });
@@ -198,7 +227,13 @@ const readPortfolioSite = async (input: {
       ...base,
       status: "ok",
       usageKwh: round(usageKwh, 2),
-      averageDailyKwh: daily.averageDailyKwh,
+      ...(input.averageDays
+        ? await siteAverageDay({
+          projectId: input.projectId,
+          daily,
+          readFullDays: () => readSiteFullDays({ ...input, timezone, hierarchyRevisionId, dailyMeters: figures.dailyMeters }),
+        })
+        : { averageDailyKwh: 0 }),
       readingDays: daily.readingDays,
       dailyKwh: daily.dailyKwh,
       peakKw: round(headline.summary.peakKw, 2),
@@ -258,18 +293,122 @@ export const readSiteFigures = async (input: {
   projectId: string;
   from: string;
   to: string;
-}): Promise<{ figures: EnergySiteFiguresProjection; timezone: string; floorAreaSqm?: number }> => withEnergyProjectPublicationReadLock(input, async () => {
+  /** Also each official meter's readings per day, for the site's average full day. */
+  includeDailyMeterFacts?: boolean;
+}): Promise<{ figures: EnergySiteFiguresProjection; timezone: string; hierarchyRevisionId: string; floorAreaSqm?: number }> => withEnergyProjectPublicationReadLock(input, async () => {
   const { context } = resolvePublishedEnergyQueryContext({
     metadataStore: input.metadataStore,
     user: input.user,
     workspaceId: input.workspaceId,
     request: { projectId: input.projectId, period: "Custom", from: input.from, to: input.to },
   });
-  const figures = await executeEnergySiteFiguresProjection({ metadataStore: input.metadataStore, context });
+  const figures = await executeEnergySiteFiguresProjection({
+    metadataStore: input.metadataStore,
+    context,
+    ...(input.includeDailyMeterFacts ? { includeDailyMeterFacts: true } : {}),
+  });
   const root = resolveEnergyPublishedHierarchyNodes(input.metadataStore, input.projectId, context.hierarchyRevisionId)
     .find((node) => node.id === context.scopeId);
-  return { figures, timezone: context.timezone, ...(root?.area_sqm && root.area_sqm > 0 ? { floorAreaSqm: root.area_sqm } : {}) };
+  return {
+    figures,
+    timezone: context.timezone,
+    hierarchyRevisionId: context.hierarchyRevisionId,
+    ...(root?.area_sqm && root.area_sqm > 0 ? { floorAreaSqm: root.area_sqm } : {}),
+  };
 });
+
+const log = logger.child({ component: "portfolio" });
+
+/**
+ * A site's average day: its average full day, as its Overview gives it, or the average of days with readings when no
+ * day was complete. Judging the days is extra to the site's figures, so if it fails the site keeps its figures and the
+ * average of days with readings, and a warning is logged.
+ */
+export const siteAverageDay = async (input: {
+  projectId: string;
+  daily: SiteDailyFigures;
+  readFullDays: () => Promise<{ averageDailyKwh: number | null; fullDays: number }>;
+}): Promise<Pick<PortfolioSite, "averageDailyKwh" | "averageBasis" | "fullDays">> => {
+  let full: { averageDailyKwh: number | null; fullDays: number } | undefined;
+  try {
+    full = await input.readFullDays();
+  } catch (error) {
+    log.warn("Could not judge a site's complete days; showing the average of days with readings", { projectId: input.projectId, error: errorCode(error) });
+  }
+  if (full && full.averageDailyKwh !== null) return { averageDailyKwh: full.averageDailyKwh, averageBasis: "full-days", fullDays: full.fullDays };
+  const fullDays = full ? { fullDays: full.fullDays } : {};
+  return input.daily.averageDailyKwh > 0
+    ? { averageDailyKwh: input.daily.averageDailyKwh, averageBasis: "reading-days", ...fullDays }
+    : { averageDailyKwh: 0, ...fullDays };
+};
+
+/**
+ * A site's average full day over the period, judged by the same day rules as its Overview and reports: the site's
+ * public holidays and what its hours mean (from its published calendar), meters marked not in use, and meters idle
+ * through the end of the period (online and using nothing, so sending nothing). The idle check reads meter health, so
+ * it runs only when a meter that could be idle was short of readings on the last day.
+ */
+const readSiteFullDays = async (input: {
+  metadataStore: MetadataStore;
+  projectId: string;
+  period: PortfolioPeriod;
+  timezone: string;
+  hierarchyRevisionId: string;
+  dailyMeters?: EnergySiteFiguresProjection["dailyMeters"] | undefined;
+  now: Date;
+}): Promise<{ averageDailyKwh: number | null; fullDays: number }> => {
+  if (!input.dailyMeters?.meterPointIds.length) return { averageDailyKwh: null, fullDays: 0 };
+  const information = safely(() => buildEnergyProjectInformation(input.metadataStore, input.projectId));
+  const notInUse = new Set((information?.meters ?? []).filter((meter) => meter.notInUse?.trim()).map((meter) => meter.id));
+  const categories = publishedMeterCategories(input.metadataStore, input.projectId, input.hierarchyRevisionId);
+  const judge = (silentMeterIds: ReadonlySet<string>) => siteFullDays({
+    period: input.period,
+    timezone: input.timezone,
+    meters: input.dailyMeters!.meterPointIds.map((id) => ({ id, category: categories.get(id) })),
+    facts: input.dailyMeters!.facts,
+    holidays: calendarHolidays(information),
+    meaning: projectCalendarEntry(information, input.period.to)?.hoursMeaning === "lights_on" ? "lights_on" : "opening",
+    silentMeterIds,
+  });
+  const first = judge(notInUse);
+  const idle = await idleThroughEnd({ ...input, candidates: first.shortOnLastDay });
+  return idle.size ? judge(new Set([...notInUse, ...idle])) : first;
+};
+
+/** Of the given meters, those idle through the end of the period (as the saved reports judge it), or none. */
+const idleThroughEnd = async (input: {
+  metadataStore: MetadataStore;
+  projectId: string;
+  period: PortfolioPeriod;
+  timezone: string;
+  candidates: readonly string[];
+  now: Date;
+}): Promise<Set<string>> => {
+  if (!input.candidates.length) return new Set();
+  const online = safely(() => readIdleWhenQuietMeters({ metadataStore: input.metadataStore, projectId: input.projectId, now: input.now.getTime() }));
+  if (!input.candidates.some((id) => online?.has(id))) return new Set();
+  try {
+    const health = await readProjectMeterHealth(input.metadataStore, input.projectId);
+    const idle = idleThroughPeriodEnd(health, localDayStartMs(shiftDate(input.period.to, 1), input.timezone));
+    return new Set(idle.filter((id) => input.candidates.includes(id)));
+  } catch {
+    // Without meter health a quiet meter counts as stopped, as it would on a report saved without it.
+    return new Set();
+  }
+};
+
+/** Each meter's type in the published meter mapping ("overall" for a main meter). */
+const publishedMeterCategories = (metadataStore: MetadataStore, projectId: string, hierarchyRevisionId: string): Map<string, string> => {
+  const revision = metadataStore.energyIq.projectSetup.listHierarchyRevisions(projectId).find((candidate) => candidate.id === hierarchyRevisionId);
+  const rows = revision
+    ? safely(() => (JSON.parse(revision.snapshot_json) as { meter_mapping?: { rows?: Array<{ id: string; category?: string }> } }).meter_mapping?.rows) ?? []
+    : [];
+  return new Map(rows.map((row) => [row.id, row.category ?? ""]));
+};
+
+const safely = <T>(read: () => T): T | null => {
+  try { return read(); } catch { return null; }
+};
 
 export type OvernightFinding = {
   night: string;

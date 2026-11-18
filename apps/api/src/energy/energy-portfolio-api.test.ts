@@ -11,7 +11,7 @@ import { createMailDelivery } from "../email/mail-delivery.js";
 import type { ConfigApiContext } from "../routes/types.js";
 import { ensureEnergyIqBootstrap } from "./energy-bootstrap.js";
 import { handleEnergyApiRequest } from "./energy-api.js";
-import { evaluateSiteChecks } from "./energy-portfolio.js";
+import { buildPortfolio, evaluateSiteChecks, portfolioProjectIds } from "./energy-portfolio.js";
 import { deliverScheduledReport, latestReportPeriod } from "./energy-report-delivery.js";
 import { readSiteAlerts } from "./energy-site-alerts.js";
 import { createEnergyTargetsMonitor } from "./energy-targets-monitor.js";
@@ -30,23 +30,26 @@ const OFFICIAL = [
 ] as const;
 const SHA = "b".repeat(64);
 
-const facts = () => {
+/** `droppedOut`: one meter offline for a while, its energy for those intervals sent late when it came back ('gap'). */
+const facts = (options: { droppedOut?: { meterPointId: string; from: string; to: string } } = {}) => {
   const rows = [];
   const start = Date.parse("2026-08-31T16:00:00.000Z");
   const end = Date.parse("2026-10-09T16:00:00.000Z");
   const unusualFrom = Date.parse("2026-10-08T16:00:00.000Z");
   const unusualTo = Date.parse("2026-10-08T22:00:00.000Z");
+  const dropped = options.droppedOut;
   let row = 0;
   for (let at = start; at < end; at += 15 * 60_000) {
     const kwh = at >= unusualFrom && at < unusualTo ? 0.5 : 0.25;
     for (const [meterPointId, scopeId] of OFFICIAL) {
+      const late = !!dropped && meterPointId === dropped.meterPointId && at >= Date.parse(dropped.from) && at < Date.parse(dropped.to);
       row += 1;
       rows.push({
         workspaceId: "default", projectId: PROJECT, importBatchId: "portfolio-fixture", resource: "electricity" as const,
         meterPointId, scopeId, sourceLabel: meterPointId, category: "load", meterRole: "total",
         intervalStart: new Date(at).toISOString(), intervalEnd: new Date(at + 15 * 60_000).toISOString(), elapsedMinutes: 15,
         activeEnergyKwh: row, previousActiveEnergyKwh: row - 1, rawDeltaKwh: kwh, usageKwh: kwh, averageKw: kwh * 4,
-        qualityStatus: "ok", localDate: new Date(at + 8 * 3_600_000).toISOString().slice(0, 10), localHour: new Date(at + 8 * 3_600_000).getUTCHours(),
+        qualityStatus: late ? "gap" : "ok", localDate: new Date(at + 8 * 3_600_000).toISOString().slice(0, 10), localHour: new Date(at + 8 * 3_600_000).getUTCHours(),
         dayType: "weekday", sourceFile: "fixture.xlsx", sourceSha256: SHA, sourceReadingKind: "interval_usage" as const,
       });
     }
@@ -101,15 +104,15 @@ describe("portfolio, budgets, overnight checks and scheduled reports", () => {
     expect(site).toMatchObject({ status: "ok", usageKwh: 2880, peakKw: 4, coveragePct: 100, dataStatus: "complete" });
     expect(site.carbonKg).toBeCloseTo(2880 * 0.402, 1);
     expect(site.carbonFactor).toMatchObject({ basis: "grid", grid: "SG", kgCo2ePerKwh: 0.402 });
-    // 96 kWh on each of the 30 days, and the whole portfolio's average day is that one site's.
-    expect(site).toMatchObject({ averageDailyKwh: 96, readingDays: 30 });
+    // 96 kWh on each of the 30 days, every one complete, and the whole portfolio's average day is that one site's.
+    expect(site).toMatchObject({ averageDailyKwh: 96, averageBasis: "full-days", fullDays: 30, readingDays: 30 });
     expect(site.dailyKwh).toEqual(Array(30).fill(96));
     expect(portfolio.totals.averageDailyKwh).toBe(96);
 
     // Readings start on 1 September: asked from 22 August, the site's average day still counts only days with readings.
     const early = await call("GET", ["portfolio"], "?from=2026-08-22&to=2026-09-30");
     const started = (early.body as { data: { sites: Array<Record<string, unknown>> } }).data.sites.find((candidate) => candidate.projectId === PROJECT)!;
-    expect(started).toMatchObject({ usageKwh: 2880, averageDailyKwh: 96, readingDays: 30 });
+    expect(started).toMatchObject({ usageKwh: 2880, averageDailyKwh: 96, averageBasis: "full-days", fullDays: 30, readingDays: 30 });
     expect(started.dailyKwh).toEqual([...Array(10).fill(null), ...Array(30).fill(96)]);
 
     const pdf = await call("GET", ["portfolio", "pdf"], "?from=2026-09-01&to=2026-09-30");
@@ -213,5 +216,55 @@ describe("portfolio, budgets, overnight checks and scheduled reports", () => {
 
     expect((await call("DELETE", ["report-schedules", schedule.id])).status).toBe(200);
     expect(metadata.energyIq.targets.listSchedules("default")).toEqual([]);
+  }, 120_000);
+});
+
+describe("a site's average day on the Portfolio, as its Overview gives it", () => {
+  const previousDuckDb = process.env.ENERGYIQ_DUCKDB_PATH;
+  let root: string;
+  let metadata: ReturnType<typeof createMetadataStore>;
+  let context: Required<ConfigApiContext>;
+
+  beforeEach(async () => {
+    root = mkdtempSync(join(tmpdir(), "energy-portfolio-average-"));
+    process.env.ENERGYIQ_DUCKDB_PATH = join(root, "energy.duckdb");
+    metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    ensureEnergyIqBootstrap(metadata);
+    // On 10 September one lighting meter was offline from 08:00 to 12:00 and sent those four hours late.
+    const intervalFacts = facts({ droppedOut: { meterPointId: OFFICIAL[0][0], from: "2026-09-10T00:00:00.000Z", to: "2026-09-10T04:00:00.000Z" } });
+    await materializeTestProjectSnapshot({
+      metadataStore: metadata, databasePath: join(root, "energy.duckdb"), workspaceId: "default", projectId: PROJECT, timezone: "Asia/Singapore",
+      batches: [{ importBatchId: "portfolio-fixture", sourceSha256: SHA, rawReadings: [], normalizedReadings: [], intervalFacts, qualityEvents: [] }],
+    });
+    context = { metadataStore: metadata, dataGateway: new LocalDataGateway(metadata), userId: "dev-user", workspaceId: "default" } as unknown as Required<ConfigApiContext>;
+  }, 120_000);
+
+  afterEach(() => {
+    metadata.close();
+    if (previousDuckDb === undefined) delete process.env.ENERGYIQ_DUCKDB_PATH;
+    else process.env.ENERGYIQ_DUCKDB_PATH = previousDuckDb;
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  });
+
+  it("averages only the days every meter read in full, so a day with energy sent late does not pull it down", async () => {
+    const segments = ["portfolio"];
+    const response = await handleEnergyApiRequest(request("GET", "/api/v1/energy/portfolio?from=2026-09-01&to=2026-09-30"), segments, context);
+    const portfolio = (response.body as { data: { sites: Array<Record<string, unknown>>; totals: Record<string, unknown> } }).data;
+    const site = portfolio.sites.find((candidate) => candidate.projectId === PROJECT)!;
+    // The total keeps the energy sent late; only what was read on time shows on the day's trend point.
+    expect(site).toMatchObject({ usageKwh: 2880, dataStatus: "partial" });
+    expect((site.dailyKwh as number[])[9]).toBe(92);
+    // Before, the average was every kWh read on time over 30 days of readings: 2,876 / 30 = 95.87 kWh. Now it is the
+    // average full day of the 29 complete days, as the Overview says it.
+    expect(site).toMatchObject({ averageDailyKwh: 96, averageBasis: "full-days", fullDays: 29, readingDays: 30 });
+    expect(portfolio.totals.averageDailyKwh).toBe(96);
+  }, 120_000);
+
+  it("works the average day out for the PDF of a portfolio of one site", async () => {
+    const user = metadata.users.getById({ user_id: "dev-user" });
+    // The fixture has one published site, so its PDF is a portfolio of one and says the site's average full day.
+    expect(portfolioProjectIds({ metadataStore: metadata, user, workspaceId: "default" })).toEqual([PROJECT]);
+    const lone = await buildPortfolio({ metadataStore: metadata, user, workspaceId: "default", period: { from: "2026-09-01", to: "2026-09-30" }, averageDays: "lone-site" });
+    expect(lone.sites[0]).toMatchObject({ projectId: PROJECT, usageKwh: 2880, averageDailyKwh: 96, averageBasis: "full-days", fullDays: 29 });
   }, 120_000);
 });

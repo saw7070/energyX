@@ -9,6 +9,7 @@ import {
   readEnergyFactCoverage,
   readEnergyReportingCoverage,
   resolveEnergyFactStorePath,
+  type EnergyDailyMeterFacts,
   type EnergyFactCoverage,
   type EnergyScopedDataSource,
   type LocalDataGateway
@@ -1404,22 +1405,29 @@ export type EnergySiteFiguresProjection = {
   headline: EnergyOverviewHeadlineProjection;
   offHours: EnergyScopeAnalysis["offHours"];
   intervals: EnergyIqAnalysisInterval[];
+  /**
+   * Only when asked for (includeDailyMeterFacts): each official meter's readings per local date, and the official meters
+   * themselves (each is expected for every minute of every day), so complete days can be judged as the reports do.
+   */
+  dailyMeters?: { meterPointIds: string[]; facts: EnergyDailyMeterFacts };
 };
 
 export const executeEnergySiteFiguresProjection = async (input: {
   metadataStore: MetadataStore;
   context: EnergyQueryContext;
   databasePath?: string;
+  includeDailyMeterFacts?: boolean;
 }): Promise<EnergySiteFiguresProjection> => {
-  const { headline, operating, intervals } = await readOverviewHeadlineWithPolicy(input);
-  return { headline, offHours: mapOperatingEvaluation(operating, headline.summary.usageKwh), intervals };
+  const { headline, operating, intervals, dailyMeters } = await readOverviewHeadlineWithPolicy(input);
+  return { headline, offHours: mapOperatingEvaluation(operating, headline.summary.usageKwh), intervals, ...(dailyMeters ? { dailyMeters } : {}) };
 };
 
 const readOverviewHeadlineWithPolicy = async (input: {
   metadataStore: MetadataStore;
   context: EnergyQueryContext;
   databasePath?: string;
-}): Promise<{ headline: EnergyOverviewHeadlineProjection; operating: EnergyIqOperatingEvaluation; intervals: EnergyIqAnalysisInterval[] }> => {
+  includeDailyMeterFacts?: boolean;
+}): Promise<{ headline: EnergyOverviewHeadlineProjection; operating: EnergyIqOperatingEvaluation; intervals: EnergyIqAnalysisInterval[]; dailyMeters?: { meterPointIds: string[]; facts: EnergyDailyMeterFacts } }> => {
   const publishedMeterRoute = resolveEnergyPublishedMeterRoute({
     metadataStore: input.metadataStore,
     projectId: input.context.projectId,
@@ -1446,6 +1454,7 @@ const readOverviewHeadlineWithPolicy = async (input: {
     from: input.context.from,
     to: input.context.to,
     ...(input.databasePath ? { databasePath: input.databasePath } : {}),
+    ...(input.includeDailyMeterFacts ? { includeDailyMeterFacts: true } : {}),
   });
   const operationalPolicy = evaluateReleasePinnedOperationalPolicy({
     metadataStore: input.metadataStore,
@@ -1472,7 +1481,12 @@ const readOverviewHeadlineWithPolicy = async (input: {
     cost: mapTariffEvaluation(operationalPolicy.tariff),
     immediateChildScopeCount: hierarchy.filter((node) => node.parent_id === selectedNode.id).length,
   });
-  return { headline, operating: operationalPolicy.operating, intervals: read.intervals };
+  return {
+    headline,
+    operating: operationalPolicy.operating,
+    intervals: read.intervals,
+    ...(read.dailyMeterFacts ? { dailyMeters: { meterPointIds: [...aggregateMeterNodeIds], facts: read.dailyMeterFacts } } : {}),
+  };
 };
 
 export type EnergyDailyTotalsProjection = {

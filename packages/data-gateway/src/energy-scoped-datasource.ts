@@ -149,6 +149,28 @@ export type EnergyOverviewHeadlineRead = {
   averageKwMismatchCount: number;
   invalidIntervalDurationCount: number;
   intervals: Array<{ start: string; end_exclusive: string; usage_kwh: number }>;
+  /** Only when asked for (includeDailyMeterFacts): see EnergyDailyMeterFacts. */
+  dailyMeterFacts?: EnergyDailyMeterFacts;
+};
+
+/** A whole day of one meter's readings, in minutes. */
+const ENERGY_METER_DAY_MINUTES = 1440;
+
+/**
+ * The official meters' readings day by day, from the same facts as the headline: the daily sums of the hourly cells
+ * the Analysis page and the reports judge complete days on, so a day can be judged here exactly as there (every
+ * expected minute read on time, and no interval that was not).
+ *
+ * Kept small, since a site has a row a day rather than one per meter a day: `days` adds the official meters up for each
+ * local date with any of their readings (kWh read on time, kWh sent late after an outage (quality 'gap'), minutes read
+ * on time, intervals that were not read on time). `meterExceptions` lists, on those dates, only the meter-days that were
+ * not exactly a whole day read on time with nothing wrong, including a meter that sent nothing at all that day. Every
+ * official meter-day on those dates that is not listed was ENERGY_METER_DAY_MINUTES read on time with no problem, so
+ * nothing is lost.
+ */
+export type EnergyDailyMeterFacts = {
+  days: Array<{ localDate: string; usageKwh: number; recoveredKwh: number; validMinutes: number; qualityEventCount: number }>;
+  meterExceptions: Array<{ localDate: string; meterPointId: string; validMinutes: number; qualityEventCount: number }>;
 };
 
 export const resolveEnergyFactStorePath = (
@@ -695,6 +717,8 @@ export const readEnergyOverviewHeadline = async (input: {
   from: string;
   to: string;
   databasePath?: string;
+  /** Also read each meter's daily facts (the Portfolio's average full day); off unless asked for. */
+  includeDailyMeterFacts?: boolean;
 }): Promise<EnergyOverviewHeadlineRead> => {
   const databasePath = input.databasePath
     ? normalizeEnergyFactStorePath(input.databasePath)
@@ -711,6 +735,8 @@ export const readEnergyOverviewHeadline = async (input: {
   });
   const periodDurationMs = Date.parse(input.to) - Date.parse(input.from);
   const previousFrom = new Date(Date.parse(input.from) - periodDurationMs).toISOString();
+  const dailyMeters = [...new Set(input.meterPointIds)];
+  const dailyMeterFactsSql = input.includeDailyMeterFacts && dailyMeters.length ? energyDailyMeterFactsSql(dailyMeters) : "";
   const database = await getDuckDbDatabase(databasePath);
   const connection = database.connect();
   try {
@@ -781,7 +807,7 @@ export const readEnergyOverviewHeadline = async (input: {
           from_ms := EPOCH_MS(interval_start),
           to_ms := EPOCH_MS(interval_end),
           usage_kwh := usage_kwh
-        ) ORDER BY interval_start, interval_end)) FROM scope_intervals), '[]') AS intervals_json
+        ) ORDER BY interval_start, interval_end)) FROM scope_intervals), '[]') AS intervals_json${dailyMeterFactsSql}
     `);
     return {
       usageKwh: numericValue(row.usage_kwh) ?? 0,
@@ -797,6 +823,9 @@ export const readEnergyOverviewHeadline = async (input: {
       averageKwMismatchCount: numericValue(row.average_kw_mismatch_count) ?? 0,
       invalidIntervalDurationCount: numericValue(row.invalid_interval_duration_count) ?? 0,
       intervals: parseEnergyOverviewIntervals(row.intervals_json),
+      ...(input.includeDailyMeterFacts ? {
+        dailyMeterFacts: parseEnergyDailyMeterFacts(row.daily_totals_json, row.daily_meter_exceptions_json, dailyMeters),
+      } : {}),
     };
   } finally {
     await duckDbClose(connection).catch(ignoreAlreadyClosed);
@@ -1275,6 +1304,68 @@ const parseEnergyOverviewIntervals = (
       usage_kwh: usageKwh,
     };
   });
+};
+
+/**
+ * The two extra columns readEnergyOverviewHeadline returns when asked for daily meter facts, over its current_facts.
+ * Rows are plain number arrays (a date as days since 1970-01-01, a meter as its place in `meterPointIds`), so a year of
+ * a large site stays small: [day, kWh on time, kWh sent late, minutes on time, intervals not on time] per date, and
+ * [day, meter, minutes on time, intervals not on time] per meter-day that was not exactly a whole clean day.
+ */
+const energyDailyMeterFactsSql = (meterPointIds: readonly string[]): string => `,
+        COALESCE((SELECT TO_JSON(LIST([day_number, usage_kwh, recovered_kwh, valid_minutes, quality_event_count] ORDER BY day_number)) FROM (
+          SELECT
+            CAST(DATE_DIFF('day', DATE '1970-01-01', local_date) AS DOUBLE) AS day_number,
+            CAST(COALESCE(SUM(usage_kwh) FILTER (WHERE quality_status = 'ok'), 0) AS DOUBLE) AS usage_kwh,
+            CAST(COALESCE(SUM(usage_kwh) FILTER (WHERE quality_status = 'gap'), 0) AS DOUBLE) AS recovered_kwh,
+            CAST(COALESCE(SUM(elapsed_minutes) FILTER (WHERE quality_status = 'ok'), 0) AS DOUBLE) AS valid_minutes,
+            CAST(COUNT(*) FILTER (WHERE quality_status <> 'ok') AS DOUBLE) AS quality_event_count
+          FROM current_facts
+          GROUP BY local_date
+        )), '[]') AS daily_totals_json,
+        COALESCE((SELECT TO_JSON(LIST([day_number, meter_index, valid_minutes, quality_event_count] ORDER BY day_number, meter_index)) FROM (
+          SELECT
+            CAST(DATE_DIFF('day', DATE '1970-01-01', fact_days.local_date) AS DOUBLE) AS day_number,
+            CAST(official.meter_index AS DOUBLE) AS meter_index,
+            CAST(COALESCE(meter_days.valid_minutes, 0) AS DOUBLE) AS valid_minutes,
+            CAST(COALESCE(meter_days.quality_event_count, 0) AS DOUBLE) AS quality_event_count
+          FROM (SELECT DISTINCT local_date FROM current_facts) fact_days
+          CROSS JOIN (VALUES ${meterPointIds.map((id, index) => `(${sqlLiteral(id)}, ${index})`).join(", ")}) official(meter_node_id, meter_index)
+          LEFT JOIN (
+            SELECT
+              local_date,
+              meter_node_id,
+              COALESCE(SUM(elapsed_minutes) FILTER (WHERE quality_status = 'ok'), 0) AS valid_minutes,
+              COUNT(*) FILTER (WHERE quality_status <> 'ok') AS quality_event_count
+            FROM current_facts
+            GROUP BY local_date, meter_node_id
+          ) meter_days ON meter_days.local_date = fact_days.local_date AND meter_days.meter_node_id = official.meter_node_id
+          WHERE COALESCE(meter_days.valid_minutes, 0) <> ${ENERGY_METER_DAY_MINUTES}
+            OR COALESCE(meter_days.quality_event_count, 0) <> 0
+        )), '[]') AS daily_meter_exceptions_json`;
+
+/** Reads the two columns of energyDailyMeterFactsSql back, with each date and meter named again. */
+export const parseEnergyDailyMeterFacts = (totals: unknown, exceptions: unknown, meterPointIds: readonly string[]): EnergyDailyMeterFacts => {
+  const rows = (value: unknown, width: number, code: string): number[][] => {
+    const parsed = JSON.parse(typeof value === "string" ? value : "[]") as unknown;
+    if (!Array.isArray(parsed)) throw new Error(`${code}_INVALID`);
+    return parsed.map((item, index) => {
+      const numbers = Array.isArray(item) && item.length === width ? item.map(numericValue) : [];
+      if (numbers.length !== width || numbers.some((number) => number === null)) throw new Error(`${code}_ROW_INVALID:${index}`);
+      return numbers as number[];
+    });
+  };
+  const dateOf = (dayNumber: number) => new Date(dayNumber * 86_400_000).toISOString().slice(0, 10);
+  return {
+    days: rows(totals, 5, "ENERGYIQ_DAILY_METER_TOTALS").map(([day, usageKwh, recoveredKwh, validMinutes, qualityEventCount]) => ({
+      localDate: dateOf(day!), usageKwh: usageKwh!, recoveredKwh: recoveredKwh!, validMinutes: validMinutes!, qualityEventCount: qualityEventCount!,
+    })),
+    meterExceptions: rows(exceptions, 4, "ENERGYIQ_DAILY_METER_EXCEPTIONS").map(([day, meter, validMinutes, qualityEventCount], index) => {
+      const meterPointId = meterPointIds[meter!];
+      if (meterPointId === undefined) throw new Error(`ENERGYIQ_DAILY_METER_EXCEPTIONS_ROW_INVALID:${index}`);
+      return { localDate: dateOf(day!), meterPointId, validMinutes: validMinutes!, qualityEventCount: qualityEventCount! };
+    }),
+  };
 };
 
 /** Bounded interval evidence for a server-authorized scope; guard and read share one transaction. */
