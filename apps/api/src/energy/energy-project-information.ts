@@ -1,6 +1,7 @@
 import { gridEmissionFactorFor, type MetadataStore, type EnergyIqMeterPresentation, type EnergyIqProjectSetupDocument } from "@datafoundry/metadata";
 import { resolveEnergyProjectCapabilities } from "./energy-project-capabilities.js";
 import { resolveEnergyPublishedHierarchyNodes } from "./energy-query-context.js";
+import { ReportFeedbackStore } from "../report-agent/report-feedback-store.js";
 
 /** presentation.always_on === "true": the meter form's "Always on by design" tick; the meter is meant to run day and night. */
 const alwaysOn = (presentation: EnergyIqMeterPresentation | undefined) => presentation?.always_on === "true";
@@ -34,9 +35,23 @@ export function circuitGroupIds(nodes: GroupNode[], meters: GroupMeter[]): Set<s
   return groups;
 }
 
-/** Published customer information only; do not return setup documents or policy catalogs. */
+/**
+ * Published customer information only; do not return setup documents or policy catalogs.
+ *
+ * Also carries what people told the AI about the site's reports (report feedback): active memory, follow-ups that are
+ * open or closed in the last 31 days, and report points the site said not to flag. The site's own reports read them.
+ */
 export function readEnergyProjectInformation(metadata: MetadataStore, userId: string, workspaceId: string, projectId: string) {
   if (!resolveEnergyProjectCapabilities({ metadataStore: metadata, userId, workspaceId, projectId }).readProjectInformation) throw Error("ENERGYIQ_PROJECT_FORBIDDEN");
+  const information = buildEnergyProjectInformation(metadata, projectId);
+  return { ...information, ...new ReportFeedbackStore(metadata.db).reportInputs(projectId, new Date(), information.timezone) };
+}
+
+/**
+ * The published information itself, without any access check. Only for server-side use after the caller has checked
+ * access in its own way (for example, the report feedback AI describing the site to the model).
+ */
+export function buildEnergyProjectInformation(metadata: MetadataStore, projectId: string) {
   const project = metadata.energyIq.getProject(projectId);
   const published = metadata.energyIq.templates.getLatestProjectRevision(projectId);
   const hierarchyId = published?.hierarchy_revision_id ?? project.hierarchy_revision_id;
