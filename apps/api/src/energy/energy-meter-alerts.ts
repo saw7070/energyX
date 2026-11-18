@@ -17,7 +17,8 @@
 import { readEnergyMeterDataHealth, readEnergyMeterIntervalCoverage } from "@datafoundry/data-gateway";
 import type { MetadataStore } from "@datafoundry/metadata";
 
-import { sendPendingAlertEmails, type AlertEmail } from "./energy-alert-emails.js";
+import { logger } from "../observability/logger.js";
+import type { AlertEmail } from "./energy-alert-emails.js";
 import { lightsOnHoursOn, readIdleWhenQuietMeters } from "./energy-idle-meters.js";
 import {
   BASELINE_DAYS,
@@ -44,6 +45,7 @@ import { resolveEnergyPublishedMeterPoints } from "./energy-query-context.js";
 import { hardwareAlertRecipients, operatorAlertRecipients } from "./energy-recipients.js";
 
 const DAY_MS = 24 * HOUR_MS;
+const log = logger.child({ component: "meter-alert" });
 /** A never-use episode that ended longer ago than this is not news when it is first seen (say, on the first check). */
 export const NEVER_USED_NEWS_DAYS = 7;
 /** Days whose hours are judged for unusual use: the newest day with readings and the one before. */
@@ -101,9 +103,14 @@ const SAME_SPELL_MS = 90 * 60_000;
  * Brings the stored alerts in line with the readings: opens new ones, updates those still going, resolves those that
  * are over. Returns what opened (or came back) and what resolved in this check; a second check of the same readings
  * returns nothing.
+ *
+ * `firstCheck`: the site has never been checked, so the readings hold weeks of history at once. What is already over
+ * (outages that ended, use that stopped) and the day's unusual hours are recorded as `seeded`: kept, but never
+ * emailed, and outages already over are not shown in the bell either. What is still going is raised as usual.
  */
-export function evaluateMeterAlerts(input: { store: MeterAlertStore; projectId: string; readings: MeterAlertReadings; patternAlerts: boolean; now: Date }): MeterAlertChanges {
+export function evaluateMeterAlerts(input: { store: MeterAlertStore; projectId: string; readings: MeterAlertReadings; patternAlerts: boolean; now: Date; firstCheck?: boolean }): MeterAlertChanges {
   const { store, projectId, readings, now } = input;
+  const seeded = input.firstCheck ? { seeded: true } : {};
   const { timezone, cells } = readings;
   const changes: MeterAlertChanges = { opened: [], resolved: [] };
   const open = (kind: MeterAlertKind, audience: MeterAlertAudience, key: string, subject: string, payload: Record<string, unknown>) => {
@@ -137,9 +144,11 @@ export function evaluateMeterAlerts(input: { store: MeterAlertStore; projectId: 
     }
     const subject = group.locationId && group.meters.length > 1 ? group.locationId : group.meters[0]!.id;
     const key = `meter-offline:${shortId(subject)}:${compactLocal(Date.parse(group.since), timezone)}`;
-    open("meter_offline", "hardware", key, subject, payload);
-    // Found only once it was over (the daily update brought the outage and the return together): news all the same.
-    if (group.back) resolve(key, payload);
+    // Found only once it was over (the daily update brought the outage and the return together): news all the same,
+    // except on a site's first check, when it is only history.
+    const fresh = group.back ? { ...payload, ...seeded } : payload;
+    open("meter_offline", "hardware", key, subject, fresh);
+    if (group.back) resolve(key, fresh);
   }
   for (const alert of stored) {
     if (alert.status !== "open" || claimed.has(alert.key)) continue;
@@ -170,9 +179,11 @@ export function evaluateMeterAlerts(input: { store: MeterAlertStore; projectId: 
       const known = store.get(projectId, key);
       if (!known && !episode.ongoing && endMs < newsFrom) continue;
       seen.add(key);
-      if (known) store.update(projectId, key, payload, now);
-      else open("never_used", "operators", key, meter.id, payload);
-      if (!episode.ongoing) resolve(key, payload);
+      // Use that already stopped before a site's first check is shown, not emailed.
+      const stored = known ? { ...payload, ...(known.payload.seeded === true ? { seeded: true } : {}) } : episode.ongoing ? payload : { ...payload, ...seeded };
+      if (known) store.update(projectId, key, stored, now);
+      else open("never_used", "operators", key, meter.id, stored);
+      if (!episode.ongoing) resolve(key, stored);
     }
   }
   for (const alert of store.list(projectId, { status: "open", kind: "never_used" })) {
@@ -180,6 +191,9 @@ export function evaluateMeterAlerts(input: { store: MeterAlertStore; projectId: 
   }
 
   // ---------- 3. unusual hourly use: the people who run the site
+  // Today's limit counts the alerts opened today, by the site's own date.
+  const today = localHourOf(now.getTime(), timezone).date;
+  const dayFrom = iso(localHourStartMs(today, 0, timezone)), dayTo = iso(localHourStartMs(shiftDate(today, 1), 0, timezone));
   if (input.patternAlerts && readings.referenceMs !== null) {
     const newest = localHourOf(readings.referenceMs - 1, timezone).date;
     const judged = new Set(datesBetween(shiftDate(newest, 1 - PATTERN_DAYS), newest));
@@ -188,10 +202,7 @@ export function evaluateMeterAlerts(input: { store: MeterAlertStore; projectId: 
     // Meters quiet right now have nothing to judge; the hours of a spell already over are left out as incomplete.
     const offlineIds = new Set(offline.filter((meter) => !meter.back).map((meter) => meter.id));
     const openPattern = store.list(projectId, { status: "open", kind: "usage_pattern" });
-    // Today's limit counts the alerts opened today, by the site's own date.
-    const today = localHourOf(now.getTime(), timezone).date;
-    const dayFrom = iso(localHourStartMs(today, 0, timezone)), dayTo = iso(localHourStartMs(shiftDate(today, 1), 0, timezone));
-    let shown = store.countOpened(projectId, "usage_pattern", dayFrom, dayTo, (record) => record.payload.suppressed !== true);
+    let shown = store.countOpened(projectId, "usage_pattern", dayFrom, dayTo, { suppressed: false });
     const touched = new Set<string>();
     let summaryNeeded = false;
     for (const meter of readings.meters) {
@@ -216,6 +227,7 @@ export function evaluateMeterAlerts(input: { store: MeterAlertStore; projectId: 
             start: typeof before.start === "string" && before.start < fresh.start ? before.start : fresh.start,
             ...(keepPeak ? { at: before.at, kwh: before.kwh, usualKwh: before.usualKwh, direction: before.direction } : {}),
             ...(before.suppressed === true ? { suppressed: true } : {}),
+            ...(before.seeded === true ? { seeded: true } : {}),
           };
           touched.add(continuing.key);
           store.update(projectId, continuing.key, payload, now);
@@ -223,7 +235,7 @@ export function evaluateMeterAlerts(input: { store: MeterAlertStore; projectId: 
           continue;
         }
         const suppressed = shown >= PATTERN_ALERTS_PER_DAY;
-        const payload = suppressed ? { ...fresh, suppressed: true } : fresh;
+        const payload = { ...fresh, ...(suppressed ? { suppressed: true } : {}), ...seeded };
         touched.add(key);
         if (suppressed) {
           store.open({ projectId, key, kind: "usage_pattern", audience: "operators", subject: meter.id, payload, now });
@@ -237,13 +249,26 @@ export function evaluateMeterAlerts(input: { store: MeterAlertStore; projectId: 
     }
     for (const alert of openPattern) if (!touched.has(alert.key)) resolve(alert.key, { ...alert.payload, ongoing: false });
     // The rest of today's unusual use, in one alert.
-    const hidden = store.list(projectId, { kind: "usage_pattern" }).filter((record) => record.payload.suppressed === true && record.openedAt >= dayFrom && record.openedAt < dayTo);
+    const hidden = store.listOpened(projectId, "usage_pattern", dayFrom, dayTo, { suppressed: true });
     if (summaryNeeded || hidden.length) {
       const summaryKey = `usage-pattern-more:${today.replaceAll("-", "")}`;
-      const payload = { date: today, count: hidden.length, names: [...new Set(hidden.map((record) => String(record.payload.meterName ?? "")))].filter(Boolean).slice(0, 10) };
-      if (store.get(projectId, summaryKey)) store.update(projectId, summaryKey, payload, now);
+      const known = store.get(projectId, summaryKey);
+      const payload = {
+        date: today, count: hidden.length, names: [...new Set(hidden.map((record) => String(record.payload.meterName ?? "")))].filter(Boolean).slice(0, 10),
+        ...(known ? (known.payload.seeded === true ? { seeded: true } : {}) : seeded),
+      };
+      if (known) store.update(projectId, summaryKey, payload, now);
       else if (hidden.length) open("usage_pattern_more", "operators", summaryKey, "site", payload);
     }
+  } else if (!input.patternAlerts) {
+    // Switched off: what was still going is closed, so it does not sit open in the bell.
+    for (const alert of store.list(projectId, { status: "open", kind: "usage_pattern" })) resolve(alert.key, { ...alert.payload, ongoing: false });
+  }
+  // A day's summary is over once the day is, once nothing is left only counted in it, or with the alerts switched off.
+  for (const summary of store.list(projectId, { status: "open", kind: "usage_pattern_more" })) {
+    const date = typeof summary.payload.date === "string" ? summary.payload.date : "";
+    const counted = date === today ? store.countOpened(projectId, "usage_pattern", dayFrom, dayTo, { suppressed: true }) : 0;
+    if (!input.patternAlerts || date !== today || counted === 0) resolve(summary.key, summary.payload);
   }
   return changes;
 }
@@ -432,75 +457,116 @@ export function meterAlertEmail(input: { site: string; timezone: string; alert: 
   return null;
 }
 
-export type MeterAlertRun = { checked: boolean; opened: MeterAlertRecord[]; resolved: MeterAlertRecord[]; emailed: string[] };
+export type MeterAlertRun = { checked: boolean; opened: MeterAlertRecord[]; resolved: MeterAlertRecord[]; emailed: string[]; emailFailures: number };
+
+/** An email still unsent after this long is not news any more: it is left in the outbox, unsent, for the record. */
+export const EMAIL_MAX_AGE_MS = 2 * DAY_MS;
+type Send = (message: { to: string[]; subject: string; text: string }) => Promise<void>;
 
 /**
- * Checks one site if it has new readings since its last check (or was last checked over three hours ago), and emails
- * whatever opened or came back. `send` is given only when mail is configured; emails also need
- * ENERGYIQ_ALERT_EMAILS_ENABLED=true.
+ * Checks one site if it has new readings since its last check (or was last checked over three hours ago), then sends
+ * whatever is waiting in its outbox. The alerts, the check and the emails about them are saved in one transaction, so
+ * an email that cannot be sent is tried again at the next hourly check (for up to two days) rather than lost. `send`
+ * is given only when mail is configured; emails also need ENERGYIQ_ALERT_EMAILS_ENABLED=true, and none are written
+ * while they are off.
  */
 export async function runMeterAlerts(input: {
   metadataStore: MetadataStore;
   projectId: string;
   now: Date;
   env?: Record<string, string | undefined>;
-  send?: (message: { to: string[]; subject: string; text: string }) => Promise<void>;
+  send?: Send;
   publicBaseUrl?: string;
   read?: (metadataStore: MetadataStore, projectId: string, now: Date) => Promise<MeterAlertReadings>;
   force?: boolean;
 }): Promise<MeterAlertRun> {
   const env = input.env ?? process.env;
   const store = new MeterAlertStore(input.metadataStore.db);
+  const emailsOn = Boolean(input.send) && env.ENERGYIQ_ALERT_EMAILS_ENABLED?.trim() === "true";
+  const drain = async (run: Omit<MeterAlertRun, "emailed" | "emailFailures">): Promise<MeterAlertRun> => {
+    const sent = emailsOn ? await drainMeterAlertEmails({ metadataStore: input.metadataStore, projectId: input.projectId, store, send: input.send!, env, now: input.now }) : { emailed: [], failures: 0 };
+    return { ...run, emailed: sent.emailed, emailFailures: sent.failures };
+  };
   const snapshotId = input.metadataStore.energyIq.findCurrentDataSnapshot(input.projectId)?.id ?? null;
   const last = store.lastCheck(input.projectId);
   if (!input.force && last && (last.dataSnapshotId ?? null) === snapshotId && input.now.getTime() - Date.parse(last.checkedAt) < RECHECK_MS) {
-    return { checked: false, opened: [], resolved: [], emailed: [] };
+    return drain({ checked: false, opened: [], resolved: [] });
   }
   const readings = await (input.read ?? readMeterAlertReadings)(input.metadataStore, input.projectId, input.now);
-  const changes = evaluateMeterAlerts({ store, projectId: input.projectId, readings, patternAlerts: store.getSettings(input.projectId).patternAlerts, now: input.now });
-  store.recordCheck(input.projectId, readings.dataSnapshotId ?? snapshotId, input.now);
-  const emailed = input.send && env.ENERGYIQ_ALERT_EMAILS_ENABLED?.trim() === "true"
-    ? await emailMeterAlerts({ ...input, env, send: input.send, store, changes, timezone: readings.timezone })
-    : [];
-  return { checked: true, ...changes, emailed };
+  // Nothing to judge (no published readings or setup right now): leave every alert as it is rather than resolve
+  // the open ones and raise them again once the readings are back.
+  if (!readings.meters.length || readings.referenceMs === null) return drain({ checked: false, opened: [], resolved: [] });
+  const project = input.metadataStore.energyIq.getProject(input.projectId);
+  const changes = store.transaction(() => {
+    const found = evaluateMeterAlerts({ store, projectId: input.projectId, readings, patternAlerts: store.getSettings(input.projectId).patternAlerts, now: input.now, firstCheck: !last });
+    store.recordCheck(input.projectId, readings.dataSnapshotId ?? snapshotId, input.now);
+    if (emailsOn) {
+      for (const email of meterAlertEmails({ changes: found, site: project.name, timezone: readings.timezone, projectId: input.projectId, ...(input.publicBaseUrl ? { publicBaseUrl: input.publicBaseUrl } : {}) })) {
+        store.enqueueEmail({ projectId: input.projectId, key: email.key, audience: email.audience, subject: email.subject, text: email.text, now: input.now });
+      }
+    }
+    return found;
+  });
+  return drain({ checked: true, ...changes });
 }
 
-const emailMeterAlerts = async (input: {
-  metadataStore: MetadataStore; projectId: string; env: Record<string, string | undefined>; publicBaseUrl?: string; store: MeterAlertStore;
-  changes: MeterAlertChanges; timezone: string; send: (message: { to: string[]; subject: string; text: string }) => Promise<void>;
-}): Promise<string[]> => {
-  const project = input.metadataStore.energyIq.getProject(input.projectId);
+/**
+ * The emails a check's changes call for: one for each alert that opened, and for meters sending again. Not for unusual
+ * use only counted in a summary, nor for anything recorded at a site's first check (`seeded`); an outage found only
+ * once it was over gets the one "back" email, which says both.
+ */
+export function meterAlertEmails(input: { changes: MeterAlertChanges; site: string; timezone: string; projectId: string; publicBaseUrl?: string }): Array<AlertEmail & { audience: MeterAlertAudience }> {
   const base = input.publicBaseUrl?.replace(/\/$/u, "") ?? "";
   const link = (path: string, extra: Record<string, string> = {}) => base ? `\n\nOpen in EnergyX: ${base}${path}?${new URLSearchParams({ projectId: input.projectId, ...extra })}` : "";
-  const hardware: AlertEmail[] = [];
-  const operators: AlertEmail[] = [];
+  const facility = link("/energyiq/project-configuration", { tab: "availability" });
+  const quiet = (alert: MeterAlertRecord) => alert.payload.suppressed === true || alert.payload.seeded === true;
   const resolvedNow = new Set(input.changes.resolved.map((alert) => alert.key));
+  const emails: Array<AlertEmail & { audience: MeterAlertAudience }> = [];
   for (const alert of input.changes.opened) {
-    // Unusual use past today's limit is only counted; an outage found once it was over gets the one "back" email below.
-    if (alert.payload.suppressed === true || (alert.kind === "meter_offline" && resolvedNow.has(alert.key))) continue;
-    const email = meterAlertEmail({
-      site: project.name, timezone: input.timezone, alert,
-      link: alert.kind === "meter_offline" ? link("/energyiq/project-configuration", { tab: "availability" }) : link("/energyiq/analysis"),
-    });
-    if (email) (alert.audience === "hardware" ? hardware : operators).push(email);
+    if (quiet(alert) || (alert.kind === "meter_offline" && resolvedNow.has(alert.key))) continue;
+    const email = meterAlertEmail({ site: input.site, timezone: input.timezone, alert, link: alert.kind === "meter_offline" ? facility : link("/energyiq/analysis") });
+    if (email) emails.push({ ...email, audience: alert.audience });
   }
   for (const alert of input.changes.resolved) {
-    if (alert.kind !== "meter_offline") continue;
-    const email = meterAlertEmail({ site: project.name, timezone: input.timezone, alert, back: true, link: link("/energyiq/project-configuration", { tab: "availability" }) });
-    if (email) hardware.push(email);
+    if (alert.kind !== "meter_offline" || quiet(alert)) continue;
+    const email = meterAlertEmail({ site: input.site, timezone: input.timezone, alert, back: true, link: facility });
+    if (email) emails.push({ ...email, audience: "hardware" });
   }
-  const sent: string[] = [];
-  if (hardware.length) {
-    sent.push(...await sendPendingAlertEmails({
-      metadataStore: input.metadataStore, projectId: input.projectId, emails: hardware, send: input.send,
-      recipients: hardwareAlertRecipients(input.metadataStore, input.projectId, input.store.getSettings(input.projectId).hardwareEmails, input.env),
-    }));
+  return emails;
+}
+
+/**
+ * Sends a site's waiting emails, oldest first, each on its own: one that fails is recorded and tried again at the next
+ * check, and never stops the rest. Recipients are worked out at sending time; with nobody to send to, an email waits.
+ */
+export async function drainMeterAlertEmails(input: {
+  metadataStore: MetadataStore; projectId: string; store: MeterAlertStore; send: Send; env: Record<string, string | undefined>; now: Date;
+}): Promise<{ emailed: string[]; failures: number }> {
+  const pending = input.store.pendingEmails(input.projectId, new Date(input.now.getTime() - EMAIL_MAX_AGE_MS).toISOString());
+  if (!pending.length) return { emailed: [], failures: 0 };
+  const recipients = new Map<MeterAlertAudience, string[]>();
+  const to = (audience: MeterAlertAudience) => {
+    if (!recipients.has(audience)) {
+      recipients.set(audience, audience === "hardware"
+        ? hardwareAlertRecipients(input.metadataStore, input.projectId, input.store.getSettings(input.projectId).hardwareEmails, input.env)
+        : operatorAlertRecipients(input.metadataStore, input.projectId, input.env));
+    }
+    return recipients.get(audience)!;
+  };
+  const emailed: string[] = [];
+  let failures = 0;
+  for (const email of pending) {
+    const list = to(email.audience);
+    if (!list.length) continue;
+    try {
+      await input.send({ to: list, subject: email.subject, text: email.text });
+      input.store.markEmailSent(input.projectId, email.key, input.now);
+      emailed.push(email.key);
+    } catch (error) {
+      failures += 1;
+      input.store.markEmailFailed(input.projectId, email.key, error instanceof Error ? error.message : "unknown", input.now);
+      log.warn("email-failed", { project_id: input.projectId, alert: email.key.split(":")[0], attempts: email.attempts + 1 });
+    }
   }
-  if (operators.length) {
-    sent.push(...await sendPendingAlertEmails({
-      metadataStore: input.metadataStore, projectId: input.projectId, emails: operators, send: input.send,
-      recipients: operatorAlertRecipients(input.metadataStore, input.projectId, input.env),
-    }));
-  }
-  return sent;
-};
+  return { emailed, failures };
+}

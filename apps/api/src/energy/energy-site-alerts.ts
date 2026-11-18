@@ -123,17 +123,15 @@ export const readSiteAlerts = (input: {
     : [];
   // Never-use and unusual-use alerts go to the same readers as the budget and overnight alerts.
   const audiences: MeterAlertAudience[] = [...(input.includeHardware ? ["hardware" as const] : []), ...(input.includeReports ? ["operators" as const] : [])];
+  // What is never shown (unusual use only counted in a summary, a resolved summary, meters quiet that did not come back
+  // or were over before the site's first check) is left out in the query, before its limit.
   const meterAlerts = new MeterAlertStore(input.metadataStore.db)
-    .listForBell(input.projectId, audiences, new Date(now - REPORT_NEWS_MS).toISOString(), 40)
-    .flatMap((alert): SiteAlertMeter[] => {
-      // Today's unusual use past the daily limit is only counted, in its summary alert.
-      if (alert.payload.suppressed === true) return [];
-      const base = { key: alert.key, kind: alert.kind, status: alert.status, openedAt: alert.openedAt, ...(alert.resolvedAt ? { resolvedAt: alert.resolvedAt } : {}), details: alert.payload };
-      if (alert.kind !== "meter_offline" || alert.status === "open") return [{ ...base, readKey: alert.key }];
-      // Meters sending again: shown once, as its own news, only when they actually came back (not when no longer watched).
-      return typeof alert.payload.back === "string" && alert.resolvedAt && now - Date.parse(alert.resolvedAt) <= BACK_NEWS_MS ? [{ ...base, readKey: `${alert.key}:back` }] : [];
-    })
-    .slice(0, MAX_METER_ALERTS);
+    .listForBell(input.projectId, audiences, new Date(now - REPORT_NEWS_MS).toISOString(), MAX_METER_ALERTS, new Date(now - BACK_NEWS_MS).toISOString())
+    .map((alert): SiteAlertMeter => ({
+      key: alert.key, kind: alert.kind, status: alert.status, openedAt: alert.openedAt, ...(alert.resolvedAt ? { resolvedAt: alert.resolvedAt } : {}), details: alert.payload,
+      // Meters sending again are their own news, shown once.
+      readKey: alert.kind === "meter_offline" && alert.status === "resolved" ? `${alert.key}:back` : alert.key,
+    }));
   return { reports, targets, meterAlerts, ...(sync ? { sync } : {}), readKeys: readKeys(input.metadataStore.db, input.userId, input.projectId) };
 };
 

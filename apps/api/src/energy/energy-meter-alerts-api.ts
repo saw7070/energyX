@@ -39,6 +39,8 @@ export const handleMeterAlertsApi = async (
   if (method === "PUT") {
     const raw = await helpers.readJsonBody(request);
     const body = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+    // Nothing to change is a mistake, not a save: it would only rewrite who changed it last.
+    if (body.patternAlerts === undefined && body.hardwareEmails === undefined) throw new Error("ENERGYIQ_METER_ALERT_SETTINGS_INVALID");
     if (body.patternAlerts !== undefined && !canEditPattern) throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
     if (body.hardwareEmails !== undefined && !canEditRecipients) throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
     store.setSettings(projectId, {

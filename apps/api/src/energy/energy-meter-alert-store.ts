@@ -1,8 +1,10 @@
 /**
  * What the meter alerts remember, on the metadata database: each alert with when it opened and was resolved, each
- * site's meter-alert settings, and when each site was last checked. Alerts are keyed per episode, so checking the
- * same readings again (the nightly update, its hourly retries, an upload) changes nothing and never adds a second bell
- * entry. Tables are created here, like the report-agent's own stores, rather than by a numbered migration.
+ * site's meter-alert settings, when each site was last checked, and the emails still to send (an outbox written in the
+ * same transaction as the alert it is about, so an email that fails is tried again rather than lost). Alerts are keyed
+ * per episode, so checking the same readings again (the nightly update, its hourly retries, an upload) changes nothing
+ * and never adds a second bell entry. Tables are created here, like the report-agent's own stores, rather than by a
+ * numbered migration.
  */
 import type { DatabaseSync } from "node:sqlite";
 
@@ -35,10 +37,27 @@ export type MeterAlertSettings = {
   updatedBy?: string;
 };
 
+/** An email waiting in the outbox: what it says and who it is for, worked out again when it is sent. */
+export type MeterAlertEmailRecord = {
+  projectId: string;
+  key: string;
+  audience: MeterAlertAudience;
+  subject: string;
+  text: string;
+  createdAt: string;
+  attempts: number;
+  lastError?: string;
+  sentAt?: string;
+};
+
 export const MAX_HARDWARE_EMAILS = 5;
 const EMAIL_PATTERN = /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/u;
 /** Resolved alerts are kept this long for the record, then cleared. */
 const KEEP_RESOLVED_MS = 180 * 24 * 3_600_000;
+/** Outbox rows, sent or not, are kept this long for the record, then cleared. */
+const KEEP_OUTBOX_MS = 30 * 24 * 3_600_000;
+/** A payload flag read in SQL: true is stored as 1. */
+const flag = (name: string) => `COALESCE(json_extract(payload_json, '$.${name}'), 0) = 1`;
 
 /** Up to five addresses, each checked; duplicates and case are folded. Throws ENERGYIQ_METER_ALERT_EMAILS_INVALID. */
 export const normalizeHardwareEmails = (value: unknown): string[] => {
@@ -69,6 +88,7 @@ export class MeterAlertStore {
       );
       CREATE INDEX IF NOT EXISTS idx_energyiq_meter_alerts_status ON energyiq_meter_alerts(project_id, status, kind);
       CREATE INDEX IF NOT EXISTS idx_energyiq_meter_alerts_recent ON energyiq_meter_alerts(project_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_energyiq_meter_alerts_opened ON energyiq_meter_alerts(project_id, kind, opened_at);
       CREATE TABLE IF NOT EXISTS energyiq_meter_alert_settings (
         project_id TEXT PRIMARY KEY,
         pattern_enabled INTEGER NOT NULL,
@@ -81,7 +101,45 @@ export class MeterAlertStore {
         data_snapshot_id TEXT,
         checked_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS energyiq_meter_alert_outbox (
+        project_id TEXT NOT NULL,
+        email_key TEXT NOT NULL,
+        audience TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        body TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        last_attempt_at TEXT,
+        sent_at TEXT,
+        PRIMARY KEY (project_id, email_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_energyiq_meter_alert_outbox_pending ON energyiq_meter_alert_outbox(project_id, sent_at, created_at);
     `);
+  }
+
+  /**
+   * Runs `work` as one transaction, so an alert's change, the site's check and the emails about it are saved together
+   * or not at all. Inside a transaction the caller already opened, the work simply joins it.
+   */
+  transaction<T>(work: () => T): T {
+    const open = (this.db as { isTransaction?: unknown }).isTransaction;
+    if (open === true) return work();
+    try {
+      this.db.exec("BEGIN IMMEDIATE");
+    } catch (error) {
+      // Node versions without `isTransaction`: an outer transaction is already open, so join it.
+      if (open === undefined && error instanceof Error && /within a transaction/iu.test(error.message)) return work();
+      throw error;
+    }
+    try {
+      const result = work();
+      this.db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      try { this.db.exec("ROLLBACK"); } catch { /* SQLite already rolled back */ }
+      throw error;
+    }
   }
 
   list(projectId: string, filter: { status?: MeterAlertStatus; kind?: MeterAlertKind } = {}): MeterAlertRecord[] {
@@ -136,23 +194,73 @@ export class MeterAlertStore {
     return Number(result.changes) > 0;
   }
 
-  /** Alerts for the bell: every open one, and those resolved since `sinceIso`, for the given audiences; newest first. */
-  listForBell(projectId: string, audiences: readonly MeterAlertAudience[], sinceIso: string, limit = 20): MeterAlertRecord[] {
+  /**
+   * Alerts for the bell, for the given audiences, newest first: every open one, and those resolved since `sinceIso`.
+   * Left out before the limit, so they never push a real alert off the list: unusual use only counted in a summary
+   * (suppressed), a summary once resolved, and meters quiet that were not found to come back since `backSinceIso`
+   * (no longer watched, filled in on time, or already over at the site's first check).
+   */
+  listForBell(projectId: string, audiences: readonly MeterAlertAudience[], sinceIso: string, limit = 20, backSinceIso = sinceIso): MeterAlertRecord[] {
     if (!audiences.length) return [];
     const marks = audiences.map(() => "?").join(", ");
     const rows = this.db.prepare(`
       SELECT * FROM energyiq_meter_alerts
       WHERE project_id = ? AND audience IN (${marks}) AND (status = 'open' OR resolved_at >= ?)
+        AND NOT ${flag("suppressed")}
+        AND NOT (kind = 'usage_pattern_more' AND status = 'resolved')
+        AND NOT (kind = 'meter_offline' AND status = 'resolved'
+          AND (json_extract(payload_json, '$.back') IS NULL OR ${flag("seeded")} OR resolved_at < ?))
       ORDER BY updated_at DESC, alert_key LIMIT ?
-    `).all(projectId, ...audiences, sinceIso, limit) as Array<Record<string, unknown>>;
+    `).all(projectId, ...audiences, sinceIso, backSinceIso, limit) as Array<Record<string, unknown>>;
     return rows.map(mapAlert);
   }
 
-  /** How many alerts of a kind opened in [fromIso, toIso). */
-  countOpened(projectId: string, kind: MeterAlertKind, fromIso: string, toIso: string, where: (record: MeterAlertRecord) => boolean = () => true): number {
-    const rows = this.db.prepare("SELECT * FROM energyiq_meter_alerts WHERE project_id = ? AND kind = ? AND opened_at >= ? AND opened_at < ?")
-      .all(projectId, kind, fromIso, toIso) as Array<Record<string, unknown>>;
-    return rows.map(mapAlert).filter(where).length;
+  /** Alerts of a kind opened in [fromIso, toIso); `suppressed` picks those only counted in a summary, or the others. */
+  listOpened(projectId: string, kind: MeterAlertKind, fromIso: string, toIso: string, filter: { suppressed?: boolean } = {}): MeterAlertRecord[] {
+    const suppressed = filter.suppressed === undefined ? "" : filter.suppressed ? `AND ${flag("suppressed")}` : `AND NOT ${flag("suppressed")}`;
+    return (this.db.prepare(`
+      SELECT * FROM energyiq_meter_alerts WHERE project_id = ? AND kind = ? AND opened_at >= ? AND opened_at < ? ${suppressed} ORDER BY opened_at, alert_key
+    `).all(projectId, kind, fromIso, toIso) as Array<Record<string, unknown>>).map(mapAlert);
+  }
+
+  /** How many alerts of a kind opened in [fromIso, toIso), counted in SQL. */
+  countOpened(projectId: string, kind: MeterAlertKind, fromIso: string, toIso: string, filter: { suppressed?: boolean } = {}): number {
+    const suppressed = filter.suppressed === undefined ? "" : filter.suppressed ? `AND ${flag("suppressed")}` : `AND NOT ${flag("suppressed")}`;
+    return Number((this.db.prepare(`
+      SELECT COUNT(*) AS count FROM energyiq_meter_alerts WHERE project_id = ? AND kind = ? AND opened_at >= ? AND opened_at < ? ${suppressed}
+    `).get(projectId, kind, fromIso, toIso) as { count: number }).count);
+  }
+
+  /** Puts an email in the outbox once; the same key again (a re-check) adds nothing, so it is never sent twice. */
+  enqueueEmail(input: { projectId: string; key: string; audience: MeterAlertAudience; subject: string; text: string; now: Date }): boolean {
+    const result = this.db.prepare(`
+      INSERT OR IGNORE INTO energyiq_meter_alert_outbox (project_id, email_key, audience, subject, body, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(input.projectId, input.key, input.audience, input.subject, input.text, input.now.toISOString());
+    return Number(result.changes) > 0;
+  }
+
+  /** Emails not sent yet that are still news (written since `sinceIso`), oldest first. */
+  pendingEmails(projectId: string, sinceIso: string): MeterAlertEmailRecord[] {
+    return (this.db.prepare(`
+      SELECT rowid AS position, * FROM energyiq_meter_alert_outbox
+      WHERE project_id = ? AND sent_at IS NULL AND created_at >= ? ORDER BY created_at, position
+    `).all(projectId, sinceIso) as Array<Record<string, unknown>>).map(mapEmail);
+  }
+
+  getEmail(projectId: string, key: string): MeterAlertEmailRecord | undefined {
+    const row = this.db.prepare("SELECT * FROM energyiq_meter_alert_outbox WHERE project_id = ? AND email_key = ?").get(projectId, key) as Record<string, unknown> | undefined;
+    return row ? mapEmail(row) : undefined;
+  }
+
+  markEmailSent(projectId: string, key: string, now: Date): void {
+    this.db.prepare("UPDATE energyiq_meter_alert_outbox SET sent_at = ?, attempts = attempts + 1, last_attempt_at = ?, last_error = NULL WHERE project_id = ? AND email_key = ?")
+      .run(now.toISOString(), now.toISOString(), projectId, key);
+  }
+
+  markEmailFailed(projectId: string, key: string, error: string, now: Date): void {
+    this.db.prepare("UPDATE energyiq_meter_alert_outbox SET attempts = attempts + 1, last_attempt_at = ?, last_error = ? WHERE project_id = ? AND email_key = ?")
+      .run(now.toISOString(), error.slice(0, 300), projectId, key);
   }
 
   getSettings(projectId: string): MeterAlertSettings {
@@ -197,6 +305,8 @@ export class MeterAlertStore {
     `).run(projectId, dataSnapshotId, now.toISOString());
     this.db.prepare("DELETE FROM energyiq_meter_alerts WHERE project_id = ? AND status = 'resolved' AND resolved_at < ?")
       .run(projectId, new Date(now.getTime() - KEEP_RESOLVED_MS).toISOString());
+    this.db.prepare("DELETE FROM energyiq_meter_alert_outbox WHERE project_id = ? AND created_at < ?")
+      .run(projectId, new Date(now.getTime() - KEEP_OUTBOX_MS).toISOString());
   }
 }
 
@@ -211,6 +321,18 @@ const mapAlert = (row: Record<string, unknown>): MeterAlertRecord => ({
   openedAt: String(row.opened_at),
   ...(typeof row.resolved_at === "string" ? { resolvedAt: row.resolved_at } : {}),
   updatedAt: String(row.updated_at),
+});
+
+const mapEmail = (row: Record<string, unknown>): MeterAlertEmailRecord => ({
+  projectId: String(row.project_id),
+  key: String(row.email_key),
+  audience: row.audience === "hardware" ? "hardware" : "operators",
+  subject: String(row.subject),
+  text: String(row.body),
+  createdAt: String(row.created_at),
+  attempts: Number(row.attempts),
+  ...(typeof row.last_error === "string" ? { lastError: row.last_error } : {}),
+  ...(typeof row.sent_at === "string" ? { sentAt: row.sent_at } : {}),
 });
 
 const parseObject = (value: unknown): Record<string, unknown> => {

@@ -128,7 +128,9 @@ export const createEnergyTargetsMonitor = (input: {
               publicBaseUrl,
               ...(input.readMeterAlertReadings ? { read: input.readMeterAlertReadings } : {}),
             });
-            if (run.opened.length || run.resolved.length) log.info("meter-alerts", { project_id: project.id, opened: run.opened.length, resolved: run.resolved.length, emailed: run.emailed.length });
+            if (run.opened.length || run.resolved.length || run.emailed.length || run.emailFailures) {
+              log.info("meter-alerts", { project_id: project.id, opened: run.opened.length, resolved: run.resolved.length, emailed: run.emailed.length, email_failures: run.emailFailures });
+            }
           } catch (error) {
             log.error("meter-alerts-failed", { project_id: project.id, code: error instanceof Error ? error.message.slice(0, 160) : "unknown" });
           }

@@ -280,18 +280,20 @@ describe("Meter alerts: when they are checked", () => {
       const delivery = { mode: "off" as const, send: vi.fn(async () => undefined) };
       const monitor = createEnergyTargetsMonitor({ metadataStore: metadata, env: {}, delivery, now: () => clock, readMeterAlertReadings: read });
       await monitor.runOnce();
-      const checked = read.mock.calls.length;
-      expect(checked).toBeGreaterThanOrEqual(1);
+      // Sites with no readings to judge are looked at again each hour (it costs nothing); this one is read once.
+      const readsOf = () => read.mock.calls.filter(([, projectId]) => projectId === PROJECT).length;
+      expect(readsOf()).toBe(1);
       expect(store.list(PROJECT, { status: "open", kind: "meter_offline" })).toHaveLength(2);
       // The next hourly tick with no new readings does not read them again.
       clock = new Date(sg("2026-11-18T04:00"));
       await monitor.runOnce();
-      expect(read).toHaveBeenCalledTimes(checked);
+      expect(readsOf()).toBe(1);
       expect(delivery.send).not.toHaveBeenCalled();
 
       const off = createEnergyTargetsMonitor({ metadataStore: metadata, env: { ENERGYIQ_METER_ALERTS_ENABLED: "false" }, delivery, now: () => new Date(sg("2026-11-18T09:00")), readMeterAlertReadings: read });
+      const before = read.mock.calls.length;
       await off.runOnce();
-      expect(read).toHaveBeenCalledTimes(checked);
+      expect(read).toHaveBeenCalledTimes(before);
     });
   });
 });
@@ -337,6 +339,137 @@ describe("Meter alerts: through the API", () => {
       expect((await call(metadata, "admin", "PUT", path, { patternAlerts: false })).body.data).toMatchObject({ patternAlerts: false, canEditPattern: true, hardwareEmails: ["gateway@example.test", "noc@example.test"] });
       // Addresses stay with the people who may change them.
       expect((await call(metadata, "viewer", "GET", path)).body.data).toMatchObject({ patternAlerts: false, hardwareEmails: [] });
+      // Nothing to change is refused, so it never rewrites who changed it last.
+      const before = new MeterAlertStore(metadata.db).getSettings(PROJECT);
+      expect(await call(metadata, "admin", "PUT", path, {})).toMatchObject({ status: 400, body: { error: { message: "ENERGYIQ_METER_ALERT_SETTINGS_INVALID" } } });
+      expect(await call(metadata, "admin", "PUT", path, { somethingElse: true })).toMatchObject({ status: 400 });
+      expect(new MeterAlertStore(metadata.db).getSettings(PROJECT)).toEqual(before);
+    });
+  });
+});
+
+describe("Meter alerts: emails that fail, first checks and housekeeping", () => {
+  const ON = { ENERGYIQ_ALERT_EMAILS_ENABLED: "true" };
+  const patternReadings = (count: number, spiking: number, spikeDate = "2026-11-18", through = "2026-11-19T02"): MeterAlertReadings => ({
+    timezone: TZ, referenceMs: sg(`${through}:00`), hoursMeaning: "lights_on",
+    meters: Array.from({ length: count }, (_, index) => ({ id: `m${index}`, name: `Meter ${index + 1}`, lastReadingAt: new Date(sg(`${through}:00`)).toISOString() })),
+    cells: new Map(Array.from({ length: count }, (_, index) => [`m${index}`, hours("2026-10-20T00", through, (date, hour) =>
+      [date, hour, index < spiking && date === spikeDate && (hour === 21 || hour === 22) ? 7 : 4, 60, 0, 0])])),
+  });
+
+  it("keeps an email that failed in the outbox and sends it at the next check, without holding up the others", async () => {
+    await withMetadata(async (metadata, store) => {
+      addTeam(metadata);
+      const now = new Date(sg("2026-11-18T03:00"));
+      // Checked before, so this is not the site's first check.
+      store.recordCheck(PROJECT, null, new Date(sg("2026-11-17T03:00")));
+      const fan = (date: string, hour: number) => (date === "2026-11-17" && hour === 23 ? 0.3 : 0);
+      const read = vi.fn(async () => sktc({ through: "2026-11-18T02", blockQuiet: "2026-11-17T10:30", fan }));
+      let calls = 0;
+      const send = vi.fn<(message: { to: string[]; subject: string; text: string }) => Promise<void>>(async () => {
+        calls += 1;
+        if (calls === 1) throw new Error("421 SMTP service not available");
+      });
+      const first = await runMeterAlerts({ metadataStore: metadata, projectId: PROJECT, now, env: ON, send, read });
+      // The first hardware email failed; the second hardware email and the operators' email still went.
+      expect(send).toHaveBeenCalledTimes(3);
+      expect(first.emailFailures).toBe(1);
+      expect(first.emailed).toHaveLength(2);
+      const failed = first.opened.find((alert) => alert.payload.since === isoAt("2026-11-05T21:00"))!.key;
+      expect(first.emailed).not.toContain(failed);
+      expect(store.getEmail(PROJECT, failed)).toMatchObject({ attempts: 1, lastError: "421 SMTP service not available" });
+      expect(send.mock.calls.map(([message]) => message.to.includes("owner@example.test"))).toEqual([false, false, true]);
+
+      // The next hourly check has no new readings, but the waiting email goes.
+      const second = await runMeterAlerts({ metadataStore: metadata, projectId: PROJECT, now: new Date(sg("2026-11-18T04:00")), env: ON, send, read });
+      expect(second).toMatchObject({ checked: false, emailed: [failed], emailFailures: 0 });
+      expect(store.getEmail(PROJECT, failed)).toMatchObject({ attempts: 2, sentAt: new Date(sg("2026-11-18T04:00")).toISOString() });
+      expect(read).toHaveBeenCalledTimes(1);
+      await runMeterAlerts({ metadataStore: metadata, projectId: PROJECT, now: new Date(sg("2026-11-18T05:00")), env: ON, send, read });
+      expect(send).toHaveBeenCalledTimes(4);
+
+      // An email that could not go for two days is not news any more.
+      store.enqueueEmail({ projectId: PROJECT, key: "meter-offline:old:20261114T1000", audience: "hardware", subject: "Old", text: "Old", now: new Date(sg("2026-11-15T03:00")) });
+      await runMeterAlerts({ metadataStore: metadata, projectId: PROJECT, now: new Date(sg("2026-11-18T06:00")), env: ON, send, read });
+      expect(send).toHaveBeenCalledTimes(4);
+      expect(store.getEmail(PROJECT, "meter-offline:old:20261114T1000")?.sentAt).toBeUndefined();
+    });
+  });
+
+  it("records what is already over at a site's first check without emailing it, and still raises what is going on", async () => {
+    await withMetadata(async (metadata) => {
+      addTeam(metadata);
+      const send = vi.fn<(message: { to: string[]; subject: string; text: string }) => Promise<void>>(async () => undefined);
+      const now = new Date(sg("2026-11-18T03:00"));
+      // Block 264F's outage is already over; Pavilion 1 is still quiet.
+      const read = async () => sktc({ through: "2026-11-18T02", blockQuiet: "2026-11-16T18:30", blockBack: "2026-11-17T07:00" });
+      const run = await runMeterAlerts({ metadataStore: metadata, projectId: PROJECT, now, env: ON, send, read });
+      expect(run.opened.map((alert) => [alert.payload.location ?? alert.payload.since, alert.payload.seeded ?? false])).toEqual([
+        [isoAt("2026-11-05T21:00"), false],
+        ["Block 264F", true],
+      ]);
+      expect(send.mock.calls.map(([message]) => message.subject)).toEqual([`${metadata.energyIq.getProject(PROJECT).name}: Pavilion 1 has stopped sending readings`]);
+      // The block's outage is kept for the record but not shown as news.
+      expect(bell(metadata, { hardware: true, operators: true }, now).meterAlerts.map((alert) => alert.details.since)).toEqual([isoAt("2026-11-05T21:00")]);
+    });
+  });
+
+  it("records the day's unusual hours at a site's first check without emailing them, and emails them from then on", async () => {
+    await withMetadata(async (metadata, store) => {
+      addTeam(metadata);
+      const send = vi.fn<(message: { to: string[]; subject: string; text: string }) => Promise<void>>(async () => undefined);
+      const first = await runMeterAlerts({ metadataStore: metadata, projectId: PROJECT, now: new Date(sg("2026-11-19T03:00")), env: ON, send, read: async () => patternReadings(8, 7) });
+      expect(first.opened.filter((alert) => alert.kind.startsWith("usage_pattern"))).toHaveLength(6);
+      expect(send).not.toHaveBeenCalled();
+      // The next day's unusual hours are news.
+      const next = await runMeterAlerts({ metadataStore: metadata, projectId: PROJECT, now: new Date(sg("2026-11-20T03:00")), env: ON, send, read: async () => patternReadings(2, 1, "2026-11-19", "2026-11-20T02") });
+      expect(next.opened.map((alert) => alert.kind)).toEqual(["usage_pattern"]);
+      expect(send.mock.calls.map(([message]) => message.subject)).toEqual([`${metadata.energyIq.getProject(PROJECT).name}: unusual use on Meter 1`]);
+      expect(store.list(PROJECT, { status: "open", kind: "usage_pattern_more" })).toEqual([]);
+    });
+  });
+
+  it("closes a day's summary of further unusual use once the day is over or the alerts are switched off", async () => {
+    await withMetadata((metadata, store) => {
+      evaluateMeterAlerts({ store, projectId: PROJECT, readings: patternReadings(8, 7), patternAlerts: true, now: new Date(sg("2026-11-19T03:00")) });
+      expect(store.list(PROJECT, { status: "open", kind: "usage_pattern_more" })).toHaveLength(1);
+      // Later the same day it stays; switched off, it closes.
+      evaluateMeterAlerts({ store, projectId: PROJECT, readings: patternReadings(8, 7), patternAlerts: true, now: new Date(sg("2026-11-19T15:00")) });
+      expect(store.list(PROJECT, { status: "open", kind: "usage_pattern_more" })).toHaveLength(1);
+      const off = evaluateMeterAlerts({ store, projectId: PROJECT, readings: patternReadings(8, 7), patternAlerts: false, now: new Date(sg("2026-11-19T16:00")) });
+      expect(off.resolved.map((alert) => alert.kind)).toEqual(["usage_pattern_more"]);
+      expect(bell(metadata, { hardware: false, operators: true }, new Date(sg("2026-11-19T16:00"))).meterAlerts.some((alert) => alert.kind === "usage_pattern_more")).toBe(false);
+    });
+    await withMetadata((metadata, store) => {
+      evaluateMeterAlerts({ store, projectId: PROJECT, readings: patternReadings(8, 7), patternAlerts: true, now: new Date(sg("2026-11-19T03:00")) });
+      // The next day, the old day's summary is over.
+      const nextDay = evaluateMeterAlerts({ store, projectId: PROJECT, readings: patternReadings(8, 7), patternAlerts: true, now: new Date(sg("2026-11-20T03:00")) });
+      expect(nextDay.resolved.map((alert) => [alert.kind, alert.payload.date])).toEqual([["usage_pattern_more", "2026-11-19"]]);
+      expect(bell(metadata, { hardware: false, operators: true }, new Date(sg("2026-11-20T03:00"))).meterAlerts.filter((alert) => alert.kind === "usage_pattern_more")).toEqual([]);
+    });
+  });
+
+  it("never lets unusual use only counted in a summary push real alerts off the bell", async () => {
+    await withMetadata((metadata, store) => {
+      const now = new Date(sg("2026-11-19T03:00"));
+      store.open({ projectId: PROJECT, key: "never-used:fan:20261118T2300", kind: "never_used", audience: "operators", subject: "fan", payload: { meterName: "Pavilion DL & fan", start: isoAt("2026-11-18T23:00"), hours: 1, totalKwh: 0.3, ongoing: true }, now: new Date(sg("2026-11-19T00:00")) });
+      for (let index = 0; index < 45; index += 1) {
+        store.open({ projectId: PROJECT, key: `usage-pattern:m${index}:20261118T2100`, kind: "usage_pattern", audience: "operators", subject: `m${index}`, payload: { meterName: `Meter ${index}`, suppressed: true }, now });
+      }
+      expect(bell(metadata, { hardware: false, operators: true }, now).meterAlerts.map((alert) => alert.kind)).toEqual(["never_used"]);
+    });
+  });
+
+  it("leaves every alert as it is when there are no readings to judge", async () => {
+    await withMetadata(async (metadata, store) => {
+      const now = new Date(sg("2026-11-18T03:00"));
+      await runMeterAlerts({ metadataStore: metadata, projectId: PROJECT, now, env: {}, read: async () => sktc({ through: "2026-11-18T02", blockQuiet: "2026-11-17T10:30" }) });
+      const checkedAt = store.lastCheck(PROJECT)!.checkedAt;
+      const empty: MeterAlertReadings = { timezone: TZ, meters: [], cells: new Map(), referenceMs: null, hoursMeaning: "opening" };
+      const run = await runMeterAlerts({ metadataStore: metadata, projectId: PROJECT, now: new Date(sg("2026-11-18T09:00")), env: {}, read: async () => empty });
+      expect(run).toMatchObject({ checked: false, opened: [], resolved: [] });
+      expect(store.list(PROJECT, { status: "open", kind: "meter_offline" })).toHaveLength(2);
+      expect(store.lastCheck(PROJECT)!.checkedAt).toBe(checkedAt);
     });
   });
 });
