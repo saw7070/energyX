@@ -73,7 +73,7 @@ export type SuggestionContext = {
  */
 export function normalizeSuggestion(kind: unknown, rawPayload: unknown, context: SuggestionContext): NormalizedSuggestion | null {
   if (typeof kind !== "string" || !(kind in PAYLOAD_SCHEMAS)) return null;
-  const parsed = PAYLOAD_SCHEMAS[kind as SuggestionKind].safeParse(rawPayload);
+  const parsed = PAYLOAD_SCHEMAS[kind as SuggestionKind].safeParse(kind === "operating_hours" ? withShortDayNames(rawPayload) : rawPayload);
   if (!parsed.success) return null;
   const { site } = context;
   const meterOf = (id: string) => site.meters.find(meter => meter.id === id);
@@ -143,6 +143,14 @@ export function normalizeSuggestion(kind: unknown, rawPayload: unknown, context:
       return { kind: "dismiss_check", payload, label: `Stop flagging “${payload.title}” in reports` };
     }
   }
+}
+
+const FULL_DAY_NAMES: Record<string, WeekDay> = { monday: "mon", tuesday: "tue", wednesday: "wed", thursday: "thu", friday: "fri", saturday: "sat", sunday: "sun" };
+/** "monday" as "mon": the model sometimes writes days in full, as the calendar itself does. */
+function withShortDayNames(payload: unknown): unknown {
+  const weekly = (payload as { weekly?: unknown } | null)?.weekly;
+  if (!weekly || typeof weekly !== "object" || Array.isArray(weekly)) return payload;
+  return { ...(payload as object), weekly: Object.fromEntries(Object.entries(weekly).map(([day, ranges]) => [FULL_DAY_NAMES[day.toLowerCase()] ?? day.toLowerCase(), ranges])) };
 }
 
 /** A report point key the person could see, or a stable key that names a real meter (or a date, or daytime use). */

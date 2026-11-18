@@ -94,6 +94,9 @@ it("drops suggestions that would change nothing and fills days the model left ou
   expect(hours.kind === "operating_hours" && hours.payload.weekly.mon).toEqual([{ from: "18:45", to: "06:45" }]);
   expect(hours.kind === "operating_hours" && hours.payload.weekly.sat).toEqual([]);
   expect(hours.label).toBe("Change lights-on hours to Sat–Sun closed");
+  // Days written in full are read the same way.
+  const full = parseClassification(JSON.stringify({ suggestions: [{ kind: "operating_hours", payload: { weekly: { Saturday: [], sunday: [] } } }] }), { site, checkKeys: new Set() });
+  expect(full.suggestions[0]?.payload).toEqual(hours.payload);
 });
 
 it("refuses an answer that is not JSON at all", () => {
