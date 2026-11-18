@@ -328,6 +328,10 @@ export const configApi = {
   reportActionRequest<T>(projectId: string, action = "", init?: RequestInit): Promise<T> {
     return requestEnvelope<T>(`/api/v1/energy/report-actions/${encodeURIComponent(projectId)}${action ? `/${action}` : ""}`, init);
   },
+  /** Feedback on the Overview's report: what the AI remembers, the changes it suggests and its follow-ups. */
+  reportFeedbackRequest<T>(projectId: string, path = "", init?: RequestInit): Promise<T> {
+    return requestEnvelope<T>(`/api/v1/energy/report-feedback/${encodeURIComponent(projectId)}${path ? `/${path}` : ""}`, init);
+  },
   reportLibraryRequest<T>(projectId: string, action = "", init?: RequestInit): Promise<T> {
     return requestEnvelope<T>(`/api/v1/energy/report-library/${encodeURIComponent(projectId)}${action ? action.startsWith("?") ? action : `/${action}` : ""}`, init);
   },

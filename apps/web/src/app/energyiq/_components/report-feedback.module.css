@@ -1,0 +1,129 @@
+/* "Tell the AI about this report", under the report on the Overview: the same card as the report above it. */
+.panel{margin-top:20px;border:1px solid #dde6e0;border-radius:16px;background:#fff;overflow:clip;box-shadow:0 1px 2px #14281f0a;scroll-margin-top:84px;color:#203d34}
+.header{padding:20px 24px;border-bottom:1px solid #e6ece7;background:#f6faf7}
+.header h2{margin:0;font-size:19px;font-weight:650;letter-spacing:-.4px;color:#1c2c24}
+.header p{margin:6px 0 0;color:#5b6d63;font-size:14px;line-height:1.55;max-width:78ch}
+.message{margin:0;padding:22px 24px;color:#5b6d63;font-size:14px}
+.problem{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:20px 24px}
+.problem p{margin:0;color:#9b2c1f;font-size:14px}
+.body{display:grid;gap:18px;padding:20px 24px 24px}
+
+/* Writing feedback. */
+.form{display:grid;gap:8px}
+.form label{font-size:14px;font-weight:600;color:#294f3f}
+.form textarea{width:100%;box-sizing:border-box;min-height:88px;border:1px solid #cbd9d0;border-radius:10px;padding:12px 14px;font:inherit;font-size:16px;line-height:1.5;background:#fbfdfb;color:#243e33;resize:vertical}
+.form textarea:focus{outline:2px solid #648a75;outline-offset:2px}
+.form textarea:disabled{opacity:.7}
+.formRow{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.count{font-size:12px;color:#7a8a81;font-variant-numeric:tabular-nums}
+.chip{display:inline-flex;align-items:center;gap:6px;justify-self:start;max-width:100%;margin:0;padding:4px 6px 4px 12px;border:1px solid #c9dccf;border-radius:999px;background:#eef5f0;color:#245747;font-size:13px;font-weight:600}
+.chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip button{display:grid;place-items:center;flex-shrink:0;width:24px;height:24px;padding:0;border:0;border-radius:50%;background:transparent;color:#245747;font-size:16px;line-height:1;cursor:pointer}
+.chip button:hover{background:#dcebe1}
+
+/* Buttons: one filled for the main step, outlined for the rest. */
+.primary,.secondary{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:0 16px;border-radius:10px;font:inherit;font-size:14px;font-weight:600;white-space:nowrap;cursor:pointer;transition:background 120ms,border-color 120ms}
+.primary{border:1px solid #185540;background:#185540;color:#fff}
+.primary:hover{background:#12422f}
+.secondary{border:1px solid #cfdad2;background:#fff;color:#245747}
+.secondary:hover{background:#eef4ef;border-color:#b9cdc0}
+.primary:disabled,.secondary:disabled{opacity:.5;cursor:default}
+
+/* What came back. */
+.reply{padding:14px 16px;border-left:3px solid #2f7a5b;border-radius:0 10px 10px 0;background:#f1f6f2;line-height:1.55}
+.reply strong{display:block;font-size:13px;font-weight:700;color:#176b59}
+.reply p{margin:4px 0 0;font-size:15px;white-space:pre-wrap;overflow-wrap:anywhere;color:#243e33}
+.note{margin:0;font-size:13px;line-height:1.5;color:#617068}
+.error{margin:0;font-size:14px;color:#9b2c1f}
+.done{margin:0;font-size:14px;color:#176b59;font-weight:600}
+.empty{margin:0;font-size:14px;color:#617068;line-height:1.55}
+
+/* Suggested changes, memory and follow-ups. */
+.section{display:grid;gap:8px;padding-top:16px;border-top:1px solid #e6ece7}
+.section h3{margin:0;font-size:16px;font-weight:650;letter-spacing:-.2px;color:#1c2c24}
+.sectionHead{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:10px 16px}
+.sectionIntro{margin:2px 0 0;font-size:13px;line-height:1.5;color:#617068;max-width:78ch}
+.list{display:grid;gap:10px;margin:4px 0 0;padding:0;list-style:none}
+.card{display:grid;gap:6px;padding:14px 16px;border:1px solid #e0e8e2;border-radius:12px;background:#fbfdfb}
+.card[data-status="applied"],.card[data-status="dismissed"],.card[data-status="removed"],.card[data-status="done"],.card[data-status="dropped"]{background:#f7f9f8}
+.card[data-status="pending"]{border-style:dashed;border-color:#d9c39b}
+.cardText{margin:0;font-size:15px;line-height:1.5;color:#243e33;overflow-wrap:anywhere;white-space:pre-wrap}
+.meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin:0;font-size:13px;color:#637368}
+.cardError{margin:0;font-size:13px;color:#9b2c1f}
+.kind{justify-self:start;display:inline-block;padding:2px 8px;border-radius:6px;background:#e6f1ea;color:#176b59;font-size:12px;font-weight:650}
+.pending{display:inline-block;padding:2px 8px;border-radius:6px;background:#f8efdd;color:#7c5320;font-size:12px;font-weight:650}
+.status{display:inline-block;padding:2px 8px;border-radius:6px;background:#e6f1ea;color:#176b59;font-size:12px;font-weight:650}
+.status[data-status="done"]{background:#e3eee8;color:#245747}
+.status[data-status="dropped"]{background:#eceeed;color:#5b6d63}
+.check{margin:0;font-size:13px;line-height:1.5;color:#43554b}
+.check strong{font-weight:650;color:#294f3f}
+.check[data-verdict="resolved"] strong{color:#176b59}
+.check[data-verdict="ongoing"] strong{color:#9a5b12}
+.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:2px}
+.dismissed{margin-top:4px}
+.dismissed h4{margin:0 0 4px;font-size:13px;font-weight:650;color:#43554b}
+.dismissed ul{margin:0;padding-left:18px;display:grid;gap:2px;font-size:13px;line-height:1.5;color:#637368}
+
+/* Earlier feedback, folded away. */
+.history{padding-top:16px;border-top:1px solid #e6ece7}
+.history summary{display:inline-block;cursor:pointer;color:#185540;font-size:14px;font-weight:600;border-bottom:1px solid #9bb6a7;padding-bottom:2px}
+.history ul{display:grid;gap:12px;margin:12px 0 0;padding:0;list-style:none}
+.history li{display:grid;gap:4px;padding-bottom:12px;border-bottom:1px solid #eef2ef}
+.history li:last-child{border-bottom:0;padding-bottom:0}
+.historyReply{margin:0;font-size:14px;line-height:1.5;color:#43554b;white-space:pre-wrap;overflow-wrap:anywhere}
+
+@media(max-width:600px){.header,.body{padding-left:16px;padding-right:16px}.problem,.message{padding-left:16px;padding-right:16px}.formRow{flex-direction:column-reverse;align-items:stretch}.formRow .primary{width:100%}.count{align-self:flex-end}.actions>button{flex:1 1 auto}}
+@media(prefers-reduced-motion:reduce){.primary,.secondary{transition:none}}
+
+/* energyiq-dark-theme:start — generated by scripts/energyiq-dark-theme.mjs; do not edit by hand */
+:global(:where(html[data-energyiq-theme="dark"])) .panel { border:1px solid #303733; border-radius:16px; background:#191919; box-shadow:0 1px 2px #14281f10; color:#accdc1; }
+:global(:where(html[data-energyiq-theme="dark"])) .header { border-bottom:1px solid #303531; background:#1a1d1b; }
+:global(:where(html[data-energyiq-theme="dark"])) .header h2 { color:#bed2c7; }
+:global(:where(html[data-energyiq-theme="dark"])) .header p { color:#9cb0a5; }
+:global(:where(html[data-energyiq-theme="dark"])) .message { color:#9cb0a5; }
+:global(:where(html[data-energyiq-theme="dark"])) .problem p { color:#f49383; }
+:global(:where(html[data-energyiq-theme="dark"])) .form label { color:#9dc6b3; }
+:global(:where(html[data-energyiq-theme="dark"])) .form textarea { border:1px solid #313c35; border-radius:10px; background:#191b19; color:#adccbd; }
+:global(:where(html[data-energyiq-theme="dark"])) .form textarea:focus { outline:2px solid #648a75; }
+:global(:where(html[data-energyiq-theme="dark"])) .count { color:#90a197; }
+:global(:where(html[data-energyiq-theme="dark"])) .chip { border:1px solid #2e3d33; border-radius:999px; background:#1b201c; color:#91c5b2; }
+:global(:where(html[data-energyiq-theme="dark"])) .chip button { border:0; border-radius:50%; background:transparent; color:#91c5b2; }
+:global(:where(html[data-energyiq-theme="dark"])) .chip button:hover { background:#1b261f; }
+:global(:where(html[data-energyiq-theme="dark"])) .primary, :global(:where(html[data-energyiq-theme="dark"])) .secondary { border-radius:10px; }
+:global(:where(html[data-energyiq-theme="dark"])) .primary { border:1px solid #185540; background:#185540; color:#fff; }
+:global(:where(html[data-energyiq-theme="dark"])) .primary:hover { background:#12422f; }
+:global(:where(html[data-energyiq-theme="dark"])) .secondary { border:1px solid #323b35; background:#191919; color:#91c5b2; }
+:global(:where(html[data-energyiq-theme="dark"])) .secondary:hover { background:#1b201c; border-color:#314237; }
+:global(:where(html[data-energyiq-theme="dark"])) .reply { border-left:3px solid #2f7a5b; border-radius:0 10px 10px 0; background:#1b1f1c; }
+:global(:where(html[data-energyiq-theme="dark"])) .reply strong { color:#75c1ac; }
+:global(:where(html[data-energyiq-theme="dark"])) .reply p { color:#adccbd; }
+:global(:where(html[data-energyiq-theme="dark"])) .note { color:#9dada4; }
+:global(:where(html[data-energyiq-theme="dark"])) .error { color:#f49383; }
+:global(:where(html[data-energyiq-theme="dark"])) .done { color:#75c1ac; }
+:global(:where(html[data-energyiq-theme="dark"])) .empty { color:#9dada4; }
+:global(:where(html[data-energyiq-theme="dark"])) .section { border-top:1px solid #303531; }
+:global(:where(html[data-energyiq-theme="dark"])) .section h3 { color:#bed2c7; }
+:global(:where(html[data-energyiq-theme="dark"])) .sectionIntro { color:#9dada4; }
+:global(:where(html[data-energyiq-theme="dark"])) .card { border:1px solid #303632; border-radius:12px; background:#191b19; }
+:global(:where(html[data-energyiq-theme="dark"])) .card[data-status="applied"], :global(:where(html[data-energyiq-theme="dark"])) .card[data-status="dismissed"], :global(:where(html[data-energyiq-theme="dark"])) .card[data-status="removed"], :global(:where(html[data-energyiq-theme="dark"])) .card[data-status="done"], :global(:where(html[data-energyiq-theme="dark"])) .card[data-status="dropped"] { background:#1b1c1c; }
+:global(:where(html[data-energyiq-theme="dark"])) .card[data-status="pending"] { border-style:dashed; border-color:#4a3b1d; }
+:global(:where(html[data-energyiq-theme="dark"])) .cardText { color:#adccbd; }
+:global(:where(html[data-energyiq-theme="dark"])) .meta { color:#9baca0; }
+:global(:where(html[data-energyiq-theme="dark"])) .cardError { color:#f49383; }
+:global(:where(html[data-energyiq-theme="dark"])) .kind { border-radius:6px; background:#1a221d; color:#75c1ac; }
+:global(:where(html[data-energyiq-theme="dark"])) .pending { border-radius:6px; background:#251e11; color:#d4a673; }
+:global(:where(html[data-energyiq-theme="dark"])) .status { border-radius:6px; background:#1a221d; color:#75c1ac; }
+:global(:where(html[data-energyiq-theme="dark"])) .status[data-status="done"] { background:#1b231f; color:#91c5b2; }
+:global(:where(html[data-energyiq-theme="dark"])) .status[data-status="dropped"] { background:#1f2120; color:#9cb0a5; }
+:global(:where(html[data-energyiq-theme="dark"])) .check { color:#a8bcb0; }
+:global(:where(html[data-energyiq-theme="dark"])) .check strong { color:#9dc6b3; }
+:global(:where(html[data-energyiq-theme="dark"])) .check[data-verdict="resolved"] strong { color:#75c1ac; }
+:global(:where(html[data-energyiq-theme="dark"])) .check[data-verdict="ongoing"] strong { color:#db9757; }
+:global(:where(html[data-energyiq-theme="dark"])) .dismissed h4 { color:#a8bcb0; }
+:global(:where(html[data-energyiq-theme="dark"])) .dismissed ul { color:#9baca0; }
+:global(:where(html[data-energyiq-theme="dark"])) .history { border-top:1px solid #303531; }
+:global(:where(html[data-energyiq-theme="dark"])) .history summary { color:#8dc9b0; border-bottom:1px solid #334a3e; }
+:global(:where(html[data-energyiq-theme="dark"])) .history li { border-bottom:1px solid #2f3230; }
+:global(:where(html[data-energyiq-theme="dark"])) .history li:last-child { border-bottom:0; }
+:global(:where(html[data-energyiq-theme="dark"])) .historyReply { color:#a8bcb0; }
+/* energyiq-dark-theme:end */
