@@ -18,7 +18,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { MetadataStore } from "@datafoundry/metadata";
 import type { LocalDataGateway } from "@datafoundry/data-gateway";
-import { readProjectSpatialReference } from "@datafoundry/contracts";
+import { readProjectSpatialReference, type ProjectSpatialReference } from "@datafoundry/contracts";
 import {
   serializeSiteReportSnapshot,
   siteReportStyleOf,
@@ -61,6 +61,28 @@ export type PublishSiteReportInput = {
   period: SiteReportPeriod;
   generatedAt?: string;
   loadData?: typeof loadSiteReportData;
+  /**
+   * After a scheduled weekly or monthly report is saved: check the open follow-ups from report feedback against its
+   * readings. Started in the background; it never delays or fails the report.
+   */
+  reviewFollowUps?: (input: FollowUpReviewAfterReport) => Promise<unknown>;
+};
+
+export type FollowUpReviewAfterReport = {
+  metadata: MetadataStore;
+  workspaceId: string;
+  projectId: string;
+  actorUserId: string;
+  cadence: SiteReportCadence | "custom";
+  data: SiteReportSnapshot["data"];
+  reference: ProjectSpatialReference | null;
+  generatedAt: string;
+};
+
+/** Loaded on first use, in the background, so publishing a report never waits on the AI modules. */
+const reviewFollowUpsInBackground = async (input: FollowUpReviewAfterReport): Promise<unknown> => {
+  const { reviewFollowUpsAfterSiteReport } = await import("./report-feedback-review.js");
+  return reviewFollowUpsAfterSiteReport(input);
 };
 
 export type PublishedSiteReport = { run: ReportRun; created: boolean; scheduleKey: string };
@@ -137,6 +159,16 @@ async function writeSiteReport(input: Omit<PublishSiteReportInput, "cadence"> & 
     });
     // Someone else published this period while we were building it; theirs is the one readers already have.
     if (!saved.created) rmSync(directory, { recursive: true, force: true });
+    if (saved.created && (input.cadence === "weekly" || input.cadence === "monthly")) {
+      try {
+        void (input.reviewFollowUps ?? reviewFollowUpsInBackground)({
+          metadata: input.metadata, workspaceId: input.settings.workspaceId, projectId: input.settings.projectId, actorUserId: input.actorUserId,
+          cadence: input.cadence, data, reference, generatedAt,
+        }).catch(error => console.warn(`[site-report] follow-up check failed project=${input.settings.projectId} code=${error instanceof Error ? error.message : "unknown"}`));
+      } catch (error) {
+        console.warn(`[site-report] follow-up check not started project=${input.settings.projectId} code=${error instanceof Error ? error.message : "unknown"}`);
+      }
+    }
     return saved;
   } catch (error) {
     rmSync(directory, { recursive: true, force: true });
