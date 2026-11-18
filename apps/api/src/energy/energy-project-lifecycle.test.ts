@@ -61,6 +61,48 @@ describe("archiving projects", () => {
   });
 });
 
+describe("renaming projects and clients", () => {
+  const auditOf = (metadata: ReturnType<typeof setup>["metadata"], type: string) =>
+    (metadata.db.prepare("SELECT metadata_json FROM auth_audit_events WHERE event_type = ?").all(type) as Array<{ metadata_json: string }>)
+      .map((row) => JSON.parse(row.metadata_json) as Record<string, unknown>);
+
+  it("renames a project, tidies the spaces, and records who changed it from what", () => {
+    const { metadata, service, org } = setup();
+    const { organisations } = service.renameProject({ actorUserId: "dev-user", projectId: "site-1", name: "  Seng Kang   Block 101 " });
+    expect(metadata.energyIq.getProject("site-1").name).toBe("Seng Kang Block 101");
+    expect(organisations.find((organisation) => organisation.id === org.id)?.projects[0]?.name).toBe("Seng Kang Block 101");
+    // The setup draft carries the new name too, so publishing setup later does not bring the old one back.
+    expect(metadata.energyIq.projectSetup.getDraft({ project_id: "site-1", user_id: "dev-user" }).document.project.name).toBe("Seng Kang Block 101");
+    expect(auditOf(metadata, "energyiq.project_renamed")).toEqual([
+      { projectId: "site-1", workspaceId: org.id, previousName: "Site One", name: "Seng Kang Block 101" },
+    ]);
+    // The same name again changes nothing and records nothing.
+    service.renameProject({ actorUserId: "dev-user", projectId: "site-1", name: "Seng Kang Block 101" });
+    expect(auditOf(metadata, "energyiq.project_renamed")).toHaveLength(1);
+  });
+
+  it("refuses an empty or over-long project name, and a project that does not exist", () => {
+    const { metadata, service } = setup();
+    expect(() => service.renameProject({ actorUserId: "dev-user", projectId: "site-1", name: "   " })).toThrow(expect.objectContaining({ status: 400 }));
+    expect(() => service.renameProject({ actorUserId: "dev-user", projectId: "site-1", name: "x".repeat(201) })).toThrow(expect.objectContaining({ status: 400 }));
+    expect(() => service.renameProject({ actorUserId: "dev-user", projectId: "missing", name: "Anything" })).toThrow(expect.objectContaining({ status: 404 }));
+    expect(metadata.energyIq.getProject("site-1").name).toBe("Site One");
+    service.renameProject({ actorUserId: "dev-user", projectId: "site-1", name: "x".repeat(200) });
+    expect(metadata.energyIq.getProject("site-1").name).toHaveLength(200);
+  });
+
+  it("renames a client without changing whether it is enabled", () => {
+    const { metadata, service, org } = setup();
+    const renamed = service.updateOrganisation({ actorUserId: "dev-user", id: org.id, name: "Seng Kang Town Council" });
+    expect(renamed).toMatchObject({ name: "Seng Kang Town Council", status: "active" });
+    expect(auditOf(metadata, "energyiq.organisation_updated").at(-1)).toMatchObject({ organisationId: org.id, name: "Seng Kang Town Council", previousName: "Acme", disabled: false });
+
+    service.updateOrganisation({ actorUserId: "dev-user", id: org.id, name: "Seng Kang Town Council", disabled: true });
+    expect(service.updateOrganisation({ actorUserId: "dev-user", id: org.id, name: "SKTC" })).toMatchObject({ name: "SKTC", status: "disabled" });
+    expect(() => service.updateOrganisation({ actorUserId: "dev-user", id: org.id, name: "  " })).toThrow(expect.objectContaining({ status: 400 }));
+  });
+});
+
 describe("deleting projects", () => {
   it("requires the exact project name, then removes the project, its history and its readings", async () => {
     const { metadata, service, org, purged } = setup();

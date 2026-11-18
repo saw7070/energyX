@@ -71,13 +71,14 @@ describe("Portfolio view", () => {
     expect(host.textContent).toContain("All sites together on an average day");
     const row = (name: string) => Array.from(host.querySelectorAll("tbody tr")).find(item => item.querySelector("th")?.textContent?.includes(name))!;
     const headers = Array.from(host.querySelectorAll("thead th")).map(cell => cell.textContent);
-    expect(headers.slice(0, 4)).toEqual(["Site", "Energy (kWh) ↓", "Average a day (kWh)", "Daily trend"]);
+    // The trend column says it is one point a day, over which days.
+    expect(headers.slice(0, 4)).toEqual(["Site", "Energy (kWh) ↓", "Average a day (kWh)", "Daily trendeach day, 1–30 Sep"]);
     // KL Office started part-way through, so its average is over its 21 days of readings and says so.
     expect(row("KL Office").querySelectorAll("td")[1]!.textContent).toBe("381over 21 days of readings");
     expect(row("Raffles HQ").querySelectorAll("td")[1]!.textContent).toBe("167");
-    const spark = row("Raffles HQ").querySelector('svg[role="img"]')!;
+    const spark = row("Raffles HQ").querySelector<HTMLElement>('[role="group"]')!;
     expect(spark.getAttribute("aria-label")).toBe("Daily use from 1 Sep to 30 Sep: lowest 160.0 kWh on 1 Sep, highest 189.0 kWh on 30 Sep.");
-    expect(spark.querySelector("title")?.textContent).toBe(spark.getAttribute("aria-label"));
+    expect(spark.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
     expect(row("KL Office").querySelectorAll("polyline")).toHaveLength(1);
     expect(row("Tuas Depot").textContent).toContain("No readings for this period");
 
@@ -85,6 +86,51 @@ describe("Portfolio view", () => {
     expect(Array.from(host.querySelectorAll("tbody th a")).map(cell => cell.textContent)).toEqual(["KL Office", "Raffles HQ", "Tuas Depot"]);
     await act(async () => (host.querySelector('button[aria-label="Sort by Average a day (kWh)"]') as HTMLButtonElement).click());
     expect(Array.from(host.querySelectorAll("tbody th a")).map(cell => cell.textContent)).toEqual(["Raffles HQ", "KL Office", "Tuas Depot"]);
+    await act(async () => root.unmount());
+  });
+
+  it("reads out one day's date and kWh on hover, tap or the arrow keys", async () => {
+    const { host, root } = await render(<PortfolioView portfolio={portfolio} />);
+    const row = (name: string) => Array.from(host.querySelectorAll("tbody tr")).find(item => item.querySelector("th")?.textContent?.includes(name))!;
+    const spark = row("Raffles HQ").querySelector<HTMLElement>('[role="group"]')!;
+    spark.getBoundingClientRect = () => ({ left: 100, right: 204, top: 0, bottom: 28, width: 104, height: 28, x: 100, y: 0, toJSON() {} }) as DOMRect;
+    const tip = () => spark.querySelector<HTMLElement>('[aria-hidden="true"]:not(svg)')?.textContent ?? null;
+    const pointer = (type: string, clientX: number, pointerType = "mouse") => {
+      const event = new MouseEvent(type, { bubbles: true, clientX });
+      Object.defineProperty(event, "pointerType", { value: pointerType });
+      spark.dispatchEvent(event);
+    };
+    expect(tip()).toBeNull();
+    // The left end is 1 September (160 kWh); the right end is 30 September (189 kWh).
+    await act(async () => pointer("pointerover", 101));
+    await act(async () => pointer("pointermove", 101));
+    expect(tip()).toBe("Tue, 1 Sep: 160.0 kWh");
+    await act(async () => pointer("pointermove", 203));
+    expect(tip()).toBe("Wed, 30 Sep: 189.0 kWh");
+    expect(spark.querySelector("circle")).not.toBeNull();
+    await act(async () => pointer("pointerout", 300));
+    expect(tip()).toBeNull();
+
+    // A tap on a phone leaves the day showing until somewhere else is tapped.
+    await act(async () => pointer("pointerdown", 152, "touch"));
+    expect(tip()).toBe("Wed, 16 Sep: 175.0 kWh");
+    await act(async () => document.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true })));
+    expect(tip()).toBeNull();
+
+    // With the keyboard: focus starts on the latest day, and the arrow keys step through the days.
+    await act(async () => spark.focus());
+    expect(tip()).toBe("Wed, 30 Sep: 189.0 kWh");
+    await act(async () => spark.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true })));
+    expect(tip()).toBe("Tue, 29 Sep: 188.0 kWh");
+    expect(spark.querySelector('[aria-live="polite"]')?.textContent).toBe("Tue, 29 Sep: 188.0 kWh");
+    await act(async () => spark.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true })));
+    expect(tip()).toBe("Tue, 1 Sep: 160.0 kWh");
+
+    // A day without readings says so.
+    const office = row("KL Office").querySelector<HTMLElement>('[role="group"]')!;
+    await act(async () => office.focus());
+    await act(async () => office.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true })));
+    expect(office.querySelector('[aria-live="polite"]')?.textContent).toBe("Tue, 1 Sep: no readings");
     await act(async () => root.unmount());
   });
 

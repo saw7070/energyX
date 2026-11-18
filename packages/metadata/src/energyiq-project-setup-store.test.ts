@@ -544,3 +544,58 @@ const componentRouteDocument = (
     official_aggregation_routes: routes,
   },
 });
+
+describe("renaming a project", () => {
+  it("renames the project and its setup draft, so publishing the draft keeps the new name", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-rename-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      metadata.workspaces.upsert({ id: "workspace-rename", owner_user_id: "dev-user", name: "Rename Workspace", kind: "customer" });
+      const document = componentRouteDocument([
+        { scope_id: "c1", resource: "electricity", category: "load", meter_point_ids: ["m1"] },
+        { scope_id: "c2", resource: "electricity", category: "load", meter_point_ids: ["m2"] },
+        { scope_id: "l1", resource: "electricity", category: "load", meter_point_ids: ["m1", "m2"] },
+        { scope_id: "project", resource: "electricity", category: "load", meter_point_ids: ["m1", "m2"] },
+      ]);
+      metadata.energyIq.projectSetup.bootstrapPublished({
+        project: {
+          id: "project-rename", workspace_id: "workspace-rename", name: "Old Name", timezone: "Asia/Singapore",
+          hierarchy_revision_id: "project-rename-hierarchy-v1", meter_formula_revision_id: "meter-formula-v1", root_scope_id: "project",
+        },
+        document: { ...document, project: { ...document.project, name: "Old Name" } },
+        published_by: "dev-user",
+      });
+
+      // No draft yet: one is made from what is published, then renamed with the project.
+      metadata.energyIq.projectSetup.renameProject({ project_id: "project-rename", name: "New Name", user_id: "dev-user" });
+      expect(metadata.energyIq.getProject("project-rename").name).toBe("New Name");
+      const draft = metadata.energyIq.projectSetup.getDraft({ project_id: "project-rename", user_id: "dev-user" });
+      expect(draft.document.project.name).toBe("New Name");
+      expect(draft.revision).toBe(2);
+      // Renaming does not count as unpublished setup changes.
+      expect(metadata.energyIq.getProject("project-rename").has_unpublished_changes).toBe(false);
+
+      // A setup page still open on the old revision cannot save the old name back.
+      expect(() => metadata.energyIq.projectSetup.saveDraft({ project_id: "project-rename", expected_revision: 1, user_id: "dev-user", document }))
+        .toThrow("ENERGYIQ_SETUP_REVISION_CONFLICT");
+
+      metadata.energyIq.projectSetup.publishDraft({ project_id: "project-rename", expected_revision: draft.revision, user_id: "dev-user" });
+      expect(metadata.energyIq.getProject("project-rename").name).toBe("New Name");
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
+  it("refuses a project that does not exist", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-rename-missing-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      expect(() => metadata.energyIq.projectSetup.renameProject({ project_id: "nope", name: "X", user_id: "dev-user" }))
+        .toThrow("ENERGYIQ_PROJECT_NOT_FOUND:nope");
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+});
