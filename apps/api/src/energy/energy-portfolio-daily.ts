@@ -1,4 +1,4 @@
-import type { EnergyDailyMeterFact } from "@datafoundry/data-gateway";
+import type { EnergyDailyMeterFacts } from "@datafoundry/data-gateway";
 import type { EnergyIqAnalysisInterval } from "@datafoundry/metadata";
 import { averageFullDay, categoryOf, scopeDays, withMetersInUse, type HoursMeaning, type ScopeData, type TrendCell, type TrendSeries } from "@datafoundry/site-report";
 
@@ -21,6 +21,7 @@ export type SiteDailyFigures = {
   dailyKwh: Array<number | null>;
 };
 
+/** A whole day of readings, in minutes (as ENERGY_METER_DAY_MINUTES in the daily meter facts). */
 const DAY_MINUTES = 24 * 60;
 /** Below one day of readings an average a day would be a guess from a few hours. */
 export const MIN_READING_DAYS_FOR_AVERAGE = 1;
@@ -81,7 +82,8 @@ export const siteFullDays = (input: {
   timezone: string;
   /** The official meters, with their meter type; each is expected for every minute of every day. */
   meters: ReadonlyArray<{ id: string; category?: string | undefined }>;
-  facts: readonly EnergyDailyMeterFact[];
+  /** The official meters' days, as readEnergyOverviewHeadline gives them. */
+  facts: EnergyDailyMeterFacts;
   holidays?: ReadonlyMap<string, string>;
   meaning?: HoursMeaning;
   /** Meters whose silence is expected: marked not in use, or idle through the end of the period. */
@@ -89,43 +91,50 @@ export const siteFullDays = (input: {
 }): SiteFullDays => {
   const dates = datesBetween(input.period.from, input.period.to);
   const dateSet = new Set(dates);
-  const official = new Set(input.meters.map((meter) => meter.id));
-  const facts = input.facts.filter((fact) => official.has(fact.meterPointId) && dateSet.has(fact.localDate));
+  const official = new Map(input.meters.map((meter) => [meter.id, meter.category ?? ""]));
+  const silent = new Set([...(input.silentMeterIds ?? [])].filter((id) => official.has(id)));
+  const days = input.facts.days.filter((day) => dateSet.has(day.localDate));
+  // The meter-days that were not a whole clean day, by meter and date, gathered once. Any other meter-day on a date with
+  // readings was a whole day read on time with nothing wrong.
+  const exceptions = new Map<string, Map<string, { validMinutes: number; qualityEventCount: number }>>();
+  for (const exception of input.facts.meterExceptions) {
+    if (!official.has(exception.meterPointId) || !dateSet.has(exception.localDate)) continue;
+    const byDate = exceptions.get(exception.meterPointId) ?? new Map<string, { validMinutes: number; qualityEventCount: number }>();
+    byDate.set(exception.localDate, exception);
+    exceptions.set(exception.meterPointId, byDate);
+  }
   // One cell per day holding the day's sums, in the hourly cells' shape ([date, hour, kWh read on time, minutes read on
   // time, intervals not read on time, kWh sent late]). scopeDays and withMetersInUse only ever add a day's cells
   // together, so a day in one cell is judged exactly as its 24 hourly cells are on the Analysis page.
-  const series = (id: string, rows: readonly EnergyDailyMeterFact[], meterCount: number): TrendSeries => {
-    const byDate = new Map<string, TrendCell>();
-    for (const row of rows) {
-      const cell = byDate.get(row.localDate) ?? [row.localDate, DAY_START_HOUR, 0, 0, 0, 0];
-      cell[2] = (cell[2] ?? 0) + row.usageKwh;
-      cell[3] += row.validMinutes;
-      cell[4] += row.qualityEventCount;
-      cell[5] = (cell[5] ?? 0) + row.recoveredKwh;
-      byDate.set(row.localDate, cell);
-    }
-    return { id, expectedMinutesPerHour: meterCount * 60, cells: [...byDate.values()].sort((left, right) => left[0].localeCompare(right[0])) };
-  };
+  const total: TrendSeries | null = official.size ? {
+    id: "__scope__",
+    expectedMinutesPerHour: official.size * 60,
+    cells: days.map((day): TrendCell => [day.localDate, DAY_START_HOUR, day.usageKwh, day.validMinutes, day.qualityEventCount, day.recoveredKwh]),
+  } : null;
+  // Only the meters whose silence is expected need a day of their own: withMetersInUse takes their minutes and problems
+  // back out of the total, and expects one meter fewer. Their energy stays in the total.
+  const ownDays = (id: string): TrendSeries => ({
+    id,
+    expectedMinutesPerHour: 60,
+    cells: days.map((day): TrendCell => {
+      const exception = exceptions.get(id)?.get(day.localDate);
+      return [day.localDate, DAY_START_HOUR, null, exception ? exception.validMinutes : DAY_MINUTES, exception ? exception.qualityEventCount : 0, 0];
+    }),
+  });
   const scope: ScopeData = {
-    id: "site", name: "site", dates, timezone: input.timezone,
-    total: input.meters.length ? series("__scope__", facts, official.size) : null,
-    types: {},
-    meters: input.meters.map((meter) => ({
-      id: meter.id, name: meter.id, location: "", category: categoryOf(meter.category ?? ""), official: true,
-      series: series(meter.id, facts.filter((fact) => fact.meterPointId === meter.id), 1),
-    })),
+    id: "site", name: "site", dates, timezone: input.timezone, total, types: {},
+    meters: [...silent].map((id) => ({ id, name: id, location: "", category: categoryOf(official.get(id) ?? ""), official: true, series: ownDays(id) })),
     usageKwh: null, peakKw: null, peakAt: null, cost: null, typeTotals: {}, coverage: null,
   };
-  const silent = input.silentMeterIds ?? new Set<string>();
-  const days = scopeDays(withMetersInUse(scope, silent), new Map(input.holidays ?? []));
-  const average = averageFullDay(days, input.meaning ?? "opening");
-  const lastDate = facts.filter((fact) => fact.validMinutes > 0).reduce<string | undefined>((latest, fact) => (!latest || fact.localDate > latest ? fact.localDate : latest), undefined);
-  const minutesOnLastDay = new Map<string, number>();
-  for (const fact of facts) if (fact.localDate === lastDate) minutesOnLastDay.set(fact.meterPointId, (minutesOnLastDay.get(fact.meterPointId) ?? 0) + fact.validMinutes);
+  const judged = scopeDays(withMetersInUse(scope, silent), new Map(input.holidays ?? []));
+  const average = averageFullDay(judged, input.meaning ?? "opening");
+  const lastDate = days.filter((day) => day.validMinutes > 0).at(-1)?.localDate;
   return {
     averageDailyKwh: average === null ? null : round(average, 2),
-    fullDays: days.filter((day) => day.complete).length,
-    shortOnLastDay: lastDate ? [...official].filter((id) => !silent.has(id) && (minutesOnLastDay.get(id) ?? 0) < DAY_MINUTES).sort() : [],
+    fullDays: judged.filter((day) => day.complete).length,
+    shortOnLastDay: lastDate
+      ? [...official.keys()].filter((id) => !silent.has(id) && (exceptions.get(id)?.get(lastDate)?.validMinutes ?? DAY_MINUTES) < DAY_MINUTES).sort()
+      : [],
   };
 };
 

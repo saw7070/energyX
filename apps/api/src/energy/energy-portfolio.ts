@@ -11,11 +11,12 @@ import {
 } from "@datafoundry/metadata";
 import { calendarHolidays, projectCalendarEntry } from "@datafoundry/site-report";
 
+import { logger } from "../observability/logger.js";
 import { readProjectMeterHealth } from "./energy-alert-emails.js";
 import { executeEnergySiteFiguresProjection, type EnergySiteFiguresProjection } from "./energy-analysis.js";
 import { localDayStartMs } from "./energy-data-availability.js";
 import { idleThroughPeriodEnd, readIdleWhenQuietMeters } from "./energy-idle-meters.js";
-import { siteDailyFigures, siteFullDays } from "./energy-portfolio-daily.js";
+import { siteDailyFigures, siteFullDays, type SiteDailyFigures } from "./energy-portfolio-daily.js";
 import { buildEnergyProjectInformation } from "./energy-project-information.js";
 import { withEnergyProjectPublicationReadLock } from "./energy-project-materialization.js";
 import { resolveEnergyAccessContext, resolveEnergyPublishedHierarchyNodes } from "./energy-query-context.js";
@@ -59,15 +60,16 @@ export type PortfolioSite = {
   usageKwh: number;
   /**
    * kWh on an average day, as the site's Overview says it ("Uses about … a day"): its average full day, from the days
-   * every meter read in full (averageBasis "full-days"). With no such day, the average of days with readings: the kWh
-   * read divided by the days of readings, so a site connected part-way through counts from its first reading
-   * ("reading-days"). 0 with neither (see energy-portfolio-daily).
+   * every meter read in full (averageBasis "full-days"). With no such day, or when the days could not be judged, the
+   * average of days with readings: the kWh read divided by the days of readings, so a site connected part-way through
+   * counts from its first reading ("reading-days"). 0 with neither, and 0 when the caller did not ask for averages
+   * (buildPortfolio's averageDays; see energy-portfolio-daily).
    */
   averageDailyKwh: number;
   /** Which average averageDailyKwh is; absent when there is none. */
   averageBasis?: "full-days" | "reading-days";
-  /** Complete days in the period (behind a "full-days" average). */
-  fullDays: number;
+  /** Complete days in the period (behind a "full-days" average); absent when they were not worked out. */
+  fullDays?: number;
   /** Days of readings, to one decimal (behind a "reading-days" average). */
   readingDays: number;
   /** Each local date's kWh from period.from to period.to, for the trend line; null on a day with no readings. */
@@ -135,6 +137,9 @@ export const portfolioProjectIds = (input: { metadataStore: MetadataStore; user:
     .map((project) => project.id);
 };
 
+/** Whether a portfolio of this many sites works out each site's average day (see buildPortfolio's averageDays). */
+export const wantsAverageDays = (mode: "every-site" | "lone-site" = "every-site", siteCount: number): boolean => mode === "every-site" || siteCount === 1;
+
 export const buildPortfolio = async (input: {
   metadataStore: MetadataStore;
   user: UserRecord;
@@ -144,15 +149,22 @@ export const buildPortfolio = async (input: {
   includeBudget?: boolean;
   /** For a report about a past period: judge budgets as of the day after it ends. */
   budgetAsOf?: string;
+  /**
+   * Which sites get an average day. "every-site" (the default): the Portfolio page, which shows one for every site.
+   * "lone-site": the PDF, which only says it for a portfolio of one site, so a PDF of several sites reads none of the
+   * daily facts behind it.
+   */
+  averageDays?: "every-site" | "lone-site";
   now?: Date;
 }): Promise<Portfolio> => {
   const now = input.now ?? new Date();
   const visible = portfolioProjectIds(input);
   const projectIds = input.projectIds ? visible.filter((id) => input.projectIds!.includes(id)) : visible;
+  const averageDays = wantsAverageDays(input.averageDays, projectIds.length);
   const sites: PortfolioSite[] = [];
   // One site at a time: all of a company's sites share one readings database.
   for (const projectId of projectIds) {
-    sites.push(await readPortfolioSite({ ...input, projectId, now }));
+    sites.push(await readPortfolioSite({ ...input, projectId, averageDays, now }));
   }
   sites.sort((left, right) => right.usageKwh - left.usageKwh || left.name.localeCompare(right.name));
   const workspace = input.metadataStore.workspaces.list().find((candidate) => candidate.id === input.workspaceId);
@@ -187,6 +199,7 @@ const readPortfolioSite = async (input: {
   period: PortfolioPeriod;
   includeBudget?: boolean;
   budgetAsOf?: string;
+  averageDays: boolean;
   now: Date;
 }): Promise<PortfolioSite> => {
   const project = input.metadataStore.energyIq.getProject(input.projectId);
@@ -201,20 +214,26 @@ const readPortfolioSite = async (input: {
   };
   let site: PortfolioSite;
   try {
-    const { figures, floorAreaSqm, timezone, hierarchyRevisionId } = await readSiteFigures({ ...input, from: input.period.from, to: input.period.to, includeDailyMeterFacts: true });
+    const { figures, floorAreaSqm, timezone, hierarchyRevisionId } = await readSiteFigures({
+      ...input,
+      from: input.period.from,
+      to: input.period.to,
+      ...(input.averageDays ? { includeDailyMeterFacts: true } : {}),
+    });
     const { headline, offHours } = figures;
     const usageKwh = headline.summary.usageKwh;
     const daily = siteDailyFigures({ intervals: figures.intervals, timezone, period: input.period });
-    const full = await readSiteFullDays({ ...input, timezone, hierarchyRevisionId, dailyMeters: figures.dailyMeters });
-    const average = full.averageDailyKwh !== null
-      ? { averageDailyKwh: full.averageDailyKwh, averageBasis: "full-days" as const }
-      : daily.averageDailyKwh > 0 ? { averageDailyKwh: daily.averageDailyKwh, averageBasis: "reading-days" as const } : { averageDailyKwh: 0 };
     site = {
       ...base,
       status: "ok",
       usageKwh: round(usageKwh, 2),
-      ...average,
-      fullDays: full.fullDays,
+      ...(input.averageDays
+        ? await siteAverageDay({
+          projectId: input.projectId,
+          daily,
+          readFullDays: () => readSiteFullDays({ ...input, timezone, hierarchyRevisionId, dailyMeters: figures.dailyMeters }),
+        })
+        : { averageDailyKwh: 0 }),
       readingDays: daily.readingDays,
       dailyKwh: daily.dailyKwh,
       peakKw: round(headline.summary.peakKw, 2),
@@ -240,7 +259,6 @@ const readPortfolioSite = async (input: {
       reason: errorCode(error),
       usageKwh: 0,
       averageDailyKwh: 0,
-      fullDays: 0,
       readingDays: 0,
       dailyKwh: [],
       peakKw: 0,
@@ -298,6 +316,31 @@ export const readSiteFigures = async (input: {
     ...(root?.area_sqm && root.area_sqm > 0 ? { floorAreaSqm: root.area_sqm } : {}),
   };
 });
+
+const log = logger.child({ component: "portfolio" });
+
+/**
+ * A site's average day: its average full day, as its Overview gives it, or the average of days with readings when no
+ * day was complete. Judging the days is extra to the site's figures, so if it fails the site keeps its figures and the
+ * average of days with readings, and a warning is logged.
+ */
+export const siteAverageDay = async (input: {
+  projectId: string;
+  daily: SiteDailyFigures;
+  readFullDays: () => Promise<{ averageDailyKwh: number | null; fullDays: number }>;
+}): Promise<Pick<PortfolioSite, "averageDailyKwh" | "averageBasis" | "fullDays">> => {
+  let full: { averageDailyKwh: number | null; fullDays: number } | undefined;
+  try {
+    full = await input.readFullDays();
+  } catch (error) {
+    log.warn("Could not judge a site's complete days; showing the average of days with readings", { projectId: input.projectId, error: errorCode(error) });
+  }
+  if (full && full.averageDailyKwh !== null) return { averageDailyKwh: full.averageDailyKwh, averageBasis: "full-days", fullDays: full.fullDays };
+  const fullDays = full ? { fullDays: full.fullDays } : {};
+  return input.daily.averageDailyKwh > 0
+    ? { averageDailyKwh: input.daily.averageDailyKwh, averageBasis: "reading-days", ...fullDays }
+    : { averageDailyKwh: 0, ...fullDays };
+};
 
 /**
  * A site's average full day over the period, judged by the same day rules as its Overview and reports: the site's

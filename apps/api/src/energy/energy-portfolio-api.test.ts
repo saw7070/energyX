@@ -11,7 +11,7 @@ import { createMailDelivery } from "../email/mail-delivery.js";
 import type { ConfigApiContext } from "../routes/types.js";
 import { ensureEnergyIqBootstrap } from "./energy-bootstrap.js";
 import { handleEnergyApiRequest } from "./energy-api.js";
-import { evaluateSiteChecks } from "./energy-portfolio.js";
+import { buildPortfolio, evaluateSiteChecks, portfolioProjectIds } from "./energy-portfolio.js";
 import { deliverScheduledReport, latestReportPeriod } from "./energy-report-delivery.js";
 import { readSiteAlerts } from "./energy-site-alerts.js";
 import { createEnergyTargetsMonitor } from "./energy-targets-monitor.js";
@@ -258,5 +258,13 @@ describe("a site's average day on the Portfolio, as its Overview gives it", () =
     // average full day of the 29 complete days, as the Overview says it.
     expect(site).toMatchObject({ averageDailyKwh: 96, averageBasis: "full-days", fullDays: 29, readingDays: 30 });
     expect(portfolio.totals.averageDailyKwh).toBe(96);
+  }, 120_000);
+
+  it("works the average day out for the PDF of a portfolio of one site", async () => {
+    const user = metadata.users.getById({ user_id: "dev-user" });
+    // The fixture has one published site, so its PDF is a portfolio of one and says the site's average full day.
+    expect(portfolioProjectIds({ metadataStore: metadata, user, workspaceId: "default" })).toEqual([PROJECT]);
+    const lone = await buildPortfolio({ metadataStore: metadata, user, workspaceId: "default", period: { from: "2026-09-01", to: "2026-09-30" }, averageDays: "lone-site" });
+    expect(lone.sites[0]).toMatchObject({ projectId: PROJECT, usageKwh: 2880, averageDailyKwh: 96, averageBasis: "full-days", fullDays: 29 });
   }, 120_000);
 });

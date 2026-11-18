@@ -426,7 +426,7 @@ describe("Energy scoped datasource Snapshot guard", () => {
     }
   });
 
-  it("reads each official meter's day only when asked: read on time, sent late, minutes and problems", async () => {
+  it("reads the official meters' days only when asked, listing only the meter-days that were not a whole clean day", async () => {
     const root = mkdtempSync(join(tmpdir(), "energy-overview-headline-days-"));
     const databasePath = join(root, "energy.duckdb");
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
@@ -454,6 +454,8 @@ describe("Energy scoped datasource Snapshot guard", () => {
         localDate: intervalStart.slice(0, 10),
         localHour: 0,
       });
+      const quarterHoursOf = (meterPointId: string, date: string) => Array.from({ length: 96 }, (_, index) =>
+        at(meterPointId, new Date(Date.parse(`${date}T00:00:00.000Z`) + index * 900_000).toISOString(), "ok", 0.25));
       const persisted = await writeEnergyFactProjectMaterialization({
         databasePath,
         projectId: "project-1",
@@ -474,6 +476,8 @@ describe("Energy scoped datasource Snapshot guard", () => {
             at("meter-b", "2026-05-02T00:00:00.000Z", "ok", 0.5),
             // Not an official meter: left out like everywhere else in the headline.
             at("meter-c", "2026-05-02T00:00:00.000Z", "ok", 9),
+            // 3 May: both meters read the whole day. 4 May: only meter A did; meter B sent nothing.
+            ...quarterHoursOf("meter-a", "2026-05-03"), ...quarterHoursOf("meter-b", "2026-05-03"), ...quarterHoursOf("meter-a", "2026-05-04"),
           ],
           qualityEvents: [],
         })],
@@ -495,19 +499,29 @@ describe("Energy scoped datasource Snapshot guard", () => {
         resource: "electricity",
         meterPointIds: ["meter-a", "meter-b"],
         from: "2026-05-01T00:00:00.000Z",
-        to: "2026-05-03T00:00:00.000Z",
+        to: "2026-05-05T00:00:00.000Z",
         ...(includeDailyMeterFacts ? { includeDailyMeterFacts } : {}),
       });
 
       const plain = await read();
-      expect(plain.usageKwh).toBe(4.5);
+      expect(plain.usageKwh).toBe(76.5);
       expect(plain.dailyMeterFacts).toBeUndefined();
-      expect((await read(true)).dailyMeterFacts).toEqual([
-        { localDate: "2026-05-01", meterPointId: "meter-a", usageKwh: 2, recoveredKwh: 0, validMinutes: 30, qualityEventCount: 0 },
-        { localDate: "2026-05-01", meterPointId: "meter-b", usageKwh: 0, recoveredKwh: 2, validMinutes: 0, qualityEventCount: 1 },
-        { localDate: "2026-05-02", meterPointId: "meter-a", usageKwh: 0, recoveredKwh: 0, validMinutes: 0, qualityEventCount: 1 },
-        { localDate: "2026-05-02", meterPointId: "meter-b", usageKwh: 0.5, recoveredKwh: 0, validMinutes: 15, qualityEventCount: 0 },
-      ]);
+      expect((await read(true)).dailyMeterFacts).toEqual({
+        days: [
+          { localDate: "2026-05-01", usageKwh: 2, recoveredKwh: 2, validMinutes: 30, qualityEventCount: 1 },
+          { localDate: "2026-05-02", usageKwh: 0.5, recoveredKwh: 0, validMinutes: 15, qualityEventCount: 1 },
+          { localDate: "2026-05-03", usageKwh: 48, recoveredKwh: 0, validMinutes: 2880, qualityEventCount: 0 },
+          { localDate: "2026-05-04", usageKwh: 24, recoveredKwh: 0, validMinutes: 1440, qualityEventCount: 0 },
+        ],
+        // Whole clean meter-days (both on 3 May, meter A on 4 May) are not listed; a meter that sent nothing is.
+        meterExceptions: [
+          { localDate: "2026-05-01", meterPointId: "meter-a", validMinutes: 30, qualityEventCount: 0 },
+          { localDate: "2026-05-01", meterPointId: "meter-b", validMinutes: 0, qualityEventCount: 1 },
+          { localDate: "2026-05-02", meterPointId: "meter-a", validMinutes: 0, qualityEventCount: 1 },
+          { localDate: "2026-05-02", meterPointId: "meter-b", validMinutes: 15, qualityEventCount: 0 },
+          { localDate: "2026-05-04", meterPointId: "meter-b", validMinutes: 0, qualityEventCount: 0 },
+        ],
+      });
     } finally {
       metadata.close();
       try {
@@ -519,12 +533,17 @@ describe("Energy scoped datasource Snapshot guard", () => {
     }
   });
 
-  it("checks every daily meter fact it is given", () => {
-    expect(parseEnergyDailyMeterFacts('[{"d":"2026-05-01","m":"meter-a","k":1.5,"gap":0,"mins":1440.0,"events":0}]'))
-      .toEqual([{ localDate: "2026-05-01", meterPointId: "meter-a", usageKwh: 1.5, recoveredKwh: 0, validMinutes: 1440, qualityEventCount: 0 }]);
-    expect(parseEnergyDailyMeterFacts(null)).toEqual([]);
-    expect(() => parseEnergyDailyMeterFacts('[{"d":"2026-05-01","m":"meter-a","k":null,"gap":0,"mins":0,"events":0}]')).toThrow("ENERGYIQ_DAILY_METER_FACT_INVALID:0");
-    expect(() => parseEnergyDailyMeterFacts('{"d":"2026-05-01"}')).toThrow("ENERGYIQ_DAILY_METER_FACTS_INVALID");
+  it("reads the compact daily rows back with each date and meter named, and checks every row", () => {
+    // 20,574 days after 1 January 1970 is 1 May 2026; meter 1 is the second meter asked for.
+    expect(parseEnergyDailyMeterFacts("[[20574.0,47.5,1.5,2850.0,2.0]]", "[[20574.0,1.0,1410.0,2.0]]", ["meter-a", "meter-b"])).toEqual({
+      days: [{ localDate: "2026-05-01", usageKwh: 47.5, recoveredKwh: 1.5, validMinutes: 2850, qualityEventCount: 2 }],
+      meterExceptions: [{ localDate: "2026-05-01", meterPointId: "meter-b", validMinutes: 1410, qualityEventCount: 2 }],
+    });
+    expect(parseEnergyDailyMeterFacts(null, null, ["meter-a"])).toEqual({ days: [], meterExceptions: [] });
+    expect(() => parseEnergyDailyMeterFacts("[[20574,1,0,1440]]", "[]", ["meter-a"])).toThrow("ENERGYIQ_DAILY_METER_TOTALS_ROW_INVALID:0");
+    expect(() => parseEnergyDailyMeterFacts("[[20574,1,0,1440,null]]", "[]", ["meter-a"])).toThrow("ENERGYIQ_DAILY_METER_TOTALS_ROW_INVALID:0");
+    expect(() => parseEnergyDailyMeterFacts("[]", "[[20574,3,0,0]]", ["meter-a"])).toThrow("ENERGYIQ_DAILY_METER_EXCEPTIONS_ROW_INVALID:0");
+    expect(() => parseEnergyDailyMeterFacts('{"d":1}', "[]", ["meter-a"])).toThrow("ENERGYIQ_DAILY_METER_TOTALS_INVALID");
   });
 
   it("reads a historical fact store with the writer revision pinned by its Snapshot", async () => {

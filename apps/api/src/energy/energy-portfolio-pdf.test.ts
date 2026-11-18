@@ -220,12 +220,26 @@ describe("portfolio PDF", () => {
 });
 
 describe("portfolio PDF key points", () => {
-  it("gives a lone site's average day as its average full day, or says it is over the days with readings", () => {
-    const one = (overrides: Partial<PortfolioSite>) => keyPoints(portfolioOf([site({ projectId: "p-sktc", name: "SKTC", usageKwh: 1316, ...overrides })]))[0];
-    expect(one({ averageDailyKwh: 47.02, averageBasis: "full-days" })).toBe("SKTC used 1,316 kWh, about 47.0 kWh on an average full day.");
-    expect(one({ averageDailyKwh: 46.04, averageBasis: "reading-days", fullDays: 0 }))
-      .toBe("SKTC used 1,316 kWh, an average of 46.0 kWh a day over the days with readings (no day had every reading).");
+  it("gives a lone site's average day as its average full day, or says it is the average of days with readings", () => {
+    const plain = site({ projectId: "p-sktc", name: "SKTC", usageKwh: 1316 });
+    delete plain.averageBasis;
+    delete plain.fullDays;
+    const one = (overrides: Partial<PortfolioSite>) => keyPoints(portfolioOf([{ ...plain, ...overrides }]))[0];
+    expect(one({ averageDailyKwh: 47.02, averageBasis: "full-days", fullDays: 25 })).toBe("SKTC used 1,316 kWh, about 47.0 kWh on an average full day.");
+    expect(one({ averageDailyKwh: 46.04, averageBasis: "reading-days", fullDays: 0 })).toBe("SKTC used 1,316 kWh, about 46.0 kWh a day (average of days with readings).");
+    // No average (less than a day of readings), or none worked out for this PDF: the total alone, never an unlabelled average.
     expect(one({ averageDailyKwh: 0, fullDays: 0, readingDays: 0.4 })).toBe("SKTC used 1,316 kWh.");
+    expect(one({ averageDailyKwh: 46.04 })).toBe("SKTC used 1,316 kWh.");
+  });
+
+  it("prints which average a lone site's day is in the PDF itself", async () => {
+    for (const [overrides, sentence] of [
+      [{ averageDailyKwh: 47.02, averageBasis: "full-days", fullDays: 25 }, "about 47.0 kWh on an average full day"],
+      [{ averageDailyKwh: 46.04, averageBasis: "reading-days", fullDays: 0 }, "(average of days with readings)"],
+    ] as const) {
+      const { text } = await textOf(await renderPortfolioPdf(portfolioOf([site({ projectId: "p-sktc", name: "SKTC", usageKwh: 1316, ...overrides })])));
+      expect(text.replace(/\s+/gu, " ")).toContain(sentence);
+    }
   });
 });
 

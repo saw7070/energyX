@@ -362,11 +362,15 @@ const drawSummary = (writer: ReportWriter, portfolio: Portfolio): void => {
   writer.y += height;
 };
 
-/** A site's average day, saying which average it is: an average full day, as on its Overview, or of days with readings. */
+/**
+ * A site's average day, saying which average it is: an average full day, as on its Overview, or the average of days
+ * with readings. Nothing when the portfolio has none for the site.
+ */
 const averageDayText = (site: PortfolioSite): string => {
   if (!(site.averageDailyKwh > 0)) return "";
-  if (site.averageBasis === "reading-days") return `, an average of ${formatKwh(site.averageDailyKwh)} kWh a day over the days with readings (no day had every reading)`;
-  return `, about ${formatKwh(site.averageDailyKwh)} kWh on an average full day`;
+  if (site.averageBasis === "full-days") return `, about ${formatKwh(site.averageDailyKwh)} kWh on an average full day`;
+  if (site.averageBasis === "reading-days") return `, about ${formatKwh(site.averageDailyKwh)} kWh a day (average of days with readings)`;
+  return "";
 };
 
 /** The few things a manager should notice first, worked out from the figures. */

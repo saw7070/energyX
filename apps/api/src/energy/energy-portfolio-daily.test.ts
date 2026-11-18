@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { EnergyDailyMeterFact } from "@datafoundry/data-gateway";
+import type { EnergyDailyMeterFacts } from "@datafoundry/data-gateway";
 import type { EnergyIqAnalysisInterval } from "@datafoundry/metadata";
 import { siteDailyFigures, siteFullDays } from "./energy-portfolio-daily.js";
 
@@ -48,17 +48,39 @@ describe("a site's average day on the Portfolio", () => {
   });
 });
 
-/** One official meter's day: kWh read on time, and by default every minute read on time with nothing wrong. */
-const day = (localDate: string, meterPointId: string, usageKwh: number, extra: Partial<EnergyDailyMeterFact> = {}): EnergyDailyMeterFact =>
+/** One meter's day: kWh read on time, and by default every minute read on time with nothing wrong. */
+type MeterDay = { localDate: string; meterPointId: string; usageKwh: number; recoveredKwh: number; validMinutes: number; qualityEventCount: number };
+const day = (localDate: string, meterPointId: string, usageKwh: number, extra: Partial<MeterDay> = {}): MeterDay =>
   ({ localDate, meterPointId, usageKwh, recoveredKwh: 0, validMinutes: 1440, qualityEventCount: 0, ...extra });
 const METERS = [{ id: "lights", category: "light" }, { id: "power", category: "load" }];
+const sum = (rows: MeterDay[], key: "usageKwh" | "recoveredKwh" | "validMinutes" | "qualityEventCount") => rows.reduce((total, row) => total + row[key], 0);
+/**
+ * The meters' days as the daily meter facts read gives them: the official meters added up for each date with any of
+ * their readings, and only the meter-days that were not a whole clean day (a meter with no row that date included).
+ */
+const compact = (rows: MeterDay[], meters: ReadonlyArray<{ id: string }> = METERS): EnergyDailyMeterFacts => {
+  const ids = meters.map((meter) => meter.id);
+  const official = rows.filter((row) => ids.includes(row.meterPointId));
+  const dates = [...new Set(official.map((row) => row.localDate))].sort();
+  return {
+    days: dates.map((localDate) => {
+      const on = official.filter((row) => row.localDate === localDate);
+      return { localDate, usageKwh: sum(on, "usageKwh"), recoveredKwh: sum(on, "recoveredKwh"), validMinutes: sum(on, "validMinutes"), qualityEventCount: sum(on, "qualityEventCount") };
+    }),
+    meterExceptions: dates.flatMap((localDate) => ids.flatMap((meterPointId) => {
+      const on = official.filter((row) => row.localDate === localDate && row.meterPointId === meterPointId);
+      const validMinutes = sum(on, "validMinutes"), qualityEventCount = sum(on, "qualityEventCount");
+      return validMinutes === 1440 && qualityEventCount === 0 ? [] : [{ localDate, meterPointId, validMinutes, qualityEventCount }];
+    })),
+  };
+};
 /** 1–14 September 2026 (Tuesday to Monday): ten weekdays and four weekend days. */
 const TWO_WEEKS = { from: "2026-09-01", to: "2026-09-14" };
 const twoWeeks = (kwh: (date: string) => number) => Array.from({ length: 14 }, (_, index) => `2026-09-${String(index + 1).padStart(2, "0")}`)
   .flatMap((date) => [day(date, "lights", kwh(date) / 2), day(date, "power", kwh(date) / 2)]);
 const weekend = (date: string) => [0, 6].includes(new Date(`${date}T00:00:00Z`).getUTCDay());
-const full = (facts: EnergyDailyMeterFact[], extra: Partial<Parameters<typeof siteFullDays>[0]> = {}) =>
-  siteFullDays({ period: TWO_WEEKS, timezone: "Asia/Singapore", meters: METERS, facts, ...extra });
+const full = (rows: MeterDay[], extra: Partial<Parameters<typeof siteFullDays>[0]> = {}) =>
+  siteFullDays({ period: TWO_WEEKS, timezone: "Asia/Singapore", meters: METERS, facts: compact(rows, extra.meters ?? METERS), ...extra });
 
 describe("a site's average full day on the Portfolio, as its Overview works it out", () => {
   it("counts only days every meter read in full, as the Overview does", () => {
@@ -101,6 +123,10 @@ describe("a site's average full day on the Portfolio, as its Overview works it o
     // The two weekdays it measured something (1 and 2 September) keep that energy: 49 kWh instead of 48.
     expect(judged.fullDays).toBe(14);
     expect(judged.averageDailyKwh).toBeCloseTo(((49 * 2 + 48 * 8) / 10 * 5 + 48 * 2) / 7, 2);
+    // A silent meter that did read the whole day is taken out with all its minutes, so another meter's gap still shows.
+    const whole = [...twoWeeks(() => 48).map((fact) => (fact.localDate === "2026-09-03" && fact.meterPointId === "power" ? { ...fact, validMinutes: 1000 } : fact)),
+      ...twoWeeks(() => 2).filter((fact) => fact.meterPointId === "lights").map((fact) => ({ ...fact, meterPointId: "spare" }))];
+    expect(full(whole, { meters, silentMeterIds: new Set(["spare"]) })).toMatchObject({ fullDays: 13 });
   });
 
   it("has no average full day without a complete day, and names the meters short on the last day", () => {
@@ -108,9 +134,37 @@ describe("a site's average full day on the Portfolio, as its Overview works it o
     expect(full(facts)).toEqual({ averageDailyKwh: null, fullDays: 0, shortOnLastDay: ["power"] });
     expect(full([])).toEqual({ averageDailyKwh: null, fullDays: 0, shortOnLastDay: [] });
     expect(full(twoWeeks(() => 48)).shortOnLastDay).toEqual([]);
+    // A meter that sent nothing at all on the last day is short of it too.
+    expect(full(twoWeeks(() => 48).filter((fact) => !(fact.localDate === "2026-09-14" && fact.meterPointId === "lights"))).shortOnLastDay).toEqual(["lights"]);
     // A meter already expected to be silent is not a candidate for the idle check.
     expect(full(facts, { silentMeterIds: new Set(["power"]) }).shortOnLastDay).toEqual([]);
-    // Facts for another meter or outside the period are ignored.
-    expect(full([...twoWeeks(() => 48), day("2026-09-15", "lights", 500), day("2026-09-01", "elsewhere", 500)])).toMatchObject({ averageDailyKwh: 48, fullDays: 14 });
+    // Days outside the period, and meters that are not official, are ignored.
+    const clean = compact(twoWeeks(() => 48));
+    const extra: EnergyDailyMeterFacts = {
+      days: [...clean.days, { localDate: "2026-09-15", usageKwh: 500, recoveredKwh: 0, validMinutes: 0, qualityEventCount: 3 }],
+      meterExceptions: [...clean.meterExceptions, { localDate: "2026-09-01", meterPointId: "elsewhere", validMinutes: 0, qualityEventCount: 9 }],
+    };
+    expect(siteFullDays({ period: TWO_WEEKS, timezone: "Asia/Singapore", meters: METERS, facts: extra })).toEqual({ averageDailyKwh: 48, fullDays: 14, shortOnLastDay: [] });
+  });
+
+  it("stays quick for a year of a large site, which sends a row a day rather than one per meter a day", () => {
+    const meters = Array.from({ length: 200 }, (_, index) => ({ id: `meter-${index}`, category: "load" }));
+    const year = { from: "2026-01-01", to: "2026-12-31" };
+    const days = Array.from({ length: 365 }, (_, index) => new Date(Date.UTC(2026, 0, 1 + index)).toISOString().slice(0, 10));
+    // Ten meters are marked not in use and sent nothing all year; one meter read only 600 minutes on 1 June.
+    const facts: EnergyDailyMeterFacts = {
+      days: days.map((localDate) => ({ localDate, usageKwh: 2000, recoveredKwh: 0, validMinutes: 190 * 1440 - (localDate === "2026-06-01" ? 840 : 0), qualityEventCount: 0 })),
+      meterExceptions: [
+        { localDate: "2026-06-01", meterPointId: "meter-0", validMinutes: 600, qualityEventCount: 0 },
+        ...days.flatMap((localDate) => Array.from({ length: 10 }, (_, index) => ({ localDate, meterPointId: `meter-${190 + index}`, validMinutes: 0, qualityEventCount: 0 }))),
+      ],
+    };
+    const silentMeterIds = new Set(meters.slice(190).map((meter) => meter.id));
+    const started = performance.now();
+    const judged = siteFullDays({ period: year, timezone: "Asia/Singapore", meters, facts, silentMeterIds });
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(judged).toMatchObject({ averageDailyKwh: 2000, fullDays: 364 });
+    // Without the meters marked not in use taken out, no day is complete.
+    expect(siteFullDays({ period: year, timezone: "Asia/Singapore", meters, facts })).toMatchObject({ averageDailyKwh: null, fullDays: 0 });
   });
 });

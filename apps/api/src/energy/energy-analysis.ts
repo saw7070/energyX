@@ -9,7 +9,7 @@ import {
   readEnergyFactCoverage,
   readEnergyReportingCoverage,
   resolveEnergyFactStorePath,
-  type EnergyDailyMeterFact,
+  type EnergyDailyMeterFacts,
   type EnergyFactCoverage,
   type EnergyScopedDataSource,
   type LocalDataGateway
@@ -1409,7 +1409,7 @@ export type EnergySiteFiguresProjection = {
    * Only when asked for (includeDailyMeterFacts): each official meter's readings per local date, and the official meters
    * themselves (each is expected for every minute of every day), so complete days can be judged as the reports do.
    */
-  dailyMeters?: { meterPointIds: string[]; facts: EnergyDailyMeterFact[] };
+  dailyMeters?: { meterPointIds: string[]; facts: EnergyDailyMeterFacts };
 };
 
 export const executeEnergySiteFiguresProjection = async (input: {
@@ -1427,7 +1427,7 @@ const readOverviewHeadlineWithPolicy = async (input: {
   context: EnergyQueryContext;
   databasePath?: string;
   includeDailyMeterFacts?: boolean;
-}): Promise<{ headline: EnergyOverviewHeadlineProjection; operating: EnergyIqOperatingEvaluation; intervals: EnergyIqAnalysisInterval[]; dailyMeters?: { meterPointIds: string[]; facts: EnergyDailyMeterFact[] } }> => {
+}): Promise<{ headline: EnergyOverviewHeadlineProjection; operating: EnergyIqOperatingEvaluation; intervals: EnergyIqAnalysisInterval[]; dailyMeters?: { meterPointIds: string[]; facts: EnergyDailyMeterFacts } }> => {
   const publishedMeterRoute = resolveEnergyPublishedMeterRoute({
     metadataStore: input.metadataStore,
     projectId: input.context.projectId,

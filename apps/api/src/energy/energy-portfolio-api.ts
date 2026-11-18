@@ -55,7 +55,8 @@ export const handlePortfolioApi = async (
       return { status: 200, headers: NO_STORE, body: createSuccessResult(portfolio) };
     }
     if (segments.length === 2 && segments[1] === "pdf") {
-      const portfolio = await buildPortfolio({ metadataStore, user, workspaceId: context.workspaceId, period, budgetAsOf: shiftDate(period.to, 1) });
+      // The PDF says a site's average day only when it covers one site.
+      const portfolio = await buildPortfolio({ metadataStore, user, workspaceId: context.workspaceId, period, budgetAsOf: shiftDate(period.to, 1), averageDays: "lone-site" });
       const pdf = await renderPortfolioPdf(portfolio);
       return {
         status: 200,

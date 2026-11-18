@@ -96,7 +96,7 @@ export {
   type EnergyMeterLastReading,
   type EnergyReportingCoverage,
   type EnergyCurrentOverviewPeriodRead,
-  type EnergyDailyMeterFact,
+  type EnergyDailyMeterFacts,
   type EnergyMeterDataHealth,
   type EnergyMeterDataHealthStatus,
   type EnergyMeterIntervalCoverage,
