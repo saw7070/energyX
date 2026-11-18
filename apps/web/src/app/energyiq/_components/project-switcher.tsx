@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { configApi, type EnergyAccessContextDto, type EnergyProjectDto } from "../../../lib/config-api";
 import { EnergyIcon } from "./icons";
 import styles from "./project-switcher.module.css";
@@ -190,10 +190,28 @@ function RowMenu({ open, label, disabled, onToggle, items }: {
   items: Array<{ label: string; danger?: boolean; onSelect: () => void }>;
 }) {
   const menu = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (open) menu.current?.querySelector<HTMLButtonElement>("button")?.focus(); }, [open]);
+  const button = useRef<HTMLButtonElement>(null);
+  // The project list scrolls, so a menu drawn inside it would be cut off at its edge. The menu floats over everything
+  // instead, beside its button: below it when there is room, above it otherwise. Scrolling the list closes it.
+  const [place, setPlace] = useState<CSSProperties | null>(null);
+  useLayoutEffect(() => {
+    if (!open || !button.current) { setPlace(null); return; }
+    const box = button.current.getBoundingClientRect();
+    const height = menu.current?.offsetHeight || items.length * 38 + 12;
+    const right = Math.max(8, window.innerWidth - box.right);
+    setPlace(window.innerHeight - box.bottom >= height + 12 ? { top: box.bottom + 4, right } : { bottom: Math.max(8, window.innerHeight - box.top + 4), right });
+  }, [open, items.length]);
+  useEffect(() => {
+    if (!open) return;
+    menu.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    const away = (event: Event) => { if (!menu.current?.contains(event.target as Node)) onToggle(); };
+    window.addEventListener("scroll", away, true);
+    window.addEventListener("resize", onToggle);
+    return () => { window.removeEventListener("scroll", away, true); window.removeEventListener("resize", onToggle); };
+  }, [open]);
   return <div className={styles.rowMenu} data-row-menu>
-    <button type="button" className={styles.kebab} aria-label={label} aria-haspopup="menu" aria-expanded={open} disabled={disabled} draggable={false} onClick={event => { event.stopPropagation(); onToggle(); }}><EnergyIcon name="more" /></button>
-    {open && <div ref={menu} role="menu" className={styles.rowMenuList} onKeyDown={event => {
+    <button ref={button} type="button" className={styles.kebab} aria-label={label} aria-haspopup="menu" aria-expanded={open} disabled={disabled} draggable={false} onClick={event => { event.stopPropagation(); onToggle(); }}><EnergyIcon name="more" /></button>
+    {open && <div ref={menu} role="menu" className={styles.rowMenuList} style={place ?? { visibility: "hidden" }} onKeyDown={event => {
       if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
       event.preventDefault(); event.stopPropagation();
       const options = Array.from(menu.current?.querySelectorAll<HTMLButtonElement>("button") ?? []);

@@ -92,7 +92,7 @@
 .groups .kebab:hover,.groups .kebab[aria-expanded=true] { background:#eef3ed; color:#24352b; }
 .groups h3 .kebab { width:26px; min-height:26px; height:26px; margin-right:-4px; }
 .menu .kebab svg { width:16px; height:16px; }
-.rowMenuList { position:absolute; right:0; top:calc(100% + 4px); z-index:5; min-width:220px; padding:5px; border:1px solid #d8dfd8; border-radius:10px; background:#fff; box-shadow:0 16px 32px -12px rgba(23,37,29,.3); }
+.rowMenuList { position:fixed; z-index:30; min-width:220px; padding:5px; border:1px solid #d8dfd8; border-radius:10px; background:#fff; box-shadow:0 16px 32px -12px rgba(23,37,29,.3); }
 .groups .rowMenuList button { min-height:36px; padding:8px 10px; border-radius:6px; font-size:13px; font-weight:500; color:#24352b; }
 .groups .rowMenuList button:hover,.groups .rowMenuList button:focus-visible { background:#eef3ed; outline:none; }
 .groups .rowMenuList .rowMenuDanger { color:#b42318; }
