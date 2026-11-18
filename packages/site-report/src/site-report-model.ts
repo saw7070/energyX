@@ -257,10 +257,13 @@ function sumCells(parts: Cells[]): Cells {
 /**
  * For each day, the meters that sent energy late after being offline, largest first. Only meters that count in the
  * official total, as the day's total does; every meter when none is marked official. Amounts under 0.05 kWh are left
- * out: they are rounding, not an outage worth naming.
+ * out: they are rounding, not an outage worth naming. Pass the site and its spaces: the whole-site readings carry a
+ * meter's own hours only for meters placed on the site itself, so a meter in a block has them in that block's readings.
  */
-export function lateMetersByDay(project: ScopeData): Map<string, ReportLateMeter[]> {
-  const read = project.meters.filter(meter => meter.series);
+export function lateMetersByDay(scopes: ScopeData | readonly ScopeData[]): Map<string, ReportLateMeter[]> {
+  const seen = new Set<string>();
+  const read = (Array.isArray(scopes) ? scopes : [scopes] as readonly ScopeData[]).flatMap(scope => scope.meters)
+    .filter(meter => meter.series && !seen.has(meter.id) && !!seen.add(meter.id));
   const meters = read.some(meter => meter.official) ? read.filter(meter => meter.official) : read;
   const byDay = new Map<string, ReportLateMeter[]>();
   for (const meter of meters) {
@@ -388,7 +391,7 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const partDay = oneDay && received && !days[0]?.complete;
 
   // Days, averages and base load. Public holidays count with weekends as closed days.
-  const lateFrom = lateMetersByDay(project);
+  const lateFrom = lateMetersByDay([project, ...data.current.spaces]);
   const reportDays: ReportDay[] = days.map(day => {
     const from = day.recoveredKwh > 0 ? lateFrom.get(day.date) ?? [] : [];
     return { date: day.date, dow: weekdayOf(day.date, locale), kwh: day.totalKwh, dayType: day.dayType, holidayName: day.holidayName, complete: day.complete, recoveredKwh: day.recoveredKwh, ...(from.length ? { recoveredFrom: from } : {}) };

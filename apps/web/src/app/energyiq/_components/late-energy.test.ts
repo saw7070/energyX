@@ -48,4 +48,12 @@ describe("energy sent late after an outage", () => {
     // 0.02 kWh is rounding, not an outage worth naming.
     expect(late.get("2026-11-17")).toEqual([{ name: "Driveway", kwh: 1.2 }]);
   });
+
+  it("finds a meter placed in a block, whose hours come with the block's readings, not the site's", () => {
+    const meter = (series: TrendSeries | null) => ({ id: "pav", name: "Pavilion linkway 2", location: "", category: "light" as const, official: true, series });
+    const site = scope(series("__scope__", 60, []), [meter(null)]);
+    const block = { ...scope(series("__scope__", 60, []), [meter(series("pav", 60, [["2026-11-17", 2, 0, 0, 4, 10.2]]))]), id: "block", name: "Common area" };
+    expect(lateMetersByDay(site).size).toBe(0);
+    expect(lateMetersByDay([site, block]).get("2026-11-17")).toEqual([{ name: "Pavilion linkway 2", kwh: 10.2 }]);
+  });
 });

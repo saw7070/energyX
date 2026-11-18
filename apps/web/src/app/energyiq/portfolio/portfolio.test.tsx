@@ -71,8 +71,8 @@ describe("Portfolio view", () => {
     expect(host.textContent).toContain("All sites together on an average day");
     const row = (name: string) => Array.from(host.querySelectorAll("tbody tr")).find(item => item.querySelector("th")?.textContent?.includes(name))!;
     const headers = Array.from(host.querySelectorAll("thead th")).map(cell => cell.textContent);
-    // The trend column says it is one point a day, over which days.
-    expect(headers.slice(0, 4)).toEqual(["Site", "Energy (kWh) ↓", "Average a day (kWh)", "Daily trendeach day, 1–30 Sep"]);
+    // The trend column says it is one point a day, over which days, and what the dashed line is.
+    expect(headers.slice(0, 4)).toEqual(["Site", "Energy (kWh) ↓", "Average a day (kWh)", "Daily trendeach day, 1–30 Sepdashed line = average day"]);
     // KL Office started part-way through, so its average is over its 21 days of readings and says so.
     expect(row("KL Office").querySelectorAll("td")[1]!.textContent).toBe("381over 21 days of readings");
     expect(row("Raffles HQ").querySelectorAll("td")[1]!.textContent).toBe("167");
@@ -80,6 +80,8 @@ describe("Portfolio view", () => {
     expect(spark.getAttribute("aria-label")).toBe("Daily use from 1 Sep to 30 Sep: lowest 160.0 kWh on 1 Sep, highest 189.0 kWh on 30 Sep.");
     expect(spark.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
     expect(row("KL Office").querySelectorAll("polyline")).toHaveLength(1);
+    // Under the line, in words: the latest day and how it compares with the site's average day.
+    expect(row("Raffles HQ").querySelectorAll("td")[2]!.lastElementChild?.textContent).toBe("Latest day 189.0 kWh13% above average");
     expect(row("Tuas Depot").textContent).toContain("No readings for this period");
 
     await act(async () => (host.querySelector('button[aria-label="Sort by Average a day (kWh)"]') as HTMLButtonElement).click());
