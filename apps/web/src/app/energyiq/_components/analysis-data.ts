@@ -55,6 +55,12 @@ type ProjectInformation = {
   tariff?: null | { entries: Array<{ location: string; from: string; toExclusive: string | null; taxBasis?: string | null; tax?: { name: string; ratePct: number } | null }> };
   /** The grid emission factor the energy review's carbon figures use. */
   carbon?: { kgCo2ePerKwh: number; year: number; source: string };
+  /** What people told the AI about the report (report-feedback): active memory only, with the day it was written. */
+  feedbackMemory?: Array<{ text: string; date: string }>;
+  /** Follow-ups the reports check: open ones, and those closed in the last 31 days. */
+  followUps?: Array<{ text: string; status: "open" | "done" | "dropped"; createdAt: string; lastCheck?: { at: string; verdict: "resolved" | "ongoing" | "unclear"; evidence: string } }>;
+  /** Points to check the reports no longer show, by the check's stable key. */
+  dismissedChecks?: Array<{ key: string; title: string; reason: string }>;
 };
 
 // "all-available" means the server picks the window, so it must not be sent with a period or explicit dates.

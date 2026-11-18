@@ -7,7 +7,7 @@ import { KeyPoints } from "./key-points";
 import { buildSiteReport } from "@datafoundry/site-report";
 import { DATA } from "./standout-days.test-fixture";
 // The fixed report loads its own readings; here it only has to feed the heading, the plain names and the dates.
-const site = vi.hoisted(() => ({ periods: [] as unknown[], saved: null as null | { reportId: string; cadence: string; period: { from: string; toExclusive: string }; generatedAt: string; coverage: number | null }, newerReadings: false, report: {
+const site = vi.hoisted(() => ({ periods: [] as unknown[], readings: undefined as unknown, retry: vi.fn(), saved: null as null | { reportId: string; cadence: string; period: { from: string; toExclusive: string }; generatedAt: string; coverage: number | null }, newerReadings: false, report: {
   title: { before: "Three-quarters of the office load ", emphasis: "never switches off" },
   headline: "About S$655 of the estimated S$868 monthly bill pays for equipment that stays on around the clock, even when nobody is there.",
   circuits: [{ code: "DB1 L1 Light", name: "Office area lights", meterIds: ["m1"] }],
@@ -16,10 +16,23 @@ const site = vi.hoisted(() => ({ periods: [] as unknown[], saved: null as null |
 vi.mock("./energyiq-access", () => ({ useEnergyIqAccess: () => ({ activeProject: null }) }));
 vi.mock("./site-report", async importOriginal => ({
   ...(await importOriginal<typeof import("./site-report")>()),
-  useSiteReport: (_projectId: string, period: unknown, enabled: boolean) => { if (enabled) site.periods.push(period); return { state: { report: site.report }, saved: site.saved, newerReadings: site.newerReadings, retry: () => {} }; },
-  SiteReportPanel: ({ saved }: { saved?: { reportId: string } | null }) => <p data-site-report>{saved ? saved.reportId : "built here"}</p>,
+  useSiteReport: (_projectId: string, period: unknown, enabled: boolean, readings: unknown) => { if (enabled) { site.periods.push(period); site.readings = readings; } return { state: { report: site.report }, saved: site.saved, newerReadings: site.newerReadings, retry: site.retry }; },
+  SiteReportPanel: ({ saved, onCheckFeedback }: { saved?: { reportId: string } | null; onCheckFeedback?: (check: { key: string; title: string }) => void }) => <>
+    <p data-site-report>{saved ? saved.reportId : "built here"}</p>
+    {onCheckFeedback && <button type="button" data-check-feedback onClick={() => onCheckFeedback({ key: "daytime", title: "Lights on in the daytime" })}>Tell the AI about this</button>}
+  </>,
 }));
-afterEach(() => { site.saved = null; site.newerReadings = false; site.periods.length = 0; });
+// Feedback on the report: the state is fixed here; the panel's own tests cover the panel.
+const feedback = vi.hoisted(() => ({ state: null as null | Record<string, unknown> }));
+vi.mock("./report-feedback-model", async importOriginal => ({
+  ...(await importOriginal<typeof import("./report-feedback-model")>()),
+  useReportFeedback: () => ({ state: feedback.state, error: null, loading: !feedback.state, forbidden: false, reload: () => {}, setState: () => {} }),
+}));
+vi.mock("./report-feedback-panel", () => ({
+  ReportFeedbackPanel: ({ focusRequest, onSiteChanged }: { focusRequest?: { about: { title: string }; nonce: number } | null; onSiteChanged?: () => void }) =>
+    <section data-feedback-panel>{focusRequest ? `${focusRequest.about.title} #${focusRequest.nonce}` : "ready"}<button type="button" data-site-changed onClick={onSiteChanged}>changed</button></section>,
+}));
+afterEach(() => { site.saved = null; site.newerReadings = false; site.periods.length = 0; site.readings = undefined; site.retry.mockClear(); feedback.state = null; });
 it("leads with the report headline and links to the explanation in Analysis instead of showing priority cards", async () => {
  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);vi.stubGlobal("React",React);
  const request=vi.spyOn(configApi,"reportActionRequest").mockResolvedValue({
@@ -164,5 +177,37 @@ it("names the saved report the heading comes from, links to it in Reports and wa
  expect(host.textContent).toContain("Readings have arrived for days after this report. The Overview changes when the next report is saved.");
  // Analysis opens on the dates of the report on screen, not the priorities' own dates.
  expect(host.querySelector('a[href^="/energyiq/analysis"]')?.getAttribute("href")).toContain("from=2026-08-01&to=2026-08-31");
+ } finally {await act(async()=>root.unmount());host.remove();request.mockRestore();vi.unstubAllGlobals();}
+});
+
+it("puts the feedback panel right under the report, opens it from a point to check, and reloads the report after a change", async () => {
+ vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);vi.stubGlobal("React",React);
+ feedback.state = { canGive: true, canManage: true, aiAvailable: true, feedback: [], followUps: [],
+  memory: [{ id: "m1", text: "The lights go off at 7:10 am", kind: "fact", status: "active", authorUserId: "u", authorName: "Andrew", createdAt: "2026-11-17T02:00:00Z", sourceFeedbackId: null }],
+  dismissedChecks: [{ key: "noUse:m7", title: "Pavilion 2 used nothing", reason: "Loses power by day", createdAt: "2026-11-17T02:00:00Z" }] };
+ const request=vi.spyOn(configApi,"reportActionRequest").mockResolvedValue({ publication:{reportId:"r",selection:{active:[],featuredActionIds:[]}}, metrics:{projectName:"Estate",period:{from:"2026-09-01",toExclusive:"2026-09-02"},energyKwh:0,peakKw:0,coverage:1,cost:null,outsideHoursPercent:null} });
+ const host=document.createElement("div");document.body.append(host);const root=createRoot(host);
+ try {await act(async()=>root.render(<KeyPoints projectId="p"/>));
+ const panel=host.querySelector("[data-feedback-panel]");
+ expect(panel?.previousElementSibling?.hasAttribute("data-check-feedback")).toBe(true);
+ expect(panel?.textContent).toContain("ready");
+ // The report shows what is known now: active memory and the dismissed checks.
+ expect(site.readings).toEqual({ feedbackMemory: [{ text: "The lights go off at 7:10 am", date: "2026-11-17" }], followUps: [], dismissedChecks: [{ key: "noUse:m7", title: "Pavilion 2 used nothing", reason: "Loses power by day" }] });
+ await act(async()=>host.querySelector<HTMLButtonElement>("[data-check-feedback]")!.click());
+ expect(host.querySelector("[data-feedback-panel]")?.textContent).toContain("Lights on in the daytime #1");
+ await act(async()=>host.querySelector<HTMLButtonElement>("[data-check-feedback]")!.click());
+ expect(host.querySelector("[data-feedback-panel]")?.textContent).toContain("Lights on in the daytime #2");
+ await act(async()=>host.querySelector<HTMLButtonElement>("[data-site-changed]")!.click());
+ expect(site.retry).toHaveBeenCalledTimes(1);
+ } finally {await act(async()=>root.unmount());host.remove();request.mockRestore();vi.unstubAllGlobals();}
+});
+
+it("leaves the points to check without a feedback button for a reader who may not give feedback", async () => {
+ vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);vi.stubGlobal("React",React);
+ feedback.state = { canGive: false, canManage: false, aiAvailable: true, feedback: [], memory: [], followUps: [], dismissedChecks: [] };
+ const request=vi.spyOn(configApi,"reportActionRequest").mockResolvedValue({ publication:{reportId:"r",selection:{active:[],featuredActionIds:[]}}, metrics:{projectName:"Estate",period:{from:"2026-09-01",toExclusive:"2026-09-02"},energyKwh:0,peakKw:0,coverage:1,cost:null,outsideHoursPercent:null} });
+ const host=document.createElement("div");document.body.append(host);const root=createRoot(host);
+ try {await act(async()=>root.render(<KeyPoints projectId="p"/>));
+ expect(host.querySelector("[data-check-feedback]")).toBeNull();
  } finally {await act(async()=>root.unmount());host.remove();request.mockRestore();vi.unstubAllGlobals();}
 });
