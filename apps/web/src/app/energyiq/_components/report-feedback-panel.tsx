@@ -18,6 +18,7 @@ import {
   FEEDBACK_MAX_LENGTH,
   reportContextOf,
   reportFeedbackApi,
+  suggestionLabel,
   suggestionsOf,
   useReportFeedback,
   type FeedbackAbout,
@@ -151,7 +152,8 @@ export function ReportFeedbackPanel({ projectId, feedback, review, report, focus
     // The site changed: read the state again and rebuild the report from the new settings.
     controller.reload();
     onSiteChanged?.();
-    return t("appliedNow", { applied: result.applied?.trim() || suggestion.label });
+    // The server's sentence is English; other readers see the change in their own words.
+    return t("appliedNow", { applied: (locale === "en" && result.applied?.trim()) || suggestionLabel(suggestion, locale, t) });
   });
   const dismiss = (suggestion: SuggestionDto) => run(`dismiss:${suggestion.id}`, () => reportFeedbackApi.dismissSuggestion(projectId, suggestion.id), t("actionFailed"));
   const approve = (memory: MemoryDto) => run(`approve:${memory.id}`, () => reportFeedbackApi.approveMemory(projectId, memory.id), t("actionFailed"));
@@ -215,14 +217,15 @@ export function ReportFeedbackPanel({ projectId, feedback, review, report, focus
           <ul className={styles.list}>{suggestions.map(suggestion => {
             const waiting = suggestion.status === "open" || suggestion.status === "failed";
             const status = suggestionStatus(suggestion);
+            const label = suggestionLabel(suggestion, locale, t);
             return <li key={suggestion.id} className={styles.card} data-status={suggestion.status}>
               {KINDS.has(suggestion.kind) && <span className={styles.kind}>{t(`kind.${suggestion.kind}`)}</span>}
-              <p className={styles.cardText}>{suggestion.label}</p>
+              <p className={styles.cardText}>{label}</p>
               {status && <p className={suggestion.status === "failed" ? styles.cardError : styles.meta}>{status}</p>}
               {waiting && (canManage
                 ? <div className={styles.actions}>
-                  <button type="button" className={styles.primary} disabled={!!busy} aria-label={itemLabel(t("apply"), suggestion.label)} onClick={() => { void apply(suggestion); }}>{busy === `apply:${suggestion.id}` ? t("applying") : t("apply")}</button>
-                  <button type="button" className={styles.secondary} disabled={!!busy} aria-label={itemLabel(t("dismiss"), suggestion.label)} onClick={() => { void dismiss(suggestion); }}>{t("dismiss")}</button>
+                  <button type="button" className={styles.primary} disabled={!!busy} aria-label={itemLabel(t("apply"), label)} onClick={() => { void apply(suggestion); }}>{busy === `apply:${suggestion.id}` ? t("applying") : t("apply")}</button>
+                  <button type="button" className={styles.secondary} disabled={!!busy} aria-label={itemLabel(t("dismiss"), label)} onClick={() => { void dismiss(suggestion); }}>{t("dismiss")}</button>
                 </div>
                 : <p className={styles.meta}>{t("adminCanApply")}</p>)}
             </li>;

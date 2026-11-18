@@ -11,6 +11,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { EnergyReview } from "@datafoundry/site-report";
 import { configApi, ConfigApiError } from "../../../lib/config-api";
+import { intlLocale, type EnergyIqLocale, type Translate } from "./energyiq-messages";
+import type { reportFeedbackMessages } from "./report-feedback-messages";
 import type { SiteReport } from "./site-report-model";
 
 /** What a piece of feedback is about: a point to check in the review, or a section of the report. */
@@ -129,15 +131,12 @@ export const reportFeedbackApi = {
 
 const clip = (text: string) => text.length > CONTEXT_MAX_TEXT ? text.slice(0, CONTEXT_MAX_TEXT) : text;
 
-/** A point to check as the review lists it; `key` is the stable key the review gives each one. */
-type CheckLike = { title: string; text: string; key?: string };
-
 /**
  * The checks and headline figures of the report on screen, within the API's limits (40 checks, 20 figures, 300
  * characters each). The energy review gives both; the full report gives its key figures. Null when there is nothing.
  */
 export function reportContextOf(review: EnergyReview | null | undefined, report: SiteReport | null | undefined): ReportContext | null {
-  const checks: ReadonlyArray<CheckLike> = review?.checks ?? [];
+  const checks = review?.checks ?? [];
   const figures = review
     ? [
       ...review.summary.figures.map(figure => `${figure.label}: ${figure.value}${figure.unit ? ` ${figure.unit}` : ""}`),
@@ -147,8 +146,8 @@ export function reportContextOf(review: EnergyReview | null | undefined, report:
       ? [...(report.headline ? [report.headline] : []), ...report.keyFigures.map(figure => `${figure.label}: ${figure.value}`)]
       : [];
   const context: ReportContext = {
-    // Only checks that carry a key can be named back to the report.
-    checks: checks.flatMap(check => check.key ? [{ key: clip(check.key), title: clip(check.title) }] : []).slice(0, CONTEXT_MAX_CHECKS),
+    // Each check is named back to the report by its stable key ("stopped:<meterId>", "daytime"…).
+    checks: checks.filter(check => check.key).map(check => ({ key: clip(check.key), title: clip(check.title) })).slice(0, CONTEXT_MAX_CHECKS),
     figures: figures.map(text => clip(text.trim())).filter(Boolean).slice(0, CONTEXT_MAX_FIGURES),
   };
   return context.checks.length || context.figures.length ? context : null;
@@ -175,6 +174,86 @@ export function readingsFromFeedback(state: ReportFeedbackState, now = Date.now(
       .map(item => ({ text: item.text, status: item.status, createdAt: item.createdAt, ...(item.lastCheck ? { lastCheck: item.lastCheck } : {}) })),
     dismissedChecks: state.dismissedChecks.map(item => ({ key: item.key, title: item.title, reason: item.reason })),
   };
+}
+
+type FeedbackTranslate = Translate<Extract<keyof typeof reportFeedbackMessages.en, string>>;
+const WEEK_DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+const TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$|^24:00$/;
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const textField = (value: unknown) => typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+
+/** The hours in a suggestion, with days that share them side by side: "周一–周五 07:00–19:10；周六 关闭". */
+function hoursText(weekly: unknown, locale: EnergyIqLocale, t: FeedbackTranslate): string | null {
+  if (!weekly || typeof weekly !== "object") return null;
+  const days = WEEK_DAYS.map(day => (weekly as Record<string, unknown>)[day]);
+  const valid = (ranges: unknown): ranges is Array<{ from: string; to: string }> => Array.isArray(ranges)
+    && ranges.every(range => !!range && typeof range === "object" && TIME.test(String((range as { from?: unknown }).from)) && TIME.test(String((range as { to?: unknown }).to)));
+  if (!days.every(valid)) return null;
+  const rangesOf = (ranges: Array<{ from: string; to: string }>) => ranges.length ? ranges.map(range => `${range.from}–${range.to}`).join(", ") : t("label.closed");
+  const texts = days.map(ranges => rangesOf(ranges as Array<{ from: string; to: string }>));
+  if (texts.every(text => text === texts[0])) return `${t("label.everyDay")} ${texts[0]}`;
+  // Monday 1 January 2024 starts the week the day names are read from.
+  const dayName = (index: number) => new Date(Date.UTC(2024, 0, 1 + index)).toLocaleDateString(intlLocale(locale), { weekday: "short", timeZone: "UTC" });
+  const groups: Array<{ first: number; last: number; text: string }> = [];
+  texts.forEach((text, index) => {
+    const previous = groups.at(-1);
+    if (previous && previous.text === text) previous.last = index;
+    else groups.push({ first: index, last: index, text });
+  });
+  return groups.map(group => `${group.first === group.last ? dayName(group.first) : `${dayName(group.first)}–${dayName(group.last)}`} ${group.text}`).join(t("label.separator"));
+}
+
+/** A day in a suggestion as people write it: "2026年12月25日", "25 Dis 2026". */
+const dayText = (date: string, locale: EnergyIqLocale) =>
+  new Date(`${date}T00:00:00Z`).toLocaleDateString(intlLocale(locale), { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" });
+
+/** The change in the reader's language, from its payload; null when the payload is not one this page can read. */
+function localSuggestionLabel(suggestion: SuggestionDto, locale: EnergyIqLocale, t: FeedbackTranslate): string | null {
+  const payload = suggestion.payload ?? {};
+  const name = textField(payload.meterName);
+  switch (suggestion.kind) {
+    case "operating_hours": {
+      const hours = hoursText(payload.weekly, locale, t);
+      return hours ? t("label.hours", { hours }) : null;
+    }
+    case "meter_not_in_use": {
+      const reason = textField(payload.reason);
+      return name && reason ? t("label.meterNotInUse", { name, reason }) : null;
+    }
+    case "meter_in_use": return name ? t("label.meterInUse", { name }) : null;
+    case "meter_always_on": return name && typeof payload.alwaysOn === "boolean" ? t(payload.alwaysOn ? "label.alwaysOn" : "label.notAlwaysOn", { name }) : null;
+    case "light_count": {
+      const count = payload.count;
+      return name && typeof count === "number" && Number.isInteger(count) && count > 0 ? t("label.lightCount", { name, count: count.toLocaleString(intlLocale(locale)) }) : null;
+    }
+    case "holiday": {
+      const date = textField(payload.date);
+      const label = textField(payload.label);
+      if (!DAY.test(date) || !label) return null;
+      return t(payload.classification === "special_closure" ? "label.closure" : "label.holiday", { date: dayText(date, locale), label });
+    }
+    case "electricity_rate": {
+      const rate = payload.ratePerKwh;
+      const from = textField(payload.effectiveFrom);
+      if (typeof rate !== "number" || !(rate > 0) || !DAY.test(from)) return null;
+      return t("label.rate", { rate: rate.toLocaleString(intlLocale(locale), { maximumFractionDigits: 4 }), date: dayText(from, locale) });
+    }
+    case "dismiss_check": {
+      const title = textField(payload.title);
+      return title ? t("label.dismissCheck", { title }) : null;
+    }
+    default: return null;
+  }
+}
+
+/**
+ * The sentence a suggestion card shows. The server writes it in English from the payload (with the site's currency
+ * and the "lights-off at 7:10 am" short form), so English readers see it as written; Chinese and Malay readers get the
+ * same change written from the payload in their language, or the English sentence when the payload cannot be read.
+ */
+export function suggestionLabel(suggestion: SuggestionDto, locale: EnergyIqLocale, t: FeedbackTranslate): string {
+  if (locale === "en") return suggestion.label;
+  return localSuggestionLabel(suggestion, locale, t) ?? suggestion.label;
 }
 
 /** Every suggestion with the feedback it came from: open and failed first, then the most recently closed. */

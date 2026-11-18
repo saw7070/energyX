@@ -1,7 +1,9 @@
 import { afterEach, expect, it, vi } from "vitest";
 import type { EnergyReview } from "@datafoundry/site-report";
 import { configApi } from "../../../lib/config-api";
-import { readingsFromFeedback, reportContextOf, reportFeedbackApi, suggestionsOf, type ReportFeedbackState, type SuggestionDto } from "./report-feedback-model";
+import { translatorFor, type EnergyIqLocale } from "./energyiq-messages";
+import { reportFeedbackMessages } from "./report-feedback-messages";
+import { readingsFromFeedback, reportContextOf, reportFeedbackApi, suggestionLabel, suggestionsOf, type ReportFeedbackState, type SuggestionDto } from "./report-feedback-model";
 import type { SiteReport } from "./site-report-model";
 
 afterEach(() => { vi.restoreAllMocks(); });
@@ -82,4 +84,25 @@ it("lists waiting suggestions first, then a few closed ones", () => {
   const feedback = (id: string, suggestions: SuggestionDto[]) => ({ id, text: id, about: null, authorUserId: "u", authorName: "A", createdAt: "2026-11-17T00:00:00Z", status: "processed" as const, reply: null, memoryIds: [], followUpIds: [], suggestions });
   const listed = suggestionsOf(state({ feedback: [feedback("f2", [item("a2", "applied"), item("o2", "open")]), feedback("f1", [item("d1", "dismissed"), item("x1", "failed"), item("a1", "applied")])] }), 2);
   expect(listed.map(entry => `${entry.id}@${entry.feedbackId}`)).toEqual(["o2@f2", "x1@f1", "a2@f2", "d1@f1"]);
+});
+
+it("writes each suggested change in the reader's language, keeping the server's English sentence", () => {
+  const label = (kind: SuggestionDto["kind"], payload: Record<string, unknown>, locale: EnergyIqLocale) =>
+    suggestionLabel({ id: "s", kind, label: "English sentence", payload, status: "open" }, locale, translatorFor(reportFeedbackMessages, locale));
+  const weekday = [{ from: "07:00", to: "19:10" }];
+  const weekly = { mon: weekday, tue: weekday, wed: weekday, thu: weekday, fri: weekday, sat: [], sun: [] };
+  expect(label("operating_hours", { weekly }, "en")).toBe("English sentence");
+  expect(label("operating_hours", { weekly }, "zh-Hans")).toBe("把运行时间改为：周一–周五 07:00–19:10；周六–周日 关闭");
+  expect(label("operating_hours", { weekly: { mon: weekday, tue: weekday, wed: weekday, thu: weekday, fri: weekday, sat: weekday, sun: weekday } }, "ms")).toBe("Tukar waktu kepada setiap hari 07:00–19:10");
+  expect(label("meter_not_in_use", { meterId: "m1", meterName: "Pavilion 2", reason: "Closed for repairs" }, "ms")).toBe("Tandakan Pavilion 2 sebagai tidak digunakan (Closed for repairs)");
+  expect(label("meter_in_use", { meterId: "m1", meterName: "Pavilion 2" }, "zh-Hans")).toBe("将 Pavilion 2 标为恢复使用");
+  expect(label("meter_always_on", { meterId: "m1", meterName: "Server room", alwaysOn: true }, "ms")).toBe("Tandakan Server room sebagai sentiasa hidup mengikut reka bentuk");
+  expect(label("light_count", { meterId: "m1", meterName: "DB1 Light", count: 24 }, "zh-Hans")).toBe("把 DB1 Light 的灯具数量设为 24");
+  expect(label("holiday", { date: "2026-12-25", label: "Christmas", closed: true, classification: "public_holiday" }, "zh-Hans")).toBe("把 2026年12月25日 加为公共假期：Christmas");
+  expect(label("holiday", { date: "2026-12-26", label: "Year-end clean", closed: true, classification: "special_closure" }, "ms")).toMatch(/^Tambah 26 Dis 2026 sebagai hari tutup yang dirancang: Year-end clean$/);
+  expect(label("electricity_rate", { ratePerKwh: 0.2981, effectiveFrom: "2027-01-01" }, "ms")).toBe("Tukar kadar elektrik kepada 0.2981 setiap kWh mulai 1 Jan 2027");
+  expect(label("dismiss_check", { checkKey: "noUse:m7", title: "Pavilion 2 used nothing", reason: "Off by day" }, "zh-Hans")).toBe("报告不再提示“Pavilion 2 used nothing”");
+  // A payload the page cannot read keeps the server's sentence rather than showing something wrong.
+  expect(label("operating_hours", { weekly: {} }, "zh-Hans")).toBe("English sentence");
+  expect(label("light_count", { meterId: "m1", meterName: "DB1 Light", count: "many" }, "ms")).toBe("English sentence");
 });

@@ -14,9 +14,9 @@
  * questions it asked at installation, answered from the same readings. The Overview cards still read the full report.
  */
 import Link from "next/link";
-import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { readProjectSpatialReference, type ProjectSpatialReference } from "@datafoundry/contracts";
-import { buildEnergyReview, parseSiteReportSnapshot, writtenStyleOf, type EnergyReview, type SiteReportCadence } from "@datafoundry/site-report";
+import { buildEnergyReview, parseSiteReportSnapshot, writtenStyleOf, type EnergyReview, type EnergyReviewCheck, type SiteReportCadence } from "@datafoundry/site-report";
 import { ENERGY_REVIEW_CSS, EnergyReviewDocument, energyReviewFileName, renderEnergyReviewHtml } from "@datafoundry/site-report/energy-review-document";
 import { renderSiteReportHtml, siteReportFileName, SiteReportDocument } from "@datafoundry/site-report/site-report-document";
 import { configApi } from "../../../lib/config-api";
@@ -31,15 +31,8 @@ import styles from "./key-points.module.css";
 
 export { monotonePath, niceTicks, renderSiteReportHtml, Rich, siteReportFileName, SiteReportDocument } from "@datafoundry/site-report/site-report-document";
 
-/** A point to check in the review, named back to the report: its stable key and its title. */
-export type ReportCheckRef = { key: string; title: string };
-/**
- * The review document with its "Tell the AI about this" button on each point to check (`onCheckFeedback`, live copy
- * only). Typed here so the page compiles whether or not the installed document already declares the prop; a document
- * without it simply shows no button.
- */
-type ReviewDocumentProps = { review: EnergyReview; standalone?: boolean | undefined; onCheckFeedback?: ((check: ReportCheckRef) => void) | undefined };
-const ReviewDocument: (props: ReviewDocumentProps) => ReactElement = EnergyReviewDocument;
+/** A point to check in the review, named back to the report: its stable key (EnergyReviewCheck.key) and its title. */
+export type ReportCheckRef = Pick<EnergyReviewCheck, "key" | "title">;
 
 /** The document's wording follows the language its sentences were written in, so a downloaded copy never mixes languages. */
 const reportText = (locale: EnergyIqLocale) => translatorFor(siteReportMessages, locale);
@@ -232,7 +225,7 @@ export function SiteReportPanel({ state, onRetry, projectId, saved, onCheckFeedb
         <p>{state.error.fixTab && projectId ? <Link href={`/energyiq/project-configuration?${new URLSearchParams({ projectId, tab: state.error.fixTab })}`}>{t("problem.openFacility")}</Link> : null}<button type="button" onClick={onRetry}>{t("panel.retry")}</button></p>
       </div>
       : !report ? <p role="status" className={styles.reportMessage}>{t("panel.loading")}</p>
-      : <div>{review ? <ReviewDocument review={review} {...(onCheckFeedback ? { onCheckFeedback } : {})} /> : <SiteReportDocument report={report} />}</div>}
+      : <div>{review ? <EnergyReviewDocument review={review} onCheckFeedback={onCheckFeedback} /> : <SiteReportDocument report={report} />}</div>}
   </section>;
 }
 

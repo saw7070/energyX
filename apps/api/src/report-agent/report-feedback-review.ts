@@ -34,7 +34,7 @@ export function followUpSummary(data: AnalysisData, review: EnergyReview | null)
     days: review?.total ? review.total.days.map(day => ({ date: day.date, kwh: round(day.kwh), complete: day.complete })) : daysFromReadings(data),
     totalKwh: data.current.project.usageKwh === null ? null : round(data.current.project.usageKwh),
     previousPeriodKwh: data.previous?.project.usageKwh == null ? null : round(data.previous.project.usageKwh),
-    checks: (review?.checks ?? []).map(check => ({ key: (check as { key?: unknown }).key ?? null, title: check.title, text: clip(check.text, 500) })),
+    checks: (review?.checks ?? []).map(check => ({ key: check.key, title: check.title, text: clip(check.text, 500) })),
     notInUse: (data.notInUse ?? []).map(meter => ({ name: meter.name, reason: meter.reason })),
     quietButIdle: data.idleWhenQuiet ?? [],
     alwaysOnByDesign: (data.alwaysOnByDesign ?? []).map(meter => meter.name),

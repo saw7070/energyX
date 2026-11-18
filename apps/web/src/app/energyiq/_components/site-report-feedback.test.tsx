@@ -54,8 +54,8 @@ it("builds the review with what people told the AI and hands the document the fe
     for (let tick = 0; tick < 4; tick += 1) await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
     expect(host.querySelector("[data-review-document]")).not.toBeNull();
     expect(seen.built.at(-1)).toBe(data);
-    // Without a handler the document gets no prop, so it shows no button.
-    expect("onCheckFeedback" in seen.props.at(-1)!).toBe(false);
+    // Without a handler the document gets none, so it shows no button.
+    expect(seen.props.at(-1)!.onCheckFeedback).toBeUndefined();
 
     await act(async () => root.render(<Overview feedback={readings} onCheckFeedback={onCheckFeedback} />));
     expect(seen.built.at(-1)).toMatchObject({ projectId: "p", ...readings });
