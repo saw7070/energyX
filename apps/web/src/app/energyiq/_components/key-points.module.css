@@ -216,7 +216,13 @@ button.splitRow[aria-expanded="true"] .splitChevron{transform:rotate(45deg)}
 .dailyTip strong{font-weight:650;font-variant-numeric:tabular-nums}
 .dailyTip .dailyUp{color:#f3b768}
 .dailyTip .dailyDown{color:#7fd3ae}
-.dailyTip em{margin-top:2px;padding-top:6px;border-top:1px solid #ffffff1f;font-style:normal;color:#e7c58f;white-space:normal;max-width:240px}
+.dailyTip em{margin-top:2px;padding-top:6px;border-top:1px solid #ffffff1f;font-style:normal;color:#e7c58f;white-space:normal;max-width:280px}
+.dailyTip .dailyTipDevices{list-style:none;display:grid;gap:3px;margin:6px 0 0;padding:0;color:#fff}
+.dailyTip .dailyTipDevices li{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding-left:12px;position:relative}
+.dailyTip .dailyTipDevices li::before{content:"";position:absolute;left:0;top:.55em;width:5px;height:5px;border-radius:50%;background:#e7c58f}
+.dailyTip .dailyTipDevices b{flex:none;font-weight:650;color:#e7c58f;font-variant-numeric:tabular-nums}
+.dailyTip .dailyTipDevices .dailyTipMore{color:#a9bdb3}
+.dailyTip .dailyTipDevices .dailyTipMore::before{background:#a9bdb3}
 .hero .dailyAlert{display:flex;gap:10px;align-items:flex-start;margin:14px 0 0;padding:11px 14px;border:1px solid #f0dfc2;border-radius:12px;background:#fdf7ec;color:#5e3e14;font-size:13.5px;line-height:1.55;max-width:none}
 .dailyAlert b{flex:none;display:grid;place-items:center;width:20px;height:20px;margin-top:1px;border-radius:50%;background:#c18a3a;color:#fff;font-size:11.5px;font-weight:800}
 .dailyAlert strong{font-weight:700;color:#4a300c}
@@ -422,6 +428,11 @@ button.splitRow[aria-expanded="true"] .splitChevron{transform:rotate(45deg)}
 :global(:where(html[data-energyiq-theme="dark"])) .dailyTip .dailyUp { color:#f3b768; }
 :global(:where(html[data-energyiq-theme="dark"])) .dailyTip .dailyDown { color:#7fd3ae; }
 :global(:where(html[data-energyiq-theme="dark"])) .dailyTip em { border-top:1px solid #2e2e2e1f; color:#e7c58f; }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyTip .dailyTipDevices { color:#fff; }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyTip .dailyTipDevices li::before { border-radius:50%; background:#3b2c12; }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyTip .dailyTipDevices b { color:#e7c58f; }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyTip .dailyTipDevices .dailyTipMore { color:#a9bdb3; }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyTip .dailyTipDevices .dailyTipMore::before { background:#2a3b33; }
 :global(:where(html[data-energyiq-theme="dark"])) .hero .dailyAlert { border:1px solid #41331b; border-radius:12px; background:#201c14; color:#dab489; }
 :global(:where(html[data-energyiq-theme="dark"])) .dailyAlert b { border-radius:50%; background:#c18a3a; color:#fff; }
 :global(:where(html[data-energyiq-theme="dark"])) .dailyAlert strong { color:#debe99; }

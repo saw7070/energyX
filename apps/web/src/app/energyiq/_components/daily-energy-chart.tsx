@@ -21,6 +21,8 @@ function ticks(top: number): number[] {
   return Array.from({ length: Math.ceil(top / step) + 1 }, (_, i) => +(i * step).toFixed(6));
 }
 
+/** How many devices the hover box lists before "and N more". */
+const TIP_DEVICES = 6;
 /** A bar with rounded top corners only, so it stands on the baseline. */
 const barPath = (x: number, top: number, w: number, h: number) => {
   if (h <= 0) return "";
@@ -126,7 +128,12 @@ export function DailyEnergyChart({ report }: { report: SiteReport }) {
         {rate != null && <span><i>{t("dailyCost")}</i><strong>{moneyText(day.kwh * rate, report.currency, 2)}</strong></span>}
         {against != null && <span><i>{t("dailyAgainst")}</i><strong className={Math.abs(against) < 0.03 ? undefined : against > 0 ? styles.dailyUp : styles.dailyDown}>{against >= 0 ? "+" : "−"}{Math.round(Math.abs(against) * 100)}%</strong></span>}
         {worthSaying(day.recoveredKwh, day.kwh)
-          ? <em>{day.recoveredFrom?.length ? t("dailyRecoveredFrom", { kwh: `${num(day.recoveredKwh)} kWh`, names: listText(day.recoveredFrom.map(item => item.name), locale) }) : t("dailyRecovered", { kwh: `${num(day.recoveredKwh)} kWh` })}</em>
+          ? <em>{day.recoveredFrom?.length ? <>
+            {t(day.recoveredFrom.length === 1 ? "dailyRecoveredFromOne" : "dailyRecoveredFromMany", { kwh: `${num(day.recoveredKwh)} kWh`, count: day.recoveredFrom.length })}
+            {/* The devices that were offline, largest first, each with what it sent late. */}
+            <ul className={styles.dailyTipDevices}>{day.recoveredFrom.slice(0, TIP_DEVICES).map(item => <li key={item.name}><span>{item.name}</span><b>{num(item.kwh)} kWh</b></li>)}
+              {day.recoveredFrom.length > TIP_DEVICES && <li className={styles.dailyTipMore}>{t("dailyOutageMore", { count: day.recoveredFrom.length - TIP_DEVICES })}</li>}</ul>
+          </> : t("dailyRecovered", { kwh: `${num(day.recoveredKwh)} kWh` })}</em>
           : !day.complete && <em>{t("dailyPartial")}</em>}
       </div>}
     </div>
