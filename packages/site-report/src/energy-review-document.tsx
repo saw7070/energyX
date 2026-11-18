@@ -12,7 +12,7 @@
  */
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ENERGY_REVIEW_PALETTE as P, worthSaying, type EnergyReview, type EnergyReviewMeter, type EnergyReviewQuestion, type EnergyReviewSlice } from "./energy-review.js";
+import { ENERGY_REVIEW_PALETTE as P, worthSaying, type EnergyReview, type EnergyReviewFollowUp, type EnergyReviewMeter, type EnergyReviewQuestion, type EnergyReviewSlice } from "./energy-review.js";
 import { energyReviewMessages } from "./energy-review-messages.js";
 import { forHoursMeaning, translatorFor } from "./locale.js";
 import { Rich } from "./rich.js";
@@ -173,6 +173,20 @@ export const ENERGY_REVIEW_CSS = `
 .eiq-energy-review .er-checks li>b{display:grid;place-items:center;width:26px;height:26px;border-radius:8px;background:var(--er-bronze-soft);color:#7C5320;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
 .eiq-energy-review .er-checks p{margin:2px 0 0;font-size:14px;line-height:1.55}
 .eiq-energy-review .er-checks strong{display:block;margin-bottom:2px}
+.eiq-energy-review .er-checks .er-ask{grid-column:2;justify-self:start;margin-top:4px;padding:6px 0;font-size:13px;font-weight:600;color:var(--er-green);text-decoration:underline;text-decoration-color:#BBD3C6;text-underline-offset:3px;transition:color .15s,text-decoration-color .15s}
+.eiq-energy-review .er-checks .er-ask:hover{color:var(--er-green-deep);text-decoration-color:currentColor}
+.eiq-energy-review .er-follow{list-style:none;margin-top:16px;display:grid;gap:10px}
+.eiq-energy-review .er-follow li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 14px;align-items:start;padding:14px 18px;border:1px solid var(--er-line);border-radius:14px;background:#fff}
+.eiq-energy-review .er-follow li.er-closed{background:var(--er-soft)}
+.eiq-energy-review .er-follow p{margin:0;max-width:none;font-size:14px;line-height:1.55;color:var(--er-ink)}
+.eiq-energy-review .er-follow li.er-closed p{color:var(--er-muted)}
+.eiq-energy-review .er-follow .er-evidence{grid-column:1/-1;font-size:13px;color:var(--er-muted)}
+.eiq-energy-review .er-chip{display:inline-block;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:650;line-height:1.6;white-space:nowrap;background:var(--er-bronze-soft);color:#7C5320}
+.eiq-energy-review .er-chip.er-chip-resolved,.eiq-energy-review .er-chip.er-chip-done{background:var(--er-green-soft);color:var(--er-green)}
+.eiq-energy-review .er-chip.er-chip-dropped{background:#EEF1EF;color:var(--er-muted)}
+.eiq-energy-review .er-known{margin:10px 0 0 20px;display:grid;gap:6px;font-size:14px;max-width:68ch}
+.eiq-energy-review .er-known li{padding-left:2px}
+.eiq-energy-review .er-known strong{font-weight:600}
 .eiq-energy-review .er-two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:52px;padding-top:52px;border-top:1px solid var(--er-line)}
 .eiq-energy-review .er-two>.er-sec{margin:0;padding:22px 24px;border:1px solid var(--er-line);border-radius:16px;background:var(--er-soft)}
 .eiq-energy-review .er-two h2{font-size:21px}
@@ -228,11 +242,13 @@ export const ENERGY_REVIEW_CSS = `
   .eiq-energy-review .er-pair .er-bars{grid-column:1/-1;grid-row:2}
   .eiq-energy-review .er-sav td.er-barcell{display:none}
   .eiq-energy-review .er-hint{display:none}
+  .eiq-energy-review .er-follow li{grid-template-columns:1fr;padding:12px 14px}
+  .eiq-energy-review .er-follow .er-chip{grid-row:1;justify-self:start}
 }
 @media (prefers-reduced-motion:reduce){.eiq-energy-review *{transition:none!important}}
 @media print{
-  .eiq-energy-review .er-nav,.eiq-energy-review .er-switch,.eiq-energy-review .er-hint,.eiq-energy-review .er-tip,.eiq-energy-review .er-more,.eiq-energy-review .er-reset{display:none!important}
-  .eiq-energy-review .er-fig,.eiq-energy-review .er-checks li,.eiq-energy-review .er-steps li{break-inside:avoid}
+  .eiq-energy-review .er-nav,.eiq-energy-review .er-switch,.eiq-energy-review .er-hint,.eiq-energy-review .er-tip,.eiq-energy-review .er-more,.eiq-energy-review .er-reset,.eiq-energy-review .er-ask{display:none!important}
+  .eiq-energy-review .er-fig,.eiq-energy-review .er-checks li,.eiq-energy-review .er-steps li,.eiq-energy-review .er-follow li{break-inside:avoid}
   .eiq-energy-review svg{max-width:100%;height:auto}
   .eiq-energy-review .er-scroll{overflow:visible}
   .eiq-energy-review a.er-fig-tile:hover{transform:none;box-shadow:none}
@@ -603,16 +619,31 @@ function MeterTable({ meters, live, t }: { meters: EnergyReviewMeter[]; live: bo
   </>;
 }
 
+// ---------- follow-ups from feedback ----------
+
+/** The chip a follow-up wears: closed ones say how they closed; open ones say what the latest check found. */
+const followUpChip = (item: EnergyReviewFollowUp): { kind: string; key: Parameters<T>[0] } =>
+  item.status === "done" ? { kind: "done", key: "followUps.status.done" }
+    : item.status === "dropped" ? { kind: "dropped", key: "followUps.status.dropped" }
+    : item.verdict === "resolved" ? { kind: "resolved", key: "followUps.status.resolved" }
+    : item.verdict === "ongoing" ? { kind: "ongoing", key: "followUps.status.ongoing" }
+    : { kind: "open", key: "followUps.status.open" };
+
 // ---------- the document ----------
 
 /**
  * The review itself, from one `EnergyReview` and nothing else. `standalone` is for a saved or downloaded copy: a title
- * block in place of the page's own heading, and no moving parts.
+ * block in place of the page's own heading, and no moving parts. `onCheckFeedback`: on the live page, each point to
+ * check offers "Tell the AI about this", which hands the point's stable key and title to the page around the review.
  */
-export function EnergyReviewDocument({ review, standalone }: { review: EnergyReview; standalone?: boolean | undefined }) {
+export function EnergyReviewDocument({ review, standalone, onCheckFeedback }: { review: EnergyReview; standalone?: boolean | undefined; onCheckFeedback?: ((check: { key: string; title: string }) => void) | undefined }) {
   const t = reviewText(review);
   const live = !standalone;
   const { cover, summary, total, groups, largest, comparison, profile, checks, littleUse, perLight, savings, nextSteps, method } = review;
+  // Reviews built before feedback existed have neither list.
+  const followUps = review.followUps ?? [];
+  const memory = review.memory ?? [];
+  const setAside = method.setAside ?? [];
   const numberOf = (id: EnergyReviewQuestion) => review.questions.indexOf(id) + 1;
   const has = (id: EnergyReviewQuestion) => review.questions.includes(id);
   const costHead = review.costBasis ? t("total.col.costBasis", { basis: review.costBasis }) : t("total.col.cost");
@@ -622,13 +653,18 @@ export function EnergyReviewDocument({ review, standalone }: { review: EnergyRev
   const littleSection = has("littleUse") && littleUse && <Question id="littleUse" number={numberOf("littleUse")} title={littleUse.heading} t={t}><p><Rich text={littleUse.text} /></p></Question>;
   const lightSection = has("perLight") && perLight && <Question id="perLight" number={numberOf("perLight")} title={perLight.heading} t={t}><p><Rich text={perLight.text} /></p></Question>;
   const navLabel: Record<EnergyReviewQuestion, Parameters<T>[0]> = { total: "nav.total", groups: "nav.groups", largest: "nav.largest", comparison: "nav.comparison", profile: "nav.profile", littleUse: "nav.littleUse", perLight: "nav.perLight", savings: "nav.savings" };
+  // The points to check and the follow-ups come after the 24 hours (or before the method, without it).
+  const afterProfile: NavItem[] = [
+    ...(checks.length ? [{ id: sectionId("checks"), label: t("nav.checks") }] : []),
+    ...(followUps.length ? [{ id: sectionId("followups"), label: t("nav.followUps") }] : []),
+  ];
   const nav: NavItem[] = [
     { id: sectionId("summary"), label: t("nav.summary") },
     ...review.questions.flatMap(id => {
       const item = { id: sectionId(`q-${id}`), label: t(navLabel[id]), number: numberOf(id) };
-      return id === "profile" && checks.length ? [item, { id: sectionId("checks"), label: t("nav.checks") }] : [item];
+      return id === "profile" ? [item, ...afterProfile] : [item];
     }),
-    ...(!has("profile") && checks.length ? [{ id: sectionId("checks"), label: t("nav.checks") }] : []),
+    ...(!has("profile") ? afterProfile : []),
     { id: sectionId("method"), label: t("nav.method") },
   ];
   // Links inside the review glide to their section rather than jump, and leave the page address alone.
@@ -710,7 +746,24 @@ export function EnergyReviewDocument({ review, standalone }: { review: EnergyRev
       {checks.length > 0 && <section id={sectionId("checks")} className="er-sec">
         <div className="er-kicker">{t("nav.checks")}</div>
         <h2>{t("checks.heading")}</h2>
-        <ol className="er-checks">{checks.map((check, index) => <li key={check.title}><b>{String(index + 1).padStart(2, "0")}</b><p><strong>{check.title}</strong>{check.text}</p></li>)}</ol>
+        <ol className="er-checks">{checks.map((check, index) => <li key={check.key || check.title}>
+          <b>{String(index + 1).padStart(2, "0")}</b><p><strong>{check.title}</strong>{check.text}</p>
+          {live && onCheckFeedback && check.key && <button type="button" className="er-ask" aria-label={t("checks.askAria", { title: check.title })} onClick={() => onCheckFeedback({ key: check.key, title: check.title })}>{t("checks.ask")}</button>}
+        </li>)}</ol>
+      </section>}
+
+      {followUps.length > 0 && <section id={sectionId("followups")} className="er-sec">
+        <div className="er-kicker">{t("nav.followUps")}</div>
+        <h2>{t("followUps.heading")}</h2>
+        <p>{t("followUps.intro")}</p>
+        <ul className="er-follow">{followUps.map((item, index) => {
+          const chip = followUpChip(item);
+          return <li key={`${index}|${item.text}`} className={item.status === "open" ? undefined : "er-closed"}>
+            <p>{item.text}</p>
+            <span className={`er-chip er-chip-${chip.kind}`}>{t(chip.key)}</span>
+            {item.evidence && <p className="er-evidence">{t("followUps.evidence", { evidence: item.evidence })}</p>}
+          </li>;
+        })}</ul>
       </section>}
 
       {pair ? <div className="er-two">{littleSection}{lightSection}</div> : <>{littleSection}{lightSection}</>}
@@ -732,6 +785,16 @@ export function EnergyReviewDocument({ review, standalone }: { review: EnergyRev
         <h2>{t("met.heading")}</h2>
         <p>{method.intro}</p>
         <dl className="er-assume">{method.assumptions.map(row => <div key={row.label}><dt>{row.label}</dt><dd>{row.value}</dd></div>)}</dl>
+        {memory.length > 0 && <>
+          <h3>{t("met.memoryTitle")}</h3>
+          <p className="er-note">{t("met.memoryNote")}</p>
+          <ul className="er-known">{memory.map((text, index) => <li key={`${index}|${text}`}>{text}</li>)}</ul>
+        </>}
+        {setAside.length > 0 && <>
+          <h3>{t("met.setAsideTitle")}</h3>
+          <p className="er-note">{t("met.setAsideNote")}</p>
+          <ul className="er-known">{setAside.map(item => <li key={item.title}><strong>{item.title}</strong>{item.reason ? `${review.locale === "zh-Hans" ? "" : " "}${item.reason}` : ""}</li>)}</ul>
+        </>}
         {method.meters.length > 0 && <>
           <h3>{t("met.metersTitle")}</h3>
           <MeterTable meters={method.meters} live={live} t={t} />
