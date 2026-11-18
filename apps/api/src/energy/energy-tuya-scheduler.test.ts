@@ -9,7 +9,12 @@ import { describe, expect, it, vi } from "vitest";
 import { createBackgroundJobRegistry } from "../observability/background-jobs.js";
 import type { ConfigApiContext } from "../routes/types.js";
 import { ensureEnergyIqBootstrap } from "./energy-bootstrap.js";
-import { createEnergyTuyaDailyScheduler, resolveNextSingaporeLocalHour } from "./energy-tuya-scheduler.js";
+import {
+  createEnergyTuyaDailyScheduler,
+  resolveNextSingaporeLocalHour,
+  resolveNextTuyaSyncDelay,
+  TUYA_SYNC_HOURLY_RETRIES,
+} from "./energy-tuya-scheduler.js";
 import { oldestRetainedTuyaReadingMs } from "./energy-tuya-sync-runner.js";
 import { resolveEnergyTuyaProjectConnector } from "./energy-tuya-connector.js";
 import {
@@ -29,6 +34,25 @@ describe("Tuya daily scheduler", () => {
       .toBe(Date.parse("2026-08-20T17:00:00.000Z"));
     expect(resolveNextSingaporeLocalHour(Date.parse("2026-08-20T18:00:00.000Z"), 1))
       .toBe(Date.parse("2026-08-21T17:00:00.000Z"));
+  });
+
+  it("tries a failed night again each hour a few times, then waits for the next day", () => {
+    // 02:30 in Singapore, daily hour 01:00.
+    const nowMs = Date.parse("2026-08-20T18:30:00.000Z");
+    const nextDay = resolveNextSingaporeLocalHour(nowMs, 1) - nowMs;
+    let retriesLeft = TUYA_SYNC_HOURLY_RETRIES;
+    const delays: number[] = [];
+    for (let attempt = 0; attempt <= TUYA_SYNC_HOURLY_RETRIES; attempt += 1) {
+      const next = resolveNextTuyaSyncDelay({ result: "failed", retriesLeft, nowMs, localHour: 1 });
+      delays.push(next.delayMs);
+      retriesLeft = next.retriesLeft;
+    }
+    expect(delays).toEqual([3_600_000, 3_600_000, 3_600_000, nextDay]);
+    // Waiting for the next day restores the retries, and a run that worked goes straight back to the daily hour.
+    expect(retriesLeft).toBe(TUYA_SYNC_HOURLY_RETRIES);
+    expect(resolveNextTuyaSyncDelay({ result: "succeeded", retriesLeft: 1, nowMs, localHour: 1 }))
+      .toEqual({ delayMs: nextDay, retriesLeft: TUYA_SYNC_HOURLY_RETRIES });
+    expect(resolveNextTuyaSyncDelay({ result: undefined, retriesLeft: 0, nowMs, localHour: 1 }).delayMs).toBe(nextDay);
   });
 
   it("contains a dynamic Connector resolution failure instead of rejecting the process task", async () => {

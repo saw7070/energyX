@@ -42,6 +42,29 @@ export type EnergyTuyaScheduler = {
   runIfDue(): Promise<"disabled" | "current" | "succeeded" | "failed">;
 };
 
+/** After a failed night the server-configured site tries again this many times, an hour apart, before its next day. */
+export const TUYA_SYNC_HOURLY_RETRIES = 3;
+const RETRY_DELAY_MS = 60 * 60_000;
+
+/**
+ * When the next update runs: an hour after a failure while retries are left, otherwise the next daily hour.
+ * Returns the delay and the retries left after this choice.
+ */
+export const resolveNextTuyaSyncDelay = (input: {
+  result: "disabled" | "current" | "succeeded" | "failed" | undefined;
+  retriesLeft: number;
+  nowMs: number;
+  localHour: number;
+}): { delayMs: number; retriesLeft: number } => {
+  if (input.result === "failed" && input.retriesLeft > 0) {
+    return { delayMs: RETRY_DELAY_MS, retriesLeft: input.retriesLeft - 1 };
+  }
+  return {
+    delayMs: Math.max(1_000, resolveNextSingaporeLocalHour(input.nowMs, input.localHour) - input.nowMs),
+    retriesLeft: TUYA_SYNC_HOURLY_RETRIES,
+  };
+};
+
 export const resolveNextSingaporeLocalHour = (nowMs: number, localHour: number): number => {
   if (!Number.isSafeInteger(nowMs) || nowMs <= 0 || !Number.isInteger(localHour)
     || localHour < 0 || localHour > 23) {
@@ -206,12 +229,14 @@ export const createEnergyTuyaDailyScheduler = (input: {
     }
   };
 
-  const scheduleNext = (): void => {
+  let retriesLeft = TUYA_SYNC_HOURLY_RETRIES;
+  const scheduleNext = (result?: Awaited<ReturnType<typeof runIfDue>>): void => {
     if (stopped || !input.enabled) return;
-    const delay = Math.max(1_000, resolveNextSingaporeLocalHour(now(), input.localHour) - now());
+    const next = resolveNextTuyaSyncDelay({ result, retriesLeft, nowMs: now(), localHour: input.localHour });
+    retriesLeft = next.retriesLeft;
     timer = setTimeout(() => {
-      void runIfDue().finally(scheduleNext);
-    }, delay);
+      void runIfDue().then(scheduleNext, () => scheduleNext("failed"));
+    }, next.delayMs);
     timer.unref();
   };
 

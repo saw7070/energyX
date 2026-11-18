@@ -85,7 +85,7 @@ export const collectSiteAlertEmails = (input: {
       ? "Tuya refused the server's IP address. Add the server's address to the Tuya project's IP allowlist."
       : sync.reason === "sign-in"
         ? "Tuya did not accept the account's key. Check the Access ID and Secret under Facility → Live connection."
-        : "The cause is recorded in the server log. The next scheduled update will try again.";
+        : "The cause is recorded in the server log. EnergyX tries again each hour, up to 3 times, and then at the next daily update.";
     emails.push({
       key: sync.key,
       subject: `${site}: the daily data update did not finish`,

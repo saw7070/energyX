@@ -93,6 +93,78 @@ describe("Live connection daily updates", () => {
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
+
+  it("tries a failed update again on the next hours instead of waiting a day, a few times only", { timeout: 60_000 }, async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-live-scheduler-retry-"));
+    const previousDuckDbPath = process.env.ENERGYIQ_DUCKDB_PATH;
+    process.env.ENERGYIQ_DUCKDB_PATH = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({
+      database_path: join(root, "metadata.sqlite"),
+      secret_master_key: "test-master-key-for-live-connections",
+    });
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const context = {
+        metadataStore: metadata,
+        dataGateway: new LocalDataGateway(metadata),
+        fileAssetService: new LocalFileAssetService(metadata, { storageRoot: join(root, "files") }),
+        userId: "dev-user",
+        workspaceId: TUYA_OFFICE_WORKSPACE_ID,
+      } as unknown as Required<ConfigApiContext>;
+      const rows = publishedRows(metadata);
+      connect(metadata, rows, 9);
+
+      // 09:30 in Singapore, then each following hour.
+      let now = Date.parse("2026-08-21T01:30:00.000Z");
+      let failing = true;
+      let calls = 0;
+      const scheduler = createEnergyLiveConnectionScheduler({
+        context,
+        env: {},
+        now: () => now,
+        syncTuyaEnergyReadings: async (input) => {
+          calls += 1;
+          if (failing) throw new Error("ENERGYIQ_TUYA_HTTP_ERROR:503");
+          return artifact(rows, input.startTime, input.endTime);
+        },
+        afterMaterialization: (projectId) => async ({ snapshot }, beforePublish) => {
+          await beforePublish({
+            persistentDirectory: root,
+            pointerKey: `current:${projectId}`,
+            previousProjectionKey: null,
+            candidateProjectionKey: `overview:${snapshot.id}`,
+          });
+          return { projectionRef: `overview:${snapshot.id}` };
+        },
+      });
+      const attemptsAt = async (hours: number): Promise<number> => {
+        now += hours * HOUR_MS;
+        const before = calls;
+        await scheduler.runDue();
+        return calls - before;
+      };
+
+      // Tuya is down at the site's hour and stays down: three hourly retries, then quiet until the next 09:00.
+      expect(await attemptsAt(0)).toBeGreaterThan(0);
+      for (let hour = 1; hour <= 3; hour += 1) expect(await attemptsAt(1)).toBeGreaterThan(0);
+      expect(await attemptsAt(1)).toBe(0);
+      expect(await attemptsAt(1)).toBe(0);
+
+      // Next day at 09:00 it runs again; Tuya is back an hour later, so the retry brings the data in and retries stop.
+      now = Date.parse("2026-08-22T01:30:00.000Z");
+      expect(await attemptsAt(0)).toBeGreaterThan(0);
+      failing = false;
+      expect(await attemptsAt(1)).toBeGreaterThan(0);
+      const state = metadata.energyIq.sourceSync.findState({ project_id: TUYA_OFFICE_PROJECT_ID, source_kind: "tuya" });
+      expect(state?.watermark_ms).toBe(Date.parse("2026-08-21T16:00:00.000Z") + 2 * HOUR_MS);
+      expect(await attemptsAt(1)).toBe(0);
+    } finally {
+      if (previousDuckDbPath === undefined) delete process.env.ENERGYIQ_DUCKDB_PATH;
+      else process.env.ENERGYIQ_DUCKDB_PATH = previousDuckDbPath;
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
 });
 
 type Row = { id: string; source_label: string };

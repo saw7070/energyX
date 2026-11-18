@@ -87,7 +87,7 @@ export const readSiteAlerts = (input: {
   if (input.includeSync) {
     const state = input.metadataStore.energyIq.sourceSync.findState({ project_id: input.projectId, source_kind: "tuya" });
     if (state?.last_failure_at && (!state.last_success_at || state.last_failure_at > state.last_success_at)) {
-      sync = { key: `sync:${state.last_failure_at}`, failedAt: state.last_failure_at, reason: syncReason(state.last_error_code) };
+      sync = { key: `sync:${state.last_failure_at.slice(0, 10)}`, failedAt: state.last_failure_at, reason: syncReason(state.last_error_code) };
     }
   }
   const targets = input.includeReports
