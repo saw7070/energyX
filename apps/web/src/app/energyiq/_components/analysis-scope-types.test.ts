@@ -35,9 +35,9 @@ describe("split by type when the site total is the main meter", () => {
   it("adds up the sub-meters by type, hour by hour", () => {
     const scope = toScope(analysis, new Map());
     expect(scope.typeTotals).toEqual({ it: 24 + 6, kitchen: 6 });
-    expect(scope.types.it?.cells[0]).toEqual(["2026-09-03", 0, 1.5, 60, 0]);
+    expect(scope.types.it?.cells[0]).toEqual(["2026-09-03", 0, 1.5, 60, 0, 0]);
     // B4B stopped at noon, so the afternoon is not a complete hour for IT.
-    expect(scope.types.it?.cells[12]).toEqual(["2026-09-03", 12, 1, 0, 0]);
+    expect(scope.types.it?.cells[12]).toEqual(["2026-09-03", 12, 1, 0, 0, 0]);
     expect(scope.types.kitchen?.cells).toHaveLength(24);
   });
 
