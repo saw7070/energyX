@@ -48,7 +48,12 @@ it("lists the devices that sent a day's energy late in the hover box, largest fi
     expect(tip.querySelector("em")!.firstChild!.textContent).toBe("Includes 10.2 kWh sent late by these 7 devices after an outage:");
     const items = [...tip.querySelectorAll("li")].map(item => item.textContent);
     expect(items.slice(0, 2)).toEqual(["264F L2–L173.0 kWh", "Compassvale Bow Entrance Lighting2.6 kWh"]);
-    expect(items).toHaveLength(6);
-    expect(items.at(-1)).toBe("2 more");
+    // All seven fit: the hover box lists up to twelve before "N more".
+    expect(items).toHaveLength(7);
+    expect(items.at(-1)).toBe("264F Decorative light0.6 kWh");
+    // The note under the chart keeps the full list, which can be opened and stays open.
+    const list = host.querySelector('[role="note"] details')!;
+    expect(list.querySelector("summary")!.textContent).toBe("Show all 7 devices");
+    expect([...list.querySelectorAll("li")].map(item => item.textContent)[0]).toBe("264F L2–L1717 Nov3.0 kWh");
   } finally { await done(); }
 });

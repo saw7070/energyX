@@ -22,7 +22,7 @@ function ticks(top: number): number[] {
 }
 
 /** How many devices the hover box lists before "and N more". */
-const TIP_DEVICES = 5;
+const TIP_DEVICES = 12;
 /** The hover box's width: wide enough that a device name rarely wraps. */
 const TIP_WIDTH = 300;
 /** A bar with rounded top corners only, so it stands on the baseline. */
@@ -79,6 +79,7 @@ export function DailyEnergyChart({ report }: { report: SiteReport }) {
   const day = hover == null ? null : days[hover]!;
   const outage = days.filter(item => worthSaying(item.recoveredKwh, item.kwh));
   const names = lateNames(outage, locale, count => t("dailyOutageMore", { count }));
+  const devices = lateDevices(outage);
   const outageText = { dates: outage.map(item => shortDay(item.date, locale)).join(", "), kwh: `${num(outage.reduce((sum, item) => sum + item.recoveredKwh, 0))} kWh` };
   const tipX = hover == null ? 0 : m.l + band * (hover + 0.5);
   // The hover box opens beside the day, from the top of the chart, so a long list of devices grows down over the
@@ -143,10 +144,29 @@ export function DailyEnergyChart({ report }: { report: SiteReport }) {
           : !day.complete && <em>{t("dailyPartial")}</em>}
       </div>}
     </div>
-    {outage.length > 0 && <p className={styles.dailyAlert} role="note"><b aria-hidden="true">!</b><span>{names.length === 0 ? t("dailyOutage", outageText)
-      : names.length === 1 ? withName(t("dailyOutageOne", { ...outageText, name: "{name}" }), "{name}", names[0]!)
-      : withName(t("dailyOutageMany", { ...outageText, names: "{names}" }), "{names}", listText(names, locale))}</span></p>}
+    {outage.length > 0 && <div className={styles.dailyAlert} role="note"><b aria-hidden="true">!</b><div>
+      <span>{names.length === 0 ? t("dailyOutage", outageText)
+        : names.length === 1 ? withName(t("dailyOutageOne", { ...outageText, name: "{name}" }), "{name}", names[0]!)
+        : withName(t("dailyOutageMany", { ...outageText, names: "{names}" }), "{names}", listText(names, locale))}</span>
+      {/* Every device, with what it sent late and when: the hover box is gone once the pointer leaves, this stays. */}
+      {devices.length > 1 && <details className={styles.dailyDevices}>
+        <summary>{t("dailyOutageShow", { count: devices.length })}</summary>
+        <ul>{devices.map(item => <li key={item.name}><span>{item.name}</span><small>{item.dates.map(date => shortDay(date, locale)).join(", ")}</small><b>{num(item.kwh)} kWh</b></li>)}</ul>
+      </details>}
+    </div></div>}
   </figure>;
+}
+
+/** Every device that sent energy late, largest first, with its total and the days it came back on. */
+function lateDevices(days: SiteReport["benchmark"]["days"]): Array<{ name: string; kwh: number; dates: string[] }> {
+  const byName = new Map<string, { name: string; kwh: number; dates: string[] }>();
+  for (const day of days) for (const meter of day.recoveredFrom ?? []) {
+    const entry = byName.get(meter.name) ?? { name: meter.name, kwh: 0, dates: [] };
+    entry.kwh += meter.kwh;
+    entry.dates.push(day.date);
+    byName.set(meter.name, entry);
+  }
+  return [...byName.values()].sort((a, b) => b.kwh - a.kwh || a.name.localeCompare(b.name));
 }
 
 /** The sentence with the meter names in bold, so the reader sees at once which meter it was. */
