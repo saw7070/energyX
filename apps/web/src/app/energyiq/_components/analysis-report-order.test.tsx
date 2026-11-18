@@ -67,8 +67,10 @@ describe("Analysis follows the site report", () => {
     const order = [...page.host.querySelectorAll("section[id^='story-']")].map(item => item.id);
     expect(order).toEqual(["story-money", "story-on", "story-when", "story-days", "story-plan", "story-health", "story-ahead"]);
     expect([...page.host.querySelectorAll("nav button")].map(button => button.textContent)).toEqual([
-      "1 · Where the money goes", "2 · What stays on", "3 · An average day", "4 · Days that stood out", "5 · Savings plan", "6 · Health check", "7 · Next month's forecast", "Detailed analysis",
+      "1 · Where the money goes", "2 · What stays on", "3 · An average day", "4 · Days that stood out", "5 · Savings plan", "6 · Health check", "7 · Next month's forecast",
     ]);
+    // On its own the story has no figures to show: no "Show the figures" and no "About these figures".
+    expect(page.text()).not.toMatch(/Show the figures|Show all figures|About these figures/);
     // It leads with the report's average day and its cost: 9 days of 18 kWh and one of 22 kWh.
     expect(report.averageDay?.text).toBe("Uses about 18.4 kWh a day (about S$5.52)");
     expect(page.host.querySelector("#story-title")?.textContent).toBe(report.averageDay!.text);

@@ -76,7 +76,17 @@ export function energyFlowSummary(flow: FlowData): { space?: { name: string; sha
   };
 }
 
-export function EnergyFlow({ data }: { data: AnalysisData }) {
+/**
+ * What the page already says just above the chart, in the same terms as `energyFlowSummary`: the largest part and
+ * its whole percentage, and the largest type of use (with its percentage when given).
+ */
+export type FlowSaid = { lead?: { name: string; share: number }; type?: { category: string; share?: number } };
+
+/**
+ * The flow chart, with its one-sentence takeaway. A half of that sentence is left out only when `said` already states
+ * exactly the same fact; a half that adds something (a different space, or the type's share) is kept.
+ */
+export function EnergyFlow({ data, said = {} }: { data: AnalysisData; said?: FlowSaid }) {
   const t = useMessages(energyFlowMessages);
   const { locale } = useEnergyIqLocale();
   const flow = energyFlowData(data.current.project, data.current.spaces, {
@@ -87,12 +97,14 @@ export function EnergyFlow({ data }: { data: AnalysisData }) {
   const number = (value: number) => value.toLocaleString(intlLocale(locale), { maximumFractionDigits: value < 100 ? 1 : 0 });
   const percent = (value: number) => flow ? `${Math.round(value / flow.totalKwh * 100)}%` : "";
   const summary = flow ? energyFlowSummary(flow) : {};
+  const space = summary.space && !(said.lead?.name === summary.space.name && said.lead.share === summary.space.share) ? summary.space : undefined;
+  const type = summary.type && !(said.type?.category === summary.type.category && said.type.share === summary.type.share) ? summary.type : undefined;
   return <section className="mt-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
     <h3 className="text-sm font-semibold text-slate-900">{t("title")}</h3>
     <p className="mt-1 text-sm text-slate-600">{t("body")}</p>
-    {flow && (summary.space || summary.type) ? <p className="mt-2 text-sm text-slate-900">
-      {summary.space ? t("summarySpace", { space: summary.space.name, share: String(summary.space.share) }) : ""}{" "}
-      {summary.type ? t("summaryType", { type: categoryLabel(summary.type.category, locale), share: String(summary.type.share) }) : ""}
+    {flow && (space || type) ? <p className="mt-2 text-sm text-slate-900">
+      {space ? t("summarySpace", { space: space.name, share: String(space.share) }) : ""}{space && type ? " " : ""}
+      {type ? t("summaryType", { type: categoryLabel(type.category, locale), share: String(type.share) }) : ""}
     </p> : null}
     {!flow ? <p className="mt-3 text-sm text-slate-600">{t("needsSpaces")}</p>
       : <>

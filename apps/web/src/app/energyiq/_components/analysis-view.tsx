@@ -20,9 +20,10 @@ import type { EnergyIqLocale, Translate } from "./energyiq-messages";
 import { formatPeriod } from "./report-period";
 import { EnergyIcon, type EnergyIconName } from "./icons";
 import { circuitSlices, PeakShareDonut } from "./peak-share-donut";
-import { DecisionSummary } from "./analysis-story";
+import { DecisionSummary, type StoryFigures } from "./analysis-story";
 import { TypeHint } from "./type-hint";
 import { EnergyFlow } from "./energy-flow";
+import { energyFlowMessages } from "./energy-flow-messages";
 import { analysisCsvFilename, analysisHourlyCsv } from "./analysis-export";
 import { downloadText } from "./explorer-export";
 import { breakdownSpaces } from "./site-total";
@@ -205,95 +206,99 @@ function Overlay({ label, onClose, className, backdrop = "z-50 bg-slate-900/40 p
   </div>;
 }
 
-type SectionId = "summary" | "profiles" | "behaviour" | "circuits";
-const SECTION_IDS: SectionId[] = ["summary", "profiles", "behaviour", "circuits"];
+/**
+ * One flowing page: the story's short version, then each numbered step with its own detailed figures directly under
+ * it ("Show the figures"), so no fact or chart is told twice. What belongs to no step is under "About these figures".
+ */
 function AnalysisBody({ data, derived, loading }: { data: AnalysisData; derived: Derived; loading: boolean }) {
-  const [collapsed, setCollapsed] = useState<Set<SectionId>>(new Set());
-  const toggle = (id: SectionId) => setCollapsed(current => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  const t = useMessages(viewMessages);
+  const flow = useMessages(energyFlowMessages);
+  const figures: StoryFigures = {
+    // 1 · Where the money goes: the totals and cost, the split by day, by type or group and by space, and the biggest circuits.
+    "story-money": {
+      contents: [t("kh.title"), t("cb.title"), t("ed.title"), flow("title"), t("cr.title")],
+      content: (_where, said) => <>
+        <TopLocation data={data} />
+        <KeyHighlights data={data} derived={derived} />
+        <ConsumptionBreakdown data={data} derived={derived} />
+        <EnergyDistribution data={data} derived={derived} />
+        <EnergyFlow data={data} said={said} />
+        <CircuitRanking data={data} />
+      </>,
+    },
+    // 3 · When it is used: each kind of day hour by hour, by type of use and by location, and use in and out of hours.
+    "story-when": {
+      contents: [t("dp.title"), ...(derived.spaces.length ? [t("lp.title")] : []), t("hs.title")],
+      content: () => <>
+        <DayProfiles data={data} derived={derived} />
+        <HealthSummary data={data} derived={derived} />
+      </>,
+    },
+    // 4 · Days that stood out: every day against a usual day, and the days that were unusually high.
+    "story-days": {
+      contents: [t("trend.title"), t("anomalies.title")],
+      content: where => <>
+        <BusiestDay derived={derived} />
+        <DailyTotalTrend data={data} derived={derived} inStep={where === "step"} />
+      </>,
+    },
+  };
+  return <div className={`space-y-6 transition-opacity ${loading ? "opacity-60" : ""}`} aria-busy={loading}>
+    <DecisionSummary data={data} days={derived.days} anomalies={derived.anomalies} floor={derived.floor} rate={derived.rate} figures={figures} about={<AboutFigures data={data} />} />
+  </div>;
+}
+
+/** Where the page's figures come from, and the full written report: what has no numbered step of its own. */
+function AboutFigures({ data }: { data: AnalysisData }) {
   const { locale } = useEnergyIqLocale();
   const t = useMessages(viewMessages);
   const project = data.current.project;
   const spaceNames = data.current.spaces.map(space => space.name).join(" & ");
-  const allCollapsed = collapsed.size === SECTION_IDS.length;
   const where = `${data.projectName}${spaceNames ? ` · ${spaceNames}` : ""}`;
-  const firstDay = dateWithDay(project.dates[0]!, locale), lastDay = dateWithDay(project.dates.at(-1)!, locale);
-  return <div className={`space-y-6 transition-opacity ${loading ? "opacity-60" : ""}`} aria-busy={loading}>
-    <DecisionSummary data={data} days={derived.days} anomalies={derived.anomalies} floor={derived.floor} rate={derived.rate} />
-
-    <div id="details" className="scroll-mt-4 border-t border-slate-200 pt-8">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">{t("details.eyebrow")}</p>
-          <h2 className="mt-1 text-lg font-semibold text-slate-900">{t("details.title")}</h2>
-          <p className="mt-1 text-sm text-slate-500">{t("details.body")}</p>
-        </div>
-        <button type="button" onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(SECTION_IDS))} className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100">{allCollapsed ? t("expandAll") : t("collapseAll")}</button>
-      </div>
-    </div>
+  return <>
     <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-slate-700">
       <p className="font-medium text-emerald-800">{t("live", { where })}</p>
-      <p className="mt-1 text-sm text-slate-600">{t("liveMeta", { from: firstDay, to: lastDay, days: project.dates.length })}</p>
+      <p className="mt-1 text-sm text-slate-600">{t("liveMeta", { from: dateWithDay(project.dates[0]!, locale), to: dateWithDay(project.dates.at(-1)!, locale), days: project.dates.length })}</p>
       <p className="mt-1 text-sm text-slate-600">{rich(t("source", {
         snapshot: data.snapshotId ? t("snapshot", { id: data.snapshotId }) : "",
         coverage: project.coverage == null ? t("coverageUnknown") : t("coverage", { pct: project.coverage.toFixed(1) }),
       }), { link: <Link href={`/energyiq/project-configuration?${new URLSearchParams({ projectId: data.projectId, tab: "devices" })}`} className="text-blue-700 hover:text-blue-800">{t("openDevices")}</Link> })}</p>
     </div>
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <p className="text-sm text-slate-600">{t("report.body")}</p>
+      <Link href={`/energyiq/reports?${new URLSearchParams({ projectId: data.projectId, sessionId: "new" })}`} className="shrink-0 rounded-md bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-500">{t("report.generate")}</Link>
+    </div>
+  </>;
+}
 
-    <DailyTotalTrend data={data} derived={derived} />
+/** The location that used the most, its share of the site, and how many times the next one it used. */
+function TopLocation({ data }: { data: AnalysisData }) {
+  const t = useMessages(viewMessages);
+  const project = data.current.project;
+  const [top, second] = [...data.current.spaces].sort((a, b) => (b.usageKwh ?? 0) - (a.usageKwh ?? 0));
+  if (!top) return null;
+  const pct = project.usageKwh ? num((top.usageKwh ?? 0) / project.usageKwh * 100) : "—";
+  return <p className={`${SUB} px-3 py-2 text-sm text-slate-700`}>{second?.usageKwh
+    ? t("top.spaceVs", { name: top.name, kwh: kwh(top.usageKwh), pct, ratio: num((top.usageKwh ?? 0) / second.usageKwh, 2), second: second.name, secondKwh: kwh(second.usageKwh) })
+    : t("top.space", { name: top.name, kwh: kwh(top.usageKwh), pct })}</p>;
+}
 
-    <Section title={t("exec.title")} subtitle={t("exec.subtitle", { where, from: firstDay, to: lastDay })} collapsed={collapsed.has("summary")} onToggle={() => toggle("summary")} guide={{
-      title: t("exec.title"), summary: t("exec.summary"),
-      dataAcquisition: [t("exec.data1"), t("exec.data2")],
-      chartGeneration: [t("exec.chart1"), t("exec.chart2")],
-    }}>
-      <KeyHighlights data={data} derived={derived} />
-      <ConsumptionBreakdown data={data} derived={derived} />
-      <EnergyDistribution data={data} derived={derived} />
-      <EnergyFlow data={data} />
-      <SummaryOfFindings data={data} derived={derived} />
-    </Section>
-
-    <Section title={t("profiles.title")} subtitle={t("profiles.subtitle")} collapsed={collapsed.has("profiles")} onToggle={() => toggle("profiles")} guide={{
-      title: t("profiles.title"), summary: t("profiles.summary"),
-      dataAcquisition: [t("profiles.data1"), t("profiles.data2")],
-      chartGeneration: [t("profiles.chart1"), t("profiles.chart2")],
-    }}>
-      <DayProfiles data={data} derived={derived} />
-    </Section>
-
-    <Section title={t("behaviour.title")} subtitle={spaceNames ? t("behaviour.subtitleFor", { spaces: spaceNames }) : t("behaviour.subtitle")} collapsed={collapsed.has("behaviour")} onToggle={() => toggle("behaviour")} guide={{
-      title: t("behaviour.title"), summary: t("behaviour.summary"),
-      dataAcquisition: [t("behaviour.data1"), t("behaviour.data2")],
-      chartGeneration: [t("behaviour.chart1"), t("behaviour.chart2")],
-    }}>
-      <HealthSummary data={data} derived={derived} />
-    </Section>
-
-    <Section title={t("circuits.title")} subtitle={spaceNames ? t("circuits.subtitleFor", { spaces: spaceNames }) : t("circuits.subtitle")} collapsed={collapsed.has("circuits")} onToggle={() => toggle("circuits")} guide={{
-      title: t("circuits.title"), summary: t("circuits.summary"),
-      dataAcquisition: [t("circuits.data1"), t("circuits.data2")],
-      chartGeneration: [t("circuits.chart1")],
-    }}>
-      <CircuitRanking data={data} />
-    </Section>
-
-  </div>;
+/** The busiest complete day of the whole site, and what each location used that day. */
+function BusiestDay({ derived }: { derived: Derived }) {
+  const { locale } = useEnergyIqLocale();
+  const t = useMessages(viewMessages);
+  const day = [...derived.complete].sort((a, b) => b.totalKwh - a.totalKwh)[0];
+  if (!day) return null;
+  const date = dateWithDay(day.date, locale);
+  return <p className={`${SUB} px-3 py-2 text-sm text-slate-700`}>{derived.spaces.length > 1
+    ? t("busiest.daySpaces", { date, kwh: kwh(day.totalKwh), spaces: derived.spaces.map(item => `${item.scope.name} ${num(item.days.find(entry => entry.date === day.date)?.totalKwh ?? 0)} kWh`).join(" · ") })
+    : t("busiest.day", { date, kwh: kwh(day.totalKwh) })}</p>;
 }
 
 function Title({ children, guide, className = "text-sm font-semibold text-slate-900" }: { children: string; guide: Omit<Guide, "title">; className?: string }) {
   const open = useContext(GuideContext);
   const t = useMessages(viewMessages);
   return <button type="button" title={t("howCalculated")} onClick={() => open({ title: children, ...guide })} className={`inline-flex items-center gap-1 text-left hover:text-blue-700 ${className}`}><span>{children}</span><EnergyIcon name="info" className="h-3.5 w-3.5 text-slate-500" /></button>;
-}
-function Section({ title, subtitle, collapsed, onToggle, guide, children }: { title: string; subtitle: string; collapsed: boolean; onToggle: () => void; guide: Guide; children: ReactNode }) {
-  const t = useMessages(viewMessages);
-  return <section className="space-y-3">
-    <div className="flex items-center justify-between gap-3">
-      <div><h2><Title guide={guide} className="text-base font-semibold text-slate-900">{title}</Title></h2><p className="text-sm text-slate-600">{subtitle}</p></div>
-      <button type="button" aria-expanded={!collapsed} aria-label={t(collapsed ? "expandSection" : "collapseSection", { title })} onClick={onToggle} className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-sm text-slate-700 hover:bg-slate-100"><EnergyIcon name="chevron" className={`h-3.5 w-3.5 ${collapsed ? "rotate-90" : "-rotate-90"}`} />{collapsed ? t("expand") : t("collapse")}</button>
-    </div>
-    {!collapsed && children}
-  </section>;
 }
 function Toggle<T extends string>({ label, options, value, onChange }: { label: string; options: Array<[T, string]>; value: T; onChange: (value: T) => void }) {
   return <div className={`${SUB} p-2`}>
@@ -327,7 +332,11 @@ function makeDayTick(holidays: Map<string, string>, locale: EnergyIqLocale = "en
 }
 
 // ---------- Daily Total Trend ----------
-function DailyTotalTrend({ data, derived }: { data: AnalysisData; derived: Derived }) {
+/**
+ * Every day against a usual day. Under "Days that stood out" (`inStep`), its list of those days only adds the meters
+ * behind each one: the step above already gives the heading, the rule, and the word when none stood out.
+ */
+function DailyTotalTrend({ data, derived, inStep = false }: { data: AnalysisData; derived: Derived; inStep?: boolean }) {
   const [dayType, setDayType] = useState<AnalysisDayType>("weekday");
   const [space, setSpace] = useState("all");
   const { locale } = useEnergyIqLocale();
@@ -343,10 +352,14 @@ function DailyTotalTrend({ data, derived }: { data: AnalysisData; derived: Deriv
   const complete = shown.filter(day => day.complete);
   const incomplete = shown.filter(day => !day.complete && day.totalKwh > 0).length;
   const anomalies = lighting ? selected.anomalies : selected.anomalies.filter(item => item.dayType === dayType);
+  // Unusual days of each kind at the chosen location, whichever kind the chart shows.
+  const byKind = (type: AnalysisDayType) => selected.anomalies.filter(item => item.dayType === type).length;
   const threshold = baseline.expectedKwh == null ? null : baseline.expectedKwh * (1 + ANOMALY_THRESHOLD_PCT / 100);
   // Why each day was different: against a usual day of its kind, split by the meters inside the chosen location.
   const explanations = useDayExplanations(selected.days, spaceItem?.scope ?? null, data.current, lighting, data.groups);
   const rows = shown.map(day => ({ date: day.date, total: day.totalKwh > 0 ? day.totalKwh : null, complete: day.complete, expected: baseline.expectedKwh, threshold, standout: explanations.get(day.date)?.status === "standout" }));
+  // Under step 4, which already says when no day stood out, the list is shown only when it has days to explain.
+  const dayItems = shown.flatMap(day => explanations.get(day.date) ?? []);
   const calibrationDates = selected.calibration.map(day => day.date).sort();
   // The area that only holds the main meter is the site total, not a part of it; it is already the daily total column.
   const listedSpaces = breakdownSpaces(derived.spaces, item => item.scope);
@@ -387,8 +400,8 @@ function DailyTotalTrend({ data, derived }: { data: AnalysisData; derived: Deriv
         </ComposedChart>
       </ResponsiveContainer> : <div className="flex h-full items-center justify-center rounded-md border border-dashed border-slate-200 text-sm text-slate-600">{lt("trend.noDays", { type: label })}</div>}
     </div>
-    {rows.length > 0 && <StandoutDayList items={shown.flatMap(day => explanations.get(day.date) ?? [])} lighting={lighting} siteName={data.projectName} hint={t("standout.hint")} />}
-    <div className="mb-2 text-sm text-slate-700">{rich(lt(complete.length === 1 ? "trend.detected.one" : "trend.detected.other", { total: complete.length, type: label }), { count: <span className="font-semibold text-rose-700">{anomalies.length}</span> })}</div>
+    {rows.length > 0 && (!inStep || dayItems.some(item => item.status === "standout")) && <StandoutDayList items={dayItems} lighting={lighting} siteName={data.projectName} hint={t("standout.hint")} {...(inStep ? { title: t("standout.eachDay"), rule: false } : {})} />}
+    <div className="mb-2 text-sm text-slate-700">{rich(lt(complete.length === 1 ? "trend.detected.one" : "trend.detected.other", { total: complete.length, type: label }), { count: <span className="font-semibold text-rose-700">{anomalies.length}</span> })} · {t(byKind("public_holiday") ? "trend.byKindHoliday" : "trend.byKind", { weekday: byKind("weekday"), weekend: byKind("weekend"), holiday: byKind("public_holiday") })}</div>
     <div className="rounded-md border border-slate-200">
       <div className="border-b border-slate-200 bg-white px-3 py-2"><Title className="text-xs font-medium text-slate-700" guide={{ summary: t("anomalies.summary"), dataAcquisition: [t("anomalies.data1")], chartGeneration: [t("anomalies.chart1")] }}>{t("anomalies.title")}</Title></div>
       <div className="max-h-72 overflow-auto">
@@ -424,7 +437,7 @@ function KeyHighlights({ data, derived }: { data: AnalysisData; derived: Derived
     { id: "cost", icon: "document", title: t("kh.cost"), value: project.cost ? money(project.cost.amount, project.cost.currency) : "—", change: percentChange(project.cost?.amount, previous?.cost?.amount), detail: project.cost ? t("kh.tariff", { note: tariffNote(project.cost, locale) }) + (previous?.cost ? t("kh.previousCost", { value: money(previous.cost.amount, previous.cost.currency) }) : "") : t("kh.noRate"), link: t("kh.viewBreakdown") },
   ];
   return <div>
-    <h3 className="mb-3 text-sm font-semibold text-slate-900">{t("kh.title")}</h3>
+    <h3 className="mb-3"><Title guide={{ summary: t("exec.summary"), dataAcquisition: [t("exec.data1"), t("exec.data2")], chartGeneration: [t("exec.chart1"), t("exec.chart2")] }}>{t("kh.title")}</Title></h3>
     <p className="mb-3 text-sm text-slate-600">{previous ? t("kh.intro", { label: previousLabel }) : t("kh.introNone")}</p>
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{cards.map(card => <button key={card.id} type="button" onClick={() => setOpen(card.id)} className={`${PANEL} cursor-pointer p-4 text-left transition hover:border-blue-300 hover:bg-slate-50`}>
       <div className="mb-2 flex items-center justify-between">
@@ -718,77 +731,6 @@ function SliceLabel({ cx, cy, midAngle, innerRadius, outerRadius, percent }: { c
   return <text x={cx + radius * Math.cos(angle)} y={cy + radius * Math.sin(angle)} textAnchor="middle" dominantBaseline="central" fill="#fff" fontSize={13} fontWeight={700} style={{ pointerEvents: "none" }}>{`${(percent * 100).toFixed(0)}%`}</text>;
 }
 
-function SummaryOfFindings({ data, derived }: { data: AnalysisData; derived: Derived }) {
-  const { locale } = useEnergyIqLocale();
-  const t = useMessages(viewMessages);
-  // A lights-on site's hours are lights-on hours, and its quiet level is the daytime.
-  const lt = forHoursMeaning(t, viewMessages, data.hoursMeaning);
-  const project = data.current.project, previous = data.previous?.project;
-  const baseline = (type: AnalysisDayType) => { const value = derived.baselines.find(item => item.dayType === type)?.expectedKwh; return value == null ? t("sf.notEnoughDays") : t("unit.perDay", { value: num(value) }); };
-  const avg = (type: AnalysisDayType) => { const value = derived.avgOf(type); return value == null ? "—" : t("unit.perDay", { value: num(value) }); };
-  const spaces = [...data.current.spaces].sort((a, b) => (b.usageKwh ?? 0) - (a.usageKwh ?? 0));
-  const typeTotals = CATEGORY_ORDER.filter(category => project.typeTotals[category]).map(category => ({ category, kwh: project.typeTotals[category]! }));
-  const typeSum = typeTotals.reduce((sum, item) => sum + item.kwh, 0);
-  // Where only some of the site is sub-metered, the types are shares of the whole site and the rest is its own part.
-  const unmeteredKwh = typeSum > 0 && project.usageKwh != null && project.usageKwh - typeSum > Math.max(0.5, project.usageKwh * 0.02) ? project.usageKwh - typeSum : 0;
-  const splitKwh = typeSum + unmeteredKwh;
-  const highestDay = [...derived.complete].sort((a, b) => b.totalKwh - a.totalKwh)[0];
-  const peak = topHours(project, 1)[0];
-  const calDates = derived.calibration.map(day => day.date).sort();
-  const w = derived.windows;
-  const weekdayAvg = derived.avgOf("weekday"), weekendAvg = derived.avgOf("weekend");
-  const count = (type: AnalysisDayType) => derived.anomalies.filter(item => item.dayType === type).length;
-  const top = spaces[0], second = spaces[1];
-  const share = (value: number | null) => value == null ? "—" : num(value * 100);
-  const cards: Array<[string, string[]]> = [
-    [t("sf.scope"), [
-      t("sf.period", { from: project.dates[0] ?? "", to: project.dates.at(-1) ?? "", days: project.dates.length, kwh: kwh(project.usageKwh) }),
-      previous ? t("sf.vsPrevious", { from: previous.dates[0] ?? "", to: previous.dates.at(-1) ?? "", change: pct(percentChange(project.usageKwh, previous.usageKwh)) ?? "—" }) : t("kh.noPrevious"),
-      t("sf.calibrated", { from: calDates[0] ?? "", to: calDates.at(-1) ?? "", days: calDates.length, weekday: baseline("weekday"), weekend: baseline("weekend"), holiday: baseline("public_holiday") }),
-    ]],
-    [spaces.length ? t("sf.byLevel") : t("sf.byType"), [
-      ...(top ? [second?.usageKwh
-        ? t("sf.topSpaceVs", { name: top.name, kwh: kwh(top.usageKwh), pct: project.usageKwh ? num((top.usageKwh ?? 0) / project.usageKwh * 100) : "—", ratio: num((top.usageKwh ?? 0) / second.usageKwh, 2), second: second.name, secondKwh: kwh(second.usageKwh) })
-        : t("sf.topSpace", { name: top.name, kwh: kwh(top.usageKwh), pct: project.usageKwh ? num((top.usageKwh ?? 0) / project.usageKwh * 100) : "—" })]
-        : typeTotals.map(item => t("sf.typeLine", { label: categoryLabel(item.category, locale), kwh: kwh(item.kwh), pct: num(item.kwh / splitKwh * 100) }))),
-      t("sf.averages", { weekday: avg("weekday"), weekend: avg("weekend"), holiday: avg("public_holiday") }),
-    ]],
-    [t("sf.mix"), [
-      t("sf.tagSplit", { list: joinText([...typeTotals.map(item => `${categoryLabel(item.category, locale)} ${num(item.kwh / splitKwh * 100)}%`), ...(unmeteredKwh ? [`${t("sf.unmetered")} ${num(unmeteredKwh / splitKwh * 100)}%`] : [])], locale) || t("sf.notAvailable") }),
-      ...(data.circuits[0] ? [data.circuits[0].location
-        ? t("sf.highestCircuitAt", { name: data.circuits[0].name, location: data.circuits[0].location, kwh: kwh(data.circuits[0].kwh) })
-        : t("sf.highestCircuit", { name: data.circuits[0].name, kwh: kwh(data.circuits[0].kwh) })] : []),
-    ]],
-    [t("sf.behaviour"), [
-      lt("sf.openHours", { hours: openingLabel(data.openingHours, locale, data.hoursMeaning), kwh: kwh(w.open), pct: share(w.openShare) }),
-      t("sf.afterHours", { kwh: kwh(w.night), pct: share(w.nightShare) }),
-      ...(weekdayAvg && weekendAvg ? [t("sf.weekendShare", { pct: num(weekendAvg / weekdayAvg * 100, 0) })] : []),
-      ...(derived.floor && derived.floor.latestKw - derived.floor.bestKw >= 0.5 ? [lt("sf.overnight", { now: num(derived.floor.latestKw, 2), best: num(derived.floor.bestKw, 2), date: shortDate(derived.floor.bestTo, locale) })] : []),
-    ]],
-    [t("sf.peaks"), [
-      ...(highestDay ? [derived.spaces.length > 1
-        ? t("sf.highestDaySpaces", { date: highestDay.date, kwh: kwh(highestDay.totalKwh), spaces: derived.spaces.map(item => `${item.scope.name} ${num(item.days.find(entry => entry.date === highestDay.date)?.totalKwh ?? 0)} kWh`).join(" · ") })
-        : t("sf.highestDay", { date: highestDay.date, kwh: kwh(highestDay.totalKwh) })] : []),
-      ...(peak ? [t("sf.peakHour", { kwh: kwh(peak.kwh), date: peak.date, from: hh(peak.hour), to: hh(peak.hour + 1) })] : []),
-    ]],
-    [t("sf.flags"), derived.anomalies.length ? [
-      t(count("public_holiday") ? "sf.flagCountHoliday" : "sf.flagCount", { count: derived.anomalies.length, pct: ANOMALY_THRESHOLD_PCT, weekday: count("weekday"), weekend: count("weekend"), holiday: count("public_holiday") }),
-      ...derived.anomalies.slice(0, 5).map(item => t("sf.flagItem", { date: item.date, type: dayTypeWord(item.dayType, locale), kwh: kwh(item.totalKwh), expected: kwh(item.expectedKwh), pct: item.deltaPct.toFixed(2) })),
-      ...(derived.anomalies.length > 5 ? [t("sf.flagMore", { count: derived.anomalies.length - 5 })] : []),
-    ] : [t("sf.flagNone", { pct: ANOMALY_THRESHOLD_PCT })]],
-  ];
-  return <section className={`${PANEL} mt-4 p-4`}>
-    <div className="mb-4 flex items-center justify-between gap-3">
-      <Title guide={{ summary: t("sf.summary"), dataAcquisition: [t("sf.data1")], chartGeneration: [t("sf.chart1")] }}>{t("sf.title")}</Title>
-      <Link href={`/energyiq/reports?${new URLSearchParams({ projectId: data.projectId, sessionId: "new" })}`} className="shrink-0 rounded-md bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-500">{t("sf.generate")}</Link>
-    </div>
-    <div className="grid gap-3 md:grid-cols-2">{cards.map(([title, lines]) => <article key={title} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-      <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">{title}</h4>
-      <ul className="space-y-2">{lines.map(line => <li key={line} className="flex gap-2 text-sm leading-snug text-slate-700"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-400" aria-hidden /><span>{line}</span></li>)}</ul>
-    </article>)}</div>
-  </section>;
-}
-
 // ---------- Day profiles ----------
 function DayProfiles({ data, derived }: { data: AnalysisData; derived: Derived }) {
   const [profile, setProfile] = useState<AnalysisDayType>("weekday");
@@ -822,7 +764,7 @@ function DayProfiles({ data, derived }: { data: AnalysisData; derived: Derived }
       <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"><p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{t("dp.weekendAvg")}</p><p className="mt-1 text-3xl font-semibold text-slate-900">{kpi(weekendAvg)}</p><p className={`mt-1 text-[10px] ${weekendDelta == null || weekendDelta <= 0 ? "text-emerald-700" : "text-amber-700"}`}>{weekendDelta == null ? t("dp.weekendSamples", { count: count("weekend") }) : t("dp.vsWeekday", { change: pct(weekendDelta) ?? "" })}</p></div>
       <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"><p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{t("dp.holidayBaseline")}</p><p className="mt-1 text-3xl font-semibold text-emerald-700">{kpi(holidayAvg)}</p><p className="mt-1 text-[10px] text-slate-500">{holidays.length ? t(holidays.length === 1 ? "dp.holidaySamples.one" : "dp.holidaySamples.other", { count: holidays.length, dates: holidayDates }) : t("dp.noHoliday")}</p></div>
     </div>
-    <Title className="mb-1 text-xs font-semibold text-slate-900" guide={{ summary: t("dp.summary"), dataAcquisition: [t("dp.data1"), t("dp.data2")], chartGeneration: [t("dp.chart1")] }}>{t("dp.title")}</Title>
+    <Title className="mb-1 text-xs font-semibold text-slate-900" guide={{ summary: t("dp.summary"), dataAcquisition: [t("dp.data1"), t("dp.data2"), t("dp.data3")], chartGeneration: [t("dp.chart1")] }}>{t("dp.title")}</Title>
     <p className="mb-3 text-[11px] text-slate-500">{t("dp.caption", { from: data.current.project.dates[0] ?? "", to: data.current.project.dates.at(-1) ?? "" })}</p>
     <div className="mb-3 space-y-3">
       <Toggle label={t("dp.usageProfile")} value={profile} onChange={setProfile} options={dayTypeOptions(locale)} />
@@ -934,21 +876,18 @@ function LevelPattern({ derived }: { derived: Derived }) {
   </section>;
 }
 
-// ---------- Behaviour, circuits, recommendations ----------
+// ---------- Behaviour, circuits ----------
+/** Use in and out of operating hours, each location's total and night-time use. The averages per kind of day are in Daily patterns, beside it. */
 function HealthSummary({ data, derived }: { data: AnalysisData; derived: Derived }) {
   const t = useMessages(viewMessages);
   const lt = forHoursMeaning(t, viewMessages, data.hoursMeaning);
   const { locale } = useEnergyIqLocale();
   const w = derived.windows;
-  const avg = (type: AnalysisDayType, empty = "—") => { const value = derived.avgOf(type); return value == null ? empty : t("unit.perDay", { value: num(value) }); };
   const items: Array<[string, string]> = [
-    [t("hs.weekday"), avg("weekday")],
-    [t("hs.weekend"), avg("weekend")],
-    [t("hs.holiday"), avg("public_holiday", t("hs.noHoliday"))],
     [lt("hs.openHours", { hours: openingLabel(data.openingHours, locale, data.hoursMeaning) }), `${kwh(w.open)}${w.openShare == null ? "" : ` (${num(w.openShare * 100)}%)`}`],
     [t("hs.afterHours"), `${kwh(w.night)}${w.nightShare == null ? "" : ` (${num(w.nightShare * 100)}%)`}`],
     ...data.current.spaces.map(space => [t("hs.spaceTotal", { name: space.name }), kwh(space.usageKwh)] as [string, string]),
-    ...(derived.floor ? [[t("hs.overnight"), t("hs.overnightValue", { now: num(derived.floor.latestKw, 2), best: num(derived.floor.bestKw, 2) })] as [string, string]] : []),
+    ...(derived.floor ? [[t("hs.overnight"), t("hs.overnightValue", { now: num(derived.floor.latestKw, 2), best: num(derived.floor.bestKw, 2), date: shortDate(derived.floor.bestTo, locale) })] as [string, string]] : []),
   ];
   return <section className={`${PANEL} p-4`}>
     <Title className="mb-3 text-sm font-semibold text-slate-900" guide={{ summary: t("hs.summary"), dataAcquisition: [t("hs.data1"), t("hs.data2")], chartGeneration: [t("hs.chart1")] }}>{t("hs.title")}</Title>
@@ -960,8 +899,10 @@ function CircuitRanking({ data }: { data: AnalysisData }) {
   const t = useMessages(viewMessages);
   const top = data.circuits.slice(0, 10);
   const avgTop = average(top.map(item => item.kwh)) ?? 0;
+  const spaceNames = data.current.spaces.map(space => space.name).join(" & ");
   return <section className={`${PANEL} p-4`}>
-    <Title className="mb-3 text-sm font-semibold text-slate-900" guide={{ summary: t("cr.summary"), dataAcquisition: [t("cr.data1"), t("cr.data2")], chartGeneration: [t("cr.chart1")] }}>{t("cr.title")}</Title>
+    <Title guide={{ summary: t("cr.summary"), dataAcquisition: [t("cr.data1"), t("cr.data2")], chartGeneration: [t("cr.chart1")] }}>{t("cr.title")}</Title>
+    <p className="mb-3 text-sm text-slate-600">{spaceNames ? t("circuits.subtitleFor", { spaces: spaceNames }) : t("circuits.subtitle")}</p>
     {top.length ? <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm">
       <thead className="bg-slate-100 text-slate-700"><tr><th className="px-3 py-2 text-left">{t("cr.rank")}</th><th className="px-3 py-2 text-left">{t("col.circuit")}</th><th className="px-3 py-2 text-left">{t("cr.floor")}</th><th className="px-3 py-2 text-left">{t("cr.category")}</th><th className="px-3 py-2 text-right">{t("cr.consumption")}</th><th className="px-3 py-2 text-right">{t("cr.vsAvg")}</th></tr></thead>
       <tbody>{top.map((circuit, index) => { const delta = avgTop > 0 ? Math.round((circuit.kwh / avgTop - 1) * 100) : 0; return <tr key={circuit.id} className="border-t border-slate-200">

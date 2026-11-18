@@ -106,18 +106,34 @@ describe("Analysis page in other languages", () => {
     await page.unmount();
   });
 
-  it("shows the page frame, date controls and detailed analysis in Malay and Chinese", async () => {
+  it("shows the page frame, date controls and each step's figures in Malay and Chinese", async () => {
     mock.load.mockResolvedValue(data);
+    const showAll = async (page: { host: HTMLElement }, label: string) => {
+      const button = [...page.host.querySelectorAll("button")].find(item => item.textContent === label)!;
+      await act(async () => button.click());
+    };
     const ms = await render("ms", <AnalysisView projectId="office" />);
     expect(ms.host.querySelector("h1")?.textContent).toBe("Analisis");
-    for (const text of ["Gambaran keseluruhan / Analisis", "4 minggu terkini", "Guna", "Office membelanjakan S$155 untuk elektrik dalam 7 hari.", "Ke mana wang dibelanjakan", "Analisis terperinci", "Ringkasan eksekutif", "Trend jumlah harian", "Sorotan utama"]) expect(ms.text()).toContain(text);
+    for (const text of ["Gambaran keseluruhan / Analisis", "4 minggu terkini", "Guna", "Office membelanjakan S$155 untuk elektrik dalam 7 hari.", "Ke mana wang dibelanjakan", "Tunjukkan angka", "Tentang angka ini", "Jana laporan penuh"]) expect(ms.text()).toContain(text);
     expect(ms.host.querySelector('input[aria-label="Dari"]')).not.toBeNull();
+    await showAll(ms, "Tunjukkan semua angka");
+    for (const text of ["Sembunyikan angka", "Sembunyikan semua angka", "Trend jumlah harian", "Sorotan utama", "Bahagian tenaga", "Aliran tenaga: tapak → ruang → kegunaan", "Hari tipikal, jam demi jam", "Penggunaan harian sepintas lalu", "10 litar teratas", "Lokasi paling banyak guna: Level 1, 516 kWh (100% daripada jumlah).", "semua jenis hari: 0 hari bekerja, 0 hujung minggu"]) expect(ms.text()).toContain(text);
+    // The separate detailed analysis and its written recap are gone.
+    expect(ms.text()).not.toMatch(/Analisis terperinci|Ringkasan eksekutif|Ringkasan penemuan/);
+    // Step 1 already says Level 1 takes 100% of the bill, so the flow chart does not say it again.
+    expect(ms.text()).not.toContain("Level 1 menggunakan 100% elektrik tapak.");
+    expect(ms.text()).toMatch(/Bagi seluruh tapak, .+ ialah kegunaan terbesar \(100%\)\./);
     await ms.unmount();
 
     const zh = await render("zh-Hans", <AnalysisView projectId="office" />);
     expect(zh.host.querySelector("h1")?.textContent).toBe("用电分析");
-    for (const text of ["概览 / 用电分析", "最近 4 周", "应用", "2026年8月10日–16日", "详细分析", "执行摘要", "每日总用电趋势", "重点数据", "电价：0.3 SGD/kWh（未含税）。", "发现摘要", "工作日、周末和假期", "用电最多的线路"]) expect(zh.text()).toContain(text);
+    for (const text of ["概览 / 用电分析", "最近 4 周", "应用", "2026年8月10日–16日", "显示详细数据", "关于这些数据", "生成完整报告"]) expect(zh.text()).toContain(text);
     expect(zh.host.querySelector('form[aria-label="日期"]')).not.toBeNull();
+    await showAll(zh, "显示全部详细数据");
+    for (const text of ["隐藏详细数据", "每日总用电趋势", "重点数据", "电价：0.3 SGD/kWh（未含税）。", "用电占比", "用电流向：全场 → 空间 → 用途", "每日用电一览", "用电最多的位置：Level 1，516 kWh（占总数 100%）。", "全部日子：工作日 0 天，周末 0 天"]) expect(zh.text()).toContain(text);
+    expect(zh.text()).not.toMatch(/详细分析|执行摘要|发现摘要/);
+    expect(zh.text()).toMatch(/全场来看，.+ 是最大的用途（100%）。/);
+    expect(zh.text()).not.toContain("Level 1 用了全场 100% 的电。");
     await zh.unmount();
   });
 });
