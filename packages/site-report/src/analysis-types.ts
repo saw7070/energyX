@@ -7,7 +7,12 @@ import type { GroupedMeter, MeterGroup } from "./meter-groups.js";
 import type { NotInUseMeter } from "./meters-in-use.js";
 import type { AlwaysOnMeter } from "./always-on-by-design.js";
 
-export type TrendCell = [string, number, number | null, number, number];
+/**
+ * [date, hour, kWh read on time, minutes read on time, intervals not read on time, kWh sent late]. The last is energy a
+ * meter counted while offline and sent when it came back, spread over the hours it was offline; older saved reports
+ * have no such entry. It counts in daily totals, but its hours stay incomplete.
+ */
+export type TrendCell = [string, number, number | null, number, number, number?];
 export type TrendSeries = { id: string; expectedMinutesPerHour: number; cells: TrendCell[] };
 /** `name` is the short name when one is set; `fullName` is then the installer's full label, shown underneath. */
 export type ScopeMeter = { id: string; name: string; fullName?: string | undefined; location: string; category: AnalysisCategory | "overall"; official: boolean; series: TrendSeries | null };

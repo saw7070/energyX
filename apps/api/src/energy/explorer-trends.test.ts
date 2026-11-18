@@ -37,6 +37,24 @@ describe("published Explorer hourly projection", () => {
   );
 });
 
+describe("energy a meter sent late, after being offline", () => {
+  it("is summed apart from the readings that arrived on time and carried as the cell's last entry", () => {
+    const sql = explorerTrendSql("scoped_view", [{ id: "__scope__", meters: ["a"] }])!;
+    expect(sql).toContain("FILTER (WHERE quality_status = 'gap')");
+    const [series] = decodeExplorerTrends([{ series_id: "__scope__", cells: JSON.stringify([
+      { d: "2026-11-16", h: 19, k: 1.2, valid_mins: 30, events: 2, gap: 0.8 },
+      { d: "2026-11-16", h: 20, k: null, valid_mins: 0, events: 4, gap: 2 },
+      { d: "2026-11-16", h: 21, k: 2, valid_mins: 60, events: 0 },
+    ]) }], [{ id: "__scope__", meters: ["a"] }]);
+    // The hour stays incomplete (only the minutes read on time count), but the energy sent late is kept.
+    expect(series?.cells).toEqual([
+      ["2026-11-16", 19, 1.2, 30, 2, 0.8],
+      ["2026-11-16", 20, null, 0, 4, 2],
+      ["2026-11-16", 21, 2, 60, 0, 0],
+    ]);
+  });
+});
+
 describe("virtual meter hourly series and peak", () => {
   const routes = [{ id: "balance", meters: ["main", "ahu"], coefficients: { main: 1, ahu: -1 } as const }];
   // main reports 10 kWh and ahu 4 kWh per 15 minutes in hour 8; in hour 9 ahu reports 1, 1, 0.5 and then nothing.
@@ -52,8 +70,8 @@ describe("virtual meter hourly series and peak", () => {
     const [series] = decodeExplorerTrends(rows, routes);
     expect(series?.expectedMinutesPerHour).toBe(120);
     expect(series?.cells).toEqual([
-      ["2026-09-10", 8, 24, 120, 0],
-      ["2026-09-10", 9, null, 105, 0],
+      ["2026-09-10", 8, 24, 120, 0, 0],
+      ["2026-09-10", 9, null, 105, 0, 0],
     ]);
   });
 

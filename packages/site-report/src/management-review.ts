@@ -46,7 +46,8 @@ const MAX_FINDINGS = 5;
 const MAX_DECISIONS = 4;
 const MAX_PARTS = 5;
 
-export type ReviewDay = { date: string; dow: string; kwh: number; cost: number | null; complete: boolean };
+/** `recoveredKwh`: energy in `kwh` that meters sent late, after being offline. */
+export type ReviewDay = { date: string; dow: string; kwh: number; cost: number | null; complete: boolean; recoveredKwh: number };
 export type ReviewDecision = { title: string; why: string; worth: string | null };
 export type ReviewBarPart = { name: string; kwh: number; share: number };
 /** `pct`: for a top-level group, the full report's whole percentage of the site (they add up to 100); absent for circuits. */
@@ -177,7 +178,7 @@ export function buildManagementReview(data: AnalysisData, reference: ProjectSpat
   const meterCount = meters.length || base.circuits.reduce((sum, circuit) => sum + circuit.meterIds.length, 0);
 
   // ---------- total energy ----------
-  const reviewDays: ReviewDay[] = days.map(day => ({ date: day.date, dow: weekdayOf(day.date, locale), kwh: day.totalKwh, cost: cost(day.totalKwh), complete: day.complete }));
+  const reviewDays: ReviewDay[] = days.map(day => ({ date: day.date, dow: weekdayOf(day.date, locale), kwh: day.totalKwh, cost: cost(day.totalKwh), complete: day.complete, recoveredKwh: day.recoveredKwh }));
   const shownDays = readDays.length ? readDays : days;
   const low = Math.min(...shownDays.map(day => day.totalKwh)), high = Math.max(...shownDays.map(day => day.totalKwh));
   const missing = readDays.filter(day => !day.complete).length;

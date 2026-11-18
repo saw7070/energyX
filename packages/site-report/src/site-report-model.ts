@@ -102,7 +102,8 @@ export type SpatialExtras = ProjectSpatialReference & {
 };
 
 // ---------- report shape ----------
-export type ReportDay = { date: string; dow: string; kwh: number; dayType: AnalysisDay["dayType"]; holidayName?: string | undefined; complete: boolean };
+/** `recoveredKwh`: energy in `kwh` that meters sent late, after being offline (0 on a normal day). */
+export type ReportDay = { date: string; dow: string; kwh: number; dayType: AnalysisDay["dayType"]; holidayName?: string | undefined; complete: boolean; recoveredKwh: number };
 /**
  * `area` is the plain place name ("Office Area") when the zone matches a space. `points` is the zone's outline when the
  * layout draws it as a free shape (an L-shaped block) and the saved points are usable; `rect` is then its bounding box.
@@ -364,7 +365,7 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const partDay = oneDay && received && !days[0]?.complete;
 
   // Days, averages and base load. Public holidays count with weekends as closed days.
-  const reportDays: ReportDay[] = days.map(day => ({ date: day.date, dow: weekdayOf(day.date, locale), kwh: day.totalKwh, dayType: day.dayType, holidayName: day.holidayName, complete: day.complete }));
+  const reportDays: ReportDay[] = days.map(day => ({ date: day.date, dow: weekdayOf(day.date, locale), kwh: day.totalKwh, dayType: day.dayType, holidayName: day.holidayName, complete: day.complete, recoveredKwh: day.recoveredKwh }));
   const weekdayAvg = mean(days.filter(day => day.complete && day.dayType === "weekday").map(day => day.totalKwh));
   const weekendAvg = mean(days.filter(day => day.complete && day.dayType !== "weekday").map(day => day.totalKwh));
   // The always-on level comes from the quiet hours: 00:00–06:00, or the daytime for lights-on hours.

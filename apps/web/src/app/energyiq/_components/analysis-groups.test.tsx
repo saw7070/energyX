@@ -85,7 +85,7 @@ describe("where the energy goes, by group", () => {
     expect(words).toContain("Pavilion 9.4 kWh a day · 13%");
     expect(markup).toContain('aria-label="Inside Common area"');
     // Every group is a button that opens the groups inside it.
-    expect(markup).toMatch(/<button type="button"[^>]*aria-expanded="false" aria-controls="[^"]+"><span[^>]*>Common area<\/span>/);
+    expect(markup).toMatch(/<button type="button"[^>]*aria-expanded="false" aria-controls="[^"]+"><span[^>]*aria-hidden="true"><\/span><span[^>]*>Common area<\/span>/);
     // Only one type of use (lighting): a split by type would say nothing beside it.
     expect(words).not.toContain("By type of use");
   });

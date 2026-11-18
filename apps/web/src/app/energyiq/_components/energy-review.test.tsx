@@ -92,7 +92,7 @@ describe("the energy review answers the site's questions in order", () => {
     expect(review.style).toBe("review");
     expect(review.questions).toEqual(["total", "groups", "largest", "comparison", "profile", "littleUse", "perLight", "savings"]);
     expect(review.summary.answers.map(answer => answer.question)).toEqual([
-      "Total energy and cost", "Block A, Block B and Common area", "Largest circuit in each group", "Block A against Block B",
+      "Total energy and cost", "Block A, Block B and Common area", "What uses the most in each group", "Block A against Block B",
       "24-hour profile", "Pavilion fan", "Energy per lighting point", "Saving potential",
     ]);
     for (const answer of review.summary.answers) expect(answer.answer).not.toMatch(/undefined|NaN|\{\w+\}/);
@@ -126,17 +126,25 @@ describe("the energy review answers the site's questions in order", () => {
     expect(slices.reduce((sum, slice) => sum + Math.round(slice.share * 100), 0)).toBe(100);
   });
 
-  it("names the largest circuit in each group, once for a circuit that leads in both blocks", () => {
-    expect(review.largest!.blocks.map(block => [block.name, block.slices[0]!.name])).toEqual([["Block A", "L7-L12 corridors"], ["Block B", "L7-L12 corridors"], ["Common area", "Driveway lamp"]]);
-    expect(review.summary.answers[2]!.answer).toMatch(/^L7-L12 corridors \(\d+% of Block A and \d+% of Block B\) and Driveway lamp \(\d+% of Common area\)\.$/);
+  it("names what uses the most inside each group, by the groups inside it rather than single circuits", () => {
+    // Block lighting is both corridor circuits together; ground floor and emergency lights follow, largest first.
+    expect(review.largest!.blocks.map(block => [block.name, block.slices.map(slice => slice.name)])).toEqual([
+      ["Block A", ["Block lighting", "Ground floor", "Emergency lights"]], ["Block B", ["Block lighting", "Ground floor", "Emergency lights"]],
+      ["Common area", expect.arrayContaining(["Driveway lamp"])],
+    ]);
+    expect(review.largest!.blocks[0]!.slices[0]!.value).toBeCloseTo(8 + 3.4 + 0.01 * 12, 1);
+    expect(review.summary.answers[2]!.answer).toMatch(/^Block lighting \(\d+% of Block A and \d+% of Block B\) and Driveway lamp \(\d+% of Common area\)\.$/);
   });
 
-  it("compares the blocks circuit for circuit and says what only the larger one has", () => {
+  it("compares the blocks part for part, with each block's whole day, and says where the gap comes from", () => {
     const comparison = review.comparison!;
     expect(comparison.heading).toBe("Block A against Block B");
-    expect(comparison.rows.map(row => row.name)).toEqual(["L7-L12 corridors", "lift lobby", "L1-L6 corridors", "emergency lights"].map(name => expect.stringMatching(new RegExp(name, "i"))));
-    expect(comparison.callout).toContain("Block A's larger total comes mainly from Riverside gate lighting");
-    expect(review.summary.answers[3]!.answer).toContain("Block A is higher overall because of Riverside gate lighting.");
+    expect(comparison.rows.map(row => row.name)).toEqual(["Block lighting", "Ground floor", "Emergency lights"]);
+    expect(comparison.total!.name).toBe("Whole block");
+    expect(comparison.total!.perDay[0]).toBeGreaterThan(comparison.total!.perDay[1]!);
+    expect(comparison.intro).toMatch(/^Block A uses \d+% more than Block B: [\d.]+ kWh against [\d.]+ kWh a day\. Part for part they are close, except: Block A uses [\d.]+ times as much on ground floor as Block B\.$/);
+    expect(comparison.callout).toContain("Most of the gap in ground floor is Riverside gate lighting (4.2 kWh a day), which only Block A has.");
+    expect(review.summary.answers[3]!.answer).toMatch(/^Block A uses \d+% more than Block B\.$/);
   });
 
   it("stacks the average day by kind, the always-on emergency lights at the bottom, and says when the lights run", () => {
@@ -145,13 +153,16 @@ describe("the energy review answers the site's questions in order", () => {
     expect(profile.layers.map(layer => layer.name)).toEqual(expect.arrayContaining(["Block lighting", "Ground floor", "Common area"]));
     expect(profile.intro).toContain("Lights switch on at about 7 pm and off at about 7 am.");
     expect(profile.intro).toContain("mostly emergency lights");
-    expect(review.summary.answers[4]!.answer).toMatch(/^Lights on from about 7 pm to 7 am, peaking near \d\.\d kW\. 2 items need checking \(section 5\)\.$/);
+    expect(review.summary.answers[4]!.answer).toMatch(/^Lights on from about 7 pm to 7 am, peaking near \d\.\d kW\. One item needs checking \(section 5\)\.$/);
+    // The night in words: when the lights come on, the step down, when they go off, and what stays on in the day.
+    expect(profile.timeline.map(moment => moment.time)).toEqual(expect.arrayContaining(["7 pm", "7 am"]));
+    expect(profile.timeline.find(moment => moment.time === "7 pm")!.text).toMatch(/^First lights on: /);
+    expect(profile.timeline.at(-1)).toMatchObject({ time: "7 am to 7 pm", text: expect.stringMatching(/^Daytime: about [\d.]+ kW stays on, mostly emergency lights\.$/) });
   });
 
-  it("lists what to check on site: a meter that stopped and one powered with its lights", () => {
-    expect(review.checks.map(check => check.title)).toEqual(["Linkway lights has stopped reporting.", "Shelter lights is powered with its lights."]);
+  it("lists what to check on site: a meter that stopped, not one wired to report only while its lights are on", () => {
+    expect(review.checks.map(check => check.title)).toEqual(["Linkway lights has stopped reporting."]);
     expect(review.checks[0]!.text).toContain("No readings since 4 Nov, 6 pm");
-    expect(review.checks[1]!.text).toContain("It reports from about 7 pm to 7 am");
     expect(review.total!.intro).toContain("From 4 Nov the total is lower because Linkway lights stopped reporting");
   });
 
@@ -169,19 +180,18 @@ describe("the energy review answers the site's questions in order", () => {
   it("costs the lighting measures and sets out next steps", () => {
     const titles = review.savings!.rows.map(row => row.title);
     expect(titles[0]).toBe("Motion-sensor dimming on block lighting, or start the night step-down earlier");
-    expect(titles).toContain("Fine-tune light timers and photocells");
+    expect(titles).toContain("Shorten the light timers a little");
     const dimming = review.savings!.rows[0]!;
     expect(dimming.basis).toBe("About 30% of block lighting");
     expect(dimming.costYear).toBeCloseTo(dimming.kwhYear * 0.3 * 1.09, 9);
     expect(review.savings!.intro).toMatch(/worth about \*\*S\$[\d,]+\*\* a year incl\. GST and [\d.]+ tonnes of CO₂\./);
     expect(review.nextSteps.map(step => step.action)).toEqual([
       "Check Linkway lights: breaker, meter power, gateway pairing and fittings",
-      "Give Shelter lights an always-on supply",
       "Send the number of light fittings per circuit",
       `Trial: ${titles[0]}`,
       "Review the next full month of readings and confirm the projections",
     ]);
-    expect(review.nextSteps[2]!.who).toBe("Riverside");
+    expect(review.nextSteps[1]!.who).toBe("Riverside");
   });
 
   it("lists every meter's typical day in the appendix, by group in the saved order", () => {
@@ -234,20 +244,22 @@ describe("the energy review on a live site's readings", () => {
     const live = buildEnergyReview(estate({}, { byArea: true }), null, GENERATED);
     // The same answers as when the site's list carries the readings: the layers, the checks, little use and the dimming.
     expect(live.profile!.layers.map(layer => layer.name)).toEqual(review.profile!.layers.map(layer => layer.name));
-    expect(live.checks.map(check => check.title)).toEqual(["Linkway lights has stopped reporting.", "Shelter lights is powered with its lights."]);
+    expect(live.checks.map(check => check.title)).toEqual(["Linkway lights has stopped reporting."]);
     expect(live.littleUse!.heading).toBe("Pavilion fan");
     expect(live.savings!.rows[0]!.title).toBe("Motion-sensor dimming on block lighting, or start the night step-down earlier");
     expect(live.summary.intro).toContain("Block lighting is the largest single load");
     expect(live.perLight!.text).toContain("For the other circuits we need the number of fittings");
   });
 
-  it("says two groups that use the same are about the same, and a circuit twice another's is twice", () => {
+  it("says two groups that use the same are about the same, and a part twice another's is twice", () => {
     const even: Record<string, Meter> = { ...METERS, "a-gate": { ...METERS["a-gate"]!, group: "common" },
       "b-lobby": { ...METERS["b-lobby"]!, kwh: lit(3.6) }, "b-high": { ...METERS["b-high"]!, kwh: lit(8) }, "b-low": { ...METERS["b-low"]!, kwh: lit(3.4, 0.01) },
       "b-deco": { name: "Block B decorative light", group: "b-gf", kwh: lit(0.15) }, "a-deco": { name: "Block A decorative light", group: "a-gf", kwh: lit(0.3) } };
     const built = buildEnergyReview(estate({}, { meters: even }), null, GENERATED);
     expect(built.groups!.intro).toMatch(/^Block A and Block B use about the same, \d+% of the energy each\. Then Common area \d+%\.$/);
-    expect(built.comparison!.intro).toContain("Block A's decorative light uses twice as much as Block B's");
+    expect(built.comparison!.intro).toMatch(/^Block A uses about the same energy as Block B: /);
+    const halved = buildEnergyReview(estate({}, { meters: { ...even, "b-emergency": { ...METERS["b-emergency"]!, kwh: () => 0.05 } } }), null, GENERATED);
+    expect(halved.comparison!.intro).toContain("Block A uses twice as much on emergency lights as Block B");
   });
 
   it("trials only the dimming, never the daytime standby or the timers", () => {
@@ -286,7 +298,7 @@ describe("the energy review as a working page", () => {
       // No cover on the page: the panel around it already names the site and the dates.
       expect(host.querySelector("h1")).toBeNull();
       const nav = [...host.querySelectorAll('nav[aria-label="Sections of the review"] a')].map(link => link.textContent);
-      expect(nav).toEqual(["Summary", "1Total use", "2By group", "3Largest circuits", "4Like for like", "5" + "24 hours", "Checks", "6Little use", "7Per light", "8Savings", "Method"]);
+      expect(nav).toEqual(["Summary", "1Total use", "2By group", "3Inside each group", "4Like for like", "5" + "24 hours", "Checks", "6Little use", "7Per light", "8Savings", "Method"]);
 
       // A figure and an answer at a glance each take the reader to their section, without changing the address.
       await click(host.querySelector('.er-glance a[href="#er-q-savings"]'));

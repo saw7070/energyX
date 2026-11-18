@@ -114,17 +114,22 @@ export function DailyProfileChart({ profileKw, openHours, name, title, max: fixe
  * the part that did); null for every other hour.
  */
 export type HeatmapRow = { id: string; name: string; group: string; profileKw: Array<number | null>; partialKwh?: Array<number | null> };
+type Rgb = [number, number, number];
+const rgb = ([r, g, b]: Rgb) => `rgb(${r}, ${g}, ${b})`;
+/** The colour at `t` along a list of stops, blended between the two stops either side of it. */
+function blend(stops: Array<[number, Rgb]>, t: number): string {
+  const at = Math.max(stops[0]![0], Math.min(stops[stops.length - 1]![0], t));
+  const upper = stops.findIndex(([stop]) => stop >= at);
+  const [a, from] = stops[Math.max(0, upper - 1)]!, [b, to] = stops[Math.max(0, upper)]!;
+  const mix = b === a ? 0 : (at - a) / (b - a);
+  return rgb(from.map((channel, index) => Math.round(channel + (to[index]! - channel) * mix)) as Rgb);
+}
 /** Traffic-light usage scale, green (low) → yellow → orange → red (high); every cell also prints its percentage, so colour is never the only cue. */
-export const HEAT_STOPS: Array<[number, [number, number, number]]> = [[0, [99, 190, 123]], [0.35, [250, 215, 100]], [0.7, [240, 140, 60]], [1, [214, 60, 47]]];
-export const HEAT_GRADIENT = `linear-gradient(90deg, ${HEAT_STOPS.map(([at, [r, g, b]]) => `rgb(${r}, ${g}, ${b}) ${at * 100}%`).join(", ")})`;
+export const HEAT_STOPS: Array<[number, Rgb]> = [[0, [99, 190, 123]], [0.35, [250, 215, 100]], [0.7, [240, 140, 60]], [1, [214, 60, 47]]];
+export const HEAT_GRADIENT = `linear-gradient(90deg, ${HEAT_STOPS.map(([at, colour]) => `${rgb(colour)} ${at * 100}%`).join(", ")})`;
 /** Colour for a cell scaled to the row's busiest hour. */
 export function heatColour(share: number | null): string {
-  if (share === null) return "transparent";
-  const t = Math.max(0, Math.min(1, share));
-  const upper = HEAT_STOPS.findIndex(([at]) => at >= t);
-  const [a, from] = HEAT_STOPS[Math.max(0, upper - 1)]!, [b, to] = HEAT_STOPS[Math.max(0, upper)]!;
-  const mix = b === a ? 0 : (t - a) / (b - a);
-  return `rgb(${from.map((channel, index) => Math.round(channel + (to[index]! - channel) * mix)).join(", ")})`;
+  return share === null ? "transparent" : blend(HEAT_STOPS, share);
 }
 
 /**
@@ -141,10 +146,72 @@ const heatText = (share: number) => share >= 0.85 ? "white" : "#1f2d25";
 const hour24 = (hour: number) => String(hour).padStart(2, "0");
 
 /**
- * Load by hour of day. `scale="row"` compares each row with its own busiest hour (one row per device);
- * `scale="all"` uses one busiest hour for every row, so days of one device can be compared with each other.
+ * The every-day grid compares each hour with what the device usually uses at that hour of the day. From 80% to 120% of
+ * usual counts as usual and is drawn in one calm green, so only a real change stands out: blue for less than usual,
+ * and the usage scale's yellow, orange and red for more.
  */
-export function UsageHeatmap({ rows, openHours, openingLabel, title, scale = "row", onOpenRow, period }: { rows: HeatmapRow[]; openHours: Set<number>; openingLabel?: string | null; title?: string; scale?: "row" | "all"; onOpenRow?: (id: string) => void; period?: string | null }) {
+export const USUAL_BAND = { from: 80, to: 120 } as const;
+const LESS_STOPS: Array<[number, Rgb]> = [[0, [45, 105, 175]], [0.8, [160, 196, 232]]];
+const USUAL_RGB: Rgb = [208, 233, 216];
+const MORE_STOPS: Array<[number, Rgb]> = [[1.2, HEAT_STOPS[1]![1]], [1.6, HEAT_STOPS[2]![1]], [2, HEAT_STOPS[3]![1]]];
+/** Colour for a cell given as a percentage of that hour's usual use; 200% and more is the deepest red. */
+export function usualColour(percent: number): string {
+  if (percent < USUAL_BAND.from) return blend(LESS_STOPS, percent / 100);
+  if (percent <= USUAL_BAND.to) return rgb(USUAL_RGB);
+  return blend(MORE_STOPS, percent / 100);
+}
+/** The legend's bar runs from 0% to 200% of usual, with the flat "usual" band in the middle. */
+export const USUAL_GRADIENT = `linear-gradient(90deg, ${[...LESS_STOPS, [USUAL_BAND.from / 100, USUAL_RGB] as [number, Rgb], [USUAL_BAND.to / 100, USUAL_RGB] as [number, Rgb], ...MORE_STOPS].map(([at, colour]) => `${rgb(colour)} ${at * 50}%`).join(", ")})`;
+/** White text only on the deep blue and deep red ends, so labels keep enough contrast. */
+const usualText = (percent: number) => percent < 25 || percent >= 180 ? "white" : "#1f2d25";
+
+/** Below this, an hour's usual use counts as off: under 1% of the device's average hourly use, or under 0.001 kWh. */
+export const OFF_SHARE = 0.01, OFF_KWH = 0.001;
+type Rows = Array<{ profileKw: Array<number | null> }>;
+const mean = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+/** Fewer days than this with a reading for an hour, and its usual use is the plain average: too few for a middle value. */
+export const MEDIAN_MIN_DAYS = 3;
+/** The middle value (the mean of the two middle values when the count is even); null when there are none. */
+export function median(values: number[]): number | null {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b), middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
+}
+/**
+ * What the device usually uses in each hour of the day, over the rows (days) with a reading for that hour: the middle
+ * value, so one odd day (a light left on one night, a one-off spike) does not shift what counts as usual. With fewer
+ * than three days of readings for an hour it is their average.
+ */
+export function usualByHour(rows: Rows): Array<number | null> {
+  return Array.from({ length: 24 }, (_, hour) => {
+    const readings = rows.map(row => row.profileKw[hour] ?? null).filter((kw): kw is number => kw !== null);
+    return readings.length >= MEDIAN_MIN_DAYS ? median(readings) : mean(readings);
+  });
+}
+/** The level under which an hour counts as off for this device. */
+export function offBelow(rows: Rows): number {
+  const average = mean(rows.flatMap(row => row.profileKw.filter((kw): kw is number => kw !== null))) ?? 0;
+  return Math.max(OFF_KWH, average * OFF_SHARE);
+}
+/**
+ * What one cell of the every-day grid shows. At an hour the device is usually off a percentage would be huge or
+ * meaningless, so the cell reads "off", or is flagged when it used energy anyway. An hour whose use shows as 0.00 kWh
+ * reads 0%, unless its usual use shows as 0.00 kWh too.
+ */
+export type UsualCell = { kind: "missing" } | { kind: "off" } | { kind: "usedWhileOff" } | { kind: "share"; percent: number };
+export function usualCell(kw: number | null, usual: number | null, off: number): UsualCell {
+  if (kw === null) return { kind: "missing" };
+  if (usual === null || usual < off) return kw < off ? { kind: "off" } : { kind: "usedWhileOff" };
+  if (Math.round(kw * 100) === 0 && Math.round(usual * 100) !== 0) return { kind: "share", percent: 0 };
+  return { kind: "share", percent: Math.round(kw / usual * 100) };
+}
+
+/**
+ * Load by hour of day. `scale="row"` compares each row with its own busiest hour (one row per device). `scale="usual"`
+ * is for one device with a row per day: each cell is compared with the device's usual use at that hour of the day, so a
+ * steady device reads about 100% everywhere and a cell well below or above it is a real change.
+ */
+export function UsageHeatmap({ rows, openHours, openingLabel, title, scale = "row", onOpenRow, period }: { rows: HeatmapRow[]; openHours: Set<number>; openingLabel?: string | null; title?: string; scale?: "row" | "usual"; onOpenRow?: (id: string) => void; period?: string | null }) {
   const t = useMessages(chartMessages);
   const [active, setActive] = useState<{ row: number; hour: number; x: number; y: number } | null>(null);
   const heatmap = useRef<HTMLDivElement>(null);
@@ -157,14 +224,26 @@ export function UsageHeatmap({ rows, openHours, openingLabel, title, scale = "ro
     return () => document.removeEventListener("pointerdown", clear);
   }, [shown]);
   const groups = [...new Set(rows.map(row => row.group))];
-  const overall = Math.max(0, ...rows.flatMap(row => row.profileKw.map(kw => kw ?? 0)));
-  const busiest = (row: HeatmapRow) => scale === "all" ? overall : Math.max(0, ...row.profileKw.map(kw => kw ?? 0));
+  const busiest = (row: HeatmapRow) => Math.max(0, ...row.profileKw.map(kw => kw ?? 0));
+  const usual = scale === "usual" ? usualByHour(rows) : null;
+  const off = usual ? offBelow(rows) : 0;
+  const cells = usual ? rows.map(row => row.profileKw.map((kw, hour) => usualCell(kw, usual[hour] ?? null, off))) : null;
+  const kinds = new Set(cells?.flat().map(cell => cell.kind));
   const dayTotal = (row: HeatmapRow) => row.profileKw.reduce<number>((sum, kw) => sum + (kw ?? 0), 0);
   const current = active ? rows[active.row] : null;
-  const value = current && active ? current.profileKw[active.hour] : null;
+  const value = current && active ? current.profileKw[active.hour] ?? null : null;
   const partKwh = current && active ? current.partialKwh?.[active.hour] ?? null : null;
   const open = [...openHours].sort((a, b) => a - b);
   const contiguous = open.length > 0 && open[open.length - 1]! - open[0]! === open.length - 1;
+  /** The tooltip's headline: the cell's percentage and what it is a percentage of, or why it has none. */
+  const headline = () => {
+    if (!current || !active || value === null) return t("heat.noComplete");
+    const cell = cells?.[active.row]?.[active.hour];
+    if (!cell) return t("heat.load", { load: loadPercent(value, busiest(current)) ?? 0, peak: compact(busiest(current)) });
+    if (cell.kind === "off") return t("heat.usuallyOff");
+    if (cell.kind === "usedWhileOff") return t("heat.usedWhileOff");
+    return t("heat.loadUsual", { load: cell.kind === "share" ? cell.percent : 0, usual: compact(usual![active.hour] ?? 0) });
+  };
   return <figure className={styles.chart}>
     <figcaption>{title ?? t("heat.title")}{period && <span className={styles.chartPeriod}>{period}</span>}</figcaption>
     {/* A finger lifting also "leaves" the heatmap, so only a mouse or pen leaving it hides the details. */}
@@ -180,20 +259,27 @@ export function UsageHeatmap({ rows, openHours, openingLabel, title, scale = "ro
         {rows.map((row, index) => {
           if (row.group !== group) return null;
           const peak = busiest(row);
-          const rowPeak = Math.max(0, ...row.profileKw.map(kw => kw ?? 0));
-          return <div key={row.id} className={styles.heatRow} role="img" aria-label={t("heat.rowAria", { name: row.name, hour: hour24(row.profileKw.indexOf(rowPeak)), kw: compact(rowPeak) })}>
+          return <div key={row.id} className={styles.heatRow} role="img" aria-label={t("heat.rowAria", { name: row.name, hour: hour24(row.profileKw.indexOf(peak)), kw: compact(peak) })}>
             {onOpenRow ? <button type="button" className={`${styles.heatName} ${styles.heatNameButton}`} title={t("heat.open", { name: row.name })} onClick={() => onOpenRow(row.id)}>{row.name}</button> : <span className={styles.heatName} title={row.name}>{row.name}</span>}
             {row.profileKw.map((kw, hour) => {
-              const load = loadPercent(kw, peak);
+              const cell = cells?.[index]?.[hour] ?? null;
+              const load = cell ? null : loadPercent(kw, peak);
+              // Off and used-while-off cells take their look from the stylesheet; the rest are coloured by their percentage.
+              const look = cell === null
+                ? { className: kw === null ? styles.heatEmpty : "", label: load === null ? null : `${load}%`, style: { background: heatColour(load === null ? null : load / 100), color: load === null ? undefined : heatText(load / 100) } }
+                : cell.kind === "share" ? { className: "", label: `${cell.percent}%`, style: { background: usualColour(cell.percent), color: usualText(cell.percent) } }
+                : cell.kind === "off" ? { className: styles.heatOff, label: t("heat.offLabel"), style: undefined }
+                : cell.kind === "usedWhileOff" ? { className: styles.heatUsedWhileOff, label: "!", style: undefined }
+                : { className: styles.heatEmpty, label: null, style: undefined };
               // A tap shows the same details as hovering, for touch screens.
-              const show = (event: React.PointerEvent<HTMLSpanElement>) => { const box = event.currentTarget.closest("[data-heatmap]")!.getBoundingClientRect(); const cell = event.currentTarget.getBoundingClientRect(); setActive({ row: index, hour, x: Math.min(box.width - 110, Math.max(110, cell.left - box.left + cell.width / 2)), y: cell.top - box.top }); };
-              return <span key={hour} data-heat-cell={`${index}:${hour}`} className={`${styles.heatCell} ${kw === null ? styles.heatEmpty : ""} ${openHours.has(hour) ? styles.heatCellOpen : ""} ${active?.row === index && active.hour === hour ? styles.heatActive : ""}`} style={{ background: heatColour(load === null ? null : load / 100), color: load === null ? undefined : heatText(load / 100) }} onPointerMove={show} onPointerDown={show}>{load !== null && <span className={styles.heatLabel}>{load}%</span>}</span>;
+              const show = (event: React.PointerEvent<HTMLSpanElement>) => { const box = event.currentTarget.closest("[data-heatmap]")!.getBoundingClientRect(); const spot = event.currentTarget.getBoundingClientRect(); setActive({ row: index, hour, x: Math.min(box.width - 110, Math.max(110, spot.left - box.left + spot.width / 2)), y: spot.top - box.top }); };
+              return <span key={hour} data-heat-cell={`${index}:${hour}`} data-heat-kind={cell?.kind} className={`${styles.heatCell} ${look.className} ${openHours.has(hour) ? styles.heatCellOpen : ""} ${active?.row === index && active.hour === hour ? styles.heatActive : ""}`} style={look.style} onPointerMove={show} onPointerDown={show}>{look.label !== null && <span className={styles.heatLabel}>{look.label}</span>}</span>;
             })}
           </div>;
         })}
       </div>)}
-      {current && active && <div className={styles.tooltip} style={{ left: active.x, top: active.y, transform: "translate(-50%, calc(-100% - 6px))" }}><strong>{value == null ? t("heat.noComplete") : t("heat.load", { load: loadPercent(value, busiest(current)) ?? 0, peak: compact(busiest(current)) })}</strong>{value != null && <span>{t(scale === "all" ? "heat.energy" : "heat.energyAverage", { kw: compact(value), kwh: compact(partKwh ?? value) })}</span>}{value != null && partKwh != null && <span>{t("heat.partHour")}</span>}<span>{t(openHours.has(active.hour) ? "heat.spanOpen" : "heat.span", { name: current.name, from: `${hour24(active.hour)}:00`, to: `${hour24((active.hour + 1) % 24)}:00` })}</span>{value != null && dayTotal(current) > 0 && <span>{t("heat.dailyShare", { pct: Math.round(value / dayTotal(current) * 100) })}</span>}</div>}
+      {current && active && <div className={styles.tooltip} style={{ left: active.x, top: active.y, transform: "translate(-50%, calc(-100% - 6px))" }}><strong>{headline()}</strong>{value != null && <span>{t(usual ? "heat.energy" : "heat.energyAverage", { kw: compact(value), kwh: compact(partKwh ?? value) })}</span>}{value != null && partKwh != null && <span>{t("heat.partHour")}</span>}<span>{t(openHours.has(active.hour) ? "heat.spanOpen" : "heat.span", { name: current.name, from: `${hour24(active.hour)}:00`, to: `${hour24((active.hour + 1) % 24)}:00` })}</span>{value != null && dayTotal(current) > 0 && <span>{t("heat.dailyShare", { pct: Math.round(value / dayTotal(current) * 100) })}</span>}</div>}
     </div>
-    <p className={styles.legend}><span className={styles.heatScaleLabel}>{t("heat.scale")}</span><span>{t("heat.low")}</span><span className={styles.heatScale} style={{ background: HEAT_GRADIENT }} /><span>{t("heat.high")}</span><span className={styles.legendNote}>{t(scale === "all" ? "heat.noteAll" : "heat.noteRow")}{onOpenRow ? t("heat.noteClick") : ""}</span></p>
+    <p className={styles.legend}><span className={styles.heatScaleLabel}>{t(usual ? "heat.scaleUsual" : "heat.scale")}</span><span>{t(usual ? "heat.less" : "heat.low")}</span><span className={styles.heatScale} style={{ background: usual ? USUAL_GRADIENT : HEAT_GRADIENT }} /><span>{t(usual ? "heat.more" : "heat.high")}</span><span className={styles.legendNote}>{t(usual ? "heat.noteUsual" : "heat.noteRow")}{onOpenRow ? t("heat.noteClick") : ""}</span>{kinds.has("off") && <span className={styles.legendBadge}><span className={`${styles.swatch} ${styles.heatOff}`} />{t("heat.usuallyOff")}</span>}{kinds.has("usedWhileOff") && <span className={styles.legendBadge}><span className={`${styles.swatch} ${styles.heatUsedWhileOff}`} />{t("heat.usedWhileOffLegend")}</span>}</p>
   </figure>;
 }

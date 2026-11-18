@@ -801,7 +801,7 @@ export function SiteDevices({ projectId, boardNames, boardParents, notInUse, alw
           <DailyProfileChart profileKw={stat.closedProfileKw} openHours={new Set()} name={t("profile.closedName", { label: row.name })} title={t("profile.closedTitleDevice", { count: stat.closedDays })} max={profileMax} period={span} />
         </div>
         {specialDaysSection(stat)}
-        <UsageHeatmap rows={dayRows} openHours={loaded.openHours} openingLabel={openingHours} title={t("everyDay")} scale="all" period={span} />
+        <UsageHeatmap rows={dayRows} openHours={loaded.openHours} openingLabel={openingHours} title={t("everyDay")} scale="usual" period={span} />
       </section>
     </>;
   };

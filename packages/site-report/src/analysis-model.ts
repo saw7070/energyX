@@ -12,7 +12,8 @@ export type AnalysisDayType = "weekday" | "weekend" | "public_holiday";
 export type HoursByDay = Record<string, Array<{ from: string; to: string }>>;
 /** What the hours mean: when the building is in use (the default), or when lighting should be on (usually at night). */
 export type HoursMeaning = "opening" | "lights_on";
-export type AnalysisDay = { date: string; dayType: AnalysisDayType; holidayName?: string; complete: boolean; totalKwh: number; byCategory: Partial<Record<AnalysisCategory, number>> };
+/** `recoveredKwh`: energy in `totalKwh` that meters sent late, after being offline (0 on a normal day). */
+export type AnalysisDay = { date: string; dayType: AnalysisDayType; holidayName?: string; complete: boolean; totalKwh: number; recoveredKwh: number; byCategory: Partial<Record<AnalysisCategory, number>> };
 export type AnalysisBaseline = { dayType: AnalysisDayType; expectedKwh: number | null; samples: number };
 export type AnalysisAnomaly = { date: string; dayType: AnalysisDayType; totalKwh: number; expectedKwh: number; deltaPct: number };
 export type HourRow = { hour: number; total: number } & Partial<Record<AnalysisCategory, number>>;
@@ -49,11 +50,17 @@ export const localDayType = (date: string, publicHolidays: Map<string, string>):
 };
 
 const dayCells = (series: TrendSeries | null | undefined, date: string) => series ? series.cells.filter(cell => cell[0] === date) : [];
-/** Same completeness rule as Energy consumption: every expected minute received and no quality events. */
+/**
+ * Same completeness rule as Energy consumption: every expected minute received and no quality events. The energy a
+ * meter sent late, after being offline, counts in the day's total (the daily totals elsewhere count it too), but the
+ * day stays incomplete: those hours were not read as they happened.
+ */
 const dayValue = (series: TrendSeries | null | undefined, date: string) => {
   const cells = dayCells(series, date);
   const minutes = cells.reduce((sum, cell) => sum + cell[3], 0);
-  return { kwh: minutes > 0 ? cells.reduce((sum, cell) => sum + (cell[2] ?? 0), 0) : null, complete: !!series && minutes >= series.expectedMinutesPerHour * 24 && cells.every(cell => cell[4] === 0) };
+  const recovered = cells.reduce((sum, cell) => sum + (cell[5] ?? 0), 0);
+  return { kwh: minutes > 0 || recovered > 0 ? cells.reduce((sum, cell) => sum + (cell[2] ?? 0), 0) + recovered : null, recovered,
+    complete: !!series && minutes >= series.expectedMinutesPerHour * 24 && cells.every(cell => cell[4] === 0) };
 };
 
 export function scopeDays(scope: ScopeData, holidays: Map<string, string>): AnalysisDay[] {
@@ -62,7 +69,7 @@ export function scopeDays(scope: ScopeData, holidays: Map<string, string>): Anal
     const byCategory: Partial<Record<AnalysisCategory, number>> = {};
     for (const category of CATEGORY_ORDER) { const value = dayValue(scope.types[category], date).kwh; if (value != null) byCategory[category] = value; }
     const type = localDayType(date, holidays);
-    return { date, ...type, complete: total.complete, totalKwh: total.kwh ?? 0, byCategory };
+    return { date, ...type, complete: total.complete, totalKwh: total.kwh ?? 0, recoveredKwh: total.recovered, byCategory };
   });
 }
 

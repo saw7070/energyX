@@ -17,6 +17,7 @@ import { listText } from "./analysis-messages.js";
 import { effectiveHours, shortDate, type HoursMeaning } from "./analysis-model.js";
 import type { AnalysisData, ScopeMeter, TrendSeries } from "./analysis-types.js";
 import { energyReviewMessages, type EnergyReviewKey } from "./energy-review-messages.js";
+import { alwaysOnByDesignIds } from "./always-on-by-design.js";
 import { daytimeUse } from "./daytime-use.js";
 import { comparableGroups, groupParts, meterHours, meterIdsIn, meterSeries, mustRunIds, partKey, partLabel } from "./group-insights.js";
 import { idleIds as idleMeterIds, silentByDesignIds, withMetersInUse } from "./meters-in-use.js";
@@ -55,10 +56,13 @@ const DIMMING_SHARE = 0.3;
 /** Trimming the light timers: this many hours less each night (a quarter of an hour at each end). */
 const TRIM_HOURS_A_NIGHT = 0.5;
 
-export type EnergyReviewDay = { date: string; label: string; kwh: number; cost: number | null; complete: boolean };
+/** `recoveredKwh`: energy in `kwh` that meters sent late, after being offline. */
+export type EnergyReviewDay = { date: string; label: string; kwh: number; cost: number | null; complete: boolean; recoveredKwh: number };
 export type EnergyReviewSlice = { name: string; value: number; share: number; colour: string };
 export type EnergyReviewLayer = { key: string; name: string; colour: string; hours: number[] };
 export type EnergyReviewCheck = { title: string; text: string };
+/** One moment of the average night: the time ("6:30 pm") and what happens then. */
+export type EnergyReviewMoment = { time: string; text: string };
 export type EnergyReviewSaving = { title: string; basis: string; kwhYear: number; costYear: number | null };
 export type EnergyReviewStep = { action: string; who: string; when: string };
 export type EnergyReviewMeter = { id: string; name: string; group: string; perDay: number | null; basis: string };
@@ -79,11 +83,15 @@ export type EnergyReview = {
   questions: EnergyReviewQuestion[];
   cover: { kicker: string; title: string; subtitle: string; preparedFor: string[]; period: string[]; issued: string[] };
   summary: { intro: string; figures: Array<{ value: string; unit: string; label: string; /** The section that explains the figure. */ target: EnergyReviewQuestion }>; answers: Array<{ id: EnergyReviewQuestion; question: string; answer: string }>; note: string };
-  total: { heading: string; intro: string; days: EnergyReviewDay[]; caption: string; /** What the line of costs under the bars is, for the printed chart; empty without a price. */ costCaption: string; projection: Array<{ label: string; kwh: number; cost: number | null; co2Kg: number | null }> } | null;
+  total: { heading: string; intro: string; days: EnergyReviewDay[]; caption: string; /** What the line of costs under the bars is, for the printed chart; empty without a price. */ costCaption: string;
+    /** Days when meters were offline and sent their energy late, said in a sentence; empty when there were none. */
+    outage: string; projection: Array<{ label: string; kwh: number; cost: number | null; co2Kg: number | null }> } | null;
   groups: { heading: string; intro: string; centre: string; unit: string; slices: EnergyReviewSlice[] } | null;
   largest: { heading: string; intro: string; blocks: Array<{ key: string; name: string; centre: string; slices: EnergyReviewSlice[] }>; note: string } | null;
-  comparison: { heading: string; intro: string; title: string; groups: Array<{ name: string; colour: string }>; rows: Array<{ name: string; perDay: number[] }>; callout: string } | null;
-  profile: { heading: string; intro: string; title: string; layers: EnergyReviewLayer[]; peakKw: number } | null;
+  /** `total`: each group's whole use a day, after the rows; absent when the rows are single circuits. */
+  comparison: { heading: string; intro: string; title: string; groups: Array<{ name: string; colour: string }>; rows: Array<{ name: string; perDay: number[] }>; total?: { name: string; perDay: number[] } | undefined; callout: string } | null;
+  /** `timeline`: what happens through the night, in clock order from midday (lights-on sites; empty otherwise). */
+  profile: { heading: string; intro: string; title: string; layers: EnergyReviewLayer[]; peakKw: number; timeline: EnergyReviewMoment[] } | null;
   /** Things to look at on site; shown after the average 24 hours, numbered. */
   checks: EnergyReviewCheck[];
   littleUse: { heading: string; text: string } | null;
@@ -199,13 +207,18 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
 
   // ---------- 1. total energy, by day, and the cost ----------
   const low = Math.min(...shownDays.map(day => day.kwh)), high = Math.max(...shownDays.map(day => day.kwh));
-  const days: EnergyReviewDay[] = base.total.days.map(day => ({ date: day.date, label: `${weekdayOf(day.date, locale)} ${shortDate(day.date, locale)}`, kwh: day.kwh, cost: cost(day.kwh), complete: day.complete }));
+  const days: EnergyReviewDay[] = base.total.days.map(day => ({ date: day.date, label: `${weekdayOf(day.date, locale)} ${shortDate(day.date, locale)}`, kwh: day.kwh, cost: cost(day.kwh), complete: day.complete, recoveredKwh: day.recoveredKwh }));
   const projection = typicalKwh == null ? [] : [
     { label: t("total.row.day"), kwh: typicalKwh, cost: cost(typicalKwh), co2Kg: co2(typicalKwh) },
     { label: t("total.row.month", { days: REVIEW_MONTH_DAYS }), kwh: typicalKwh * REVIEW_MONTH_DAYS, cost: cost(typicalKwh * REVIEW_MONTH_DAYS), co2Kg: co2(typicalKwh * REVIEW_MONTH_DAYS) },
     { label: t("total.row.year"), kwh: typicalKwh * 365, cost: cost(typicalKwh * 365), co2Kg: co2(typicalKwh * 365) },
   ];
   const firstStopped = stopped[0];
+  // Meters that were offline kept counting and sent the energy when they came back: it is in those days' totals.
+  const outageDays = shownDays.filter(day => day.recoveredKwh >= 0.05);
+  const outageText = outageDays.length ? t(outageDays.length === 1 ? "total.outage.one" : "total.outage.other", {
+    dates: list(outageDays.map(day => shortDate(day.date, locale))), kwh: kwhText(outageDays.reduce((sum, day) => sum + day.recoveredKwh, 0)),
+  }) : "";
   const total: EnergyReview["total"] = shownDays.length ? {
     heading: t("q.total"),
     intro: paragraph([
@@ -216,6 +229,7 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
     ]),
     days,
     caption: t("total.caption", { count: meterCount }),
+    outage: outageText,
     costCaption: rate != null ? t(costBasis ? "total.captionCostBasis" : "total.captionCost", { basis: costBasis }) : "",
     projection,
   } : null;
@@ -241,13 +255,18 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
     slices: groupSlices,
   } : null;
 
-  // ---------- 3. which circuit uses the most in each group ----------
+  // ---------- 3. what uses the most inside each group ----------
+  // Each top-level group by the groups inside it (ground floor, block lighting, emergency lights), largest first; a
+  // meter directly in the group is a part of its own. Single circuits are not ranked against whole groups of them: two
+  // circuits that light one block's floors between them are that block's lighting.
   const blocks = tree ? inSavedOrder(tree.children).filter(group => group.kwh > 0).flatMap(group => {
-    const circuits = metersIn(group).filter(meter => meter.kwh > 0);
-    if (circuits.length < 2) return [];
-    const kept = circuits.slice(0, MAX_CIRCUITS - (circuits.length > MAX_CIRCUITS ? 1 : 0));
-    const rest = circuits.slice(kept.length);
-    const rows = [...kept.map(meter => ({ name: circuitLabel(meter.name, group.name), kwh: meter.kwh })), ...(rest.length ? [{ name: t("largest.others", { count: rest.length }), kwh: rest.reduce((sum, meter) => sum + meter.kwh, 0) }] : [])];
+    const parts = groupParts(group).filter(part => part.kwh > 0)
+      .map(part => ({ name: part.node ? part.name : circuitLabel(part.name, group.name), kwh: part.kwh }))
+      .sort((a, b) => b.kwh - a.kwh || a.name.localeCompare(b.name));
+    if (parts.length < 2) return [];
+    const kept = parts.slice(0, MAX_CIRCUITS - (parts.length > MAX_CIRCUITS ? 1 : 0));
+    const rest = parts.slice(kept.length);
+    const rows = [...kept, ...(rest.length ? [{ name: t("largest.others", { count: rest.length }), kwh: rest.reduce((sum, part) => sum + part.kwh, 0) }] : [])];
     const shares = wholeShares(rows.map(row => row.kwh));
     return [{ key: group.id, name: group.name, perDay: perDayOf(group.kwh), centre: num(perDayOf(group.kwh)),
       slices: rows.map((row, index) => ({ name: row.name, value: perDayOf(row.kwh), share: shares[index]! / 100, colour: ENERGY_REVIEW_PALETTE[index % ENERGY_REVIEW_PALETTE.length]! })) }];
@@ -271,7 +290,68 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
   const alike = tree ? comparableGroups(tree) : null;
   let comparison: EnergyReview["comparison"] = null;
   let comparisonAnswer = "";
-  if (alike && alike.length >= 2) {
+  // The groups inside alike groups matched by name (ground floor, block lighting, emergency lights): the comparison
+  // reads at that level, with each group's whole day after them. Circuits are compared only when the groups have no
+  // such parts in common.
+  const partsOf = (alike ?? []).map(group => new Map(groupParts(group).filter(part => part.node && part.kwh > 0).map(part => [part.name.trim().toLocaleLowerCase(), part] as const)));
+  const sharedParts = partsOf.length >= 2 ? [...partsOf[0]!.keys()].filter(key => partsOf.every(map => map.has(key))) : [];
+  if (alike && alike.length >= 2 && sharedParts.length >= 2) {
+    const names = alike.map(group => group.name);
+    const rows = sharedParts.map(key => ({ key, name: partsOf[0]!.get(key)!.name, perDay: partsOf.map(map => perDayOf(map.get(key)!.kwh)) }))
+      .sort((a, b) => Math.max(...b.perDay) - Math.max(...a.perDay));
+    const totals = alike.map(group => perDayOf(group.kwh));
+    const average = totals.reduce((sum, value) => sum + value, 0) / totals.length;
+    const groupColours = alike.map((_, index) => ({ name: names[index]!, colour: ENERGY_REVIEW_PALETTE[index % ENERGY_REVIEW_PALETTE.length]! }));
+    const spread = (values: number[]) => { const hi = Math.max(...values), lo = Math.min(...values); return lo > 0 ? hi / lo - 1 : 0; };
+    let intro: string, callout = "";
+    if (alike.length === 2) {
+      const higher = totals[0]! >= totals[1]! ? 0 : 1, lower = 1 - higher;
+      const totalGap = spread(totals);
+      const apart = rows.map(row => { const [a = 0, b = 0] = row.perDay; return { row, gap: spread([a, b]), hi: a >= b ? 0 : 1, kwh: Math.abs(a - b) }; })
+        .filter(item => item.kwh >= 0.05 && item.gap >= NAMED_GAP).sort((a, b) => b.gap - a.gap).slice(0, 3);
+      const gapText = (item: (typeof apart)[number]) => {
+        const part = inSentence(item.row.name, locale), a = names[item.hi]!, b = names[1 - item.hi]!;
+        return item.gap >= 0.95 && item.gap < 1.05 ? t("cmp.gapTwice", { part, a, b }) : item.gap >= 1.05 ? t("cmp.gapTimes", { part, a, b, times: (item.gap + 1).toFixed(1) }) : t("cmp.gapPct", { part, a, b, pct: pctText(item.gap) });
+      };
+      intro = paragraph([
+        totalGap < CLOSE_SHARE
+          ? t("cmp.groupSame", { a: names[0]!, b: names[1]!, aKwh: kwhText(totals[0]!), bKwh: kwhText(totals[1]!), avg: kwhText(average) })
+          : t("cmp.groupMore", { hi: names[higher]!, lo: names[lower]!, pct: pctText(totalGap), hiKwh: kwhText(totals[higher]!), loKwh: kwhText(totals[lower]!) }),
+        apart.length ? t("cmp.partsApart", { items: list(apart.map(gapText)) }) : t("cmp.partsClose"),
+      ]);
+      // Where the largest gap comes from: the circuit inside that part that differs most between the two groups.
+      const widest = apart[0];
+      if (widest) {
+        const circuits = alike.map((group, index) => {
+          const node = partsOf[index]!.get(widest.row.key)!.node!;
+          const map = new Map<string, { label: string; kwh: number }>();
+          for (const meter of metersIn(node)) { const key = partKey(meter.name, group.name) || meter.name.toLocaleLowerCase(); map.set(key, { label: map.get(key)?.label ?? circuitLabel(meter.name, group.name), kwh: (map.get(key)?.kwh ?? 0) + meter.kwh }); }
+          return map;
+        });
+        const keys = new Set([...circuits[0]!.keys(), ...circuits[1]!.keys()]);
+        const most = [...keys].map(key => ({ key, label: circuits[0]!.get(key)?.label ?? circuits[1]!.get(key)!.label, a: perDayOf(circuits[0]!.get(key)?.kwh ?? 0), b: perDayOf(circuits[1]!.get(key)?.kwh ?? 0) }))
+          .sort((x, y) => Math.abs(y.a - y.b) - Math.abs(x.a - x.b))[0];
+        const only = most && Math.min(most.a, most.b) < 0.01 ? (most.a >= most.b ? 0 : 1) : null;
+        if (most && Math.abs(most.a - most.b) >= 0.05) callout = paragraph([
+          only != null ? t("cmp.becauseOnly", { part: inSentence(widest.row.name, locale), circuit: most.label, kwh: kwhText(Math.max(most.a, most.b)), name: names[only]! })
+            : t("cmp.because", { part: inSentence(widest.row.name, locale), circuit: most.label, a: names[0]!, b: names[1]!, aKwh: kwhText(most.a), bKwh: kwhText(most.b) }),
+          t("cmp.worthALook"),
+        ]);
+      }
+      comparisonAnswer = totalGap < CLOSE_SHARE
+        ? t("cmp.answerGroupSame", { a: names[0]!, b: names[1]!, aKwh: num(totals[0]!), bKwh: num(totals[1]!) })
+        : t("cmp.answerGroupMore", { hi: names[higher]!, lo: names[lower]!, pct: pctText(totalGap) });
+    } else {
+      const order = totals.map((value, index) => ({ value, name: names[index]! })).sort((a, b) => b.value - a.value);
+      intro = t("cmp.introMany", { count: alike.length, high: order[0]!.name, low: order.at(-1)!.name, highKwh: kwhText(order[0]!.value), lowKwh: kwhText(order.at(-1)!.value) });
+      comparisonAnswer = t("cmp.answerMany", { high: order[0]!.name, low: order.at(-1)!.name, highKwh: num(order[0]!.value), lowKwh: num(order.at(-1)!.value) });
+    }
+    comparison = {
+      heading: alike.length === 2 ? t("q.comparisonTwo", { a: names[0]!, b: names[1]! }) : t("q.comparisonMany"),
+      intro, title: t("cmp.titleGroups"), groups: groupColours, rows: rows.map(({ name, perDay }) => ({ name, perDay })),
+      total: { name: t("cmp.total"), perDay: totals }, callout,
+    };
+  } else if (alike && alike.length >= 2) {
     const keyed = alike.map(group => {
       const map = new Map<string, { label: string; kwh: number }>();
       for (const meter of metersIn(group)) {
@@ -391,15 +471,85 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
     drops[0] ? t("profile.introStep", { time: clock(drops[0].hour, locale), kw: kwText(drops[0].to, 1) }) : "",
     dayKw > 0.005 ? dayLead && dayLead.kw >= 0.5 * dayKw ? t("profile.introDayMostly", { kw: kwText(dayKw, 1), name: inSentence(dayLead.layer.name, locale) }) : t("profile.introDay", { kw: kwText(dayKw, 1) }) : "",
   ]);
+  // ---------- 5b. the night, moment by moment ----------
+  // Each lighting circuit's average hour says when it comes on, steps down and goes off. Readings are hourly, so an
+  // hour a circuit was on for only part of reads as the minutes it was on: at half its usual level, half an hour.
+  const timeline: EnergyReviewMoment[] = [];
+  if (lighting && profileLayers.length && peakKw > 0) {
+    const steadyIds = alwaysOnByDesignIds(data);
+    const tenMinutes = (fraction: number) => Math.round(Math.min(1, Math.max(0, fraction)) * 6) * 10;
+    type Moment = { at: number; kind: "on" | "step" | "off"; name: string };
+    const moments: Moment[] = [];
+    for (const meter of allMeters) {
+      if (meter.category !== "light" || steadyIds.has(meter.id) || stoppedIds.has(meter.id) || notInUseIds.has(meter.id)) continue;
+      const hours = meterHours(series.get(meter.id), profileDates);
+      const top = Math.max(...hours);
+      // Off in the middle of the day and on for part of the night; a circuit on all day long is not on a timer.
+      if (top < 0.01 || hours[12]! >= 0.1 * top || Math.min(...hours) >= 0.6 * top) continue;
+      const on = (hour: number) => hours[hour]! >= 0.1 * top;
+      const start = clockOrder.findIndex(on);
+      if (start < 0) continue;
+      let end = start;
+      while (end + 1 < clockOrder.length && on(clockOrder[end + 1]!)) end += 1;
+      const at = (index: number) => clockOrder[index]!;
+      const value = (index: number) => hours[at(index)]!;
+      // Switching on: the first hour's share of the next one's level is the part of the hour it was on for.
+      const onLevel = end > start ? Math.max(value(start), value(start + 1)) : value(start);
+      moments.push({ at: at(start) * 60 + 60 - tenMinutes(value(start) / onLevel), kind: "on", name: meter.name });
+      // Switching off: the last hour's share of the hour before it.
+      const offLevel = end > start ? value(end - 1) : value(end);
+      const lastShare = value(end) / Math.max(offLevel, 0.0001);
+      moments.push({ at: lastShare >= 0.95 ? (at(end) + 1) * 60 : at(end) * 60 + tenMinutes(lastShare), kind: "off", name: meter.name });
+      // A step down in the night: two hours in a row at under 85% of the first full hour, still on.
+      const first = value(Math.min(start + 1, end));
+      for (let index = start + 2; index < end; index += 1) {
+        if (value(index) < 0.85 * first && value(index + 1) < 0.85 * first) {
+          const before = value(index - 1), after = value(index + 1);
+          const share = before > after ? (value(index) - after) / (before - after) : 0;
+          moments.push({ at: at(index) * 60 + tenMinutes(share), kind: "step", name: meter.name });
+          break;
+        }
+      }
+    }
+    // Minutes from midday, so the night reads in order across midnight.
+    const fromNoon = (minutes: number) => (minutes - 12 * 60 + 24 * 60) % (24 * 60);
+    const timeOf = (exact: number) => {
+      const minutes = Math.floor(exact);
+      const hour = Math.floor(minutes / 60) % 24, minute = minutes % 60;
+      if (!minute) return clock(hour, locale);
+      if (locale === "zh-Hans") return `${clock(hour, locale)}${minute}分`;
+      const twelve = hour % 12 === 0 ? 12 : hour % 12;
+      return locale === "en" ? `${twelve}:${String(minute).padStart(2, "0")} ${hour < 12 ? "am" : "pm"}` : clock(hour, locale).replace(/\d+/, `${twelve}:${String(minute).padStart(2, "0")}`);
+    };
+    const names = (items: Moment[]) => { const all = [...new Set(items.map(item => item.name))]; return all.length <= 3 ? list(all) : t("time.namesMore", { names: all.slice(0, 2).join(locale === "zh-Hans" ? "、" : ", "), count: all.length - 2 }); };
+    const groupedBy = (kind: Moment["kind"]) => [...moments.filter(item => item.kind === kind).reduce((map, item) => map.set(item.at, [...(map.get(item.at) ?? []), item]), new Map<number, Moment[]>())]
+      .sort((a, b) => fromNoon(a[0]) - fromNoon(b[0]));
+    const ons = groupedBy("on"), steps = groupedBy("step"), offs = groupedBy("off");
+    const kwAt = (minutes: number) => stackedHours[Math.floor(minutes / 60) % 24]!;
+    // Each switch time is one moment; at most three switch-on and three switch-off moments, in clock order from midday.
+    const entries: Array<{ key: number; moment: EnergyReviewMoment }> = [];
+    const add = (minutes: number, text: string) => entries.push({ key: fromNoon(minutes), moment: { time: timeOf(minutes), text } });
+    ons.slice(0, 3).forEach(([at, items], index) => add(at, t(index === 0 ? "time.firstOn" : "time.moreOn", { names: names(items) })));
+    const allOn = clockOrder.find(hour => stackedHours[hour]! >= 0.95 * peakKw);
+    if (allOn !== undefined && ons.length > 1 && fromNoon(allOn * 60) >= fromNoon(ons[0]![0])) add(allOn * 60 + 0.5, t("time.allOn", { kw: kwText(peakKw, 1) }));
+    steps.slice(0, 2).forEach(([at, items]) => add(at, t("time.step", { names: names(items), kw: kwText(kwAt(at + 60), 1) })));
+    offs.slice(-3).forEach(([at, items], index, shown) => add(at, t(index === shown.length - 1 && shown.length > 1 ? "time.lastOff" : "time.off", { names: names(items) })));
+    entries.sort((a, b) => a.key - b.key);
+    timeline.push(...entries.map(entry => ({ time: entry.moment.time, text: entry.moment.text })));
+    // The day last: from the last light off to the first one on, and what stays on.
+    if (offs.length && ons.length && dayKw > 0.005) timeline.push({ time: t("time.daytime", { from: timeOf(offs.at(-1)![0]), to: timeOf(ons[0]![0]) }),
+      text: dayLead && dayLead.kw >= 0.5 * dayKw ? t("time.dayMostly", { kw: kwText(dayKw, 1), name: inSentence(dayLead.layer.name, locale) }) : t("time.day", { kw: kwText(dayKw, 1) }) });
+  }
   const profile: EnergyReview["profile"] = profileLayers.length && peakKw > 0 ? {
     heading: t("q.profile"),
     intro: profileIntro,
     title: t("profile.title", { period: periodText }),
-    layers: profileLayers, peakKw,
+    layers: profileLayers, peakKw, timeline,
   } : null;
 
   // ---------- points to check ----------
   const checks: EnergyReviewCheck[] = [];
+  const offlineTitles = new Set<string>(), offlineNames = new Map<string, string>();
   for (const { meter, last } of stopped) {
     const usual = usualOf.get(meter.id) ?? null;
     checks.push({ title: t("check.stopped.title", { name: meter.name }), text: paragraph([
@@ -408,12 +558,27 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
       t("check.stopped.do"),
     ]) });
   }
-  for (const item of poweredWithLights) checks.push({ title: t("check.powered.title", { name: item.meter.name }), text: paragraph([
-    item.from !== undefined && item.to !== undefined ? t("check.powered.hours", { from: clock(item.from, locale), to: clock(item.to, locale) }) : t("check.powered.plain"),
-    t("check.powered.do"),
-  ]) });
-  for (const item of notInUse) checks.push({ title: t("check.notInUse.title", { name: item.name }), text: item.reason && !item.reason.startsWith("reason:") ? t("check.notInUse.reason", { reason: item.reason }) : t("check.notInUse.plain") });
-  for (const item of (base.total.standout?.items ?? []).slice(0, 2)) checks.push({ title: t("check.standout.title", { date: `${weekdayOf(item.date, locale)} ${shortDate(item.date, locale)}` }), text: item.text });
+  // A meter powered with its lights (it reports only while they are on) is wired that way on purpose: nothing to check.
+  // A meter set aside as not in use is checked only when it has gone quiet: then it is offline, and someone must look.
+  for (const item of notInUse) {
+    const meter = allMeters.find(candidate => candidate.id === item.id);
+    const cells = meter?.series?.cells.filter(cell => dates.includes(cell[0])) ?? [];
+    if (lighting && cells.length && receivedShare(cells, true) >= POWERED_NIGHT_SHARE) continue;
+    const last = meter?.series ? lastReading(meter.series.cells) : null;
+    const quiet = !last || !Number.isFinite(siteLast) || siteLast - hourIndex(last.date, last.hour) > REVIEW_STOPPED_HOURS;
+    const reason = item.reason && !item.reason.startsWith("reason:") ? item.reason : "";
+    if (quiet) { offlineTitles.add(t("check.offline.title", { name: item.name })); offlineNames.set(t("check.offline.title", { name: item.name }), item.name); }
+    checks.push(quiet ? { title: t("check.offline.title", { name: item.name }), text: paragraph([
+      last ? t("check.stopped.since", { since: at(last.date, last.hour) }) : t("check.stopped.none"),
+      reason ? t("check.offline.reason", { reason }) : "",
+      t("check.offline.do"),
+    ]) } : { title: t("check.notInUse.title", { name: item.name }), text: reason ? t("check.notInUse.reason", { reason }) : t("check.notInUse.plain") });
+  }
+  // The first days after the meters went in often carry readings from installation day: they are not "stood out" days.
+  const historyCells = (data.history?.total ?? project.total)?.cells ?? [];
+  const firstRead = historyCells.filter(cell => cell[3] > 0).reduce<string | null>((first, cell) => !first || cell[0] < first ? cell[0] : first, null);
+  const settled = (date: string) => !firstRead || Date.parse(`${date}T00:00:00Z`) - Date.parse(`${firstRead}T00:00:00Z`) >= 2 * 86_400_000;
+  for (const item of (base.total.standout?.items ?? []).filter(item => settled(item.date)).slice(0, 2)) checks.push({ title: t("check.standout.title", { date: `${weekdayOf(item.date, locale)} ${shortDate(item.date, locale)}` }), text: item.text });
   if (lighting && base.daytime?.items.length) checks.push({ title: t("check.daytime.title"), text: paragraph([list(base.daytime.items), base.daytime.more ?? ""]) });
   const mustRun = mustRunIds(allMeters, data);
   const quietMustRun = allMeters.filter(meter => mustRun.has(meter.id) && !stoppedIds.has(meter.id) && !notInUseIds.has(meter.id) && meter.series!.cells.every(cell => (cell[2] ?? 0) < USED_DAY_KWH / 24) && meter.series!.cells.some(cell => cell[3] > 0));
@@ -518,13 +683,14 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
   // ---------- recommended next steps ----------
   const client = data.projectName;
   const steps: EnergyReviewStep[] = [];
-  for (const { meter } of stopped.slice(0, 2)) steps.push({ action: t("step.fixMeter", { name: meter.name }), who: t("who.contractor"), when: t("when.week") });
-  if (stopped.length > 2) steps.push({ action: t("step.fixMeters", { count: stopped.length - 2 }), who: t("who.contractor"), when: t("when.week") });
+  // Meters to fix: those that stopped, and those set aside as not in use that have gone quiet.
+  const toFix = [...stopped.map(item => item.meter.name), ...checks.filter(check => offlineTitles.has(check.title)).map(check => offlineNames.get(check.title)!)];
+  for (const name of toFix.slice(0, 2)) steps.push({ action: t("step.fixMeter", { name }), who: t("who.contractor"), when: t("when.week") });
+  if (toFix.length > 2) steps.push({ action: t("step.fixMeters", { count: toFix.length - 2 }), who: t("who.contractor"), when: t("when.week") });
   if (lighting && base.daytime?.items.length) {
     const names = base.daytime.items.slice(0, 2).map(item => item.split(/[:：]/)[0]!.trim());
     steps.push({ action: t("step.daytime", { names: list(names) }), who: t("who.contractor"), when: t("when.week") });
   }
-  for (const item of poweredWithLights.slice(0, 1)) steps.push({ action: t("step.powered", { name: item.meter.name }), who: t("who.contractor"), when: t("when.convenient") });
   const sendRate = rate == null, sendCounts = missingCounts;
   if (sendRate || sendCounts) steps.push({ action: t(sendRate && sendCounts ? "step.sendBoth" : sendRate ? "step.sendRate" : "step.sendCounts"), who: client, when: t("when.available") });
   // Lights-on sites trial the dimming only; the daytime standby and timers are fixed, not trialled. Opening-hours sites

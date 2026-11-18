@@ -67,15 +67,81 @@ it("keeps a tapped cell's details after the finger lifts, until a tap elsewhere"
   await unmount();
 });
 
-it("speaks of one day's hour when each row is a day of one device", async () => {
-  const days = [{ id: "2026-11-02", name: "Mon 2 Nov", group: "Week of 2 Nov", profileKw: profile }, { id: "2026-11-03", name: "Tue 3 Nov", group: "Week of 2 Nov", profileKw: profile.map(kw => kw === null ? null : kw / 2) }];
-  const { host, unmount } = await render(<UsageHeatmap rows={days} openHours={new Set()} scale="all" />);
-  await hover(host, "1:20");
-  const tooltip = host.querySelector("[data-heatmap] > div:last-child")!.textContent!;
-  expect(tooltip).toContain("50% of its busiest hour (0.30 kW)");
-  expect(tooltip).toContain("0.15 kW · 0.15 kWh in this hour");
-  expect(tooltip).not.toContain("average day");
-  expect(host.querySelector("figure > p:last-child")!.textContent).toContain("100% is the busiest hour in the whole period.");
+/** A made-up emergency-lights circuit over three days: a steady 0.09 kWh an hour, dimmed to 0.03 at 01:00, with one 0.11 at 05:00 on Tue. */
+const steady = (change: Record<number, number | null> = {}) => Array.from({ length: 24 }, (_, hour): number | null => hour in change ? change[hour]! : hour === 1 ? 0.03 : 0.09);
+const week = [
+  { id: "2026-11-02", name: "Mon 2 Nov", group: "Week of 2 Nov", profileKw: steady() },
+  { id: "2026-11-03", name: "Tue 3 Nov", group: "Week of 2 Nov", profileKw: steady({ 5: 0.11 }) },
+  { id: "2026-11-04", name: "Wed 4 Nov", group: "Week of 2 Nov", profileKw: steady({ 7: null }) },
+];
+const tooltipText = (host: HTMLElement) => host.querySelector("[data-heatmap] > div:last-child")!.textContent!;
+
+it("compares each hour of a day with that hour's usual use, so a steady device reads about 100%", async () => {
+  const { host, unmount } = await render(<UsageHeatmap rows={week} openHours={new Set()} scale="usual" />);
+  const text = (cell: string) => host.querySelector(`[data-heat-cell="${cell}"]`)!.textContent;
+  expect(text("0:3")).toBe("100%");
+  // Dimmed at 01:00 every night, so 01:00 on a normal night is usual too.
+  expect(text("0:1")).toBe("100%");
+  // The one 0.11 stands out; it does not lift what counts as usual, so the ordinary 0.09 on the other days stays at 100%.
+  expect(text("1:5")).toBe("122%");
+  expect(text("0:5")).toBe("100%");
+  // A missing hour stays empty, and is left out of that hour's usual use.
+  expect(text("2:7")).toBe("");
+  expect(host.querySelector('[data-heat-cell="2:7"]')!.getAttribute("data-heat-kind")).toBe("missing");
+  expect(text("0:7")).toBe("100%");
+  const legend = host.querySelector("figure > p:last-child")!.textContent!;
+  expect(legend).toContain("% of this hour's usual use");
+  expect(legend).toContain("Less than usual");
+  expect(legend).toContain("More than usual");
+  expect(legend).toContain("100% = what this device usually uses at this hour");
+  expect(legend).toContain("its typical value for that hour over the period");
+  expect(legend).not.toContain("busiest");
+  expect(legend).not.toContain("Usually off");
+  await hover(host, "1:5");
+  expect(tooltipText(host)).toContain("122% of its usual use at this hour (usually 0.09 kWh)");
+  expect(tooltipText(host)).toContain("0.11 kW · 0.11 kWh in this hour");
+  expect(tooltipText(host)).not.toContain("average day");
+  await unmount();
+});
+
+it("reads off at an hour the device is usually off, and flags a day it used energy then", async () => {
+  // Lighting at 2 kW from 18:00 to 23:00 and off otherwise, over ten days; on the last day 0.02 kWh went at 03:00.
+  const night = (extra: number) => Array.from({ length: 24 }, (_, hour) => hour >= 18 ? 2 : hour === 3 ? extra : 0);
+  const days = Array.from({ length: 10 }, (_, day) => ({ id: `2026-11-${10 + day}`, name: `Day ${day + 1}`, group: "Week", profileKw: night(day === 9 ? 0.02 : 0) }));
+  const { host, unmount } = await render(<UsageHeatmap rows={days} openHours={new Set()} scale="usual" />);
+  const cell = (id: string) => host.querySelector(`[data-heat-cell="${id}"]`)!;
+  expect(cell("0:3").getAttribute("data-heat-kind")).toBe("off");
+  expect(cell("0:3").textContent).toBe("off");
+  expect(cell("9:3").getAttribute("data-heat-kind")).toBe("usedWhileOff");
+  expect(cell("9:3").textContent).toBe("!");
+  expect(cell("9:3").textContent).not.toContain("%");
+  expect(cell("9:20").textContent).toBe("100%");
+  const legend = host.querySelector("figure > p:last-child")!.textContent!;
+  expect(legend).toContain("Usually off at this hour");
+  expect(legend).toContain("Used while usually off");
+  await hover(host, "9:3");
+  expect(tooltipText(host)).toContain("Used energy at an hour it is usually off");
+  expect(tooltipText(host)).toContain("0.02 kW · 0.02 kWh in this hour");
+  await hover(host, "0:3");
+  expect(tooltipText(host)).toContain("Usually off at this hour");
+  expect(tooltipText(host)).toContain("0.00 kW · 0.00 kWh in this hour");
+  await unmount();
+});
+
+it("keeps an hour usually off when the device ran there on one odd night, and flags that night", async () => {
+  // Lighting at 2 kW from 18:00 to 23:00 over a week; on the seventh night it was also left on at 03:00.
+  const nights = Array.from({ length: 7 }, (_, night) => ({ id: `2026-11-${16 + night}`, name: `Night ${night + 1}`, group: "Week", profileKw: Array.from({ length: 24 }, (_, hour) => hour >= 18 ? 2 : hour === 3 && night === 6 ? 2 : 0) }));
+  const { host, unmount } = await render(<UsageHeatmap rows={nights} openHours={new Set()} scale="usual" />);
+  const cell = (id: string) => host.querySelector(`[data-heat-cell="${id}"]`)!;
+  for (let night = 0; night < 6; night++) {
+    expect(cell(`${night}:3`).getAttribute("data-heat-kind")).toBe("off");
+    expect(cell(`${night}:3`).textContent).toBe("off");
+  }
+  expect(cell("6:3").getAttribute("data-heat-kind")).toBe("usedWhileOff");
+  expect(cell("6:3").textContent).toBe("!");
+  await hover(host, "6:3");
+  expect(tooltipText(host)).toContain("Used energy at an hour it is usually off");
+  expect(tooltipText(host)).toContain("2.00 kW · 2.00 kWh in this hour");
   await unmount();
 });
 
@@ -84,7 +150,7 @@ it("gives the kWh really recorded for an hour only partly received, and says so"
   const partial = profile.map(() => null as number | null);
   partial[3] = 0.1;
   const days = [{ id: "2026-11-02", name: "Mon 2 Nov", group: "Week of 2 Nov", profileKw: profile.map((kw, hour) => hour === 3 ? 0.2 : kw), partialKwh: partial }];
-  const { host, unmount } = await render(<UsageHeatmap rows={days} openHours={new Set()} scale="all" />);
+  const { host, unmount } = await render(<UsageHeatmap rows={days} openHours={new Set()} scale="usual" />);
   await hover(host, "0:3");
   let tooltip = host.querySelector("[data-heatmap] > div:last-child")!.textContent!;
   expect(tooltip).toContain("0.20 kW · 0.10 kWh in this hour");
