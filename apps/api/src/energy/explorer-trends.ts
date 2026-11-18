@@ -1,8 +1,13 @@
-/** Compact hourly facts; scope totals use only published official routes. */
+/**
+ * Compact hourly facts; scope totals use only published official routes. A cell is [date, hour, kWh read on time,
+ * minutes read on time, intervals that were not read on time, kWh sent late]. The last is the energy a meter counted
+ * while it was offline and sent when it came back, spread over the hours it was offline (quality 'gap'): it is real
+ * energy, so daily totals count it, but its hours stay incomplete.
+ */
 export type ExplorerTrendSeries = {
   id: string;
   expectedMinutesPerHour: number;
-  cells: Array<[string, number, number | null, number, number]>;
+  cells: Array<[string, number, number | null, number, number, number]>;
 };
 /**
  * A series sums its meters. A virtual meter's series also carries each input's sign (main − sub-meters); its hour is
@@ -25,9 +30,10 @@ export function explorerTrendSql(
 ) {
   const terms = routeTerms(routes);
   if (!terms.length) return null;
-  return `SELECT series_id, to_json(list(struct_pack(d := d, h := h, k := k, valid_mins := valid_mins, events := events) ORDER BY d,h)) AS cells
+  return `SELECT series_id, to_json(list(struct_pack(d := d, h := h, k := k, valid_mins := valid_mins, events := events, gap := gap) ORDER BY d,h)) AS cells
   FROM (SELECT r.series_id, CAST(local_date AS VARCHAR) d, local_hour h,
     SUM(usage_kwh * r.coef) FILTER (WHERE quality_status = 'ok') k,
+    COALESCE(SUM(usage_kwh * r.coef) FILTER (WHERE quality_status = 'gap'),0) AS gap,
     COALESCE(SUM(elapsed_minutes) FILTER (WHERE quality_status = 'ok'),0) AS valid_mins,
     COUNT(*) FILTER (WHERE quality_status <> 'ok') events
     FROM ${quoted(view)} source
@@ -47,6 +53,7 @@ export function decodeExplorerTrends(
           k: number | null;
           valid_mins: number;
           events: number;
+          gap?: number | null;
         }>)
       : [];
     const expectedMinutesPerHour = new Set(route.meters).size * 60;
@@ -59,6 +66,8 @@ export function decodeExplorerTrends(
         c.k == null || (route.coefficients && Number(c.valid_mins) < expectedMinutesPerHour) ? null : Number(c.k),
         Number(c.valid_mins),
         Number(c.events),
+        // A virtual meter (main − sub-meters) only has a value when every input read on time, so nothing is sent late.
+        route.coefficients ? 0 : Number(c.gap ?? 0),
       ]),
     };
   });

@@ -70,8 +70,8 @@ describe("analysis data", () => {
     expect(data.previous?.project.usageKwh).toBe(72);
     expect(data.history?.dates).toEqual(["2026-08-02", "2026-08-03", "2026-08-04", "2026-08-05", "2026-08-06", "2026-08-07", "2026-08-08", "2026-08-09"]);
     expect(scopeDays(data.current.project, data.holidays)).toEqual([
-      { date: "2026-08-08", dayType: "public_holiday", holidayName: "Office move (planned closure)", complete: true, totalKwh: 144, byCategory: { light: 48, load: 96 } },
-      { date: "2026-08-09", dayType: "public_holiday", holidayName: "National Day", complete: true, totalKwh: 144, byCategory: { light: 48, load: 96 } },
+      { date: "2026-08-08", dayType: "public_holiday", holidayName: "Office move (planned closure)", complete: true, totalKwh: 144, recoveredKwh: 0, byCategory: { light: 48, load: 96 } },
+      { date: "2026-08-09", dayType: "public_holiday", holidayName: "National Day", complete: true, totalKwh: 144, recoveredKwh: 0, byCategory: { light: 48, load: 96 } },
     ]);
   });
 

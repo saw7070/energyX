@@ -16,6 +16,8 @@ import { intlLocale, type EnergyIqLocale } from "./energyiq-messages";
 import { keyPointsMessages } from "./key-points-messages";
 import { useEnergyIqAccess } from "./energyiq-access";
 import { GroupSplit } from "./group-split";
+import { DailyEnergyChart } from "./daily-energy-chart";
+import { kwhText, moneyText } from "@datafoundry/site-report";
 
 /** Two sentences that say nearly the same thing ("used after working hours" / "used outside working hours"). */
 const sameText = (left: string, right: string): boolean => {
@@ -27,6 +29,21 @@ const sameText = (left: string, right: string): boolean => {
   // CJK sentences have no spaces, so compare them whole.
   return all === 0 ? true : all <= 2 ? left.trim() === right.trim() : shared / all >= 0.6;
 };
+
+/**
+ * The sentence under the finding, without what the finding already says. "Lights ran at night as planned: almost all
+ * the electricity was used during the lights-on hours" under "The lights run at night, as planned" keeps only "Almost
+ * all the electricity was used during the lights-on hours". Null when nothing is left to add.
+ */
+export function afterTitle(headline: string, title: string): string | null {
+  if (sameText(headline, title)) return null;
+  const colon = headline.search(/[:：]/);
+  if (colon > 0 && sameText(headline.slice(0, colon), title)) {
+    const rest = headline.slice(colon + 1).trim();
+    return rest ? rest.charAt(0).toLocaleUpperCase() + rest.slice(1) : null;
+  }
+  return headline;
+}
 
 /**
  * Analysis for the same dates as the headline's report. A headline about equipment left on opens step 2,
@@ -118,12 +135,14 @@ export function KeyPoints({projectId}:{projectId:string}) {
       :!result?<p role="status">{t("loading")}</p>
       :<>
       <section className={styles.hero}><p className={styles.heroEyebrow}>{metrics?.projectName ?? activeProject?.name ?? t("yourProject")}</p>
-        {/* With groups, the first view leads with the site's average day, then where it goes by group; the finding follows. */}
+        {/* The first view: energy each day, then the site's average day and its month, then where it goes by group. */}
+        {report && <DailyEnergyChart report={report} />}
         <h2>{averageDay ? averageDay.text : report ? <>{report.title.before}<span>{report.title.emphasis}</span></> : site.state && publication?.selection.summary ? plain(publication.selection.summary) : t("fallbackHeadline")}</h2>
+        {averageDay && <p className={styles.heroMonth}>{averageDay.cost != null ? t("monthEstimate", { kwh: kwhText(averageDay.kwh * 30), cost: moneyText(averageDay.cost * 30, report?.currency ?? "SGD") }) : t("monthEstimatePlain", { kwh: kwhText(averageDay.kwh * 30) })}</p>}
         {split && <GroupSplit rows={split} />}
         {averageDay && report && <p className={styles.heroFinding}>{report.title.before}<span>{report.title.emphasis}</span></p>}
         {/* The sentence under the headline only when it adds something: often it is the headline again. */}
-        {report?.headline && sameText(report.headline, `${report.title.before}${report.title.emphasis}`) === false ? <p>{report.headline}</p> : null}
+        {report?.headline ? (() => { const rest = afterTitle(report.headline, `${report.title.before}${report.title.emphasis}`); return rest ? <p>{rest}</p> : null; })() : null}
         {/* Lights-on sites warned about daytime use: which lights were on in the daytime, and when, largest first. */}
         {report?.daytime && report.headlineTopic === "daytime" && report.daytime.items.length > 0 && <div className={styles.heroDaytime}>
           <p>{report.daytime.heading}</p>

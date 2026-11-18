@@ -1409,7 +1409,7 @@ export type EnergyScopeAnalysisDto = {
     validIntervalCount: number;
     qualityEventCount: number;
   };
-  explorerTrends?: Array<{id: string; expectedMinutesPerHour: number; cells: Array<[string, number, number | null, number, number]>}>;
+  explorerTrends?: Array<{id: string; expectedMinutesPerHour: number; cells: Array<[string, number, number | null, number, number, number?]>}>;
   hourlyProfile: Array<{
     hour: number;
     usageKwh: number;

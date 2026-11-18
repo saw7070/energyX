@@ -92,7 +92,12 @@ it("leads with the average day, then where it goes by group, each top-level grou
  await act(async()=>common.click());
  expect(common.getAttribute("aria-expanded")).toBe("true");
  expect(inside.hidden).toBe(false);
- expect([...inside.querySelectorAll("li")].map(item=>item.textContent)).toEqual(["Driveway3.8 kWh a day · 8%", "Playground2.4 kWh a day · 5%", "Pavilion1.4 kWh a day · 3%", "Entrance1.9 kWh a day · 4%"]);
+ // The groups inside, largest first, beside a ring of their shares; pointing at a row lights up its slice.
+ expect([...inside.querySelectorAll("li")].map(item=>item.textContent)).toEqual(["Driveway3.8 kWh a day · 8%", "Playground2.4 kWh a day · 5%", "Entrance1.9 kWh a day · 4%", "Pavilion1.4 kWh a day · 3%"]);
+ const slices=[...inside.querySelectorAll("svg path")];
+ expect(slices).toHaveLength(4);
+ await act(async()=>inside.querySelector("li > div")!.dispatchEvent(new MouseEvent("pointerover",{bubbles:true})));
+ expect(inside.querySelector("svg text")?.textContent).toBe("8%");
  await act(async()=>common.click());
  expect(inside.hidden).toBe(true);
  } finally {delete report.groups;delete report.averageDay;await act(async()=>root.unmount());host.remove();request.mockRestore();vi.unstubAllGlobals();}

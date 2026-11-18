@@ -155,6 +155,15 @@ export const ENERGY_REVIEW_CSS = `
 .eiq-energy-review .er-bar>span{display:block;height:9px;min-width:2px;border-radius:0 3px 3px 0;transition:width .3s}
 .eiq-energy-review .er-gap{justify-self:end;font-size:11.5px;font-weight:600;color:var(--er-muted);background:var(--er-soft);border-radius:999px;padding:2px 8px;white-space:nowrap}
 .eiq-energy-review .er-gap.er-wide{background:var(--er-bronze-soft);color:#7C5320}
+.eiq-energy-review .er-alert{display:flex;gap:12px;align-items:flex-start;margin-top:12px;padding:10px 14px;border-radius:10px;background:var(--er-bronze-soft);color:#5E3E14;font-size:13px;line-height:1.5}
+.eiq-energy-review .er-alert b{flex:none;display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--er-bronze);color:#fff;font-size:12px;font-weight:800}
+.eiq-energy-review .er-alert p{margin:0;max-width:none}
+.eiq-energy-review .er-pair-total{border-top:1.5px solid var(--er-ink);border-bottom:0;margin-top:2px}
+.eiq-energy-review .er-pair-total>span:first-child{font-weight:700}
+.eiq-energy-review .er-timeline{list-style:none;margin-top:16px;border-top:1px solid var(--er-line);padding-top:6px;display:grid}
+.eiq-energy-review .er-timeline li{display:grid;grid-template-columns:minmax(92px,auto) minmax(0,1fr);gap:14px;align-items:baseline;padding:8px 0;border-bottom:1px dashed var(--er-line);font-size:13.5px}
+.eiq-energy-review .er-timeline li:last-child{border-bottom:0}
+.eiq-energy-review .er-timeline time{font-weight:700;color:var(--er-green);font-variant-numeric:tabular-nums;white-space:nowrap}
 .eiq-energy-review .er-callout{display:flex;gap:14px;margin-top:20px;padding:14px 18px;border-radius:12px;background:var(--er-bronze-soft);max-width:none}
 .eiq-energy-review .er-callout::before{content:"";flex:none;width:3px;border-radius:2px;background:var(--er-bronze)}
 
@@ -369,9 +378,10 @@ function DailyBars({ review, live }: { review: EnergyReview; live: boolean }) {
         <TipRow label={t("chart.energy")} value={`${num(day.kwh)} kWh`} />
         {day.cost != null && <TipRow label={review.costBasis ? `${t("chart.cost")} (${review.costBasis})` : t("chart.cost")} value={moneyText(day.cost, review.currency, 2)} />}
         {typical && typical.kwh > 0 && <TipRow label={t("chart.vsTypical")} value={`${day.kwh >= typical.kwh ? "+" : "−"}${pct(Math.abs(day.kwh / typical.kwh - 1))}`} />}
-        {!day.complete && <em>{t("total.missingDay")}</em>}
+        {day.recoveredKwh >= 0.05 ? <em>{t("chart.recovered", { kwh: kwhLabel(day.recoveredKwh) })}</em> : !day.complete && <em>{t("total.missingDay")}</em>}
       </Tip>}
     </div>
+    {review.total!.outage && <div className="er-alert" role="note"><b aria-hidden="true">!</b><p>{review.total!.outage}</p></div>}
     <p className="er-note">{review.total!.caption}{staticCost && review.total!.costCaption ? `${review.locale === "zh-Hans" ? "" : " "}${review.total!.costCaption}` : ""}{days.some(item => !item.complete && item.kwh > 0) ? review.locale === "zh-Hans" ? `${t("total.legendMissing")}。` : ` ${t("total.legendMissing")}.` : ""}</p>
   </figure>;
 }
@@ -431,15 +441,16 @@ function Ring({ slices, centre, unit, value, size = 188, stacked, live, t }: { s
 
 function Pairs({ review, t }: { review: EnergyReview; t: T }) {
   const comparison = review.comparison!;
-  const max = Math.max(...comparison.rows.flatMap(row => row.perDay), 0.001);
+  const max = Math.max(...comparison.rows.flatMap(row => row.perDay), ...(comparison.total?.perDay ?? []), 0.001);
   const two = comparison.groups.length === 2;
   return <figure className="er-fig">
     <figcaption className="er-fig-head"><span className="er-fig-title">{comparison.title}</span></figcaption>
     <div className="er-key">{comparison.groups.map(group => <span key={group.name}><i style={{ background: group.colour }} />{group.name}</span>)}</div>
-    <div className="er-pairs">{comparison.rows.map(row => {
+    <div className="er-pairs">{[...comparison.rows, ...(comparison.total ? [comparison.total] : [])].map(row => {
       const [a = 0, b = 0] = row.perDay;
+      const isTotal = row === comparison.total;
       const gap = two && Math.min(a, b) > 0 ? Math.abs(a - b) / Math.min(a, b) : null;
-      return <div key={row.name} className="er-pair">
+      return <div key={row.name} className={`er-pair${isTotal ? " er-pair-total" : ""}`}>
         <span>{row.name}</span>
         <span className="er-bars">{row.perDay.map((value, index) => <span key={comparison.groups[index]!.name} className="er-bar">
           <span style={{ width: `${value / max * 80}%`, background: comparison.groups[index]!.colour }} />{num(value, 2)}
@@ -515,6 +526,7 @@ function Layers({ review, live, t }: { review: EnergyReview; live: boolean; t: T
         {shown.length > 1 && <TipRow sum label={t("chart.total")} value={`${num(stackTop[hover]!, 2)} kW`} />}
       </Tip>}
     </div>
+    {profile.timeline.length > 0 && <ol className="er-timeline">{profile.timeline.map(moment => <li key={`${moment.time}|${moment.text}`}><time>{moment.time}</time><span>{moment.text}</span></li>)}</ol>}
   </figure>;
 }
 

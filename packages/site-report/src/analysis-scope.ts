@@ -20,7 +20,7 @@ export type AnalysisSource = {
     dataSnapshotId?: string;
   };
   summary: { usageKwh: number; peakKw: number; peakAt?: string | undefined; validIntervalCount: number };
-  explorerTrends?: Array<{ id: string; expectedMinutesPerHour: number; cells: Array<[string, number, number | null, number, number]> }> | undefined;
+  explorerTrends?: Array<{ id: string; expectedMinutesPerHour: number; cells: Array<[string, number, number | null, number, number, number?]> }> | undefined;
   explorerMeters?: Array<{ id: string; name: string; fullName?: string | undefined; scopeId: string; kind: "physical" | "virtual"; category: string; includedInOfficialTotal: boolean }> | undefined;
   categories: Array<{ category: string; usageKwh: number }>;
   childScopes: Array<{ nodeId: string; name: string }>;
