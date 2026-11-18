@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import React, { useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import React, { createContext, useContext, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   CATEGORY_COLORS, CATEGORY_ORDER, TIME_BUCKETS, dateWithDayYear, TIME_BUCKET_COLORS, aboveBenchmarkWhenClosed, alwaysOnKw, closedUseBreakdown,
@@ -53,6 +53,18 @@ const closedThresholds = (meaning: HoursMeaning) => meaning === "lights_on" ? { 
 type StoryInput = { data: AnalysisData; days: AnalysisDay[]; anomalies: AnalysisAnomaly[]; floor: ReturnType<typeof overnightFloor>; rate: number | null };
 type Story = ReturnType<typeof buildStory>;
 
+/** The numbered steps, by the id each one's section (and its link) has. */
+export type StoryStepId = "story-money" | "story-on" | "story-when" | "story-days" | "story-plan" | "story-health" | "story-ahead";
+/**
+ * A step's detailed figures, shown directly under it on request: the titles of what is inside, and the figures
+ * themselves. `where` is "about" when the step is missing (the days that stood out need the site report) and the
+ * figures move to "About these figures" at the end instead.
+ */
+export type StoryFigure = { contents: string[]; content: (where: "step" | "about") => ReactNode };
+export type StoryFigures = Partial<Record<StoryStepId, StoryFigure>>;
+type FiguresState = { figures: StoryFigures; open: ReadonlySet<string>; toggle: (id: string) => void };
+const FiguresContext = createContext<FiguresState | null>(null);
+
 /**
  * The site report for the same readings, so the summary follows the report and never disagrees with it: the average
  * day and its cost, the split by group, the lights on in the daytime, the average day hour by hour and the days that
@@ -63,7 +75,7 @@ function siteReportFor(data: AnalysisData, locale: EnergyIqLocale): SiteReport |
   try { return buildSiteReport(data, null, new Date().toISOString(), locale); } catch { return null; }
 }
 
-/** Every number the decision summary shows, from the same readings as the detailed analysis below it. */
+/** Every number the story shows, from the same readings as the figures under each step. */
 function buildStory({ data, days, anomalies, floor, rate }: StoryInput, locale: EnergyIqLocale = "en") {
   const project = data.current.project;
   const currency = project.cost?.currency ?? null;
@@ -108,7 +120,11 @@ function buildStory({ data, days, anomalies, floor, rate }: StoryInput, locale: 
   };
 }
 
-export function DecisionSummary(props: StoryInput) {
+/**
+ * The whole Analysis story: the short version at the top, then each numbered step with its own detailed figures under
+ * it (closed until asked for), and "About these figures" at the end for what has no step of its own.
+ */
+export function DecisionSummary(props: StoryInput & { figures?: StoryFigures; about?: ReactNode }) {
   const { data: storyData, days, anomalies, floor, rate } = props;
   const { locale } = useEnergyIqLocale();
   const story = useMemo(() => buildStory({ data: storyData, days, anomalies, floor, rate }, locale), [storyData, days, anomalies, floor, rate, locale]);
@@ -135,10 +151,21 @@ export function DecisionSummary(props: StoryInput) {
   const headline = story.periodCost != null
     ? rich(t(lightsOk ? "lights.summary.headlineCostOk" : "summary.headlineCost", { days: dates.length }), { name: data.projectName, cost: <Strong>{money(story.periodCost)}</Strong>, closed: <Strong tone="amber">{money(story.closedCost)} ({num(story.closedShare * 100, 0)}%)</Strong> })
     : rich(t(lightsOk ? "lights.summary.headlineKwhOk" : "summary.headlineKwh", { days: dates.length }), { name: data.projectName, kwh: <Strong>{num(story.split.total, 0)} kWh</Strong>, share: <Strong tone="amber">{num(story.closedShare * 100, 0)}%</Strong> });
+  // Each step's figures sit under it. Without the site report there is no "Days that stood out" step, so its figures
+  // (the daily chart) move to the end with the rest that has no step of its own.
+  const given = props.figures ?? {};
+  const placed: StoryFigures = story.report ? given : Object.fromEntries(Object.entries(given).filter(([id]) => id !== "story-days"));
+  const homeless = story.report ? undefined : given["story-days"];
+  const about = homeless || props.about ? <>{homeless?.content("about")}{props.about}</> : null;
+  const figureIds = Object.keys(placed);
+  const [openFigures, setOpenFigures] = useState<ReadonlySet<string>>(() => new Set());
+  const allOpen = figureIds.length > 0 && figureIds.every(id => openFigures.has(id));
+  const toggleFigures = (id: string) => setOpenFigures(current => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   // The steps in the report's order, then the checks and the forecast the report does not have.
   const steps = [
     ["story-money", story.periodCost != null ? "nav.money" : "nav.energy"], ["story-on", "nav.on"], ["story-when", "nav.when"],
-    ...(story.report ? [["story-days", "nav.days"] as const] : []), ["story-plan", "nav.plan"], ["story-health", "nav.health"], ["story-ahead", "nav.ahead"], ["details", "nav.details"],
+    ...(story.report ? [["story-days", "nav.days"] as const] : []), ["story-plan", "nav.plan"], ["story-health", "nav.health"], ["story-ahead", "nav.ahead"],
+    ...(about ? [["story-about", "nav.about"] as const] : []),
   ] as const;
   return <div className="space-y-8">
     <section aria-labelledby="story-title" className="overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-white to-emerald-50/60 shadow-sm">
@@ -174,17 +201,25 @@ export function DecisionSummary(props: StoryInput) {
       </p> : null}
     </section>
 
-    <nav aria-label={t("nav.label")} className="flex flex-wrap gap-2 text-xs">
-      {steps.map(([id, label]) => <button key={id} type="button" onClick={() => jump(id)} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-slate-600 hover:border-slate-300 hover:text-slate-900">{t(label)}</button>)}
-    </nav>
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <nav aria-label={t("nav.label")} className="flex flex-wrap gap-2 text-xs">
+        {steps.map(([id, label]) => <button key={id} type="button" onClick={() => jump(id)} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-slate-600 hover:border-slate-300 hover:text-slate-900">{t(label)}</button>)}
+      </nav>
+      {figureIds.length > 0 && <button type="button" onClick={() => setOpenFigures(allOpen ? new Set() : new Set(figureIds))} className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-slate-300 hover:text-slate-900">
+        <EnergyIcon name="chevron" className={`h-3.5 w-3.5 transition-transform ${allOpen ? "-rotate-90" : "rotate-90"}`} />{t(allOpen ? "figures.hideAll" : "figures.showAll")}
+      </button>}
+    </div>
 
-    <MoneySection story={story} data={data} money={money} />
-    <StaysOnSection story={story} money={money} />
-    <WhenSection story={story} money={money} inspect={inspectDay} />
-    <DaysSection story={story} onInspectDay={openDay} />
-    <PlanSection story={story} data={data} money={money} />
-    <HealthSection story={story} data={data} anomalies={props.anomalies} floor={props.floor} onJump={jump} onInspectDay={openDay} />
-    <AheadSection story={story} data={data} />
+    <FiguresContext.Provider value={{ figures: placed, open: openFigures, toggle: toggleFigures }}>
+      <MoneySection story={story} data={data} money={money} />
+      <StaysOnSection story={story} money={money} />
+      <WhenSection story={story} money={money} inspect={inspectDay} />
+      <DaysSection story={story} onInspectDay={openDay} />
+      <PlanSection story={story} data={data} money={money} />
+      <HealthSection story={story} data={data} anomalies={props.anomalies} floor={props.floor} onJump={jump} onInspectDay={openDay} />
+      <AheadSection story={story} data={data} />
+    </FiguresContext.Provider>
+    {about && <StoryCard id="story-about" title={t("about.title")} takeaway={t("about.takeaway")}><div className="space-y-4">{about}</div></StoryCard>}
   </div>;
 }
 
@@ -224,17 +259,34 @@ function BaselineTag({ viewBox, text, colour }: { viewBox?: { x?: number; y?: nu
     <text x={x} y={y} fill={colour} fontSize={11} fontWeight={600}>{text}</text>
   </g>;
 }
-function StoryCard({ id, step, title, takeaway, children }: { id: string; step: number; title: string; takeaway: ReactNode; children: ReactNode }) {
+function StoryCard({ id, step, title, takeaway, children }: { id: string; step?: number; title: string; takeaway: ReactNode; children: ReactNode }) {
+  const figures = useContext(FiguresContext);
+  const figure = figures?.figures[id as StoryStepId];
   return <section id={id} aria-labelledby={`${id}-title`} className="scroll-mt-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
     <div className="mb-5 flex items-start gap-3">
-      <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-semibold text-white">{step}</span>
+      {step != null && <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-semibold text-white">{step}</span>}
       <div>
         <h2 id={`${id}-title`} className="text-lg font-semibold text-slate-900">{title}</h2>
         <p className="mt-1 max-w-4xl text-sm leading-relaxed text-slate-600">{takeaway}</p>
       </div>
     </div>
     {children}
+    {figure && figures && <StepFigures id={id} figure={figure} open={figures.open.has(id)} onToggle={() => figures.toggle(id)} />}
   </section>;
+}
+/** "Show the figures": a step's detailed charts and tables, directly under its summary, drawn only once opened. */
+function StepFigures({ id, figure, open, onToggle }: { id: string; figure: StoryFigure; open: boolean; onToggle: () => void }) {
+  const t = useMessages(storyMessages);
+  const { locale } = useEnergyIqLocale();
+  return <div className="mt-6 border-t border-slate-200 pt-4">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      <button type="button" aria-expanded={open} aria-controls={`${id}-figures`} onClick={onToggle} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+        <EnergyIcon name="chevron" className={`h-4 w-4 transition-transform ${open ? "-rotate-90" : "rotate-90"}`} />{t(open ? "figures.hide" : "figures.show")}
+      </button>
+      {figure.contents.length > 0 && <p className="text-sm text-slate-500">{joinText(figure.contents, locale)}</p>}
+    </div>
+    <div id={`${id}-figures`} hidden={!open} className="mt-4 space-y-4">{open ? figure.content("step") : null}</div>
+  </div>;
 }
 function ShareBars({ title, rows, format }: { title: string; rows: Array<{ key: string; label: string; value: number; color: string; hint?: ReactNode }>; format: (value: number) => string }) {
   const total = rows.reduce((sum, row) => sum + row.value, 0);

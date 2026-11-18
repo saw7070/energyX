@@ -99,6 +99,8 @@ describe("where the energy goes, by group", () => {
   it("lets Analysis switch where the energy goes to a nested split by group, and only when the readings have groups", async () => {
     mock.load.mockResolvedValue(data);
     const page = await render(<AnalysisView projectId="estate" />);
+    // The split is one of step 1's figures, under "Where the money goes".
+    await act(async () => page.host.querySelector<HTMLButtonElement>('button[aria-controls="story-money-figures"]')!.click());
     const toggle = page.host.querySelector('[role="group"][aria-label="Split by"]')!;
     expect(toggle).not.toBeNull();
     await act(async () => Array.from(toggle.querySelectorAll("button")).find(button => button.textContent === "Group")!.click());
@@ -113,6 +115,8 @@ describe("where the energy goes, by group", () => {
 
     mock.load.mockResolvedValue(withoutGroups);
     const plain = await render(<AnalysisView projectId="estate" />);
+    await act(async () => plain.host.querySelector<HTMLButtonElement>('button[aria-controls="story-money-figures"]')!.click());
+    expect(plain.host.textContent).toContain("Share of the energy");
     expect(plain.host.querySelector('[aria-label="Split by"]')).toBeNull();
     await plain.unmount();
   });

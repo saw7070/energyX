@@ -58,15 +58,20 @@ export function DayTip({ date, item, siteName, totalLabel }: { date: string; ite
   </div>;
 }
 
-/** The days that stood out among the days on the chart, written out in full: the keyboard and screen-reader route to the tooltips. */
-export function StandoutDayList({ items, lighting, siteName, hint }: { items: DayExplanation[]; lighting: boolean; siteName: string; hint: string }) {
+/**
+ * The days that stood out among the days on the chart, written out in full: the keyboard and screen-reader route to
+ * the tooltips. Where the page already heads them "Days that stood out" and gives the rule, pass another `title` and
+ * `rule={false}` so neither is said twice.
+ */
+export function StandoutDayList({ items, lighting, siteName, hint, title, rule = true }: { items: DayExplanation[]; lighting: boolean; siteName: string; hint: string; title?: string; rule?: boolean }) {
   const { locale } = useEnergyIqLocale();
   const t = standoutText(locale);
   const heading = useId();
   const found = items.filter(item => item.status === "standout");
+  const note = [rule ? standoutRule(locale, lighting) : "", found.length ? hint : ""].filter(Boolean).join(" ");
   return <section aria-labelledby={heading} className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3">
-    <h3 id={heading} className="text-sm font-semibold text-slate-900">{t("title")}</h3>
-    <p className="mt-0.5 text-xs text-slate-600">{standoutRule(locale, lighting)}{found.length ? ` ${hint}` : ""}</p>
+    <h3 id={heading} className="text-sm font-semibold text-slate-900">{title ?? t("title")}</h3>
+    {note && <p className="mt-0.5 text-xs text-slate-600">{note}</p>}
     {found.length
       ? <ul className="mt-2 max-h-80 space-y-2 overflow-auto">{found.map(item => <li key={item.date} className="rounded border border-slate-200 bg-white p-2 text-sm text-slate-800"><DayExplanationView item={item} siteName={siteName} /></li>)}</ul>
       : <p className="mt-2 text-sm text-slate-600">{t(lighting ? "lights.none" : "none")}</p>}

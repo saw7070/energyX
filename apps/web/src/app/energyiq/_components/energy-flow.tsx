@@ -64,18 +64,6 @@ export function energyFlowData(project: ScopeData, spaces: ScopeData[], words: {
 
 const NODE_COLORS = { site: "#276854", space: "#5f7f72", unsplit: "#b6c2bc" } as const;
 
-/** One plain sentence a reader can take away without reading the chart: the biggest space and the biggest use. */
-export function energyFlowSummary(flow: FlowData): { space?: { name: string; share: number }; type?: { category: AnalysisCategory; share: number } } {
-  const into = (index: number) => flow.links.filter(link => link.target === index).reduce((sum, link) => sum + link.value, 0);
-  const share = (kwh: number) => Math.round(kwh / flow.totalKwh * 100);
-  const spaces = flow.nodes.map((node, index) => ({ node, kwh: into(index) })).filter(({ node }) => node.kind === "space").sort((a, b) => b.kwh - a.kwh);
-  const types = flow.nodes.map((node, index) => ({ node, kwh: into(index) })).filter(({ node }) => node.kind === "type").sort((a, b) => b.kwh - a.kwh);
-  return {
-    ...(spaces[0] ? { space: { name: spaces[0].node.name, share: share(spaces[0].kwh) } } : {}),
-    ...(types[0]?.node.category ? { type: { category: types[0].node.category, share: share(types[0].kwh) } } : {}),
-  };
-}
-
 export function EnergyFlow({ data }: { data: AnalysisData }) {
   const t = useMessages(energyFlowMessages);
   const { locale } = useEnergyIqLocale();
@@ -86,14 +74,9 @@ export function EnergyFlow({ data }: { data: AnalysisData }) {
   });
   const number = (value: number) => value.toLocaleString(intlLocale(locale), { maximumFractionDigits: value < 100 ? 1 : 0 });
   const percent = (value: number) => flow ? `${Math.round(value / flow.totalKwh * 100)}%` : "";
-  const summary = flow ? energyFlowSummary(flow) : {};
   return <section className="mt-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
     <h3 className="text-sm font-semibold text-slate-900">{t("title")}</h3>
     <p className="mt-1 text-sm text-slate-600">{t("body")}</p>
-    {flow && (summary.space || summary.type) ? <p className="mt-2 text-sm text-slate-900">
-      {summary.space ? t("summarySpace", { space: summary.space.name, share: String(summary.space.share) }) : ""}{" "}
-      {summary.type ? t("summaryType", { type: categoryLabel(summary.type.category, locale), share: String(summary.type.share) }) : ""}
-    </p> : null}
     {!flow ? <p className="mt-3 text-sm text-slate-600">{t("needsSpaces")}</p>
       : <>
         <div className="mt-3 grid grid-cols-3 text-[11px] font-medium uppercase tracking-wide text-slate-500" aria-hidden>

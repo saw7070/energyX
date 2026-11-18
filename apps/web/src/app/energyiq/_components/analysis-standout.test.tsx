@@ -67,17 +67,33 @@ describe("why a day was different, on the Analysis daily chart", () => {
     expect(quiet.text()).toContain("Hari yang menonjol");
     expect(quiet.text()).toContain("Tiada hari yang menonjol berbanding hari biasa.");
     await quiet.unmount();
+
+    // Under a step that already heads the days and states the rule, the list says neither again.
+    const inStep = await render("en", <StandoutDayList items={explained} lighting siteName="Estate" hint="Outlined bars stood out." title="Each day, meter by meter" rule={false} />);
+    expect(inStep.host.querySelector("h3")?.textContent).toBe("Each day, meter by meter");
+    expect(inStep.host.querySelector("section > p")?.textContent).toBe("Outlined bars stood out.");
+    expect(inStep.text()).toContain("Thu 5 Nov used 48.4 kWh, 2.3 kWh more than a usual day (46.1 kWh).");
+    await inStep.unmount();
   });
 
   it("shows a lights-on site's days as one kind on the Analysis page, in English and Chinese", async () => {
     mock.load.mockResolvedValue(DATA);
+    // The daily chart is one of the figures under step 4, "Days that stood out".
+    const openDays = async (page: { host: HTMLElement }) => act(async () => page.host.querySelector<HTMLButtonElement>('button[aria-controls="story-days-figures"]')!.click());
     const en = await render("en", <AnalysisView projectId="estate" />);
+    expect(en.text()).not.toContain("Daily total · kWh · every day");
+    await openDays(en);
     expect(en.text()).toContain("Daily total · kWh · every day");
     expect(en.text()).toContain("Days that stood out");
     expect(en.text()).toContain("Thu 5 Nov used 48.4 kWh, 2.3 kWh more than a usual day (46.1 kWh).");
     // No weekday / weekend switch on the daily chart: the lights run every night.
     const trend = [...en.host.querySelectorAll("section")].find(section => section.querySelector("button")?.textContent === "Daily Total Trend")!;
-    expect(trend.textContent).toContain("Days that stood out");
+    expect(trend.closest("#story-days")).not.toBeNull();
+    // Step 4 already heads the days and gives the rule; the chart's list adds the meters behind each day without
+    // saying either again.
+    expect(trend.querySelector("h3")?.textContent).toBe("Each day, meter by meter");
+    expect(trend.textContent).not.toContain("Days that stood out");
+    expect(trend.textContent).not.toContain("A day is called out when");
     expect(trend.querySelector('[role="group"][aria-label="Kind of day"]')).toBeNull();
     // The chart's usual-day line is the same 46.1 kWh the explanations compare with: one usual figure on the page.
     expect(trend.textContent).toContain("13 complete days · usual day: 46.1 kWh per day.");
@@ -85,6 +101,7 @@ describe("why a day was different, on the Analysis daily chart", () => {
     await en.unmount();
 
     const zh = await render("zh-Hans", <AnalysisView projectId="estate" />);
+    await openDays(zh);
     expect(zh.text()).toContain("与平常不同的日子");
     expect(zh.text()).toContain("11月5日 周四用电 48.4 kWh，比正常日子（46.1 kWh）多 2.3 kWh。");
     expect(zh.text()).toContain("正常日子：46.1 kWh");
