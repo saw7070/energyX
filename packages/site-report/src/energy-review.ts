@@ -15,7 +15,7 @@
 import type { ProjectSpatialReference } from "@datafoundry/contracts";
 import { listText } from "./analysis-messages.js";
 import { effectiveHours, shortDate, type HoursMeaning } from "./analysis-model.js";
-import type { AnalysisData, ScopeMeter, TrendSeries } from "./analysis-types.js";
+import type { AnalysisData, ReportFollowUpStatus, ReportFollowUpVerdict, ScopeMeter, TrendSeries } from "./analysis-types.js";
 import { energyReviewMessages, type EnergyReviewKey } from "./energy-review-messages.js";
 import { alwaysOnByDesignIds } from "./always-on-by-design.js";
 import { daytimeUse } from "./daytime-use.js";
@@ -29,6 +29,34 @@ import { clock, inWindow, kwhText as baseKwhText, kwText, moneyText, openingWind
 
 type T = Translate<EnergyReviewKey>;
 const reviewText = (locale: EnergyIqLocale, meaning: HoursMeaning): T => forHoursMeaning(translatorFor(energyReviewMessages, locale), energyReviewMessages, meaning);
+
+/**
+ * The stable keys of the review's points to check (EnergyReviewCheck.key): a meter point names the meter's id (group
+ * 2), a day that stood out names the day (group 3).
+ */
+export const ENERGY_REVIEW_CHECK_KEY = /^(?:(stopped|offline|notInUse|noUse):(.+)|standout:(\d{4}-\d{2}-\d{2})|daytime)$/;
+
+/**
+ * The title a point to check carries in the review, worded from its key alone and without the closing full stop:
+ * "Pavilion 2 has stopped reporting", "Tue 17 Nov stood out". A meter point needs the meter's name. Null for a key that
+ * is not one of the review's own, so nobody can choose the words shown for a point.
+ */
+export function energyReviewCheckTitle(key: string, meterName: string | null | undefined, locale: EnergyIqLocale = "en"): string | null {
+  const match = ENERGY_REVIEW_CHECK_KEY.exec(key);
+  if (!match) return null;
+  const t = translatorFor(energyReviewMessages, locale);
+  let title: string;
+  if (match[1]) {
+    const name = meterName?.trim();
+    if (!name) return null;
+    title = t(`check.${match[1]}.title` as EnergyReviewKey, { name });
+  } else if (match[3]) {
+    title = t("check.standout.title", { date: `${weekdayOf(match[3], locale)} ${shortDate(match[3], locale)}` });
+  } else {
+    title = t("check.daytime.title");
+  }
+  return title.replace(/[.。]\s*$/u, "");
+}
 
 /** The questions a review answers, in reading order; the document numbers the ones present as it goes. */
 export const ENERGY_REVIEW_QUESTIONS = ["total", "groups", "largest", "comparison", "profile", "littleUse", "perLight", "savings"] as const;
@@ -48,6 +76,10 @@ const POWERED_NIGHT_SHARE = 0.7;
 const MAX_CIRCUITS = 8;
 const MAX_CHECKS = 6;
 const MAX_STEPS = 6;
+/** Follow-ups and remembered facts the review shows, and the longest text it quotes from either. */
+const MAX_FOLLOW_UPS = 12;
+const MAX_MEMORY = 10;
+const MAX_FEEDBACK_TEXT = 300;
 /** Two figures within this share of each other read as "close"; a circuit this much apart is named. */
 const CLOSE_SHARE = 0.05;
 const NAMED_GAP = 0.15;
@@ -62,7 +94,14 @@ const DAYTIME_WORTH_KWH_YEAR = 100;
 export type EnergyReviewDay = { date: string; label: string; kwh: number; cost: number | null; complete: boolean; recoveredKwh: number };
 export type EnergyReviewSlice = { name: string; value: number; share: number; colour: string };
 export type EnergyReviewLayer = { key: string; name: string; colour: string; hours: number[] };
-export type EnergyReviewCheck = { title: string; text: string };
+/**
+ * A point to check on site. `key` names it the same way in every report, so feedback can refer to it and an admin can
+ * set it aside: "stopped:<meterId>", "offline:<meterId>", "notInUse:<meterId>", "standout:<YYYY-MM-DD>", "daytime",
+ * "noUse:<meterId>".
+ */
+export type EnergyReviewCheck = { key: string; title: string; text: string };
+/** A follow-up from feedback on an earlier report, with the AI's latest look at it (`verdict` null when it has not looked). */
+export type EnergyReviewFollowUp = { text: string; status: ReportFollowUpStatus; verdict: ReportFollowUpVerdict | null; evidence: string | null };
 /** One moment of the average night: the time ("6:30 pm") and what happens then. */
 export type EnergyReviewMoment = { time: string; text: string };
 export type EnergyReviewSaving = { title: string; basis: string; kwhYear: number; costYear: number | null };
@@ -94,13 +133,18 @@ export type EnergyReview = {
   comparison: { heading: string; intro: string; title: string; groups: Array<{ name: string; colour: string }>; rows: Array<{ name: string; perDay: number[] }>; total?: { name: string; perDay: number[] } | undefined; callout: string } | null;
   /** `timeline`: what happens through the night, in clock order from midday (lights-on sites; empty otherwise). */
   profile: { heading: string; intro: string; title: string; layers: EnergyReviewLayer[]; peakKw: number; timeline: EnergyReviewMoment[] } | null;
-  /** Things to look at on site; shown after the average 24 hours, numbered. */
+  /** Things to look at on site; shown after the average 24 hours, numbered. Points an admin set aside are left out. */
   checks: EnergyReviewCheck[];
+  /** Follow-ups from feedback on earlier reports, open ones first; shown after the points to check. */
+  followUps: EnergyReviewFollowUp[];
+  /** What the site's people told the AI (active memory), newest first; listed in the appendix. */
+  memory: string[];
   littleUse: { heading: string; text: string } | null;
   perLight: { heading: string; text: string } | null;
   savings: { heading: string; intro: string; title: string; rows: EnergyReviewSaving[]; totalKwh: number; totalCost: number | null; note: string } | null;
   nextSteps: EnergyReviewStep[];
-  method: { intro: string; assumptions: Array<{ label: string; value: string }>; meters: EnergyReviewMeter[] };
+  /** `setAside`: points to check this review found but left out, because an admin marked them as known, and why. */
+  method: { intro: string; assumptions: Array<{ label: string; value: string }>; meters: EnergyReviewMeter[]; setAside: Array<{ title: string; reason: string }> };
   footer: { left: string };
 };
 
@@ -557,10 +601,14 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
   const daytimeYearKwh = usedInDay ? usedInDay.kwh / Math.max(readDays.length, 1) * 365 : 0;
   const daytimeWorthIt = daytimeYearKwh >= DAYTIME_WORTH_KWH_YEAR;
   const checks: EnergyReviewCheck[] = [];
-  const offlineTitles = new Set<string>(), offlineNames = new Map<string, string>();
+  // Points an admin set aside as known (from feedback on an earlier report) are left out, and so are the steps for them.
+  const dismissedReason = new Map((data.dismissedChecks ?? []).map(item => [item.key, typeof item.reason === "string" ? item.reason.trim() : ""] as const));
+  const dismissed = new Set(dismissedReason.keys());
+  const kept = (key: string) => !dismissed.has(key);
+  const offlineNames = new Map<string, string>();
   for (const { meter, last } of stopped) {
     const usual = usualOf.get(meter.id) ?? null;
-    checks.push({ title: t("check.stopped.title", { name: meter.name }), text: paragraph([
+    checks.push({ key: `stopped:${meter.id}`, title: t("check.stopped.title", { name: meter.name }), text: paragraph([
       last ? t("check.stopped.since", { since: at(last.date, last.hour) }) : t("check.stopped.none"),
       usual != null ? t("check.stopped.before", { kwh: kwhText(usual) }) : "",
       t("check.stopped.do"),
@@ -576,23 +624,29 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
     // Gone quiet comes first: a meter powered with its lights still reports every night, so one silent for days is offline.
     if (!quiet && lighting && cells.length && receivedShare(cells, true) >= POWERED_NIGHT_SHARE) continue;
     const reason = item.reason && !item.reason.startsWith("reason:") ? item.reason : "";
-    if (quiet) { offlineTitles.add(t("check.offline.title", { name: item.name })); offlineNames.set(t("check.offline.title", { name: item.name }), item.name); }
-    checks.push(quiet ? { title: t("check.offline.title", { name: item.name }), text: paragraph([
+    if (quiet) offlineNames.set(`offline:${item.id}`, item.name);
+    checks.push(quiet ? { key: `offline:${item.id}`, title: t("check.offline.title", { name: item.name }), text: paragraph([
       last ? t("check.stopped.since", { since: at(last.date, last.hour) }) : t("check.stopped.none"),
       reason ? t("check.offline.reason", { reason }) : "",
       t("check.offline.do"),
-    ]) } : { title: t("check.notInUse.title", { name: item.name }), text: reason ? t("check.notInUse.reason", { reason }) : t("check.notInUse.plain") });
+    ]) } : { key: `notInUse:${item.id}`, title: t("check.notInUse.title", { name: item.name }), text: reason ? t("check.notInUse.reason", { reason }) : t("check.notInUse.plain") });
   }
   // The first days after the meters went in often carry readings from installation day: they are not "stood out" days.
   const historyCells = (data.history?.total ?? project.total)?.cells ?? [];
   const firstRead = historyCells.filter(cell => cell[3] > 0).reduce<string | null>((first, cell) => !first || cell[0] < first ? cell[0] : first, null);
   const settled = (date: string) => !firstRead || Date.parse(`${date}T00:00:00Z`) - Date.parse(`${firstRead}T00:00:00Z`) >= 2 * 86_400_000;
-  for (const item of (base.total.standout?.items ?? []).filter(item => settled(item.date)).slice(0, 2)) checks.push({ title: t("check.standout.title", { date: `${weekdayOf(item.date, locale)} ${shortDate(item.date, locale)}` }), text: item.text });
-  if (lighting && base.daytime?.items.length && daytimeWorthIt) checks.push({ title: t("check.daytime.title"), text: paragraph([list(base.daytime.items), base.daytime.more ?? ""]) });
+  // Two days that stood out at most; a day set aside as known makes room for the next one.
+  const standouts: EnergyReviewCheck[] = (base.total.standout?.items ?? []).filter(item => settled(item.date))
+    .map(item => ({ key: `standout:${item.date}`, title: t("check.standout.title", { date: `${weekdayOf(item.date, locale)} ${shortDate(item.date, locale)}` }), text: item.text }));
+  checks.push(...standouts.filter(check => kept(check.key)).slice(0, 2), ...standouts.filter(check => !kept(check.key)));
+  const daytimeFound = lighting && !!base.daytime?.items.length && daytimeWorthIt;
+  if (daytimeFound) checks.push({ key: "daytime", title: t("check.daytime.title"), text: paragraph([list(base.daytime!.items), base.daytime!.more ?? ""]) });
+  const daytimeCheck = daytimeFound && kept("daytime");
   const mustRun = mustRunIds(allMeters, data);
   const quietMustRun = allMeters.filter(meter => mustRun.has(meter.id) && !stoppedIds.has(meter.id) && !notInUseIds.has(meter.id) && meter.series!.cells.every(cell => (cell[2] ?? 0) < USED_DAY_KWH / 24) && meter.series!.cells.some(cell => cell[3] > 0));
-  for (const meter of quietMustRun) checks.push({ title: t("check.noUse.title", { name: meter.name }), text: t("check.noUse.do") });
-  const shownChecks = checks.slice(0, MAX_CHECKS);
+  for (const meter of quietMustRun) checks.push({ key: `noUse:${meter.id}`, title: t("check.noUse.title", { name: meter.name }), text: t("check.noUse.do") });
+  const keptChecks = checks.filter(check => kept(check.key));
+  const shownChecks = keptChecks.slice(0, MAX_CHECKS);
 
   // ---------- 6. meters with little use ----------
   const readDates = new Set(readDays.map(day => day.date));
@@ -691,12 +745,12 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
   // ---------- recommended next steps ----------
   const client = data.projectName;
   const steps: EnergyReviewStep[] = [];
-  // Meters to fix: those that stopped, and those set aside as not in use that have gone quiet.
-  const toFix = [...stopped.map(item => item.meter.name), ...checks.filter(check => offlineTitles.has(check.title)).map(check => offlineNames.get(check.title)!)];
+  // Meters to fix: those that stopped, and those set aside as not in use that have gone quiet (unless set aside as known).
+  const toFix = [...stopped.filter(item => kept(`stopped:${item.meter.id}`)).map(item => item.meter.name), ...keptChecks.flatMap(check => offlineNames.has(check.key) ? [offlineNames.get(check.key)!] : [])];
   for (const name of toFix.slice(0, 2)) steps.push({ action: t("step.fixMeter", { name }), who: t("who.contractor"), when: t("when.week") });
   if (toFix.length > 2) steps.push({ action: t("step.fixMeters", { count: toFix.length - 2 }), who: t("who.contractor"), when: t("when.week") });
-  if (lighting && base.daytime?.items.length && daytimeWorthIt) {
-    const names = base.daytime.items.slice(0, 2).map(item => item.split(/[:：]/)[0]!.trim());
+  if (daytimeCheck) {
+    const names = base.daytime!.items.slice(0, 2).map(item => item.split(/[:：]/)[0]!.trim());
     steps.push({ action: t("step.daytime", { names: list(names) }), who: t("who.contractor"), when: t("when.week") });
   }
   const sendRate = rate == null, sendCounts = missingCounts;
@@ -728,6 +782,7 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
   const method = {
     intro: paragraph([t("met.intro", { count: meterCount }), t("met.introPeriod", { period: periodText, tz: base.tzLabel })]),
     assumptions, meters,
+    setAside: checks.filter(check => dismissed.has(check.key)).map(check => ({ title: check.title, reason: dismissedReason.get(check.key) ?? "" })),
   };
 
   // ---------- summary ----------
@@ -773,6 +828,23 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
   };
   const answers = questions.map(id => ({ id, ...answerOf[id]() }));
 
+  // ---------- feedback: follow-ups and what the AI remembers ----------
+  // Written by people and the AI, and kept with saved reports: read defensively, and quoted at a readable length.
+  const plainText = (value: unknown) => typeof value === "string" ? value.trim() : "";
+  const clip = (text: string) => text.length > MAX_FEEDBACK_TEXT ? `${text.slice(0, MAX_FEEDBACK_TEXT - 1).trimEnd()}…` : text;
+  const followUps: EnergyReviewFollowUp[] = (data.followUps ?? [])
+    .filter(item => plainText(item.text) && (item.status === "open" || item.status === "done" || item.status === "dropped"))
+    .map((item, index) => ({ item, index })).sort((a, b) => Number(a.item.status !== "open") - Number(b.item.status !== "open") || a.index - b.index)
+    .slice(0, MAX_FOLLOW_UPS)
+    .map(({ item }) => {
+      const verdict = item.lastCheck && ["resolved", "ongoing", "unclear"].includes(item.lastCheck.verdict) ? item.lastCheck.verdict : null;
+      const evidence = verdict ? plainText(item.lastCheck?.evidence) : "";
+      return { text: clip(plainText(item.text)), status: item.status, verdict, evidence: evidence ? clip(evidence) : null };
+    });
+  const memory = (data.feedbackMemory ?? []).filter(item => plainText(item.text))
+    .map((item, index) => ({ item, index })).sort((a, b) => plainText(b.item.date).localeCompare(plainText(a.item.date)) || a.index - b.index)
+    .slice(0, MAX_MEMORY).map(({ item }) => clip(plainText(item.text)));
+
   const generatedDay = generatedAt.slice(0, 10);
   const issued = formatPeriod(generatedDay, generatedDay, locale);
   const address = (reference as { property?: { address?: string } } | null)?.property?.address?.trim();
@@ -795,7 +867,7 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
         rate != null && base.rate != null ? t(taxPct > 0 ? "sum.noteCostTax" : basis === "tax_inclusive" ? "sum.noteCostIncl" : "sum.noteCost", { rate: moneyText(base.rate, currency, 4), tax: taxName, pct: taxPct }) : t("sum.noteNoRate"),
       ]),
     },
-    total, groups, largest, comparison, profile, checks: shownChecks, littleUse, perLight, savings, nextSteps, method,
+    total, groups, largest, comparison, profile, checks: shownChecks, followUps, memory, littleUse, perLight, savings, nextSteps, method,
     footer: { left: t("foot.left", { name: data.projectName, date: issued }) },
   };
 }

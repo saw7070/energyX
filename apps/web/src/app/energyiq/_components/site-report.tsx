@@ -16,7 +16,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { readProjectSpatialReference, type ProjectSpatialReference } from "@datafoundry/contracts";
-import { buildEnergyReview, parseSiteReportSnapshot, writtenStyleOf, type EnergyReview, type SiteReportCadence } from "@datafoundry/site-report";
+import { buildEnergyReview, parseSiteReportSnapshot, writtenStyleOf, type EnergyReview, type EnergyReviewCheck, type SiteReportCadence } from "@datafoundry/site-report";
 import { ENERGY_REVIEW_CSS, EnergyReviewDocument, energyReviewFileName, renderEnergyReviewHtml } from "@datafoundry/site-report/energy-review-document";
 import { renderSiteReportHtml, siteReportFileName, SiteReportDocument } from "@datafoundry/site-report/site-report-document";
 import { configApi } from "../../../lib/config-api";
@@ -26,9 +26,13 @@ import { intlLocale, translatorFor, type EnergyIqLocale } from "./energyiq-messa
 import { buildSiteReport, clock, type SiteReport } from "./site-report-model";
 import { siteReportMessages } from "./site-report-messages";
 import { REPORT_CSS } from "./site-report-styles";
+import type { ReportFeedbackReadings } from "./report-feedback-model";
 import styles from "./key-points.module.css";
 
 export { monotonePath, niceTicks, renderSiteReportHtml, Rich, siteReportFileName, SiteReportDocument } from "@datafoundry/site-report/site-report-document";
+
+/** A point to check in the review, named back to the report: its stable key (EnergyReviewCheck.key) and its title. */
+export type ReportCheckRef = Pick<EnergyReviewCheck, "key" | "title">;
 
 /** The document's wording follows the language its sentences were written in, so a downloaded copy never mixes languages. */
 const reportText = (locale: EnergyIqLocale) => translatorFor(siteReportMessages, locale);
@@ -127,7 +131,12 @@ async function reportProblem(reason: unknown, projectId: string, t: ReturnType<t
 const REPORT_CACHE_MS = 5 * 60_000;
 const reportCache = new Map<string, { at: number; value: Exclude<Loaded, null> }>();
 
-export function useSiteReport(projectId: string, period: Period, enabled = true) {
+/**
+ * `feedback`: what people told the AI about the report, as it stands now (report-feedback-model readingsFromFeedback).
+ * It is laid over the readings, so the review drops a dismissed check and shows memory and follow-ups the moment they
+ * change, even on a report saved before. Keep the object stable between renders: a new one rebuilds the report.
+ */
+export function useSiteReport(projectId: string, period: Period, enabled = true, feedback: ReportFeedbackReadings | null = null) {
   const { locale } = useEnergyIqLocale();
   const t = useMessages(siteReportMessages);
   const [loaded, setLoaded] = useState<Loaded>(null);
@@ -164,12 +173,13 @@ export function useSiteReport(projectId: string, period: Period, enabled = true)
   const state = useMemo<SiteReportState>(() => {
     if (!loaded || "error" in loaded) return loaded;
     try {
-      const report = buildSiteReport(loaded.data, loaded.reference, loaded.generatedAt, locale);
+      const data: AnalysisData = feedback ? { ...loaded.data, ...feedback } : loaded.data;
+      const report = buildSiteReport(data, loaded.reference, loaded.generatedAt, locale);
       // A one-day report has nothing to compare or project, so it stays the full report (see writtenStyleOf).
-      const review = loaded.review && writtenStyleOf("review", loaded.data.current.project.dates.length) === "review" ? buildEnergyReview(loaded.data, loaded.reference, loaded.generatedAt, locale) : undefined;
+      const review = loaded.review && writtenStyleOf("review", data.current.project.dates.length) === "review" ? buildEnergyReview(data, loaded.reference, loaded.generatedAt, locale) : undefined;
       return { report, review };
     } catch { return { error: { title: t("problem.unexpected"), steps: [t("problem.unexpectedStep")] } }; }
-  }, [loaded, locale]);
+  }, [loaded, locale, feedback]);
   // The heading and the document are the same report, so what is said about one is true of the other.
   const shown = loaded && !("error" in loaded) && state && "report" in state ? loaded : null;
   return {
@@ -180,8 +190,11 @@ export function useSiteReport(projectId: string, period: Period, enabled = true)
   };
 }
 
-/** The report as shown on the Overview, with a download of the same page as one HTML file. */
-export function SiteReportPanel({ state, onRetry, projectId, saved }: { state: SiteReportState; onRetry: () => void; projectId?: string; saved?: SavedSiteReport | null }) {
+/**
+ * The report as shown on the Overview, with a download of the same page as one HTML file. `onCheckFeedback` puts a
+ * "Tell the AI about this" button on each point to check of the energy review.
+ */
+export function SiteReportPanel({ state, onRetry, projectId, saved, onCheckFeedback }: { state: SiteReportState; onRetry: () => void; projectId?: string; saved?: SavedSiteReport | null; onCheckFeedback?: ((check: ReportCheckRef) => void) | undefined }) {
   const t = useMessages(siteReportMessages);
   const { locale } = useEnergyIqLocale();
   const report = state && "report" in state ? state.report : null;
@@ -212,7 +225,7 @@ export function SiteReportPanel({ state, onRetry, projectId, saved }: { state: S
         <p>{state.error.fixTab && projectId ? <Link href={`/energyiq/project-configuration?${new URLSearchParams({ projectId, tab: state.error.fixTab })}`}>{t("problem.openFacility")}</Link> : null}<button type="button" onClick={onRetry}>{t("panel.retry")}</button></p>
       </div>
       : !report ? <p role="status" className={styles.reportMessage}>{t("panel.loading")}</p>
-      : <div>{review ? <EnergyReviewDocument review={review} /> : <SiteReportDocument report={report} />}</div>}
+      : <div>{review ? <EnergyReviewDocument review={review} onCheckFeedback={onCheckFeedback} /> : <SiteReportDocument report={report} />}</div>}
   </section>;
 }
 

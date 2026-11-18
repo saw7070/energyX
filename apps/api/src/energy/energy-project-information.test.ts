@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { ensureEnergyIqBootstrap } from "./energy-bootstrap.js";
 import { readEnergyProjectInformation } from "./energy-project-information.js";
+import { ReportFeedbackStore } from "../report-agent/report-feedback-store.js";
 
 let root: string;
 let metadata: ReturnType<typeof createMetadataStore>;
@@ -93,4 +94,20 @@ it("keeps groups made inside a block as groups, while a circuit named after its 
   const meters = [meter("gf", "Lobby A"), meter("gf", "Lobby B"), meter("emergency", "Block A Emergency Lighting"), meter("old-circuit", "Lobby lights"), meter("nested-child", "Stair lights")];
   // Two meters, one meter under a group name, and a group with a group inside it are groups; a circuit named after its meter is not.
   expect([...circuitGroupIds(nodes, meters)].sort()).toEqual(["emergency", "gf", "nested", "nested-child"]);
+});
+
+it("carries what people told the AI about the reports: active memory, recent follow-ups and points not to flag", () => {
+  expect(read()).toMatchObject({ feedbackMemory: [], followUps: [], dismissedChecks: [] });
+  const store = new ReportFeedbackStore(metadata.db);
+  const author = { authorUserId: "reader", authorName: "Reader", sourceFeedbackId: null };
+  store.addMemory("ngee-ann-polytechnic", { ...author, text: "The pavilion fan must never run.", kind: "rule", status: "active" }, new Date("2026-11-17T20:00:00Z"));
+  store.addMemory("ngee-ann-polytechnic", { ...author, text: "Waiting for an admin", kind: "fact", status: "pending" });
+  store.addMemory("preschool-demo", { ...author, text: "Another project's memory", kind: "fact", status: "active" });
+  store.addFollowUp("ngee-ann-polytechnic", { text: "Check lights off at 7:10", checkBy: "next_report", sourceFeedbackId: null, authorUserId: "reader" }, new Date("2026-11-18T00:00:00Z"));
+  store.dismissCheck("ngee-ann-polytechnic", { key: "daytime", title: "Daytime use", reason: "Cleaners", suggestionId: null });
+  const info = read();
+  // Dated in the site's own time zone (Singapore), and only memory an administrator has let through.
+  expect(info.feedbackMemory).toEqual([{ text: "The pavilion fan must never run.", date: "2026-11-18" }]);
+  expect(info.followUps).toEqual([{ text: "Check lights off at 7:10", status: "open", createdAt: "2026-11-18T00:00:00.000Z" }]);
+  expect(info.dismissedChecks).toEqual([{ key: "daytime", title: "Daytime use", reason: "Cleaners" }]);
 });

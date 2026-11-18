@@ -7,7 +7,7 @@
  */
 import type { AnalysisCategory } from "./analysis-model.js";
 import { PLANNED_CLOSURE_SUFFIX } from "./analysis-messages.js";
-import type { AnalysisData, AnalysisGroups, LoadedPeriod, ProjectAction, ScopeCircuit, ScopeData, TrendCell, TrendSeries } from "./analysis-types.js";
+import type { AnalysisData, AnalysisGroups, DismissedCheck, FeedbackMemoryItem, LoadedPeriod, ProjectAction, ReportFollowUp, ReportFollowUpStatus, ReportFollowUpVerdict, ScopeCircuit, ScopeData, TrendCell, TrendSeries } from "./analysis-types.js";
 import { groupsFromLocations } from "./meter-groups.js";
 
 /**
@@ -45,6 +45,12 @@ export type ProjectInformationSource = {
   tariff?: null | { entries: Array<{ location: string; from: string; toExclusive: string | null; taxBasis?: string | null | undefined; tax?: { name: string; ratePct: number } | null | undefined }> } | undefined;
   /** The site's grid emission factor (kg CO2e per kWh). Older servers leave it out. */
   carbon?: { kgCo2ePerKwh: number; year: number; source: string } | null | undefined;
+  /** What the AI remembers about the site from feedback on reports (active memory only). Older servers leave it out. */
+  feedbackMemory?: Array<{ text: string; date: string }> | undefined;
+  /** Follow-ups from feedback: open ones and ones closed in the last 31 days. Older servers leave it out. */
+  followUps?: Array<{ text: string; status: ReportFollowUpStatus; createdAt: string; lastCheck?: { at: string; verdict: ReportFollowUpVerdict; evidence: string } | undefined }> | undefined;
+  /** Points to check an admin marked as known; the energy review leaves them out. Older servers leave it out. */
+  dismissedChecks?: Array<{ key: string; title: string; reason: string }> | undefined;
 } | null;
 
 const CATEGORY_OF: Record<string, AnalysisCategory | "overall"> = { light: "light", load: "load", aircon: "aircon", it: "it", kitchen: "kitchen", plug: "plug", overall: "overall" };
@@ -217,6 +223,7 @@ export function assembleAnalysisData(input: {
   const tariffEntry = tariffEntries.find(entry => entry.location === information?.name && entry.from <= lastDate && (!entry.toExclusive || entry.toExclusive > lastDate)) ?? tariffEntries.find(entry => entry.location === information?.name);
   const tariffTax = tariffEntry?.tax && Number.isFinite(tariffEntry.tax.ratePct) && tariffEntry.tax.ratePct > 0 ? { name: tariffEntry.tax.name, ratePct: tariffEntry.tax.ratePct } : null;
   const carbon = information?.carbon && Number.isFinite(information.carbon.kgCo2ePerKwh) ? { kgCo2ePerKwh: information.carbon.kgCo2ePerKwh, year: information.carbon.year, source: information.carbon.source } : null;
+  const { feedbackMemory, followUps, dismissedChecks } = reportFeedback(information);
   const loadedSpaces = input.spaceCurrent.filter((item): item is AnalysisSource => !!item);
   const period = (project: AnalysisSource, loaded: Array<AnalysisSource | null>): LoadedPeriod => ({
     project: toScope(project, locations),
@@ -238,7 +245,30 @@ export function assembleAnalysisData(input: {
     ...(lightCounts.length ? { lightCounts } : {}),
     ...(tariffTax ? { tariffTax } : {}),
     ...(carbon ? { carbon } : {}),
+    ...(feedbackMemory.length ? { feedbackMemory } : {}),
+    ...(followUps.length ? { followUps } : {}),
+    ...(dismissedChecks.length ? { dismissedChecks } : {}),
   };
+}
+
+const FOLLOW_UP_STATUSES: ReadonlySet<string> = new Set<ReportFollowUpStatus>(["open", "done", "dropped"]);
+const FOLLOW_UP_VERDICTS: ReadonlySet<string> = new Set<ReportFollowUpVerdict>(["resolved", "ongoing", "unclear"]);
+const textOf = (value: unknown) => typeof value === "string" ? value.trim() : "";
+
+/**
+ * What people told the AI about earlier reports, as the reports read it: memory, follow-ups and the points to check
+ * set aside. It arrives over the wire, so anything without text or with a status we do not know is dropped.
+ */
+function reportFeedback(information: ProjectInformationSource): { feedbackMemory: FeedbackMemoryItem[]; followUps: ReportFollowUp[]; dismissedChecks: DismissedCheck[] } {
+  const list = <T>(value: T[] | undefined): T[] => Array.isArray(value) ? value : [];
+  const feedbackMemory = list(information?.feedbackMemory).flatMap(item => textOf(item?.text) ? [{ text: textOf(item.text), date: textOf(item.date) }] : []);
+  const followUps = list(information?.followUps).flatMap((item): ReportFollowUp[] => {
+    if (!textOf(item?.text) || !FOLLOW_UP_STATUSES.has(item.status)) return [];
+    const check = item.lastCheck && FOLLOW_UP_VERDICTS.has(item.lastCheck.verdict) ? { at: textOf(item.lastCheck.at), verdict: item.lastCheck.verdict, evidence: textOf(item.lastCheck.evidence) } : null;
+    return [{ text: textOf(item.text), status: item.status, createdAt: textOf(item.createdAt), ...(check ? { lastCheck: check } : {}) }];
+  });
+  const dismissedChecks = list(information?.dismissedChecks).flatMap(item => textOf(item?.key) ? [{ key: textOf(item.key), title: textOf(item.title), reason: textOf(item.reason) }] : []);
+  return { feedbackMemory, followUps, dismissedChecks };
 }
 
 /**

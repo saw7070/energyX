@@ -1,12 +1,14 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { configApi } from "../../../lib/config-api";
 import styles from "./key-points.module.css";
 import { operatingHoursWording } from "./hours-wording";
 import { formatPeriod, shiftDate } from "./report-period";
 import { EnergyIcon } from "./icons";
-import { plainNames, plainTimes, SiteReportPanel, useSiteReport } from "./site-report";
+import { plainNames, plainTimes, SiteReportPanel, useSiteReport, type ReportCheckRef } from "./site-report";
+import { ReportFeedbackPanel, type FeedbackFocusRequest } from "./report-feedback-panel";
+import { readingsFromFeedback, useReportFeedback } from "./report-feedback-model";
 import { ReportScheduleNote } from "./report-schedule-note";
 import { StoppedMetersNote } from "./meter-health-notice";
 import { ForecastLine } from "./forecast-line";
@@ -122,9 +124,14 @@ export function KeyPoints({projectId}:{projectId:string}) {
   const points=publication?.selection.featuredActionIds.flatMap(id=>publication.selection.active.filter(p=>p.actionId===id)) ?? [];
   const metrics=result?.metrics;
   const source=result?.source ?? null;
+  // What people told the AI about the report: the panel under it, and what the report shows from it straight away.
+  const feedback=useReportFeedback(projectId);
+  const readings=useMemo(()=>feedback.state ? readingsFromFeedback(feedback.state) : null,[feedback.state]);
+  const [askAbout,setAskAbout]=useState<FeedbackFocusRequest|null>(null);
+  const tellAbout=useCallback((check:ReportCheckRef)=>setAskAbout(previous=>({about:{kind:"check",key:check.key,title:check.title},nonce:(previous?.nonce??0)+1})),[]);
   // The heading and the full report are one report: the saved one for this project, or — until one has been saved —
   // a report built here for the same dates as the priorities.
-  const site=useSiteReport(projectId, source ? {from:source.period.from,to:shiftDate(source.period.toExclusive,-1)} : null, !!result && !error);
+  const site=useSiteReport(projectId, source ? {from:source.period.from,to:shiftDate(source.period.toExclusive,-1)} : null, !!result && !error, readings);
   const report=site.state && "report" in site.state ? site.state.report : null;
   const saved=site.saved;
   const shownPeriod=saved?.period ?? source?.period ?? null;
@@ -182,7 +189,9 @@ export function KeyPoints({projectId}:{projectId:string}) {
       <ReportScheduleNote projectId={projectId} overview className={styles.schedule} />
       </>}
       {/* The saved report itself. Until one exists it is built here, for the same dates as the priorities. */}
-      {result && !error && <SiteReportPanel state={site.state} onRetry={site.retry} projectId={projectId} saved={saved} />}
+      {result && !error && <SiteReportPanel state={site.state} onRetry={site.retry} projectId={projectId} saved={saved} onCheckFeedback={feedback.state?.canGive ? tellAbout : undefined} />}
+      {/* Feedback on the report right under it: the AI remembers it, suggests changes an admin applies, and follows up. */}
+      {result && !error && <ReportFeedbackPanel projectId={projectId} feedback={feedback} review={site.state && "report" in site.state ? site.state.review ?? null : null} report={report} focusRequest={askAbout} onSiteChanged={site.retry} />}
   </main>;
 }
 
