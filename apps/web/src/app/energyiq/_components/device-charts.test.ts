@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { heatColour, loadPercent, niceMax } from "./device-charts";
+import { heatColour, loadPercent, niceMax, offBelow, usualByHour, usualCell, usualColour, USUAL_GRADIENT } from "./device-charts";
 
 describe("loadPercent", () => {
   it("expresses an hour's power as a share of the device's busiest hour", () => {
@@ -29,6 +29,76 @@ describe("heatColour", () => {
 
   it("blends between neighbouring stops", () => {
     expect(heatColour(0.175)).toBe("rgb(175, 203, 112)");
+  });
+});
+
+describe("usualByHour", () => {
+  it("averages each hour of the day over the days that have a reading for it, leaving missing hours out", () => {
+    const day = (kw: Array<number | null>) => ({ profileKw: Array.from({ length: 24 }, (_, hour) => kw[hour] ?? null) });
+    const usual = usualByHour([day([0.09, 0.2, null]), day([0.09, 0.4, null]), day([0.12, null, null])]);
+    expect(usual[0]).toBeCloseTo(0.1);
+    // 01:00 has readings on two days only; the missing third day does not drag the average down.
+    expect(usual[1]).toBeCloseTo(0.3);
+    expect(usual[2]).toBeNull();
+    expect(usual).toHaveLength(24);
+  });
+});
+
+describe("offBelow", () => {
+  it("is 1% of the device's average hourly use, and never under 0.001 kWh", () => {
+    expect(offBelow([{ profileKw: [2, 4, null] }])).toBeCloseTo(0.03);
+    expect(offBelow([{ profileKw: [0.02, 0.04] }])).toBe(0.001);
+    expect(offBelow([{ profileKw: [null, null] }])).toBe(0.001);
+  });
+});
+
+describe("usualCell", () => {
+  it("expresses an hour's use as a share of that hour's usual use", () => {
+    // Charles's emergency lights: usually 0.09 kWh an hour, so an ordinary 0.09 reads 100%, not 82% of a one-off 0.11.
+    expect(usualCell(0.09, 0.09, 0.001)).toEqual({ kind: "share", percent: 100 });
+    expect(usualCell(0.11, 0.09, 0.001)).toEqual({ kind: "share", percent: 122 });
+    expect(usualCell(0.045, 0.09, 0.001)).toEqual({ kind: "share", percent: 50 });
+  });
+
+  it("keeps a missing hour missing", () => {
+    expect(usualCell(null, 0.09, 0.001)).toEqual({ kind: "missing" });
+  });
+
+  it("reads off at an hour the device is usually off, and flags energy used then instead of printing a huge percentage", () => {
+    expect(usualCell(0, 0.0004, 0.001)).toEqual({ kind: "off" });
+    expect(usualCell(0.0008, 0.0004, 0.001)).toEqual({ kind: "off" });
+    expect(usualCell(0.5, 0.0004, 0.001)).toEqual({ kind: "usedWhileOff" });
+    expect(usualCell(0.02, 0.02, 0.03)).toEqual({ kind: "off" });
+    expect(usualCell(0.04, 0.02, 0.03)).toEqual({ kind: "usedWhileOff" });
+  });
+
+  it("reads 0% for an hour whose use shows as 0.00 kWh, unless its usual use shows as 0.00 kWh too", () => {
+    expect(usualCell(0.004, 0.3, 0.001)).toEqual({ kind: "share", percent: 0 });
+    expect(usualCell(0.004, 0.004, 0.001)).toEqual({ kind: "share", percent: 100 });
+  });
+});
+
+describe("usualColour", () => {
+  it("draws 80% to 120% of usual in one calm colour, so only a real change stands out", () => {
+    const usual = usualColour(100);
+    expect(usualColour(80)).toBe(usual);
+    expect(usualColour(92)).toBe(usual);
+    expect(usualColour(120)).toBe(usual);
+    expect(usualColour(79)).not.toBe(usual);
+    expect(usualColour(121)).not.toBe(usual);
+  });
+
+  it("turns blue below usual and yellow, orange then red above it", () => {
+    expect(usualColour(0)).toBe("rgb(45, 105, 175)");
+    expect(usualColour(79)).toBe("rgb(159, 195, 231)");
+    expect(usualColour(121)).toBe("rgb(250, 213, 99)");
+    expect(usualColour(160)).toBe("rgb(240, 140, 60)");
+    expect(usualColour(200)).toBe("rgb(214, 60, 47)");
+    expect(usualColour(900)).toBe("rgb(214, 60, 47)");
+  });
+
+  it("gives the legend a bar from 0% to 200% with the usual band in the middle", () => {
+    expect(USUAL_GRADIENT).toBe("linear-gradient(90deg, rgb(45, 105, 175) 0%, rgb(160, 196, 232) 40%, rgb(208, 233, 216) 40%, rgb(208, 233, 216) 60%, rgb(250, 215, 100) 60%, rgb(240, 140, 60) 80%, rgb(214, 60, 47) 100%)");
   });
 });
 
