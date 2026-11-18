@@ -1,11 +1,14 @@
+/** @vitest-environment happy-dom */
 /**
  * The energy review: the site report written as answers to the questions the site asked at installation. An estate
  * with two alike blocks and a common area, lights on 19:00–07:00, two weeks of readings. One common-area meter stops
  * reporting, one is powered with its lights, and the pavilion fan is used on a single evening. All names are made up.
  */
-import { describe, expect, it } from "vitest";
+import React, { act } from "react";
+import { createRoot } from "react-dom/client";
+import { describe, expect, it, vi } from "vitest";
 import { buildEnergyReview, type AnalysisData, type ScopeMeter, type TrendSeries } from "@datafoundry/site-report";
-import { renderEnergyReviewHtml, renderEnergyReviewMarkup } from "@datafoundry/site-report/energy-review-document";
+import { EnergyReviewDocument, renderEnergyReviewHtml, renderEnergyReviewMarkup } from "@datafoundry/site-report/energy-review-document";
 import { renderStyledSiteReportHtml } from "@datafoundry/site-report/management-review-document";
 
 const DATES = Array.from({ length: 14 }, (_, index) => new Date(Date.parse("2026-11-02T00:00:00Z") + index * 86_400_000).toISOString().slice(0, 10));
@@ -194,7 +197,10 @@ describe("the energy review as a page", () => {
     for (const locale of ["en", "zh-Hans", "ms"] as const) {
       const html = renderEnergyReviewHtml(buildEnergyReview(estate(), null, GENERATED, locale));
       expect(plain(html)).not.toMatch(/undefined|NaN|\{\w+\}/);
-      for (const id of ["summary", "q-total", "q-groups", "q-largest", "q-comparison", "q-profile", "checks", "q-littleUse", "q-perLight", "q-savings", "method"]) expect(html).toContain(`id="${id}"`);
+      for (const id of ["summary", "q-total", "q-groups", "q-largest", "q-comparison", "q-profile", "checks", "q-littleUse", "q-perLight", "q-savings", "method"]) {
+        expect(html).toContain(`id="er-${id}"`);
+        expect(html).toContain(`href="#er-${id}"`);
+      }
     }
     const page = plain(renderEnergyReviewHtml(review));
     expect(page).toContain("Riverside Energy Review · 2–15 Nov 2026");
@@ -253,3 +259,75 @@ describe("the energy review on a live site's readings", () => {
   });
 });
 
+describe("the energy review as a working page", () => {
+  it("gives a saved copy a title block and the bar of sections, but nothing that moves", () => {
+    const html = renderEnergyReviewHtml(review);
+    expect(html).toContain("<h1>Riverside energy review</h1>");
+    expect(plain(html)).toContain("Prepared for Riverside");
+    expect(html).toContain('aria-label="Sections of the review"');
+    expect(html).not.toMatch(/<button|<input|<script/);
+    // On paper every figure the charts give on hover is still there: the costs under the bars and the full meter list.
+    expect(plain(html)).toContain("Second line: cost incl. GST.");
+    expect(html.match(/<tbody>/g)!.length).toBeGreaterThanOrEqual(3);
+    for (const meter of review.method.meters) expect(plain(html)).toContain(meter.name);
+  });
+
+  it("opens on its summary under the bar of sections, and its switches, layers, measures and meter list respond", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); vi.stubGlobal("React", React);
+    const scrolled = vi.fn();
+    Element.prototype.scrollIntoView = scrolled;
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    const click = async (element: Element | null | undefined) => { expect(element).toBeTruthy(); await act(async () => (element as HTMLElement).click()); };
+    const button = (text: string) => [...host.querySelectorAll("button")].find(item => item.textContent?.trim() === text);
+    try {
+      await act(async () => root.render(<EnergyReviewDocument review={review} />));
+      // No cover on the page: the panel around it already names the site and the dates.
+      expect(host.querySelector("h1")).toBeNull();
+      const nav = [...host.querySelectorAll('nav[aria-label="Sections of the review"] a')].map(link => link.textContent);
+      expect(nav).toEqual(["Summary", "1Total use", "2By group", "3Largest circuits", "4Like for like", "5" + "24 hours", "Checks", "6Little use", "7Per light", "8Savings", "Method"]);
+
+      // A figure and an answer at a glance each take the reader to their section, without changing the address.
+      await click(host.querySelector('.er-glance a[href="#er-q-savings"]'));
+      expect(scrolled).toHaveBeenCalledTimes(1);
+      expect((scrolled.mock.contexts[0] as Element).id).toBe("er-q-savings");
+      expect(host.querySelector('a.er-fig-tile[href="#er-q-total"]')).not.toBeNull();
+
+      // Energy or cost, each day.
+      expect(host.querySelector("#er-q-total .er-fig-title")?.textContent).toBe("Energy used each day, kWh");
+      await click(button("Cost"));
+      expect(host.querySelector("#er-q-total .er-fig-title")?.textContent).toBe("Cost of each day, S$");
+      expect(host.querySelector("#er-q-total .er-typ")?.textContent).toMatch(/^Typical day S\$\d+\.\d\d$/);
+
+      // A layer of the 24 hours can be hidden, and everything shown again.
+      const layer = review.profile!.layers[0]!.name;
+      await click(button(layer));
+      expect(button(layer)!.getAttribute("aria-pressed")).toBe("false");
+      await click(button("Show all"));
+      expect(button(layer)!.getAttribute("aria-pressed")).toBe("true");
+      expect(button("Show all")).toBeUndefined();
+
+      // Leaving a measure out takes it off the saving total.
+      expect(review.savings!.rows.length).toBeGreaterThan(1);
+      const total = () => host.querySelector("table.er-sav tr.er-total")!.textContent!;
+      expect(total()).toContain("Total");
+      await click(host.querySelector(`input[aria-label="Include ${review.savings!.rows[0]!.title} in the total"]`));
+      expect(total()).toContain(`1 of ${review.savings!.rows.length} measures`);
+      expect(total()).toContain(review.savings!.rows.slice(1).reduce((sum, row) => sum + row.kwhYear, 0).toLocaleString("en-SG", { maximumFractionDigits: 0 }));
+
+      // The meter list starts short, opens in full, and sorts by use.
+      const rows = () => [...host.querySelectorAll("#er-method tbody tr")];
+      expect(rows()).toHaveLength(8);
+      await click(button(`Show all ${review.method.meters.length} meters`));
+      expect(rows()).toHaveLength(review.method.meters.length);
+      await click(host.querySelector('#er-method th button[title="Sort by kWh / day"]'));
+      const largest = Math.max(...review.method.meters.map(meter => meter.perDay ?? 0));
+      expect(rows()[0]!.textContent).toContain(largest.toFixed(2));
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+});
