@@ -11,7 +11,7 @@ import { randomUUID } from "node:crypto";
 
 import { AuthError, type AuthService } from "../auth/service.js";
 import { BOOTSTRAP_WORKSPACE_IDS } from "./energy-bootstrap.js";
-import { deleteEnergyProject, setEnergyProjectArchived } from "./energy-project-lifecycle.js";
+import { deleteEnergyProject, renameEnergyProject, setEnergyProjectArchived } from "./energy-project-lifecycle.js";
 import {
   moveEnergyProjectToWorkspace,
   type EnergyProjectMoveFactStore,
@@ -83,22 +83,25 @@ export class EnergyAdminAccessService {
     return this.organisationDto(organisation);
   }
 
+  /** Renames an Organisation and enables or disables it. Leaving `disabled` out keeps it as it is (a rename only). */
   updateOrganisation(input: {
     actorUserId: string;
-    disabled: boolean;
+    disabled?: boolean;
     id: string;
     name: string;
   }): EnergyAdminOrganisationDto {
     const current = this.requireCustomerWorkspace(input.id);
+    const disabled = input.disabled ?? Boolean(current.disabled_at);
     const updated = this.metadataStore.workspaces.setCustomerDetails({
       id: current.id,
       name: requireName(input.name, "Organisation name"),
-      disabled: input.disabled
+      disabled
     });
     this.audit("energyiq.organisation_updated", input.actorUserId, {
       organisationId: updated.id,
-      disabled: input.disabled,
-      name: updated.name
+      disabled,
+      name: updated.name,
+      ...(updated.name !== current.name ? { previousName: current.name } : {})
     });
     return this.organisationDto(updated);
   }
@@ -158,6 +161,13 @@ export class EnergyAdminAccessService {
     // Naming the Organisation puts the event on that client's Activity page.
     const workspaceId = this.metadataStore.energyIq.getProject(result.projectId).workspace_id;
     this.audit(input.archived ? "energyiq.project_archived" : "energyiq.project_restored", input.actorUserId, { ...result, workspaceId });
+    return { organisations: this.listOrganisations() };
+  }
+
+  renameProject(input: { actorUserId: string; projectId: string; name: string }): { organisations: EnergyAdminOrganisationDto[] } {
+    const { changed, ...result } = renameEnergyProject({ metadataStore: this.metadataStore, ...input });
+    // The Organisation in the event puts it on that client's Activity page too.
+    if (changed) this.audit("energyiq.project_renamed", input.actorUserId, result);
     return { organisations: this.listOrganisations() };
   }
 

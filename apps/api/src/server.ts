@@ -223,6 +223,8 @@ import {
 } from "./energy/energy-live-connection-scheduler.js";
 import { createTuyaOpenApiClientFor, createTuyaOpenApiClientFromEnv, type TuyaOpenApiClient } from "./energy/tuya-openapi-client.js";
 import { createEnergyLiveReadingsPoller } from "./energy/energy-live-readings.js";
+import { createEnergyReadingRetentionJob } from "./energy/energy-reading-retention.js";
+import type { EnergyTuyaPostMaterialization } from "./energy/energy-tuya-sync-runner.js";
 import { createEnergyAlertEmailer } from "./energy/energy-alert-emails.js";
 import { assertAiAllowed, finishAiRequest, recordAiRequest } from "./energy/energy-ai-governance.js";
 import { createEnergyReportDeliveryWorker } from "./energy/energy-report-delivery.js";
@@ -1448,11 +1450,9 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
       });
     },
   });
-  // Sites an administrator connected in the app (Facility → Live connection) update on their own daily hour.
-  const liveConnectionScheduler = createEnergyLiveConnectionScheduler({
-    context: energyProjectContext,
-    syncTuyaEnergyReadings: (syncInput) => createTuyaOpenApiClientFor(syncInput.credentials).syncEnergyReadings(syncInput),
-    afterMaterialization: (projectId, workspaceId, actorUserId) => async (_materialized, beforePublish) => {
+  // Publishes the Overview for a site republished in the background (a daily update or the retention clean-up).
+  const backgroundOverviewPublication = (projectId: string, workspaceId: string, actorUserId: string): EnergyTuyaPostMaterialization =>
+    async (_materialized, beforePublish) => {
       const projection = await materializeCurrentProjectOverviewProjectionIfReady({
         metadataStore,
         dataGateway,
@@ -1462,7 +1462,18 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
         beforePublish,
       });
       return projection ? { projectionRef: projection.contextPackage.projectionRef } : undefined;
-    },
+    };
+  // Sites an administrator connected in the app (Facility → Live connection) update on their own daily hour.
+  const liveConnectionScheduler = createEnergyLiveConnectionScheduler({
+    context: energyProjectContext,
+    syncTuyaEnergyReadings: (syncInput) => createTuyaOpenApiClientFor(syncInput.credentials).syncEnergyReadings(syncInput),
+    afterMaterialization: backgroundOverviewPublication,
+  });
+  // Clients that keep meter readings for a limited time (Team → Keep meter readings for) are trimmed each night.
+  const readingRetention = createEnergyReadingRetentionJob({
+    context: energyProjectContext,
+    fallbackActorUserId: tuyaSyncActorUserId,
+    afterMaterialization: backgroundOverviewPublication,
   });
   registerEnergyLiveConnectionScheduler(liveConnectionScheduler);
   // Every 15 minutes, each live site's current meter readings for Overview's live power. Nothing is published.
@@ -1507,6 +1518,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
   });
   tuyaScheduler.start();
   liveConnectionScheduler.start();
+  readingRetention.start();
   if (process.env.ENERGYIQ_LIVE_READINGS_ENABLED?.trim() !== "false") liveReadingsPoller.start();
   // Emails site owners about stopped meters and failed daily updates; off unless ENERGYIQ_ALERT_EMAILS_ENABLED=true.
   const alertEmailer = createEnergyAlertEmailer({ metadataStore });
@@ -1526,6 +1538,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
       observability.close();
       await tuyaScheduler.stop();
       await liveConnectionScheduler.stop();
+      await readingRetention.stop();
       await liveReadingsPoller.stop();
       alertEmailer.stop();
       targetsMonitor.stop();

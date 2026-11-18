@@ -36,6 +36,8 @@ const OVERVIEW_LOOK: GroupSplitLook = {
 
 /** Slice colours that read on the light card and on the dark one alike. */
 const SLICE_COLOURS = ["#2f8a66", "#d19a45", "#7d8f9b", "#5fb38a", "#a8d5bd", "#c4643f", "#9aa9a2", "#9b7cc0"];
+/** The Overview's top-level groups: each has its own colour, shared by its row and its part of the bar above them. */
+const GROUP_COLOURS = ["#17614a", "#3f9f7b", "#d39b45", "#6f8798", "#9ccdb6", "#c4643f", "#8a79b8", "#b5a58a"];
 
 /** The groups inside a group, largest first (the top-level groups keep their saved order). */
 const largestFirst = (rows: BreakdownRow[]) => [...rows].sort((a, b) => b.share - a.share || a.name.localeCompare(b.name));
@@ -73,13 +75,23 @@ export function GroupSplit({ rows, title, note, look = OVERVIEW_LOOK }: { rows: 
   // One scale for every bar, so the groups inside a group visibly add up to it.
   const scale = Math.max(0.001, ...rows.map(row => row.share));
   // Whole percentages that add up: the top-level groups to 100%, the groups inside one to its own share.
-  const value = (row: BreakdownRow) => row.perDay == null ? `${row.pct}%` : t("splitValue", { kwh: kwhText(row.perDay), pct: `${row.pct}%` });
-  const parts = (row: BreakdownRow, inner: boolean, opens: boolean, swatch?: string) => <>
+  // The Overview sets kWh a day and the share in columns of their own, so every row lines up; the words between them
+  // stay for screen readers. Analysis keeps the one line of its own look.
+  const rich = look === OVERVIEW_LOOK;
+  const value = (row: BreakdownRow) => {
+    const text = row.perDay == null ? `${row.pct}%` : t("splitValue", { kwh: kwhText(row.perDay), pct: `${row.pct}%` });
+    if (!rich || row.perDay == null) return text;
+    const [kwh, rest] = text.split(`${row.pct}%`);
+    const sep = /\s*·\s*$/.exec(kwh ?? "")?.[0] ?? "";
+    return <><span className={styles.splitKwh}>{(kwh ?? "").slice(0, (kwh ?? "").length - sep.length)}{rest}</span><span className={styles.srOnly}>{sep}</span><b className={styles.splitPct}>{row.pct}%</b></>;
+  };
+  const parts = (row: BreakdownRow, inner: boolean, opens: boolean, swatch?: string, fill?: string) => <>
     <span className={opens ? look.chevron : styles.splitNoChevron} aria-hidden="true" />
     <span className={(inner ? look.innerName : undefined) ?? look.name}>{swatch && <i className={styles.splitSwatch} style={{ background: swatch }} />}{row.name}</span>
-    <span className={look.bar} aria-hidden="true"><i className={(inner ? look.innerFill : undefined) ?? look.fill} style={{ width: `${Math.min(1, row.share / scale) * 100}%` }} /></span>
+    <span className={look.bar} aria-hidden="true"><i className={(inner ? look.innerFill : undefined) ?? look.fill} style={{ width: `${Math.min(1, row.share / scale) * 100}%`, ...(fill ? { background: fill } : {}) }} /></span>
     <span className={look.value}>{value(row)}</span>
   </>;
+  const groupColour = (index: number) => rich ? GROUP_COLOURS[index % GROUP_COLOURS.length] : undefined;
   // A row inside a group: lit up with its slice, and opening onto its own circuits when it has several.
   const innerRow = (group: BreakdownRow, child: BreakdownRow, index: number) => {
     const listId = `${id}-${group.key}-${index}`;
@@ -89,8 +101,8 @@ export function GroupSplit({ rows, title, note, look = OVERVIEW_LOOK }: { rows: 
     const hover = { onPointerEnter: () => setActive({ group: group.key, index }), onPointerLeave: () => setActive(null), onFocus: () => setActive({ group: group.key, index }), onBlur: () => setActive(null) };
     const className = `${look.innerRow ?? look.row ?? ""}${lit ? ` ${styles.splitLit}` : ""}`;
     return <li key={child.key}>
-      {opens ? <button type="button" className={className} aria-expanded={expanded} aria-controls={listId} onClick={() => toggle(child.key)} {...hover}>{parts(child, true, true, SLICE_COLOURS[index % SLICE_COLOURS.length])}</button>
-        : <div className={className} {...hover}>{parts(child, true, false, SLICE_COLOURS[index % SLICE_COLOURS.length])}</div>}
+      {opens ? <button type="button" className={className} aria-expanded={expanded} aria-controls={listId} onClick={() => toggle(child.key)} {...hover}>{parts(child, true, true, SLICE_COLOURS[index % SLICE_COLOURS.length], rich ? SLICE_COLOURS[index % SLICE_COLOURS.length] : undefined)}</button>
+        : <div className={className} {...hover}>{parts(child, true, false, SLICE_COLOURS[index % SLICE_COLOURS.length], rich ? SLICE_COLOURS[index % SLICE_COLOURS.length] : undefined)}</div>}
       {opens && <ul id={listId} className={look.inner} hidden={!expanded} aria-label={t("splitInside", { name: child.name })}>
         {largestFirst(child.rows).map(grand => <li key={grand.key}><div className={look.innerRow ?? look.row}>{parts(grand, true, false)}</div></li>)}
       </ul>}
@@ -99,14 +111,17 @@ export function GroupSplit({ rows, title, note, look = OVERVIEW_LOOK }: { rows: 
   return <section className={look.section} aria-labelledby={`${id}-title`}>
     <h3 id={`${id}-title`} className={look.heading}>{title ?? t("splitTitle")}</h3>
     {note && <p className={look.note}>{note}</p>}
+    {/* The whole site as one bar, split by top-level group in their colours: the rows below are its key. */}
+    {rich && rows.length > 1 && <div className={styles.splitStack} aria-hidden="true">{rows.map((row, index) => row.share > 0 &&
+      <i key={row.key} style={{ flexGrow: row.share, background: groupColour(index) }} title={`${row.name} ${row.pct}%`} />)}</div>}
     <ul className={look.list}>{rows.map((row, index) => {
       const listId = `${id}-group-${index}`;
       const expanded = open.has(row.key);
       const inside = largestFirst(row.rows);
       return <li key={row.key}>
         {row.rows.length ? <button type="button" className={look.button ?? look.row} aria-expanded={expanded} aria-controls={listId} onClick={() => toggle(row.key)}>
-          {parts(row, false, true)}
-        </button> : <div className={look.row}>{parts(row, false, false)}</div>}
+          {parts(row, false, true, groupColour(index), groupColour(index))}
+        </button> : <div className={look.row}>{parts(row, false, false, groupColour(index), groupColour(index))}</div>}
         {row.rows.length > 0 && <div id={listId} className={styles.splitOpen} hidden={!expanded} role="group" aria-label={t("splitInside", { name: row.name })}>
           {inside.length > 1 && <Ring rows={inside} active={active?.group === row.key ? active.index : null} onActive={index => setActive(index == null ? null : { group: row.key, index })} label={`${row.pct}%`} />}
           <ul className={look.inner}>{inside.map((child, childIndex) => innerRow(row, child, childIndex))}</ul>

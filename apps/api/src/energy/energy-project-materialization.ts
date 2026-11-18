@@ -23,6 +23,7 @@ import {
 } from "@datafoundry/metadata";
 
 import type { ConfigApiContext } from "../routes/types.js";
+import { resolveReadingRetainFrom } from "./energy-reading-retention-cutoff.js";
 import {
   buildEnergyExcelMaterialization,
   buildEnergyTuyaMaterialization,
@@ -116,6 +117,13 @@ export type EnergyProjectManifestMaterializationInput = {
     hierarchySequence: number;
     document: EnergyIqProjectSetupDocument;
   };
+  /**
+   * Publish a new Snapshot even when every source is already current. Only the nightly reading retention clean-up
+   * sets this: the files have not changed, but the readings older than the client's limit must go.
+   */
+  forceRepublish?: boolean;
+  /** The moment the reading retention limit is measured from; defaults to now. */
+  nowMs?: number;
 };
 
 export const materializeEnergyProjectManifest = async (
@@ -460,7 +468,7 @@ const materializeEnergyProjectManifestWithinLock = async (
         timezone: document.project.timezone,
         resolveMappingByFingerprint,
       }));
-      if (factState && currentSnapshot && allBatchesCurrent) {
+      if (factState && currentSnapshot && allBatchesCurrent && !input.forceRepublish) {
         let expectedScope: EnergyIqSnapshotFactScope;
         try {
           expectedScope = resolveEnergyIqSnapshotFactScope(currentSnapshot);
@@ -532,6 +540,17 @@ const materializeEnergyProjectManifestWithinLock = async (
           parseNormalizeMs: elapsedMs(parseNormalizeStartedAt),
         };
       }));
+      // A client with a reading retention limit: readings older than it are removed in the fact writer's
+      // transaction, and each summary carries the limit so the trimmed Snapshot gets its own identity.
+      const retainFrom = resolveReadingRetainFrom({
+        metadataStore: input.context.metadataStore,
+        workspaceId: project.workspace_id,
+        timezone: document.project.timezone,
+        nowMs: input.nowMs ?? Date.now(),
+      });
+      for (const entry of materializations) {
+        entry.result = withReadingRetention(entry.result, retainFrom);
+      }
       const metadataMaterializations = materializations.map(({ batch, result }) => ({
         batch_id: batch.id,
         summary: result.summary,
@@ -562,6 +581,7 @@ const materializeEnergyProjectManifestWithinLock = async (
         expectedPreviousDataSnapshotId: prepared.expected_previous_snapshot_id,
         snapshotFactScope: prepared.fact_scope,
         batches: materializations.map(({ result }) => result.write),
+        ...(retainFrom ? { retainFrom } : {}),
       });
       const existingAudit = input.context.metadataStore.db.prepare("SELECT audit_json FROM energyiq_data_snapshots WHERE id = ? AND project_id = ?").get(prepared.expected_snapshot_id, input.projectId);
       const setupPin = existingAudit
@@ -848,6 +868,27 @@ const sameSourceSet = (left: readonly string[], right: readonly string[]): boole
 };
 
 const normalizeSha = (value: string): string => value.trim().toLocaleLowerCase();
+
+/**
+ * Applies a client's reading retention limit to one Batch's materialization. The summary records the limit (and drops
+ * it when the client keeps everything again). A preserved Batch whose readings all predate the limit may already have
+ * lost every source row to it; it is marked so the fact writer accepts it empty instead of treating it as damage.
+ */
+const withReadingRetention = <T extends { write: EnergyFactMaterializationBatchWrite; summary: EnergyImportMaterializationSummary }>(
+  result: T,
+  retainFrom: string | undefined,
+): T => {
+  const { readingRetainedFrom: _previous, ...summary } = result.summary;
+  if (!retainFrom) return { ...result, summary };
+  const coverageTo = summary.sourceCoverageTo ? Date.parse(summary.sourceCoverageTo) : Number.NaN;
+  const expired = result.write.preserveExisting === true
+    && (!Number.isFinite(coverageTo) || coverageTo < Date.parse(retainFrom));
+  return {
+    ...result,
+    write: expired ? { ...result.write, retentionExpired: true as const } : result.write,
+    summary: { ...summary, readingRetainedFrom: retainFrom },
+  };
+};
 
 const parseStoredMaterializationSummary = (
   batch: EnergyIqImportBatchRecord,

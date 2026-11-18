@@ -12,6 +12,11 @@ const SINGAPORE_OFFSET_MS = 8 * HOUR_MS;
 const FIRST_SYNC_LOOKBACK_MS = 7 * 24 * HOUR_MS;
 /** The scheduler wakes hourly and on every sync pass (at most 20 minutes each); three quiet hours means it is stuck. */
 const STALE_AFTER_MS = 3 * HOUR_MS;
+/**
+ * A night that fails (Tuya busy, a network blip) is tried again on each of the next hours, this many times, instead of
+ * waiting a whole day. A fault that lasts (an expired plan, a changed key) then rests until the site's own hour.
+ */
+export const LIVE_SYNC_HOURLY_RETRIES = 3;
 
 const log = logger.child({ component: "live-sync" });
 
@@ -44,6 +49,16 @@ export const createEnergyLiveConnectionScheduler = (input: {
   let draining: Promise<void> | undefined;
   let timer: NodeJS.Timeout | undefined;
   let stopped = true;
+  /** Hourly retries left for a site whose last update failed. */
+  const retriesLeft = new Map<string, number>();
+  const noteResult = (projectId: string, result: string): void => {
+    if (result !== "failed") {
+      retriesLeft.delete(projectId);
+      return;
+    }
+    const left = retriesLeft.get(projectId);
+    retriesLeft.set(projectId, left === undefined ? LIVE_SYNC_HOURLY_RETRIES : left - 1);
+  };
 
   const syncOne = async (projectId: string): Promise<void> => {
     const connection = input.context.metadataStore.energyIq.liveConnectors.find(projectId);
@@ -67,7 +82,7 @@ export const createEnergyLiveConnectionScheduler = (input: {
     });
     active = { projectId, stop: () => scheduler.stop() };
     try {
-      await scheduler.runIfDue();
+      noteResult(projectId, await scheduler.runIfDue());
     } finally {
       active = undefined;
     }
@@ -83,6 +98,7 @@ export const createEnergyLiveConnectionScheduler = (input: {
           } catch (error) {
             log.error("failed", { project_id: projectId, code: error instanceof Error ? error.message : "unknown" });
             job.failed(error, projectId);
+            noteResult(projectId, "failed");
           }
         }
       } finally {
@@ -105,7 +121,14 @@ export const createEnergyLiveConnectionScheduler = (input: {
     job.heartbeat();
     const hour = new Date(now() + SINGAPORE_OFFSET_MS).getUTCHours();
     for (const connection of input.context.metadataStore.energyIq.liveConnectors.listSyncEnabled()) {
-      if (connection.sync_local_hour === hour) requestSync(connection.project_id);
+      if (connection.sync_local_hour === hour) {
+        // The site's own hour always runs, with a fresh set of retries if it fails.
+        retriesLeft.delete(connection.project_id);
+        requestSync(connection.project_id);
+      } else if ((retriesLeft.get(connection.project_id) ?? 0) > 0) {
+        log.info("retrying", { project_id: connection.project_id, retries_left: retriesLeft.get(connection.project_id) });
+        requestSync(connection.project_id);
+      }
     }
     return draining ?? Promise.resolve();
   };

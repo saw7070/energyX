@@ -102,8 +102,14 @@ export type SpatialExtras = ProjectSpatialReference & {
 };
 
 // ---------- report shape ----------
-/** `recoveredKwh`: energy in `kwh` that meters sent late, after being offline (0 on a normal day). */
-export type ReportDay = { date: string; dow: string; kwh: number; dayType: AnalysisDay["dayType"]; holidayName?: string | undefined; complete: boolean; recoveredKwh: number };
+/**
+ * `recoveredKwh`: energy in `kwh` that meters sent late, after being offline (0 on a normal day). `recoveredFrom`: the
+ * meters that sent it, largest first, so the reader is told which meter was offline. Absent on a normal day and on
+ * reports saved before it was kept.
+ */
+export type ReportDay = { date: string; dow: string; kwh: number; dayType: AnalysisDay["dayType"]; holidayName?: string | undefined; complete: boolean; recoveredKwh: number; recoveredFrom?: ReportLateMeter[] | undefined };
+/** A meter that was offline and sent `kwh` late, when it came back, for one day. */
+export type ReportLateMeter = { name: string; kwh: number };
 /**
  * `area` is the plain place name ("Office Area") when the zone matches a space. `points` is the zone's outline when the
  * layout draws it as a free shape (an L-shaped block) and the saved points are usable; `rect` is then its bounding box.
@@ -248,7 +254,27 @@ function sumCells(parts: Cells[]): Cells {
   }
   return out;
 }
-const periodSum = (series: TrendSeries | null | undefined, dates: Set<string>) => (series?.cells ?? []).reduce((sum, cell) => dates.has(cell[0]) && cell[2] != null ? sum + cell[2] : sum, 0);
+/**
+ * For each day, the meters that sent energy late after being offline, largest first. Only meters that count in the
+ * official total, as the day's total does; every meter when none is marked official. Amounts under 0.05 kWh are left
+ * out: they are rounding, not an outage worth naming. Pass the site and its spaces: the whole-site readings carry a
+ * meter's own hours only for meters placed on the site itself, so a meter in a block has them in that block's readings.
+ */
+export function lateMetersByDay(scopes: ScopeData | readonly ScopeData[]): Map<string, ReportLateMeter[]> {
+  const seen = new Set<string>();
+  const read = (Array.isArray(scopes) ? scopes : [scopes] as readonly ScopeData[]).flatMap(scope => scope.meters)
+    .filter(meter => meter.series && !seen.has(meter.id) && !!seen.add(meter.id));
+  const meters = read.some(meter => meter.official) ? read.filter(meter => meter.official) : read;
+  const byDay = new Map<string, ReportLateMeter[]>();
+  for (const meter of meters) {
+    const late = new Map<string, number>();
+    for (const cell of meter.series!.cells) if (cell[5]) late.set(cell[0], (late.get(cell[0]) ?? 0) + cell[5]);
+    for (const [date, kwh] of late) if (kwh >= 0.05) byDay.set(date, [...byDay.get(date) ?? [], { name: meter.name, kwh }]);
+  }
+  for (const list of byDay.values()) list.sort((a, b) => b.kwh - a.kwh || a.name.localeCompare(b.name));
+  return byDay;
+}
+const periodSum = (series: TrendSeries | null | undefined, dates: Set<string>) =>(series?.cells ?? []).reduce((sum, cell) => dates.has(cell[0]) && cell[2] != null ? sum + cell[2] : sum, 0);
 
 /** "LED Display 3" → "LED Display": the name without the number at its end. */
 function withoutTrailingNumber(name: string) {
@@ -365,7 +391,11 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const partDay = oneDay && received && !days[0]?.complete;
 
   // Days, averages and base load. Public holidays count with weekends as closed days.
-  const reportDays: ReportDay[] = days.map(day => ({ date: day.date, dow: weekdayOf(day.date, locale), kwh: day.totalKwh, dayType: day.dayType, holidayName: day.holidayName, complete: day.complete, recoveredKwh: day.recoveredKwh }));
+  const lateFrom = lateMetersByDay([project, ...data.current.spaces]);
+  const reportDays: ReportDay[] = days.map(day => {
+    const from = day.recoveredKwh > 0 ? lateFrom.get(day.date) ?? [] : [];
+    return { date: day.date, dow: weekdayOf(day.date, locale), kwh: day.totalKwh, dayType: day.dayType, holidayName: day.holidayName, complete: day.complete, recoveredKwh: day.recoveredKwh, ...(from.length ? { recoveredFrom: from } : {}) };
+  });
   const weekdayAvg = mean(days.filter(day => day.complete && day.dayType === "weekday").map(day => day.totalKwh));
   const weekendAvg = mean(days.filter(day => day.complete && day.dayType !== "weekday").map(day => day.totalKwh));
   // The always-on level comes from the quiet hours: 00:00–06:00, or the daytime for lights-on hours.

@@ -111,6 +111,7 @@ export {
   probeEnergyFactProjectStateForMaterialization,
   readEnergyFactProjectAudit,
   readEnergyFactProjectState,
+  readEnergyFactProjectOldestReading,
   readEnergyFactMaterializationStats,
   resetEnergyFactProjectMaterialization,
   writeEnergyFactProjectMaterialization,

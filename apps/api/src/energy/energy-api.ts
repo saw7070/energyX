@@ -27,7 +27,7 @@ import {
 import { localDayStarts, resolveDataAvailabilityPeriod, startAtFirstReading, summariseDataAvailability } from "./energy-data-availability.js";
 import { readOfflineMeters } from "./energy-live-status.js";
 import { readIdleWhenQuietMeters } from "./energy-idle-meters.js";
-import { normalizeProjectRegion, type EnergyIqProjectRegion, type MetadataStore } from "@datafoundry/metadata";
+import { isEnergyIqReadingRetentionMonths, normalizeProjectRegion, type EnergyIqProjectRegion, type MetadataStore } from "@datafoundry/metadata";
 import type {
   EnergyIqPermissionArea,
   EnergyIqAcademicCalendarPeriod,
@@ -513,7 +513,20 @@ export const handleEnergyApiRequest = async (
             actorUserId: user.id,
             id: decodeURIComponent(segments[2]),
             name: requireNonEmptyString(body.name, "ENERGYIQ_ORGANISATION_NAME_REQUIRED"),
-            disabled: body.disabled === true
+            // Left out, the Organisation keeps its status: a rename only.
+            ...(typeof body.disabled === "boolean" ? { disabled: body.disabled } : {})
+          }))
+        };
+      }
+      if (segments[1] === "projects" && segments[2] && segments[3] === "rename"
+        && segments.length === 4 && request.method === "POST") {
+        const body = requireRecord(await readJsonBody(request));
+        return {
+          status: 200,
+          body: createSuccessResult(service.renameProject({
+            actorUserId: user.id,
+            projectId: decodeURIComponent(segments[2]),
+            name: requireNonEmptyString(body.name, "ENERGYIQ_PROJECT_NAME_REQUIRED")
           }))
         };
       }
@@ -705,6 +718,17 @@ export const handleEnergyApiRequest = async (
           status: 200,
           body: createSuccessResult(team.setSecurity({ actor: user, workspaceId, requireTwoStep: body.requireTwoStep }))
         };
+      }
+      if (segments[1] === "retention" && segments.length === 2 && request.method === "GET") {
+        return { status: 200, body: createSuccessResult(team.retention({ actor: user, workspaceId })) };
+      }
+      if (segments[1] === "retention" && segments.length === 2 && request.method === "PUT") {
+        const body = requireRecord(await readJsonBody(request));
+        const months = body.months;
+        if (!(months === null || isEnergyIqReadingRetentionMonths(months))) {
+          throw new AuthError(400, "BAD_REQUEST", "Choose how long to keep readings: for good, 12 months or 3 months.");
+        }
+        return { status: 200, body: createSuccessResult(team.setRetention({ actor: user, workspaceId, months })) };
       }
       if (segments[1] === "users" && segments.length === 2 && request.method === "POST") {
         const body = requireRecord(await readJsonBody(request));

@@ -95,6 +95,7 @@ import type {
   TwoStepSetupDto,
   TwoStepStatusDto,
   EnergyTeamSecurityDto,
+  EnergyTeamReadingRetentionDto,
   McpServerDto,
   ModelProfileDto,
   QueryHistoryItemDto,
@@ -557,9 +558,10 @@ export const configApi = {
     });
   },
 
+  /** Renames an Organisation; `disabled` enables or disables it, and left out keeps it as it is. */
   updateEnergyAdminOrganisation(
     id: string,
-    body: { disabled: boolean; name: string },
+    body: { disabled?: boolean; name: string },
   ): Promise<EnergyAdminOrganisationDto> {
     return requestEnvelope(`/api/v1/energy/admin/organisations/${encodeURIComponent(id)}`, {
       method: "PATCH",
@@ -575,6 +577,14 @@ export const configApi = {
     return requestEnvelope(`/api/v1/energy/admin/projects/${encodeURIComponent(projectId)}/move`, {
       method: "POST",
       body: JSON.stringify(body),
+    });
+  },
+
+  /** Gives a project a new name, shown everywhere the project is named from then on. */
+  renameEnergyAdminProject(projectId: string, name: string): Promise<{ organisations: EnergyAdminOrganisationDto[] }> {
+    return requestEnvelope(`/api/v1/energy/admin/projects/${encodeURIComponent(projectId)}/rename`, {
+      method: "POST",
+      body: JSON.stringify({ name }),
     });
   },
 
@@ -721,6 +731,14 @@ export const configApi = {
 
   setEnergyTeamSecurity(body: { requireTwoStep: boolean }): Promise<EnergyTeamSecurityDto> {
     return requestEnvelope("/api/v1/energy/team/security", { method: "PUT", body: JSON.stringify(body) });
+  },
+
+  getEnergyTeamReadingRetention(): Promise<EnergyTeamReadingRetentionDto> {
+    return requestEnvelope("/api/v1/energy/team/retention");
+  },
+
+  setEnergyTeamReadingRetention(body: { months: 3 | 12 | null }): Promise<EnergyTeamReadingRetentionDto> {
+    return requestEnvelope("/api/v1/energy/team/retention", { method: "PUT", body: JSON.stringify(body) });
   },
 
   getEnergyProjectHierarchy(projectId: string): Promise<EnergyProjectHierarchyDto> {

@@ -47,6 +47,8 @@ export type EnergyImportMaterializationSummary = {
   sourceLabels: string[];
   sourceCoverageFrom?: string;
   sourceCoverageTo?: string;
+  /** Set when the client keeps readings for a limited time: readings before this instant were removed. */
+  readingRetainedFrom?: string;
 };
 
 export const ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION = "energy-excel-cumulative-v2" as const;

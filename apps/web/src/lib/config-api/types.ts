@@ -86,6 +86,8 @@ export type TwoStepStatusDto = {
 export type TwoStepSetupDto = { secret: string; otpauthUri: string };
 
 export type EnergyTeamSecurityDto = { required: boolean; membersWithoutTwoStep: number; canChange: boolean };
+/** How long the client keeps meter readings: 3 or 12 months, or null for as long as it is subscribed. */
+export type EnergyTeamReadingRetentionDto = { months: 3 | 12 | null; canChange: boolean };
 
 export type EnergyRole = "user" | "admin";
 

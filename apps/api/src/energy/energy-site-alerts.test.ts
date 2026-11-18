@@ -63,7 +63,7 @@ describe("Site alerts", () => {
 
       const alerts = read(true);
       expect(alerts.reports.map((report) => [report.reportId, report.cadence])).toEqual([["monthly-report", "monthly"], ["weekly-report", "weekly"]]);
-      expect(alerts.sync).toEqual({ key: "sync:2026-10-01T18:00:05.000Z", failedAt: "2026-10-01T18:00:05.000Z", reason: "ip-blocked" });
+      expect(alerts.sync).toEqual({ key: "sync:2026-10-01", failedAt: "2026-10-01T18:00:05.000Z", reason: "ip-blocked" });
       expect(read(false).sync).toBeUndefined();
       expect(alerts.readKeys).toEqual([]);
 

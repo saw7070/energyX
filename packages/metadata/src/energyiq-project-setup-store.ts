@@ -459,6 +459,32 @@ export class EnergyIqProjectSetupStore {
     return validateProjectSetupDocument(this.requireDraft(projectId).document);
   }
 
+  /**
+   * Gives a project a new name. The setup draft carries the name as well, and publishing it writes that name back, so
+   * the draft is renamed too (made from what is published first, when there is none yet). Its revision moves on, so a
+   * setup page still open on the old name reloads instead of saving the old name back. The name is checked by the caller.
+   */
+  renameProject(input: { project_id: string; name: string; user_id: string }): void {
+    this.requireProject(input.project_id);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const draft = this.getDraft({ project_id: input.project_id, user_id: input.user_id });
+      const document = canonicalizeDocument({ ...draft.document, project: { ...draft.document.project, name: input.name } });
+      const now = new Date().toISOString();
+      this.db.prepare(`
+        UPDATE energyiq_project_setup_drafts
+        SET revision = revision + 1, document_json = ?, updated_at = ?
+        WHERE project_id = ?
+      `).run(JSON.stringify(document), now, input.project_id);
+      this.db.prepare("UPDATE energyiq_projects SET name = ?, updated_at = ? WHERE id = ?")
+        .run(input.name, now, input.project_id);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   publishDraft(input: {
     project_id: string;
     expected_revision: number;

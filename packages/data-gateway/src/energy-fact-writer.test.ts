@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { getDuckDbDatabase } from "./duckdb-database-cache.js";
+import { energySnapshotGuardSql } from "./energy-snapshot-guard.js";
 
 import {
   ENERGY_FACT_WRITER_CONTRACT_VERSION,
@@ -1540,4 +1541,106 @@ const projectBatch = (input: EnergyFactMaterializationBatchWrite): EnergyFactMat
   normalizedReadings: input.normalizedReadings,
   intervalFacts: input.intervalFacts,
   qualityEvents: input.qualityEvents,
+});
+
+describe("Reading retention", () => {
+  const databasePath = ":memory:";
+  const timezone = "Asia/Singapore";
+  const preserved = (batch: EnergyFactMaterializationBatchWrite, retentionExpired = false): EnergyFactMaterializationBatchWrite => ({
+    importBatchId: batch.importBatchId,
+    sourceSha256: batch.sourceSha256,
+    preserveExisting: true,
+    ...(retentionExpired ? { retentionExpired: true as const } : {}),
+    rawReadings: [],
+    normalizedReadings: [],
+    intervalFacts: [],
+    qualityEvents: [],
+  });
+
+  it("deletes readings older than the limit inside the publication, and the published digest still checks out", async () => {
+    const projectId = "project-retention";
+    const old = boundaryBatch({ databasePath, projectId, importBatchId: "ret-old", sourceSha256: "ret-sha-old",
+      readings: [["2026-01-01T00:00:00.000Z", 100], ["2026-01-01T00:15:00.000Z", 101]] });
+    const recent = boundaryBatch({ databasePath, projectId, importBatchId: "ret-new", sourceSha256: "ret-sha-new",
+      readings: [["2026-05-01T00:00:00.000Z", 200], ["2026-05-01T00:15:00.000Z", 201], ["2026-05-01T00:30:00.000Z", 202]] });
+    const sources = ["ret-sha-old", "ret-sha-new"];
+    await writeEnergyFactProjectMaterialization({
+      databasePath, projectId, timezone, expectedPreviousDataSnapshotId: "unavailable",
+      snapshotFactScope: testFactScope(projectId, "ret-1", sources),
+      batches: [projectBatch(old), projectBatch(recent)],
+    });
+    expect((await readCanonicalIntervals(databasePath, projectId)).some((row) => new Date(String(row.interval_start)).toISOString().startsWith("2026-01-01"))).toBe(true);
+
+    // The client keeps readings from 1 April: the next publication trims the January file away.
+    await writeEnergyFactProjectMaterialization({
+      databasePath, projectId, timezone, expectedPreviousDataSnapshotId: "ret-1",
+      snapshotFactScope: testFactScope(projectId, "ret-2", sources),
+      retainFrom: "2026-04-01T00:00:00.000Z",
+      batches: [preserved(old, true), preserved(recent)],
+    });
+    const sourceRows = await readRows(databasePath, `
+      SELECT import_batch_id, COUNT(*) AS n FROM energy_source_normalized_readings
+      WHERE project_id = 'project-retention' GROUP BY import_batch_id ORDER BY import_batch_id`);
+    expect(sourceRows.map((row) => [row.import_batch_id, Number(row.n)])).toEqual([["ret-new", 3]]);
+    const canonical = await readCanonicalIntervals(databasePath, projectId);
+    expect(canonical.length).toBeGreaterThan(0);
+    expect(canonical.every((row) => new Date(String(row.interval_start)).getTime() >= Date.parse("2026-04-01T00:00:00.000Z"))).toBe(true);
+    const older = await readRows(databasePath, `
+      SELECT
+        (SELECT COUNT(*) FROM raw_meter_readings WHERE project_id = 'project-retention' AND event_time < TIMESTAMPTZ '2026-04-01 00:00:00+00')
+        + (SELECT COUNT(*) FROM normalized_meter_readings WHERE project_id = 'project-retention' AND event_time < TIMESTAMPTZ '2026-04-01 00:00:00+00')
+        + (SELECT COUNT(*) FROM energy_source_interval_facts WHERE project_id = 'project-retention' AND interval_start < TIMESTAMPTZ '2026-04-01 00:00:00+00')
+        + (SELECT COUNT(*) FROM energy_interval_facts WHERE project_id = 'project-retention' AND interval_start < TIMESTAMPTZ '2026-04-01 00:00:00+00') AS n`);
+    expect(Number(older[0]!.n)).toBe(0);
+
+    // Reads through the snapshot guard still pass: the digest was taken after the trim.
+    const state = (await readEnergyFactProjectState({ databasePath, projectId }))!;
+    expect(state.dataSnapshotId).toBe("ret-2");
+    const guard = await readRows(databasePath, `SELECT ${energySnapshotGuardSql({ ...testFactScope(projectId, "ret-2", sources),
+      canonicalIntervalCount: state.canonicalIntervalCount, canonicalIntervalDigest: state.canonicalIntervalDigest })} AS ok`);
+    expect(guard[0]!.ok).toBe(true);
+
+    // The emptied January file only passes as empty because retention says so; otherwise it is damage.
+    await expect(writeEnergyFactProjectMaterialization({
+      databasePath, projectId, timezone, expectedPreviousDataSnapshotId: "ret-2",
+      snapshotFactScope: testFactScope(projectId, "ret-3", sources),
+      retainFrom: "2026-04-01T00:00:00.000Z",
+      batches: [preserved(old), preserved(recent)],
+    })).rejects.toThrow("ENERGYIQ_IMPORT_BATCH_SOURCE_ROWS_UNAVAILABLE:ret-old");
+    await expect(writeEnergyFactProjectMaterialization({
+      databasePath, projectId, timezone, expectedPreviousDataSnapshotId: "ret-2",
+      snapshotFactScope: testFactScope(projectId, "ret-3", sources),
+      batches: [preserved(old, true), preserved(recent)],
+    })).rejects.toThrow("ENERGYIQ_IMPORT_BATCH_SOURCE_ROWS_UNAVAILABLE:ret-old");
+    await expect(writeEnergyFactProjectMaterialization({
+      databasePath, projectId, timezone, expectedPreviousDataSnapshotId: "ret-2",
+      snapshotFactScope: testFactScope(projectId, "ret-3", sources),
+      retainFrom: "2026-04-01T00:00:00.000Z",
+      batches: [preserved(old, true), preserved(recent)],
+    })).resolves.toBeDefined();
+  });
+
+  it("deletes nothing without a limit, and refuses a limit that is not a date", async () => {
+    const projectId = "project-retention-none";
+    const old = boundaryBatch({ databasePath, projectId, importBatchId: "keep-old", sourceSha256: "keep-sha-old",
+      readings: [["2025-01-01T00:00:00.000Z", 10], ["2025-01-01T00:15:00.000Z", 11]] });
+    await writeEnergyFactProjectMaterialization({
+      databasePath, projectId, timezone, expectedPreviousDataSnapshotId: "unavailable",
+      snapshotFactScope: testFactScope(projectId, "keep-1", ["keep-sha-old"]),
+      batches: [projectBatch(old)],
+    });
+    await writeEnergyFactProjectMaterialization({
+      databasePath, projectId, timezone, expectedPreviousDataSnapshotId: "keep-1",
+      snapshotFactScope: testFactScope(projectId, "keep-2", ["keep-sha-old"]),
+      batches: [preserved(old)],
+    });
+    const rows = await readRows(databasePath, "SELECT COUNT(*) AS n FROM energy_source_normalized_readings WHERE project_id = 'project-retention-none'");
+    expect(Number(rows[0]!.n)).toBe(2);
+    await expect(writeEnergyFactProjectMaterialization({
+      databasePath, projectId, timezone, expectedPreviousDataSnapshotId: "keep-2",
+      snapshotFactScope: testFactScope(projectId, "keep-3", ["keep-sha-old"]),
+      retainFrom: "three months",
+      batches: [preserved(old)],
+    })).rejects.toThrow("ENERGYIQ_READING_RETENTION_INVALID");
+  });
 });

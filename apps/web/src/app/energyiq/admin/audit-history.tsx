@@ -52,6 +52,7 @@ export const AUDIT_EVENT_LABELS: Record<string, string> = {
   "energyiq.project_restored": "Restored a project",
   "energyiq.project_deleted": "Deleted a project",
   "energyiq.project_moved": "Moved a project to another client",
+  "energyiq.project_renamed": "Renamed a project",
   "energyiq.electricity_rate_published": "Changed the electricity rate",
   "energyiq.hours_holidays_published": "Changed opening hours or holidays",
   "energyiq.policy_version_selected": "Switched the rate or hours version in use",
