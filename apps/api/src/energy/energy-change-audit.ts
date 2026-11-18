@@ -22,6 +22,7 @@ const CHANGE_EVENTS: Array<{ match: (segments: string[], method: string) => bool
   { match: (s) => s[0] === "projects" && (s[2] === "rule-config" || s[2] === "metric-config"), event: "energyiq.analysis_rules_changed" },
   { match: (s) => s[0] === "projects" && (s[2] === "template-draft" || s[2] === "published-template" || s[2] === "overview-lifecycle"), event: "energyiq.overview_layout_changed" },
   { match: (s) => s[0] === "projects" && s[2] === "targets", event: "energyiq.budget_carbon_changed" },
+  { match: (s) => s[0] === "projects" && s[2] === "meter-alerts", event: "energyiq.meter_alerts_changed" },
   { match: (s) => s[0] === "report-schedules" && s[2] === "send", event: "energyiq.report_email_sent" },
   { match: (s) => s[0] === "report-schedules", event: "energyiq.report_schedule_changed" },
 ];

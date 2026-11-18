@@ -73,8 +73,9 @@ export async function applySuggestionChange(input: ApplyInput, suggestion: Sugge
     case "meter_not_in_use":
     case "meter_in_use":
     case "meter_always_on":
+    case "meter_never_used":
     case "light_count":
-      return applyMeter(input, suggestion.kind, parsed.data as SuggestionPayloads["meter_in_use"] & Partial<SuggestionPayloads["meter_not_in_use"] & SuggestionPayloads["meter_always_on"] & SuggestionPayloads["light_count"]>);
+      return applyMeter(input, suggestion.kind, parsed.data as SuggestionPayloads["meter_in_use"] & Partial<SuggestionPayloads["meter_not_in_use"] & SuggestionPayloads["meter_always_on"] & SuggestionPayloads["meter_never_used"] & SuggestionPayloads["light_count"]>);
     case "dismiss_check": {
       const value = parsed.data as SuggestionPayloads["dismiss_check"];
       // The point's title is written again from its key and the site, so what is kept is what the report flags.
@@ -196,9 +197,9 @@ async function applyRate(input: ApplyInput, payload: SuggestionPayloads["electri
   return makeLive(input);
 }
 
-type MeterKind = "meter_not_in_use" | "meter_in_use" | "meter_always_on" | "light_count";
+type MeterKind = "meter_not_in_use" | "meter_in_use" | "meter_always_on" | "meter_never_used" | "light_count";
 
-async function applyMeter(input: ApplyInput, kind: MeterKind, payload: { meterId: string; meterName?: string; reason?: string; alwaysOn?: boolean; count?: number }): Promise<ApplyResult> {
+async function applyMeter(input: ApplyInput, kind: MeterKind, payload: { meterId: string; meterName?: string; reason?: string; alwaysOn?: boolean; neverUsed?: boolean; count?: number }): Promise<ApplyResult> {
   const setup = metadataOf(input).energyIq.projectSetup;
   const draft = setup.getDraft({ project_id: input.projectId, user_id: input.user.id });
   const mapping = draft.document.meter_mapping;
@@ -212,6 +213,10 @@ async function applyMeter(input: ApplyInput, kind: MeterKind, payload: { meterId
   if (kind === "meter_always_on") {
     if (payload.alwaysOn) presentation.always_on = "true";
     else delete presentation.always_on;
+  }
+  if (kind === "meter_never_used") {
+    if (payload.neverUsed) presentation.never_used = "true";
+    else delete presentation.never_used;
   }
   if (kind === "light_count") presentation.light_count = String(payload.count);
   let checked: Record<string, string>;
@@ -235,13 +240,13 @@ async function applyMeter(input: ApplyInput, kind: MeterKind, payload: { meterId
 
 /** The meter form's rules for these settings (parseMeterPresentation in energy-api.ts). */
 export function checkMeterPresentation(presentation: Record<string, unknown>): Record<string, string> {
-  const keys = ["device_name", "circuit_name", "group", "not_in_use", "off_with_lights", "short_name", "panel", "always_on", "light_count"];
+  const keys = ["device_name", "circuit_name", "group", "not_in_use", "off_with_lights", "short_name", "panel", "always_on", "light_count", "never_used"];
   return Object.fromEntries(keys.flatMap(key => {
     const value = presentation[key];
     if (value === undefined) return [];
     if (typeof value !== "string") throw new Error(`ENERGYIQ_METER_PRESENTATION_INVALID:${key}`);
     const label = value.trim().slice(0, 160);
-    if (key === "always_on") return label === "true" ? [[key, label]] : [];
+    if (key === "always_on" || key === "never_used") return label === "true" ? [[key, label]] : [];
     if (key === "light_count" && label) {
       const count = /^\d+$/u.test(label) ? Number(label) : Number.NaN;
       if (!(count >= 1 && count <= MAX_METER_LIGHT_COUNT)) throw new Error(`ENERGYIQ_METER_PRESENTATION_INVALID:${key}`);

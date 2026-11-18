@@ -9,6 +9,7 @@ import type { ConfigApiContext } from "../routes/types.js";
 import { ensureEnergyIqBootstrap } from "../energy/energy-bootstrap.js";
 import { readEnergyProjectInformation } from "../energy/energy-project-information.js";
 import type { PiReportModel } from "./pi-report-harness.js";
+import { checkMeterPresentation } from "./report-feedback-apply.js";
 import { handleReportFeedbackApi, RATE_LIMITS, STALE_PROCESSING_MS, type ReportFeedbackDependencies } from "./report-feedback-api.js";
 import { activeCalendar, activeTariff, projectCalendarEntry, readFeedbackSite } from "./report-feedback-site.js";
 import { MAX_PENDING_MEMORY, ReportFeedbackStore, type FeedbackDto, type ReportFeedbackState } from "./report-feedback-store.js";
@@ -253,6 +254,27 @@ it("changes a meter's settings through the setup draft and makes them live", asy
   const row = metadata.energyIq.projectSetup.getDraft({ project_id: PROJECT, user_id: "admin" }).document.meter_mapping!.rows.find(item => item.id === meterId)!;
   expect(row.presentation).toMatchObject({ not_in_use: "Switched off at the board", light_count: "24", always_on: "true" });
   expect(applyProjectChanges).toHaveBeenCalledTimes(3);
+});
+
+it("turns \"the pavilion fan must never run\" into a one-click setting that alerts on any use, and back", async () => {
+  answers.push({ reply: "I will alert you whenever it uses power.", suggestions: [
+    { kind: "meter_never_used", payload: { meterId, neverUsed: true } },
+    // Already as it is: nothing to change, so not offered.
+    { kind: "meter_never_used", payload: { meterId, neverUsed: false } },
+  ] });
+  const { feedback } = dataOf<{ feedback: FeedbackDto }>(await give("admin", "The pavilion fan must never run."));
+  expect(feedback.suggestions.map(item => [item.kind, item.label, item.payload])).toEqual([
+    ["meter_never_used", `Alert when ${meterName} uses any power (it should never use power)`, { meterId, meterName, neverUsed: true }],
+  ]);
+  expect((await call("admin", ["suggestions", feedback.suggestions[0]!.id, "apply"], {})).status).toBe(200);
+  const rowOf = () => metadata.energyIq.projectSetup.getDraft({ project_id: PROJECT, user_id: "admin" }).document.meter_mapping!.rows.find(item => item.id === meterId)!;
+  expect(rowOf().presentation).toMatchObject({ never_used: "true" });
+  expect(applyProjectChanges).toHaveBeenCalledTimes(1);
+
+  // The setting is a yes/no, checked like the meter form checks it.
+  expect(checkMeterPresentation({ never_used: "true", always_on: "yes" })).toEqual({ never_used: "true" });
+  expect(checkMeterPresentation({ never_used: "no" })).toEqual({});
+  expect(() => checkMeterPresentation({ never_used: true })).toThrow("ENERGYIQ_METER_PRESENTATION_INVALID:never_used");
 });
 
 it("refuses to apply to a meter that is no longer in the setup, and says so", async () => {

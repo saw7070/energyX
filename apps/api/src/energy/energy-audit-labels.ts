@@ -49,6 +49,7 @@ export const AUDIT_EVENT_LABELS: Readonly<Record<string, string>> = {
   "energyiq.analysis_rules_changed": "Changed analysis rules",
   "energyiq.overview_layout_changed": "Changed the Overview layout",
   "energyiq.budget_carbon_changed": "Changed a site's budget, carbon factor or overnight check",
+  "energyiq.meter_alerts_changed": "Changed a site's meter alert settings",
   "energyiq.report_schedule_changed": "Changed a scheduled report email",
   "energyiq.report_email_sent": "Sent a scheduled report email",
   "energyiq.report_feedback_applied": "Applied a change the AI suggested from report feedback",

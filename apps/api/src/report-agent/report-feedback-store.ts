@@ -18,6 +18,7 @@ export const SUGGESTION_KINDS = [
   "meter_not_in_use",
   "meter_in_use",
   "meter_always_on",
+  "meter_never_used",
   "light_count",
   "holiday",
   "electricity_rate",
