@@ -169,9 +169,24 @@ const usualText = (percent: number) => percent < 25 || percent >= 180 ? "white" 
 export const OFF_SHARE = 0.01, OFF_KWH = 0.001;
 type Rows = Array<{ profileKw: Array<number | null> }>;
 const mean = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
-/** What the device usually uses in each hour of the day: the average over the rows (days) with a reading for that hour. */
+/** Fewer days than this with a reading for an hour, and its usual use is the plain average: too few for a middle value. */
+export const MEDIAN_MIN_DAYS = 3;
+/** The middle value (the mean of the two middle values when the count is even); null when there are none. */
+export function median(values: number[]): number | null {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b), middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
+}
+/**
+ * What the device usually uses in each hour of the day, over the rows (days) with a reading for that hour: the middle
+ * value, so one odd day (a light left on one night, a one-off spike) does not shift what counts as usual. With fewer
+ * than three days of readings for an hour it is their average.
+ */
 export function usualByHour(rows: Rows): Array<number | null> {
-  return Array.from({ length: 24 }, (_, hour) => mean(rows.map(row => row.profileKw[hour] ?? null).filter((kw): kw is number => kw !== null)));
+  return Array.from({ length: 24 }, (_, hour) => {
+    const readings = rows.map(row => row.profileKw[hour] ?? null).filter((kw): kw is number => kw !== null);
+    return readings.length >= MEDIAN_MIN_DAYS ? median(readings) : mean(readings);
+  });
 }
 /** The level under which an hour counts as off for this device. */
 export function offBelow(rows: Rows): number {

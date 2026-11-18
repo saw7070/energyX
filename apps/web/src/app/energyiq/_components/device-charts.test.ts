@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { heatColour, loadPercent, niceMax, offBelow, usualByHour, usualCell, usualColour, USUAL_GRADIENT } from "./device-charts";
+import { heatColour, loadPercent, median, niceMax, offBelow, usualByHour, usualCell, usualColour, USUAL_GRADIENT } from "./device-charts";
 
 describe("loadPercent", () => {
   it("expresses an hour's power as a share of the device's busiest hour", () => {
@@ -32,15 +32,34 @@ describe("heatColour", () => {
   });
 });
 
+describe("median", () => {
+  it("takes the middle value, or the mean of the two middle values for an even count", () => {
+    expect(median([0.12, 0.09, 0.09])).toBe(0.09);
+    expect(median([4, 1, 3, 2])).toBe(2.5);
+    expect(median([])).toBeNull();
+  });
+});
+
 describe("usualByHour", () => {
-  it("averages each hour of the day over the days that have a reading for it, leaving missing hours out", () => {
-    const day = (kw: Array<number | null>) => ({ profileKw: Array.from({ length: 24 }, (_, hour) => kw[hour] ?? null) });
+  const day = (kw: Array<number | null>) => ({ profileKw: Array.from({ length: 24 }, (_, hour) => kw[hour] ?? null) });
+
+  it("takes the middle value of each hour over the days with a reading for it, so one odd day does not shift it", () => {
     const usual = usualByHour([day([0.09, 0.2, null]), day([0.09, 0.4, null]), day([0.12, null, null])]);
-    expect(usual[0]).toBeCloseTo(0.1);
-    // 01:00 has readings on two days only; the missing third day does not drag the average down.
-    expect(usual[1]).toBeCloseTo(0.3);
+    // 00:00 read 0.09, 0.09 and 0.12: usual is 0.09, not the 0.10 average the one 0.12 would make it.
+    expect(usual[0]).toBe(0.09);
     expect(usual[2]).toBeNull();
     expect(usual).toHaveLength(24);
+  });
+
+  it("falls back to the average when fewer than three days have a reading for that hour, leaving missing days out", () => {
+    const usual = usualByHour([day([0.09, 0.2]), day([0.09, 0.4]), day([0.12, null])]);
+    expect(usual[1]).toBeCloseTo(0.3);
+    expect(usualByHour([day([0.5])])[0]).toBe(0.5);
+  });
+
+  it("keeps an hour usually off when the device was on there on only one night out of seven", () => {
+    const nights = Array.from({ length: 7 }, (_, night) => day(Array.from({ length: 24 }, (_, hour) => hour >= 18 ? 2 : hour === 3 && night === 6 ? 2 : 0)));
+    expect(usualByHour(nights)[3]).toBe(0);
   });
 });
 

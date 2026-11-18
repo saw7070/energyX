@@ -82,9 +82,9 @@ it("compares each hour of a day with that hour's usual use, so a steady device r
   expect(text("0:3")).toBe("100%");
   // Dimmed at 01:00 every night, so 01:00 on a normal night is usual too.
   expect(text("0:1")).toBe("100%");
-  // The one 0.11 stands out a little; the ordinary 0.09 beside it stays close to usual.
-  expect(text("1:5")).toBe("114%");
-  expect(text("0:5")).toBe("93%");
+  // The one 0.11 stands out; it does not lift what counts as usual, so the ordinary 0.09 on the other days stays at 100%.
+  expect(text("1:5")).toBe("122%");
+  expect(text("0:5")).toBe("100%");
   // A missing hour stays empty, and is left out of that hour's usual use.
   expect(text("2:7")).toBe("");
   expect(host.querySelector('[data-heat-cell="2:7"]')!.getAttribute("data-heat-kind")).toBe("missing");
@@ -94,10 +94,11 @@ it("compares each hour of a day with that hour's usual use, so a steady device r
   expect(legend).toContain("Less than usual");
   expect(legend).toContain("More than usual");
   expect(legend).toContain("100% = what this device usually uses at this hour");
+  expect(legend).toContain("its typical value for that hour over the period");
   expect(legend).not.toContain("busiest");
   expect(legend).not.toContain("Usually off");
   await hover(host, "1:5");
-  expect(tooltipText(host)).toContain("114% of its usual use at this hour (usually 0.10 kWh)");
+  expect(tooltipText(host)).toContain("122% of its usual use at this hour (usually 0.09 kWh)");
   expect(tooltipText(host)).toContain("0.11 kW · 0.11 kWh in this hour");
   expect(tooltipText(host)).not.toContain("average day");
   await unmount();
@@ -124,6 +125,23 @@ it("reads off at an hour the device is usually off, and flags a day it used ener
   await hover(host, "0:3");
   expect(tooltipText(host)).toContain("Usually off at this hour");
   expect(tooltipText(host)).toContain("0.00 kW · 0.00 kWh in this hour");
+  await unmount();
+});
+
+it("keeps an hour usually off when the device ran there on one odd night, and flags that night", async () => {
+  // Lighting at 2 kW from 18:00 to 23:00 over a week; on the seventh night it was also left on at 03:00.
+  const nights = Array.from({ length: 7 }, (_, night) => ({ id: `2026-11-${16 + night}`, name: `Night ${night + 1}`, group: "Week", profileKw: Array.from({ length: 24 }, (_, hour) => hour >= 18 ? 2 : hour === 3 && night === 6 ? 2 : 0) }));
+  const { host, unmount } = await render(<UsageHeatmap rows={nights} openHours={new Set()} scale="usual" />);
+  const cell = (id: string) => host.querySelector(`[data-heat-cell="${id}"]`)!;
+  for (let night = 0; night < 6; night++) {
+    expect(cell(`${night}:3`).getAttribute("data-heat-kind")).toBe("off");
+    expect(cell(`${night}:3`).textContent).toBe("off");
+  }
+  expect(cell("6:3").getAttribute("data-heat-kind")).toBe("usedWhileOff");
+  expect(cell("6:3").textContent).toBe("!");
+  await hover(host, "6:3");
+  expect(tooltipText(host)).toContain("Used energy at an hour it is usually off");
+  expect(tooltipText(host)).toContain("2.00 kW · 2.00 kWh in this hour");
   await unmount();
 });
 
