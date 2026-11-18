@@ -61,6 +61,18 @@ export function PortfolioView({ portfolio }: { portfolio: EnergyPortfolioDto }) 
     const low = days.reduce((best, day) => day.kwh < best.kwh ? day : best), high = days.reduce((best, day) => day.kwh > best.kwh ? day : best);
     return t("trendAlt", { from: dayLabel(dates[0]!), to: dayLabel(dates.at(-1)!), low: format.one(low.kwh), lowDate: dayLabel(low.date), high: format.one(high.kwh), highDate: dayLabel(high.date) });
   };
+  /** Under the line, in words: the latest day's kWh and how it compares with the site's average day. */
+  const latestNote = (values: Array<number | null>, average: number | null) => {
+    const index = values.findLastIndex(value => value !== null);
+    const kwh = index < 0 ? null : values[index]!;
+    if (kwh === null) return null;
+    const change = average ? (kwh / average - 1) * 100 : null;
+    const tone = change === null || Math.abs(change) < 5 ? "" : change > 0 ? styles.trendUp : styles.trendDown;
+    return <span className={styles.trendNote}>
+      {t("trendLatest", { kwh: format.one(kwh) })}
+      {change !== null && <b className={tone}>{Math.abs(change) < 5 ? t("trendSteady") : t(change > 0 ? "trendAbove" : "trendBelow", { pct: `${format.whole(Math.abs(change))}%` })}</b>}
+    </span>;
+  };
   const header = (key: SortKey, label: string, align: "left" | "right" = "right") => (
     <th scope="col" className={align === "right" ? styles.numeric : undefined} aria-sort={sort.key === key ? (sort.descending ? "descending" : "ascending") : "none"}>
       <button type="button" onClick={() => setSort(current => ({ key, descending: current.key === key ? !current.descending : key !== "name" }))} aria-label={t("sortBy", { column: label })}>
@@ -93,7 +105,8 @@ export function PortfolioView({ portfolio }: { portfolio: EnergyPortfolioDto }) 
               {header("name", t("col.site"), "left")}
               {header("usageKwh", t("col.energy"))}
               {header("averageDailyKwh", t("col.average"))}
-              <th scope="col">{t("col.trend")}{datesLabel && <small className={styles.cellNote}>{t("trendHint", { dates: datesLabel })}</small>}</th>
+              <th scope="col">{t("col.trend")}{datesLabel && <small className={styles.cellNote}>{t("trendHint", { dates: datesLabel })}</small>}
+                <small className={styles.trendKey}><i aria-hidden="true" />{t("trendAverageKey")}</small></th>
               {header("changePct", t("col.change"))}
               {header("cost", t("col.cost"))}
               {header("peakKw", t("col.peak"))}
@@ -127,7 +140,10 @@ export function PortfolioView({ portfolio }: { portfolio: EnergyPortfolioDto }) 
                       {/* A site connected part-way through, or with days lost, says how many days the average is over. */}
                       {site.readingDays !== undefined && site.readingDays >= 1 && site.readingDays <= dates.length - 1 && <small className={styles.cellNote}>{t("readingDays", { days: format.days(site.readingDays) })}</small>}
                     </td>
-                    <td className={styles.trendCell}><Sparkline values={site.dailyKwh ?? []} label={trendLabel(site.dailyKwh ?? [])} pointLabel={pointLabel(site.dailyKwh ?? [])} keysHint={t("trendKeys")} /></td>
+                    <td className={styles.trendCell}>
+                      <Sparkline values={site.dailyKwh ?? []} average={averageOf(site)} label={trendLabel(site.dailyKwh ?? [])} pointLabel={pointLabel(site.dailyKwh ?? [])} keysHint={t("trendKeys")} />
+                      {latestNote(site.dailyKwh ?? [], averageOf(site))}
+                    </td>
                     <td className={`${styles.numeric} ${site.changePct !== null && site.changePct > 0 ? styles.up : site.changePct !== null && site.changePct < 0 ? styles.down : ""}`}>{site.changePct === null ? "—" : format.signedPct(site.changePct)}</td>
                     <td className={styles.numeric}>{site.cost ? withCurrency(site.cost.currency, format.money(site.cost.amount)) : "—"}</td>
                     <td className={styles.numeric}>{format.one(site.peakKw)}</td>
@@ -165,14 +181,16 @@ export function PortfolioView({ portfolio }: { portfolio: EnergyPortfolioDto }) 
 }
 
 /**
- * Each day's use as a small line from zero, so a steady site reads as steady. Days without readings leave a gap.
- * Pointing at it (or tapping it on a phone) shows one day's date and kWh; with the keyboard, the arrow keys step through
- * the days. A screen reader first hears the whole story in words: the period and its lowest and highest day.
+ * Each day's use as a small shaded line from zero, so a steady site reads as steady, with the site's average day as a
+ * dashed line and the latest day marked. Days without readings leave a gap. Pointing at it (or tapping it on a phone)
+ * shows one day's date and kWh; with the keyboard, the arrow keys step through the days. A screen reader first hears
+ * the whole story in words: the period and its lowest and highest day.
  */
-export function Sparkline({ values, label, pointLabel, keysHint }: { values: Array<number | null>; label: string; pointLabel?: (index: number) => string; keysHint?: string }) {
+export function Sparkline({ values, average = null, label, pointLabel, keysHint }: { values: Array<number | null>; average?: number | null; label: string; pointLabel?: (index: number) => string; keysHint?: string }) {
   const [active, setActive] = useState<number | null>(null);
   const wrap = useRef<HTMLSpanElement>(null);
   const hintId = useId();
+  const fillId = `${hintId.replace(/[^a-zA-Z0-9_-]/g, "")}-fill`;
   // A tap leaves the day showing; tapping anywhere else puts it away.
   useEffect(() => {
     if (active === null) return;
@@ -180,10 +198,11 @@ export function Sparkline({ values, label, pointLabel, keysHint }: { values: Arr
     document.addEventListener("pointerdown", away);
     return () => document.removeEventListener("pointerdown", away);
   }, [active]);
-  const width = 104, height = 28, pad = 2;
+  const width = 132, height = 36, pad = 3;
   const present = values.filter((value): value is number => value !== null);
   if (!present.length) return <span className={styles.coverage} title={label}>—<span className={styles.srOnly}>{label}</span></span>;
-  const max = Math.max(...present, 0.001);
+  const max = Math.max(...present, average ?? 0, 0.001) * 1.08;
+  const base = height - pad;
   const x = (index: number) => values.length === 1 ? width / 2 : pad + index * (width - 2 * pad) / (values.length - 1);
   const y = (value: number) => pad + (1 - value / max) * (height - 2 * pad);
   const runs: Array<Array<[number, number]>> = [];
@@ -192,13 +211,22 @@ export function Sparkline({ values, label, pointLabel, keysHint }: { values: Arr
     if (!runs.length) runs.push([]);
     runs.at(-1)!.push([x(index), y(value)]);
   });
-  const line = runs.filter(run => run.length).map((run, index) => run.length === 1
-    ? <circle key={index} cx={run[0]![0]} cy={run[0]![1]} r={1.6} />
-    : <polyline key={index} points={run.map(([px, py]) => `${px.toFixed(1)},${py.toFixed(1)}`).join(" ")} />);
-  if (!pointLabel) return <svg className={styles.spark} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={label}><title>{label}</title>{line}</svg>;
+  const pts = (run: Array<[number, number]>) => run.map(([px, py]) => `${px.toFixed(1)},${py.toFixed(1)}`).join(" ");
+  const drawn = runs.filter(run => run.length);
+  const lastWithReading = values.findLastIndex(value => value !== null);
+  const picture = <>
+    <defs><linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1"><stop offset="0" className={styles.sparkFillTop} /><stop offset="1" className={styles.sparkFillBottom} /></linearGradient></defs>
+    <line className={styles.sparkBase} x1={pad} x2={width - pad} y1={base} y2={base} />
+    {drawn.map((run, index) => run.length > 1 && <path key={`a${index}`} className={styles.sparkArea} fill={`url(#${fillId})`} d={`M${run[0]![0].toFixed(1)},${base} L${pts(run).replaceAll(" ", " L")} L${run.at(-1)![0].toFixed(1)},${base} Z`} />)}
+    {average !== null && average > 0 && <line className={styles.sparkAverage} x1={pad} x2={width - pad} y1={y(average)} y2={y(average)} />}
+    {drawn.map((run, index) => run.length === 1
+      ? <circle key={index} cx={run[0]![0]} cy={run[0]![1]} r={1.8} />
+      : <polyline key={index} points={pts(run)} />)}
+    <circle className={styles.sparkLast} cx={x(lastWithReading)} cy={y(values[lastWithReading]!)} r={2.8} />
+  </>;
+  if (!pointLabel) return <svg className={styles.spark} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={label}><title>{label}</title>{picture}</svg>;
 
   const last = values.length - 1;
-  const lastWithReading = values.findLastIndex(value => value !== null);
   /** The day nearest the pointer, from where it is across the line. */
   const dayAt = (clientX: number) => {
     const box = wrap.current?.getBoundingClientRect();
@@ -226,8 +254,8 @@ export function Sparkline({ values, label, pointLabel, keysHint }: { values: Arr
     onKeyDown={step}>
     <svg className={styles.spark} viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
       {shown && <line className={styles.sparkGuide} x1={shown.x} x2={shown.x} y1={0} y2={height} />}
-      {line}
-      {shown && shown.value !== null && <circle className={styles.sparkDot} cx={shown.x} cy={y(shown.value)} r={2.6} />}
+      {picture}
+      {shown && shown.value !== null && <circle className={styles.sparkDot} cx={shown.x} cy={y(shown.value)} r={3} />}
     </svg>
     {/* Kept inside the line's width: at the first day it starts there, at the last it ends there. */}
     {shown && <span className={styles.sparkTip} aria-hidden="true" style={{ left: `${(shown.x / width) * 100}%`, transform: `translateX(-${(shown.x / width) * 100}%)` }}>{shown.text}</span>}

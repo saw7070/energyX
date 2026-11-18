@@ -121,10 +121,24 @@
 
 /* Average a day and the daily trend line. The line uses the theme's primary colour, so it follows light and dark. */
 .cellNote { display:block; margin-top:2px; font-size:11.5px; font-weight:500; color:var(--text-tertiary); }
-.trendCell { padding-top:6px !important; padding-bottom:6px !important; }
-.spark { display:block; width:104px; height:28px; overflow:visible; }
-.spark polyline { fill:none; stroke:var(--primary); stroke-width:1.5; stroke-linejoin:round; stroke-linecap:round; }
+.trendCell { padding-top:8px !important; padding-bottom:8px !important; min-width:150px; }
+.spark { display:block; width:132px; height:36px; overflow:visible; }
+.spark polyline { fill:none; stroke:var(--primary); stroke-width:1.75; stroke-linejoin:round; stroke-linecap:round; }
 .spark circle { fill:var(--primary); }
+.spark .sparkFillTop { stop-color:var(--primary); stop-opacity:.24; }
+.spark .sparkFillBottom { stop-color:var(--primary); stop-opacity:0; }
+.spark .sparkArea { stroke:none; }
+.spark .sparkBase { stroke:var(--border, #e3e8e5); stroke-width:1; }
+.spark .sparkAverage { stroke:var(--step-warning); stroke-width:1.2; stroke-dasharray:3 3; opacity:.9; }
+.spark .sparkLast { fill:var(--primary); stroke:var(--surface); stroke-width:1.5; }
+/* Under the line, in words: the latest day and how it compares with the average day. */
+.trendNote { display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 6px; margin-top:4px; font-size:11.5px; font-weight:500; color:var(--text-secondary); white-space:nowrap; }
+.trendNote b { font-weight:650; color:var(--text-tertiary); }
+.trendNote b.trendUp { color:var(--step-error); }
+.trendNote b.trendDown { color:var(--step-success); }
+/* The header's key for the dashed line. */
+.trendKey { display:flex; align-items:center; gap:6px; margin-top:2px; font-size:11.5px; font-weight:500; color:var(--text-tertiary); white-space:nowrap; }
+.trendKey i { display:block; width:14px; border-top:1.5px dashed var(--step-warning); }
 /* One day's readout: hover, tap, or the arrow keys once the line has keyboard focus. */
 .sparkWrap { position:relative; display:inline-block; vertical-align:middle; border-radius:4px; cursor:crosshair; }
 .sparkWrap:focus-visible { outline:2px solid var(--primary); outline-offset:3px; }
