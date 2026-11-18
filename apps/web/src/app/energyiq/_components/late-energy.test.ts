@@ -4,7 +4,7 @@
  * type. Otherwise a day after an outage reads short on the Overview while the readings have the energy.
  */
 import { describe, expect, it } from "vitest";
-import { inUseTotal, worthSaying } from "@datafoundry/site-report";
+import { inUseTotal, lateMetersByDay, worthSaying } from "@datafoundry/site-report";
 import { scopeDays, type ScopeData, type TrendSeries } from "@datafoundry/site-report";
 
 const series = (id: string, expected: number, cells: TrendSeries["cells"]): TrendSeries => ({ id, expectedMinutesPerHour: expected, cells });
@@ -32,5 +32,20 @@ describe("energy sent late after an outage", () => {
     expect(worthSaying(0.3, 47)).toBe(false);
     expect(worthSaying(0.8, 47)).toBe(false);
     expect(worthSaying(1, 47)).toBe(true);
+  });
+
+  it("names the meters that sent it, largest first, counting only meters in the official total", () => {
+    const total = series("__scope__", 180, []);
+    const meter = (id: string, name: string, official: boolean, cells: TrendSeries["cells"]) => ({ id, name, location: "", category: "light" as const, official, series: series(id, 60, cells) });
+    const site = scope(total, [
+      meter("pav", "Pavilion 2", true, [["2026-11-16", 19, 0, 0, 4, 2.5], ["2026-11-16", 20, 0, 0, 4, 1.4], ["2026-11-17", 19, 0, 0, 4, 0.02]]),
+      meter("drive", "Driveway", true, [["2026-11-16", 21, 0, 0, 4, 0.6], ["2026-11-17", 3, 0, 0, 4, 1.2]]),
+      meter("main", "Main incomer", false, [["2026-11-16", 19, 0, 0, 4, 9]]),
+    ]);
+    const late = lateMetersByDay(site);
+    expect(late.get("2026-11-16")!.map(item => item.name)).toEqual(["Pavilion 2", "Driveway"]);
+    expect(late.get("2026-11-16")![0]!.kwh).toBeCloseTo(3.9, 9);
+    // 0.02 kWh is rounding, not an outage worth naming.
+    expect(late.get("2026-11-17")).toEqual([{ name: "Driveway", kwh: 1.2 }]);
   });
 });

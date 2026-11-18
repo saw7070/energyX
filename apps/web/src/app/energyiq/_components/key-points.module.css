@@ -175,41 +175,107 @@ button.splitRow[aria-expanded="true"] .splitChevron{transform:rotate(45deg)}
 .splitLit{background:#e3eee7 !important}
 @media(max-width:600px){.splitOpen{grid-template-columns:1fr;justify-items:center}.splitOpen>ul{width:100%}}
 
-/* The Overview's first picture: energy used each day. */
-.daily{margin:14px 0 6px;padding:16px 16px 12px;border:1px solid var(--hero-rule);border-radius:16px;background:transparent;max-width:none}
-.dailyHead{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:8px 16px;margin-bottom:6px}
-.dailyHead b{display:block;font-size:14px;font-weight:650;color:var(--hero-ink)}
-.dailyTypical{display:inline-flex;align-items:center;gap:8px;margin-top:3px;font-size:12.5px;color:var(--hero-quiet)}
-.dailyTypical i{display:block;width:18px;border-top:2px dashed #c28a3c}
-.dailySwitch{display:inline-flex;padding:3px;border-radius:999px;border:1px solid var(--hero-rule)}
-.dailySwitch button{border:0;background:none;padding:4px 12px;border-radius:999px;font:inherit;font-size:12.5px;font-weight:600;color:var(--hero-quiet);cursor:pointer}
-.dailySwitch button[aria-pressed="true"]{background:#176b59;color:#fff}
+/* The Overview's first picture: energy used each day, as a card of its own inside the headline card. */
+.daily{margin:16px 0 4px;padding:20px 22px 16px;border:1px solid #e3ebe6;border-radius:18px;background:linear-gradient(180deg,#fbfdfc 0%,#fff 100%);box-shadow:0 1px 2px #0a281b08;max-width:none}
+.dailyHead{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:10px 16px;margin-bottom:10px}
+.dailyHead b{display:block;font-size:15px;font-weight:700;letter-spacing:-.01em;color:var(--hero-ink)}
+.dailyTypical{display:inline-flex;align-items:center;gap:8px;margin-top:4px;font-size:13px;color:var(--hero-quiet)}
+.dailyTypical i{display:block;width:20px;border-top:2px dashed #c98a2e}
+.dailySwitch{display:inline-flex;gap:2px;padding:3px;border-radius:12px;background:#eef3f0}
+.dailySwitch button{border:0;background:none;padding:6px 14px;border-radius:9px;font:inherit;font-size:13px;font-weight:600;color:var(--hero-quiet);cursor:pointer;transition:background 140ms,color 140ms,box-shadow 140ms}
+.dailySwitch button:hover{color:var(--hero-ink)}
+.dailySwitch button[aria-pressed="true"]{background:#fff;color:#0f5a46;box-shadow:0 1px 2px #0a281b1f,0 2px 6px -2px #0a281b29}
 .dailyPlot{position:relative}
 .dailyScroll{overflow-x:auto}
 .dailyScroll svg{display:block;overflow:visible}
-.dailyGrid{stroke:var(--hero-rule);stroke-dasharray:2 4}
-.dailyBase{stroke:var(--hero-quiet)}
-.dailyAxis{font-size:11px;fill:var(--hero-quiet)}
-.dailyDow{font-size:11px;font-weight:600;fill:var(--hero-ink)}
-.dailyValue{font-size:10.5px;font-weight:600;fill:var(--hero-ink)}
-.dailyBar{fill:#1f6b52;transition:opacity 140ms}
-.dailyBarPale{fill:#9fbfb1;transition:opacity 140ms}
+.dailyGrid{stroke:#edf2ef}
+.dailyBase{stroke:#c9d4ce}
+.dailyAxis{font-size:11px;fill:var(--hero-quiet);font-variant-numeric:tabular-nums}
+.dailyDow,.dailyDowLit{font-size:11.5px;font-weight:600;fill:var(--hero-body)}
+.dailyDowLit{fill:var(--hero-ink);font-weight:750}
+.dailyValue,.dailyValueLit{font-size:10.5px;font-weight:600;fill:#7a8a82;font-variant-numeric:tabular-nums}
+.dailyValueLit{font-size:11.5px;font-weight:750;fill:var(--hero-ink)}
+.dailyStopTop{stop-color:#2e9471}
+.dailyStopBottom{stop-color:#17614a}
+.dailyPaleFill{fill:#b9d6c8}
+.dailyPaleStripe{stroke:#ffffff;stroke-width:2.2;stroke-opacity:.55}
+.dailyBar{transform-box:fill-box;transform-origin:50% 100%;animation:dailyGrow 620ms cubic-bezier(.2,.8,.2,1) both}
+@keyframes dailyGrow{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+.dailyColumn{fill:#eff6f2;pointer-events:none}
 .dailyHit{fill:transparent;cursor:crosshair}
 .dailyHit:focus{outline:none}
-.dailyTypicalLine{stroke:#c28a3c;stroke-width:1.5;stroke-dasharray:6 4;pointer-events:none}
-.dailyTip{position:absolute;z-index:3;pointer-events:none;display:grid;gap:2px;min-width:150px;padding:8px 11px;border-radius:10px;background:#17221d;color:#fff;font-size:12px;line-height:1.45;white-space:nowrap;box-shadow:0 12px 28px -12px #0009;transform:translate(-50%,calc(-100% - 12px))}
-.dailyTipLeft{transform:translate(-14%,calc(-100% - 12px))}
-.dailyTipRight{transform:translate(-86%,calc(-100% - 12px))}
-.dailyTip b{font-weight:650}
-.dailyTip em{font-style:normal;color:#e7c58f}
-.hero .dailyAlert{display:flex;gap:10px;align-items:flex-start;margin:10px 0 0;padding:9px 12px;border-radius:10px;background:#f8efe1;color:#5e3e14;font-size:13px;line-height:1.5;max-width:none}
-.dailyAlert b{flex:none;display:grid;place-items:center;width:19px;height:19px;border-radius:50%;background:#b47e33;color:#fff;font-size:11.5px;font-weight:800}
-.hero .heroMonth{margin-top:-6px;font-size:17px;font-weight:600;color:var(--hero-body)}
-/* Dark theme: brighter bars, a softer lit row and a darker note. */
-:global(html[data-energyiq-theme="dark"]) .splitLit{background:#ffffff14 !important}
-:global(html[data-energyiq-theme="dark"]) .dailyBar{fill:#5fb38a}
-:global(html[data-energyiq-theme="dark"]) .dailyBarPale{fill:#5a7a6c}
-:global(html[data-energyiq-theme="dark"]) .hero .dailyAlert{background:#3a2c17;color:#f0d6ad}
+.dailyTypicalLine{stroke:#c98a2e;stroke-width:1.5;stroke-dasharray:5 4;pointer-events:none}
+.dailyTypicalPill{fill:#fbefdc;stroke:#efd2a4}
+.dailyTypicalText{font-size:11px;font-weight:700;fill:#8a5a17;font-variant-numeric:tabular-nums}
+.dailyTip{position:absolute;z-index:3;pointer-events:none;display:grid;gap:4px;min-width:190px;padding:11px 13px;border-radius:12px;background:#10201a;color:#fff;font-size:12.5px;line-height:1.4;white-space:nowrap;box-shadow:0 18px 36px -14px #000a,0 0 0 1px #ffffff14;transform:translate(-50%,calc(-100% - 14px))}
+.dailyTipLeft{transform:translate(-14%,calc(-100% - 14px))}
+.dailyTipRight{transform:translate(-86%,calc(-100% - 14px))}
+.dailyTip b{margin-bottom:2px;font-size:13px;font-weight:700}
+.dailyTip span{display:flex;justify-content:space-between;gap:18px}
+.dailyTip i{font-style:normal;color:#a9bdb3}
+.dailyTip strong{font-weight:650;font-variant-numeric:tabular-nums}
+.dailyTip .dailyUp{color:#f3b768}
+.dailyTip .dailyDown{color:#7fd3ae}
+.dailyTip em{margin-top:2px;padding-top:6px;border-top:1px solid #ffffff1f;font-style:normal;color:#e7c58f;white-space:normal;max-width:240px}
+.hero .dailyAlert{display:flex;gap:10px;align-items:flex-start;margin:14px 0 0;padding:11px 14px;border:1px solid #f0dfc2;border-radius:12px;background:#fdf7ec;color:#5e3e14;font-size:13.5px;line-height:1.55;max-width:none}
+.dailyAlert b{flex:none;display:grid;place-items:center;width:20px;height:20px;margin-top:1px;border-radius:50%;background:#c18a3a;color:#fff;font-size:11.5px;font-weight:800}
+.dailyAlert strong{font-weight:700;color:#4a300c}
+@media(prefers-reduced-motion:reduce){.dailyBar{animation:none}.dailySwitch button{transition:none}}
+
+/* The average day beside where it goes: the statement on the left, the breakdown on the right. */
+.hero .heroBody{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:24px 48px;align-items:start;margin-top:28px}
+.hero .heroSummary{max-width:none}
+.hero .heroSummary h2{margin:0 0 14px;font-size:clamp(30px,2.7vw,42px);line-height:1.1;letter-spacing:-.035em;font-weight:800;max-width:16ch}
+.hero .heroSummary h2 em{font-style:normal;color:#11705a}
+.hero .heroMonth{display:inline-flex;align-items:center;gap:8px;margin:0;padding:8px 14px;border-radius:999px;background:#eff5f2;font-size:14.5px;font-weight:600;color:#245747}
+.hero .heroMonth::before{content:"";width:16px;height:16px;flex:none;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23176b59' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='18' height='16' rx='2'/%3E%3Cpath d='M16 3v4M8 3v4M3 10h18'/%3E%3C/svg%3E") center / contain no-repeat}
+.hero .heroBody .split{margin:0}
+.hero .heroBody .split>ul,.hero .heroBody .split>p{max-width:none}
+/* The finding starts a new section of the card. */
+.hero .heroFinding{margin-top:28px;padding-top:24px;border-top:1px solid var(--hero-rule)}
+@media(max-width:1100px){.hero .heroBody{grid-template-columns:1fr;gap:22px}.hero .heroSummary h2{max-width:24ch}}
+
+/* Where it goes, on the Overview: one bar for the whole site, then a row per group lined up in columns. */
+.split h3{margin:0 0 12px;font-size:12.5px;font-weight:750;letter-spacing:.09em;color:#176b59}
+.splitStack{display:flex;gap:3px;height:12px;margin:0 0 14px;border-radius:999px;overflow:hidden}
+.splitStack i{display:block;min-width:4px}
+.split>ul{gap:0}
+.split>ul>li{border-top:1px solid var(--hero-rule)}
+.split>ul>li:last-child{border-bottom:1px solid var(--hero-rule)}
+.split .splitRow{grid-template-columns:14px minmax(0,1fr) minmax(80px,30%) 11.5em;gap:14px;padding:13px 10px;border-radius:12px;background:transparent;font-size:15.5px}
+.split button.splitRow:hover{background:#f4f8f6}
+.split button.splitRow[aria-expanded="true"]{background:#f4f8f6}
+.split .splitName{display:flex;align-items:center;font-weight:650}
+.split .splitSwatch{width:10px;height:10px;border-radius:50%;margin-right:10px;flex:none}
+.split .splitBar{height:8px;border-radius:999px;background:#edf2ef}
+.split .splitBar i{border-radius:999px}
+.split .splitValue{display:grid;grid-template-columns:1fr 3.4em;align-items:baseline;gap:10px;text-align:right}
+.splitKwh{font-size:14px;color:var(--hero-body)}
+.splitPct{font-size:16px;font-weight:750;color:var(--hero-ink)}
+.srOnly{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.split .splitOpen{margin:2px 0 12px;padding:18px 18px 14px;border-radius:14px;background:#f6f9f7;gap:12px 22px}
+.split .splitOpen>ul{padding-left:0;border-left:0}
+.split .splitOpen .splitRow{padding:8px 10px;font-size:14.5px}
+.split .splitOpen .splitName{font-weight:550}
+.split .splitOpen .splitPct{font-size:14.5px}
+.split .splitOpen li .splitInner{margin:2px 0 6px 14px;padding-left:10px;border-left:2px solid #dfe8e3}
+.split .splitOpen .splitRow{grid-template-columns:14px minmax(0,1fr) minmax(60px,24%) 10.5em}
+.split .splitLit{background:#e6f0ea !important}
+.hero .split .splitHint{margin-top:12px;font-size:13px}
+@media(max-width:600px){.split .splitRow{grid-template-columns:14px minmax(0,1fr) auto}.split .splitBar{grid-column:2 / -1;grid-row:2}.split .splitValue{grid-template-columns:auto 3em}}
+
+/* Dark theme: what the generator cannot know (SVG gradient stops, stripes) and softer panels. */
+:global(html[data-energyiq-theme="dark"]) .dailyStopTop{stop-color:#5fc79b}
+:global(html[data-energyiq-theme="dark"]) .dailyStopBottom{stop-color:#2f8a66}
+:global(html[data-energyiq-theme="dark"]) .dailyPaleFill{fill:#3f5c50}
+:global(html[data-energyiq-theme="dark"]) .dailyPaleStripe{stroke:#191919}
+:global(html[data-energyiq-theme="dark"]) .daily{background:#1c1f1d;border-color:#2c322f}
+:global(html[data-energyiq-theme="dark"]) .dailyColumn{fill:#ffffff0d}
+:global(html[data-energyiq-theme="dark"]) .dailySwitch button[aria-pressed="true"]{background:#2f7a5b;color:#fff}
+:global(html[data-energyiq-theme="dark"]) .hero .dailyAlert{background:#2c2316;border-color:#4a3a20;color:#f0d6ad}
+:global(html[data-energyiq-theme="dark"]) .dailyAlert strong{color:#ffe2b5}
+:global(html[data-energyiq-theme="dark"]) .hero .heroSummary h2 em{color:#6fd1a8}
+:global(html[data-energyiq-theme="dark"]) .splitLit,:global(html[data-energyiq-theme="dark"]) .split .splitLit{background:#ffffff12 !important}
 
 /* energyiq-dark-theme:start — generated by scripts/energyiq-dark-theme.mjs; do not edit by hand */
 :global(:where(html[data-energyiq-theme="dark"])) .page { color:#accdc1; }
@@ -328,30 +394,65 @@ button.splitRow[aria-expanded="true"] .splitChevron{transform:rotate(45deg)}
 :global(:where(html[data-energyiq-theme="dark"])) .splitRingValue { fill:var(--hero-ink); }
 :global(:where(html[data-energyiq-theme="dark"])) .splitRingName { fill:var(--hero-quiet); }
 :global(:where(html[data-energyiq-theme="dark"])) .splitLit { background:#1b241f !important; }
-:global(:where(html[data-energyiq-theme="dark"])) .daily { border:1px solid var(--hero-rule); border-radius:16px; background:transparent; }
+:global(:where(html[data-energyiq-theme="dark"])) .daily { border:1px solid #2f3532; border-radius:18px; background:linear-gradient(180deg,#191b1a 0%,#191919 100%); box-shadow:0 1px 2px #0a281b0d; }
 :global(:where(html[data-energyiq-theme="dark"])) .dailyHead b { color:var(--hero-ink); }
 :global(:where(html[data-energyiq-theme="dark"])) .dailyTypical { color:var(--hero-quiet); }
-:global(:where(html[data-energyiq-theme="dark"])) .dailyTypical i { border-top:2px dashed #c28a3c; }
-:global(:where(html[data-energyiq-theme="dark"])) .dailySwitch { border-radius:999px; border:1px solid var(--hero-rule); }
-:global(:where(html[data-energyiq-theme="dark"])) .dailySwitch button { border:0; background:none; border-radius:999px; color:var(--hero-quiet); }
-:global(:where(html[data-energyiq-theme="dark"])) .dailySwitch button[aria-pressed="true"] { background:#176b59; color:#fff; }
-:global(:where(html[data-energyiq-theme="dark"])) .dailyGrid { stroke:var(--hero-rule); }
-:global(:where(html[data-energyiq-theme="dark"])) .dailyBase { stroke:var(--hero-quiet); }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyTypical i { border-top:2px dashed #c98a2e; }
+:global(:where(html[data-energyiq-theme="dark"])) .dailySwitch { border-radius:12px; background:#1c201d; }
+:global(:where(html[data-energyiq-theme="dark"])) .dailySwitch button { border:0; background:none; border-radius:9px; color:var(--hero-quiet); }
+:global(:where(html[data-energyiq-theme="dark"])) .dailySwitch button:hover { color:var(--hero-ink); }
+:global(:where(html[data-energyiq-theme="dark"])) .dailySwitch button[aria-pressed="true"] { background:#191919; color:#85c8b0; box-shadow:0 1px 2px #0a281b32,0 2px 6px -2px #0a281b42; }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyGrid { stroke:#2f3330; }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyBase { stroke:#343d38; }
 :global(:where(html[data-energyiq-theme="dark"])) .dailyAxis { fill:var(--hero-quiet); }
-:global(:where(html[data-energyiq-theme="dark"])) .dailyDow { fill:var(--hero-ink); }
-:global(:where(html[data-energyiq-theme="dark"])) .dailyValue { fill:var(--hero-ink); }
-:global(:where(html[data-energyiq-theme="dark"])) .dailyBar { fill:#79c1a5; }
-:global(:where(html[data-energyiq-theme="dark"])) .dailyBarPale { fill:#9fbfb1; }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyDow, :global(:where(html[data-energyiq-theme="dark"])) .dailyDowLit { fill:var(--hero-body); }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyDowLit { fill:var(--hero-ink); }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyValue, :global(:where(html[data-energyiq-theme="dark"])) .dailyValueLit { fill:#90a098; }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyValueLit { fill:var(--hero-ink); }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyPaleFill { fill:#b9d6c8; }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyPaleStripe { stroke:#2e2e2e; }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyColumn { fill:#eff6f2; }
 :global(:where(html[data-energyiq-theme="dark"])) .dailyHit { fill:transparent; }
 :global(:where(html[data-energyiq-theme="dark"])) .dailyHit:focus { outline:none; }
-:global(:where(html[data-energyiq-theme="dark"])) .dailyTypicalLine { stroke:#c28a3c; }
-:global(:where(html[data-energyiq-theme="dark"])) .dailyTip { border-radius:10px; background:#25312c; color:#fff; box-shadow:0 12px 28px -12px #000000f5; }
-:global(:where(html[data-energyiq-theme="dark"])) .dailyTip em { color:#e7c58f; }
-:global(:where(html[data-energyiq-theme="dark"])) .hero .dailyAlert { border-radius:10px; background:#251e14; color:#dab489; }
-:global(:where(html[data-energyiq-theme="dark"])) .dailyAlert b { border-radius:50%; background:#b47e33; color:#fff; }
-:global(:where(html[data-energyiq-theme="dark"])) .hero .heroMonth { color:var(--hero-body); }
-:global(:where(html[data-energyiq-theme="dark"])) :global(html[data-energyiq-theme="dark"]) .splitLit { background:#19191914 !important; }
-:global(:where(html[data-energyiq-theme="dark"])) :global(html[data-energyiq-theme="dark"]) .dailyBar { fill:#5fb38a; }
-:global(:where(html[data-energyiq-theme="dark"])) :global(html[data-energyiq-theme="dark"]) .dailyBarPale { fill:#8dae9f; }
-:global(:where(html[data-energyiq-theme="dark"])) :global(html[data-energyiq-theme="dark"]) .hero .dailyAlert { background:#3a2c17; color:#f0d6ad; }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyTypicalLine { stroke:#c98a2e; }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyTypicalPill { fill:#fbefdc; stroke:#473619; }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyTypicalText { fill:#d4a062; }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyTip { border-radius:12px; background:#21322b; color:#fff; box-shadow:0 18px 36px -14px #000000,0 0 0 1px #06060614; }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyTip i { color:#a9bdb3; }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyTip .dailyUp { color:#f3b768; }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyTip .dailyDown { color:#7fd3ae; }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyTip em { border-top:1px solid #2e2e2e1f; color:#e7c58f; }
+:global(:where(html[data-energyiq-theme="dark"])) .hero .dailyAlert { border:1px solid #41331b; border-radius:12px; background:#201c14; color:#dab489; }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyAlert b { border-radius:50%; background:#c18a3a; color:#fff; }
+:global(:where(html[data-energyiq-theme="dark"])) .dailyAlert strong { color:#debe99; }
+:global(:where(html[data-energyiq-theme="dark"])) .hero .heroSummary h2 em { color:#6ec1a8; }
+:global(:where(html[data-energyiq-theme="dark"])) .hero .heroMonth { border-radius:999px; background:#1b1f1d; color:#91c5b2; }
+:global(:where(html[data-energyiq-theme="dark"])) .hero .heroMonth::before { background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23176b59' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='18' height='16' rx='2'/%3E%3Cpath d='M16 3v4M8 3v4M3 10h18'/%3E%3C/svg%3E") center / contain no-repeat; }
+:global(:where(html[data-energyiq-theme="dark"])) .hero .heroFinding { border-top:1px solid var(--hero-rule); }
+:global(:where(html[data-energyiq-theme="dark"])) .split h3 { color:#75c1ac; }
+:global(:where(html[data-energyiq-theme="dark"])) .splitStack { border-radius:999px; }
+:global(:where(html[data-energyiq-theme="dark"])) .split>ul>li { border-top:1px solid var(--hero-rule); }
+:global(:where(html[data-energyiq-theme="dark"])) .split>ul>li:last-child { border-bottom:1px solid var(--hero-rule); }
+:global(:where(html[data-energyiq-theme="dark"])) .split .splitRow { border-radius:12px; background:transparent; }
+:global(:where(html[data-energyiq-theme="dark"])) .split button.splitRow:hover { background:#1a1d1c; }
+:global(:where(html[data-energyiq-theme="dark"])) .split button.splitRow[aria-expanded="true"] { background:#1a1d1c; }
+:global(:where(html[data-energyiq-theme="dark"])) .split .splitSwatch { border-radius:50%; }
+:global(:where(html[data-energyiq-theme="dark"])) .split .splitBar { border-radius:999px; background:#1c201e; }
+:global(:where(html[data-energyiq-theme="dark"])) .split .splitBar i { border-radius:999px; }
+:global(:where(html[data-energyiq-theme="dark"])) .splitKwh { color:var(--hero-body); }
+:global(:where(html[data-energyiq-theme="dark"])) .splitPct { color:var(--hero-ink); }
+:global(:where(html[data-energyiq-theme="dark"])) .srOnly { border:0; }
+:global(:where(html[data-energyiq-theme="dark"])) .split .splitOpen { border-radius:14px; background:#1b1d1b; }
+:global(:where(html[data-energyiq-theme="dark"])) .split .splitOpen>ul { border-left:0; }
+:global(:where(html[data-energyiq-theme="dark"])) .split .splitOpen li .splitInner { border-left:2px solid #303733; }
+:global(:where(html[data-energyiq-theme="dark"])) .split .splitLit { background:#1b221e !important; }
+:global(:where(html[data-energyiq-theme="dark"])) :global(html[data-energyiq-theme="dark"]) .dailyPaleFill { fill:#9cbcae; }
+:global(:where(html[data-energyiq-theme="dark"])) :global(html[data-energyiq-theme="dark"]) .dailyPaleStripe { stroke:#191919; }
+:global(:where(html[data-energyiq-theme="dark"])) :global(html[data-energyiq-theme="dark"]) .daily { background:#2c2f2d; border-color:#2c322f; }
+:global(:where(html[data-energyiq-theme="dark"])) :global(html[data-energyiq-theme="dark"]) .dailyColumn { fill:#ffffff0d; }
+:global(:where(html[data-energyiq-theme="dark"])) :global(html[data-energyiq-theme="dark"]) .dailySwitch button[aria-pressed="true"] { background:#2f7a5b; color:#fff; }
+:global(:where(html[data-energyiq-theme="dark"])) :global(html[data-energyiq-theme="dark"]) .hero .dailyAlert { background:#352c1f; border-color:#4a3a20; color:#f0d6ad; }
+:global(:where(html[data-energyiq-theme="dark"])) :global(html[data-energyiq-theme="dark"]) .dailyAlert strong { color:#ffe2b5; }
+:global(:where(html[data-energyiq-theme="dark"])) :global(html[data-energyiq-theme="dark"]) .hero .heroSummary h2 em { color:#6fd1a8; }
+:global(:where(html[data-energyiq-theme="dark"])) :global(html[data-energyiq-theme="dark"]) .splitLit, :global(:where(html[data-energyiq-theme="dark"])) :global(html[data-energyiq-theme="dark"]) .split .splitLit { background:#19191912 !important; }
 /* energyiq-dark-theme:end */
