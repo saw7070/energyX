@@ -6,7 +6,8 @@ import { MeterAlertStore, type MeterAlertAudience, type MeterAlertKind } from ".
 /**
  * What the notification bell tells a site's readers besides action results: automatic reports that are ready, budget,
  * and overnight-use alerts, and, for administrators, a daily live update that did not finish. Stopped meters come from the meter-health read the
- * pages already make. Each alert has a key; a reader who opens or dismisses it does not see that key again.
+ * pages already make. The meter alerts (energy-meter-alerts.ts) come with them, each for its own readers. Each alert has
+ * a key; a reader who opens or dismisses it does not see that key again.
  */
 export type SiteAlertReport = {
   key: string;

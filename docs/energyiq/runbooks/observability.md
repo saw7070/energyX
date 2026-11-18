@@ -181,7 +181,7 @@ All run on timers inside the API process. A job is only watched while it is swit
 | `live-sync` | Daily sync for sites connected in the app (Facility → Live connection) | Hourly, each sync pass | 3 h |
 | `live-readings` | Current meter readings for Overview's live power | Every 15 min | 1 h |
 | `alert-email` | Emails about stopped or offline meters and failed syncs (`ENERGYIQ_ALERT_EMAILS_ENABLED=true` with SMTP) | Every 15 min | 1 h |
-| `target-alert` | Daily budget and overnight-use checks per site | Hourly | 3 h |
+| `target-alert` | Daily budget and overnight-use checks per site; meter alerts (stopped meters, power that should never be used, unusual hourly use) whenever a site has new readings (`ENERGYIQ_METER_ALERTS_ENABLED=false` turns them off) | Hourly | 3 h |
 | `report-email` | Scheduled portfolio report emails | Every 15 min | 1 h |
 | `report-agent` | Advisor report scheduling, site reports and action checks (`ENERGYIQ_REPORT_AGENT_ENABLED=true`) | Every 30 s | 10 min |
 

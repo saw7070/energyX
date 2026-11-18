@@ -144,8 +144,13 @@ export function evaluateMeterAlerts(input: { store: MeterAlertStore; projectId: 
   for (const alert of stored) {
     if (alert.status !== "open" || claimed.has(alert.key)) continue;
     // No longer quiet and no spell found (it came back long ago, or is no longer watched): when it came back, if it did.
+    // Readings that later filled the quiet time on time (a meter that sends only when its total moves, and used
+    // nothing) mean it never stopped: resolved without a "back" message.
     const before = payloadMeters(alert.payload);
-    const backs = before.map((meter) => meterBack(cells.get(meter.id) ?? [], Date.parse(meter.since), timezone));
+    const backs = before.map((meter) => {
+      const back = meterBack(cells.get(meter.id) ?? [], Date.parse(meter.since), timezone);
+      return back && Date.parse(back.at) - Date.parse(meter.since) >= HOUR_MS ? back : null;
+    });
     const back = backs.length && backs.every(Boolean)
       ? { back: backs.map((item) => item!.at).sort().at(-1)!, filledLateKwh: Math.round(backs.reduce((sum, item) => sum + item!.filledLateKwh, 0) * 1000) / 1000 }
       : { cleared: true };

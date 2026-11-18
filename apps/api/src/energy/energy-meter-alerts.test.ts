@@ -129,6 +129,22 @@ describe("Meter alerts: stopped sending", () => {
     });
   });
 
+  it("drops the alert quietly when later readings fill the quiet time on time: the meter used nothing, it never stopped", async () => {
+    await withMetadata((metadata, store) => {
+      const meter = { id: "office-lights", name: "Office lights", lastReadingAt: isoAt("2026-11-13T19:00") };
+      const quiet: MeterAlertReadings = { timezone: TZ, hoursMeaning: "opening", referenceMs: sg("2026-11-15T02:00"), meters: [meter], cells: new Map([["office-lights", hours("2026-11-01T00", "2026-11-13T19", steady(0.5))]]) };
+      const sunday = new Date(sg("2026-11-15T03:00"));
+      expect(evaluateMeterAlerts({ store, projectId: PROJECT, readings: quiet, patternAlerts: false, now: sunday }).opened).toHaveLength(1);
+      // Monday's readings: its total did not move all weekend, so the weekend was filled in as read, at 0 kWh.
+      const filled: MeterAlertReadings = { ...quiet, referenceMs: sg("2026-11-17T02:00"), meters: [{ ...meter, lastReadingAt: isoAt("2026-11-17T02:00") }],
+        cells: new Map([["office-lights", hours("2026-11-01T00", "2026-11-17T02", (date, hour, at) => steady(at >= sg("2026-11-13T19:00") && at < sg("2026-11-16T08:00") ? 0 : 0.5)(date, hour))]]) };
+      const monday = new Date(sg("2026-11-17T03:00"));
+      const changes = evaluateMeterAlerts({ store, projectId: PROJECT, readings: filled, patternAlerts: false, now: monday });
+      expect(changes.resolved.map((alert) => alert.payload.cleared)).toEqual([true]);
+      expect(bell(metadata, { hardware: true, operators: true }, monday).meterAlerts).toEqual([]);
+    });
+  });
+
   it("still reports an outage the daily update found only once it was over, opened and resolved together", async () => {
     await withMetadata((metadata, store) => {
       // SKTC: Block 264F's gateway was down 16 Nov 18:30 – 17 Nov 07:00; the 02:00 update brought both.
