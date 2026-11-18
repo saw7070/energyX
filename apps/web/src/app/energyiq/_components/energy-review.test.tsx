@@ -262,6 +262,19 @@ describe("the energy review on a live site's readings", () => {
     expect(halved.comparison!.intro).toContain("Block A uses twice as much on emergency lights as Block B");
   });
 
+  it("names daytime use on lighting only when it is worth a visit (about 100 kWh a year)", () => {
+    const withDay = (kwh: number) => buildEnergyReview(estate({}, { meters: { ...METERS, "a-high": { ...METERS["a-high"]!, kwh: lit(8, kwh) } } }), null, GENERATED);
+    // 0.02 kWh an hour for 12 daytime hours is under 90 kWh a year: not a point to check, not a saving.
+    const small = withDay(0.02);
+    expect(small.checks.map(check => check.title)).not.toContain("Daytime use on lighting circuits.");
+    expect(small.savings!.rows.map(row => row.title)).not.toContain("Find and fix the daytime standby");
+    // 0.2 kWh an hour is about 880 kWh a year: named, costed and sent to the contractor.
+    const large = withDay(0.2);
+    expect(large.checks.map(check => check.title)).toContain("Daytime use on lighting circuits.");
+    expect(large.savings!.rows.map(row => row.title)).toContain("Find and fix the daytime standby");
+    expect(large.nextSteps.some(step => step.action.startsWith("Find the source of the daytime use"))).toBe(true);
+  });
+
   it("trials only the dimming, never the daytime standby or the timers", () => {
     const trials = review.nextSteps.filter(step => step.action.startsWith("Trial:"));
     expect(trials.map(step => step.action)).toEqual(["Trial: Motion-sensor dimming on block lighting, or start the night step-down earlier"]);

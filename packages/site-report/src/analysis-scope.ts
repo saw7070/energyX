@@ -101,7 +101,7 @@ function subMeterTypes(analysis: AnalysisSource, trends: TrendSeries[], typeTota
     const cells = [...hours.values()].map((cells): TrendCell => {
       const readings = cells.filter(cell => cell[2] != null);
       return [cells[0]![0], cells[0]![1], readings.length ? readings.reduce((sum, cell) => sum + cell[2]!, 0) : null,
-        cells.length === list.length ? Math.min(...cells.map(cell => cell[3])) : 0, Math.max(...cells.map(cell => cell[4]))];
+        cells.length === list.length ? Math.min(...cells.map(cell => cell[3])) : 0, Math.max(...cells.map(cell => cell[4])), cells.reduce((sum, cell) => sum + (cell[5] ?? 0), 0)];
     }).sort((left, right) => left[0].localeCompare(right[0]) || left[1] - right[1]);
     types[category] = { id: `__category__:${category}`, expectedMinutesPerHour: Math.min(...list.map(series => series.expectedMinutesPerHour)), cells };
   }

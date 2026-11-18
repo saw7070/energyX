@@ -55,6 +55,8 @@ const NAMED_GAP = 0.15;
 const DIMMING_SHARE = 0.3;
 /** Trimming the light timers: this many hours less each night (a quarter of an hour at each end). */
 const TRIM_HOURS_A_NIGHT = 0.5;
+/** Daytime use on lighting circuits worth naming, costing and a site visit: this many kWh a year (about S$30). */
+const DAYTIME_WORTH_KWH_YEAR = 100;
 
 /** `recoveredKwh`: energy in `kwh` that meters sent late, after being offline. */
 export type EnergyReviewDay = { date: string; label: string; kwh: number; cost: number | null; complete: boolean; recoveredKwh: number };
@@ -548,6 +550,10 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
   } : null;
 
   // ---------- points to check ----------
+  // Daytime use on lighting circuits, a year of it: named, costed and sent to the contractor only when it is worth a visit.
+  const usedInDay = lighting ? daytimeUse(data, withMetersInUse(project, silentByDesignIds(data), data.current.spaces, idleMeterIds(data))) : null;
+  const daytimeYearKwh = usedInDay ? usedInDay.kwh / Math.max(readDays.length, 1) * 365 : 0;
+  const daytimeWorthIt = daytimeYearKwh >= DAYTIME_WORTH_KWH_YEAR;
   const checks: EnergyReviewCheck[] = [];
   const offlineTitles = new Set<string>(), offlineNames = new Map<string, string>();
   for (const { meter, last } of stopped) {
@@ -579,7 +585,7 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
   const firstRead = historyCells.filter(cell => cell[3] > 0).reduce<string | null>((first, cell) => !first || cell[0] < first ? cell[0] : first, null);
   const settled = (date: string) => !firstRead || Date.parse(`${date}T00:00:00Z`) - Date.parse(`${firstRead}T00:00:00Z`) >= 2 * 86_400_000;
   for (const item of (base.total.standout?.items ?? []).filter(item => settled(item.date)).slice(0, 2)) checks.push({ title: t("check.standout.title", { date: `${weekdayOf(item.date, locale)} ${shortDate(item.date, locale)}` }), text: item.text });
-  if (lighting && base.daytime?.items.length) checks.push({ title: t("check.daytime.title"), text: paragraph([list(base.daytime.items), base.daytime.more ?? ""]) });
+  if (lighting && base.daytime?.items.length && daytimeWorthIt) checks.push({ title: t("check.daytime.title"), text: paragraph([list(base.daytime.items), base.daytime.more ?? ""]) });
   const mustRun = mustRunIds(allMeters, data);
   const quietMustRun = allMeters.filter(meter => mustRun.has(meter.id) && !stoppedIds.has(meter.id) && !notInUseIds.has(meter.id) && meter.series!.cells.every(cell => (cell[2] ?? 0) < USED_DAY_KWH / 24) && meter.series!.cells.some(cell => cell[3] > 0));
   for (const meter of quietMustRun) checks.push({ title: t("check.noUse.title", { name: meter.name }), text: t("check.noUse.do") });
@@ -645,9 +651,8 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
         lightingRows.push(trialRow);
       }
     }
-    const usedInDay = daytimeUse(data, withMetersInUse(project, silentByDesignIds(data), data.current.spaces, idleMeterIds(data)));
-    const daytimePerDay = usedInDay.kwh / Math.max(readDays.length, 1);
-    if (yearOf(daytimePerDay) >= 10 && dayHours.length) {
+    const daytimePerDay = (usedInDay?.kwh ?? 0) / Math.max(readDays.length, 1);
+    if (daytimeWorthIt && dayHours.length) {
       const watts = daytimePerDay / dayHours.length * 1000;
       lightingRows.push({ title: t("sav.day.title"), basis: t("sav.day.basis", { w: Math.round(watts) }), kwhYear: yearOf(daytimePerDay), costYear: cost(yearOf(daytimePerDay)) });
     }
@@ -687,7 +692,7 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
   const toFix = [...stopped.map(item => item.meter.name), ...checks.filter(check => offlineTitles.has(check.title)).map(check => offlineNames.get(check.title)!)];
   for (const name of toFix.slice(0, 2)) steps.push({ action: t("step.fixMeter", { name }), who: t("who.contractor"), when: t("when.week") });
   if (toFix.length > 2) steps.push({ action: t("step.fixMeters", { count: toFix.length - 2 }), who: t("who.contractor"), when: t("when.week") });
-  if (lighting && base.daytime?.items.length) {
+  if (lighting && base.daytime?.items.length && daytimeWorthIt) {
     const names = base.daytime.items.slice(0, 2).map(item => item.split(/[:：]/)[0]!.trim());
     steps.push({ action: t("step.daytime", { names: list(names) }), who: t("who.contractor"), when: t("when.week") });
   }

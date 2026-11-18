@@ -54,7 +54,8 @@ export function inUseTotal(scope: ScopeData, notInUse: ReadonlySet<string>, sour
     ...total, expectedMinutesPerHour: expected,
     cells: total.cells.map(cell => {
       const part = own.get(`${cell[0]}|${cell[1]}`);
-      return part ? [cell[0], cell[1], cell[2], Math.max(0, cell[3] - part.minutes), Math.max(0, cell[4] - part.events)] : cell;
+      // Only the counts change: the hour's energy, including any sent late after an outage, stays as it was.
+      return part ? [cell[0], cell[1], cell[2], Math.max(0, cell[3] - part.minutes), Math.max(0, cell[4] - part.events), cell[5] ?? 0] : cell;
     }),
   };
 }
