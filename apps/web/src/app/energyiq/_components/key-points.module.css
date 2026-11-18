@@ -207,16 +207,14 @@ button.splitRow[aria-expanded="true"] .splitChevron{transform:rotate(45deg)}
 .dailyTypicalLine{stroke:#c98a2e;stroke-width:1.5;stroke-dasharray:5 4;pointer-events:none}
 .dailyTypicalPill{fill:#fbefdc;stroke:#efd2a4}
 .dailyTypicalText{font-size:11px;font-weight:700;fill:#8a5a17;font-variant-numeric:tabular-nums}
-.dailyTip{position:absolute;z-index:3;pointer-events:none;display:grid;gap:4px;min-width:190px;padding:11px 13px;border-radius:12px;background:#10201a;color:#fff;font-size:12.5px;line-height:1.4;white-space:nowrap;box-shadow:0 18px 36px -14px #000a,0 0 0 1px #ffffff14;transform:translate(-50%,calc(-100% - 14px))}
-.dailyTipLeft{transform:translate(-14%,calc(-100% - 14px))}
-.dailyTipRight{transform:translate(-86%,calc(-100% - 14px))}
+.dailyTip{position:absolute;z-index:3;pointer-events:none;display:grid;gap:4px;box-sizing:border-box;padding:12px 14px;border-radius:12px;background:#10201a;color:#fff;font-size:12.5px;line-height:1.4;box-shadow:0 18px 36px -14px #000a,0 0 0 1px #ffffff14}
 .dailyTip b{margin-bottom:2px;font-size:13px;font-weight:700}
 .dailyTip span{display:flex;justify-content:space-between;gap:18px}
 .dailyTip i{font-style:normal;color:#a9bdb3}
 .dailyTip strong{font-weight:650;font-variant-numeric:tabular-nums}
 .dailyTip .dailyUp{color:#f3b768}
 .dailyTip .dailyDown{color:#7fd3ae}
-.dailyTip em{margin-top:2px;padding-top:6px;border-top:1px solid #ffffff1f;font-style:normal;color:#e7c58f;white-space:normal;max-width:280px}
+.dailyTip em{margin-top:2px;padding-top:6px;border-top:1px solid #ffffff1f;font-style:normal;color:#e7c58f}
 .dailyTip .dailyTipDevices{list-style:none;display:grid;gap:3px;margin:6px 0 0;padding:0;color:#fff}
 .dailyTip .dailyTipDevices li{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding-left:12px;position:relative}
 .dailyTip .dailyTipDevices li::before{content:"";position:absolute;left:0;top:.55em;width:5px;height:5px;border-radius:50%;background:#e7c58f}
