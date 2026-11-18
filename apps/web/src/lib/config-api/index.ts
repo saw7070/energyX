@@ -237,6 +237,7 @@ export type {
   TwoStepSetupDto,
   TwoStepStatusDto,
   EnergyTeamSecurityDto,
+  EnergyTeamReadingRetentionDto,
   McpServerDto,
   ModelProfileDto,
   QueryHistoryItemDto,

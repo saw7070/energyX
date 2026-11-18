@@ -7,6 +7,7 @@
 | Data | Kept for | Removal |
 |---|---|---|
 | Customer data (readings, settings, files, reports, saved AI conversations) | Subscription term, plus a 30-day export window; deleted from the live service within 60 days | Retention job (Phase 1); until then, manual deletion recorded in the log |
+| Meter readings, per client option | For good (default), or 12 or 3 months, set by an EnergyX platform administrator on the client's Team page (`workspace_reading_retention`) | Nightly clean-up at 04:30 (UTC+8) and every publication remove that client's readings older than the limit from the readings database; each change is in the audit log. The original uploaded files and Tuya downloads stay until removed, so restoring or re-reading them can bring older readings back while the client keeps them for good |
 | Local nightly backups | 7 copies | Backup rotation |
 | Offsite encrypted backups | 35 days | Storage lifecycle rule |
 | Security and audit records | 24 months | Daily retention job (`ENERGYX_AUDIT_RETENTION_MONTHS`, default 24) behind a signed checkpoint; the off-host copy expires under its storage bucket's retention rule, which must also be 24 months |

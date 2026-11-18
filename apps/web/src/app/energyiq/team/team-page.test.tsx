@@ -12,6 +12,7 @@ import { EnergyIqTeam } from "./team-client";
 beforeEach(() => {
   vi.stubGlobal("React", React); globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   vi.spyOn(configApi, "getEnergyTeamSecurity").mockResolvedValue({ required: false, membersWithoutTwoStep: 0, canChange: true });
+  vi.spyOn(configApi, "getEnergyTeamReadingRetention").mockResolvedValue({ months: null, canChange: true });
   // The sign-in and provisioning section has its own tests (organisation-sign-in-card.test.tsx); keep it loading here.
   vi.spyOn(configApi, "organisationSignInRequest").mockReturnValue(new Promise(() => undefined));
 });

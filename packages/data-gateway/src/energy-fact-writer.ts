@@ -91,6 +91,11 @@ export type EnergyFactMaterializationBatchWrite = {
   sourceSha256: string;
   /** Reuse source rows already committed for this exact Batch/SHA; only canonical facts are rebuilt. */
   preserveExisting?: true;
+  /**
+   * With a reading retention limit, every reading in this preserved Batch is older than the limit, so the limit may
+   * already have removed all its source rows. Only then may a preserved Batch hold no rows.
+   */
+  retentionExpired?: true;
   rawReadings: EnergyRawReadingWrite[];
   normalizedReadings: EnergyNormalizedReadingWrite[];
   intervalFacts: EnergyIntervalFactWrite[];
@@ -143,6 +148,12 @@ export type EnergyFactProjectMaterializationWrite = {
   expectedPreviousDataSnapshotId: string;
   snapshotFactScope: EnergyIqSnapshotFactScope;
   batches: EnergyFactMaterializationBatchWrite[];
+  /**
+   * The client's reading retention limit as an instant (ISO 8601). Source readings, intervals and quality events
+   * older than it are deleted inside this materialization's transaction, before the canonical facts and their digest
+   * are rebuilt, so the published Snapshot and the guard always describe the trimmed data. Absent: nothing is deleted.
+   */
+  retainFrom?: string;
 };
 
 export type EnergyFactProjectMaterializationResult = {
@@ -237,7 +248,7 @@ export const writeEnergyFactProjectMaterialization = async (
       let intervalWriteMs = 0;
       let qualityWriteMs = 0;
       if (write.preserveExisting) {
-        await assertExistingBatchSourceRows(connection, write);
+        await assertExistingBatchSourceRows(connection, write, input.retainFrom !== undefined && write.retentionExpired === true);
       } else {
         const deleteExistingStartedAt = performance.now();
         await deleteExistingBatch(connection, write);
@@ -273,6 +284,7 @@ export const writeEnergyFactProjectMaterialization = async (
         totalMs: elapsedMs(batchStartedAt),
       });
     }
+    if (input.retainFrom !== undefined) await deleteSourceRowsBefore(connection, input.projectId, input.retainFrom);
     const sourceWriteMs = elapsedMs(sourceWriteStartedAt);
     const canonicalRebuildMs = await publishCanonicalProjectFacts(
       connection,
@@ -349,6 +361,36 @@ export const readEnergyFactProjectState = async (input: {
       throw error;
     }
     throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  } finally {
+    await duckDbClose(connection).catch(ignoreAlreadyClosed);
+  }
+};
+
+/**
+ * The oldest dated source row (reading or interval) the project still holds, as an ISO instant, or null when there
+ * is none. The reading retention clean-up republishes a project only when this is older than the client's limit.
+ */
+export const readEnergyFactProjectOldestReading = async (input: {
+  databasePath: string;
+  projectId: string;
+}): Promise<string | null> => {
+  const databasePath = input.databasePath === ":memory:" ? input.databasePath : resolve(input.databasePath);
+  if (databasePath !== ":memory:" && !existsSync(databasePath)) return null;
+  const database = await getDuckDbDatabase(databasePath);
+  const connection = database.connect();
+  try {
+    await ensureFactSchema(connection);
+    const row = await duckDbGet(connection, `
+      SELECT CAST(epoch_ms(MIN(oldest)) AS DOUBLE) AS oldest_ms FROM (
+        SELECT MIN(event_time) AS oldest FROM raw_meter_readings WHERE project_id = ?
+        UNION ALL SELECT MIN(event_time) FROM energy_source_normalized_readings WHERE project_id = ?
+        UNION ALL SELECT MIN(interval_start) FROM energy_source_interval_facts WHERE project_id = ?
+      )
+    `, [input.projectId, input.projectId, input.projectId]);
+    const oldestMs = Number(row.oldest_ms);
+    return row.oldest_ms === null || row.oldest_ms === undefined || !Number.isFinite(oldestMs)
+      ? null
+      : new Date(oldestMs).toISOString();
   } finally {
     await duckDbClose(connection).catch(ignoreAlreadyClosed);
   }
@@ -953,9 +995,33 @@ const validateSnapshotFactScope = (input: EnergyFactScopedBatchWrite): void => {
   }
 };
 
+/** Source tables and the column that dates each row; the canonical tables are rebuilt from these. */
+const RETENTION_SOURCE_TABLES = [
+  ["raw_meter_readings", "event_time"],
+  ["energy_source_normalized_readings", "event_time"],
+  ["energy_source_interval_facts", "interval_start"],
+  ["energy_source_quality_events", "event_time"],
+] as const;
+
+/** Deletes the project's source rows dated before `retainFrom`. Rows without a date (some quality events) stay. */
+const deleteSourceRowsBefore = async (
+  connection: DuckDbModule.Connection,
+  projectId: string,
+  retainFrom: string,
+): Promise<void> => {
+  for (const [table, column] of RETENTION_SOURCE_TABLES) {
+    await duckDbRun(
+      connection,
+      `DELETE FROM ${table} WHERE project_id = ? AND ${column} IS NOT NULL AND ${column} < CAST(? AS TIMESTAMPTZ)`,
+      [projectId, retainFrom],
+    );
+  }
+};
+
 const assertExistingBatchSourceRows = async (
   connection: DuckDbModule.Connection,
   input: EnergyFactScopedBatchWrite,
+  mayBeEmptiedByRetention = false,
 ): Promise<void> => {
   const row = await duckDbGet(connection, `
     SELECT (
@@ -970,12 +1036,16 @@ const assertExistingBatchSourceRows = async (
     input.projectId, input.importBatchId, input.sourceSha256,
     input.projectId, input.importBatchId, input.sourceSha256,
   ]);
-  if (Number(row.row_count ?? 0) <= 0) {
+  if (Number(row.row_count ?? 0) <= 0 && !mayBeEmptiedByRetention) {
     throw new Error(`ENERGYIQ_IMPORT_BATCH_SOURCE_ROWS_UNAVAILABLE:${input.importBatchId}`);
   }
 };
 
 const validateProjectMaterializationInput = (input: EnergyFactProjectMaterializationWrite): void => {
+  if (input.retainFrom !== undefined
+    && (typeof input.retainFrom !== "string" || !Number.isFinite(Date.parse(input.retainFrom)))) {
+    throw new Error("ENERGYIQ_READING_RETENTION_INVALID");
+  }
   const snapshotSources = input.snapshotFactScope.sourceSha256.map((value) => value.toLocaleLowerCase());
   const batchSources = input.batches.map((batch) => batch.sourceSha256.toLocaleLowerCase());
   const expectedSources = [...new Set(snapshotSources)]

@@ -95,6 +95,7 @@ import type {
   TwoStepSetupDto,
   TwoStepStatusDto,
   EnergyTeamSecurityDto,
+  EnergyTeamReadingRetentionDto,
   McpServerDto,
   ModelProfileDto,
   QueryHistoryItemDto,
@@ -726,6 +727,14 @@ export const configApi = {
 
   setEnergyTeamSecurity(body: { requireTwoStep: boolean }): Promise<EnergyTeamSecurityDto> {
     return requestEnvelope("/api/v1/energy/team/security", { method: "PUT", body: JSON.stringify(body) });
+  },
+
+  getEnergyTeamReadingRetention(): Promise<EnergyTeamReadingRetentionDto> {
+    return requestEnvelope("/api/v1/energy/team/retention");
+  },
+
+  setEnergyTeamReadingRetention(body: { months: 3 | 12 | null }): Promise<EnergyTeamReadingRetentionDto> {
+    return requestEnvelope("/api/v1/energy/team/retention", { method: "PUT", body: JSON.stringify(body) });
   },
 
   getEnergyProjectHierarchy(projectId: string): Promise<EnergyProjectHierarchyDto> {

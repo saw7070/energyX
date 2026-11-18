@@ -1,6 +1,7 @@
 import {
   ENERGYIQ_PERMISSION_AREAS,
   ENERGYIQ_VIEWER_ROLE_ID,
+  type EnergyIqReadingRetentionMonths,
   type EnergyIqRolePermissions,
   type MetadataStore,
   type UserRecord,
@@ -46,6 +47,9 @@ export type EnergyTeamDto = {
  * "People: write" there (and read-only sight of the list with "People: read"). Every call is confined to the Organisation named by `workspaceId`; the caller's right
  * over that Organisation is re-checked here on each call, never trusted from the page.
  */
+/** null keeps readings for as long as the client is subscribed. */
+export type EnergyTeamReadingRetention = { months: EnergyIqReadingRetentionMonths | null; canChange: boolean };
+
 export class EnergyTeamAccessService {
   constructor(
     private readonly metadataStore: MetadataStore,
@@ -161,6 +165,40 @@ export class EnergyTeamAccessService {
       }),
       canChange: true
     };
+  }
+
+  /** How long this client keeps meter readings (null: for as long as it is subscribed), for anyone who may see its people. */
+  retention(input: { actor: UserRecord; workspaceId: string }): EnergyTeamReadingRetention {
+    const organisation = this.requireAccess(input.actor, input.workspaceId, "read");
+    return {
+      months: this.metadataStore.energyIq.readingRetention.get(organisation.id) ?? null,
+      canChange: this.isPlatformAdmin(input.actor)
+    };
+  }
+
+  /**
+   * Sets how long this client keeps meter readings. Shortening it deletes older readings for every site of the client
+   * in the next nightly clean-up, so only EnergyX platform administrators may change it, not the client's own admins.
+   */
+  setRetention(input: { actor: UserRecord; workspaceId: string; months: EnergyIqReadingRetentionMonths | null }): EnergyTeamReadingRetention {
+    if (!this.isPlatformAdmin(input.actor)) {
+      throw new AuthError(403, "FORBIDDEN", "Only EnergyX platform administrators can change how long readings are kept.");
+    }
+    const organisation = this.requireAccess(input.actor, input.workspaceId, "read");
+    const previous = this.metadataStore.energyIq.readingRetention.get(organisation.id) ?? null;
+    this.metadataStore.energyIq.readingRetention.set({ workspace_id: organisation.id, months: input.months, updated_by: input.actor.id });
+    if (previous !== input.months) {
+      this.audit("energyiq.reading_retention_changed", input.actor.id, {
+        organisationId: organisation.id,
+        previousMonths: previous,
+        months: input.months
+      });
+    }
+    return { months: input.months, canChange: true };
+  }
+
+  private isPlatformAdmin(actor: UserRecord): boolean {
+    return !actor.disabled_at && resolveEnergyIqUserRole(this.metadataStore, actor) === "admin";
   }
 
   private requireAccess(actor: UserRecord, workspaceId: string, needed: "read" | "write"): WorkspaceRecord {

@@ -15,6 +15,7 @@ import { EnergyIqReportTimePolicyStore } from "./energyiq-report-time-policy-sto
 import { EnergyIqOverviewDefinitionStore } from "./energyiq-overview-definition-store.js";
 import { EnergyIqSourceSyncStore } from "./energyiq-source-sync-store.js";
 import { EnergyIqLiveConnectorStore } from "./energyiq-live-connector-store.js";
+import { EnergyIqReadingRetentionStore } from "./energyiq-reading-retention-store.js";
 import { EnergyIqAccessRoleStore } from "./energyiq-access-role-store.js";
 import { EnergyIqTargetsStore } from "./energyiq-targets-store.js";
 import { EnergyIqAiGovernanceStore } from "./energyiq-ai-governance-store.js";
@@ -350,6 +351,7 @@ export class EnergyIqStore {
   readonly reportTimePolicies: EnergyIqReportTimePolicyStore;
   readonly sourceSync: EnergyIqSourceSyncStore;
   readonly liveConnectors: EnergyIqLiveConnectorStore;
+  readonly readingRetention: EnergyIqReadingRetentionStore;
   readonly roles: EnergyIqAccessRoleStore;
   readonly targets: EnergyIqTargetsStore;
   readonly ai: EnergyIqAiGovernanceStore;
@@ -370,6 +372,7 @@ export class EnergyIqStore {
     this.reportTimePolicies = new EnergyIqReportTimePolicyStore(db);
     this.sourceSync = new EnergyIqSourceSyncStore(db);
     this.liveConnectors = new EnergyIqLiveConnectorStore(db);
+    this.readingRetention = new EnergyIqReadingRetentionStore(db);
     this.roles = new EnergyIqAccessRoleStore(db);
     this.targets = new EnergyIqTargetsStore(db);
     this.ai = new EnergyIqAiGovernanceStore(db);
@@ -1179,6 +1182,11 @@ const createDataSnapshotIdentity = (
       timezone: optionalJsonString(materialization.timezone),
       materializerContractVersion: optionalJsonString(materialization.materializerContractVersion),
       factWriterContractVersion: optionalJsonString(materialization.factWriterContractVersion),
+      // Present only for a client with a reading retention limit, so every other Snapshot keeps its identity. A trim
+      // changes the facts, so it must never reuse the identity of the Snapshot it trimmed.
+      ...(optionalJsonString(materialization.readingRetainedFrom)
+        ? { readingRetainedFrom: optionalJsonString(materialization.readingRetainedFrom) }
+        : {}),
     };
   }),
 });

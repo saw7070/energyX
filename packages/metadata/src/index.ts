@@ -53,6 +53,7 @@ import {
 import { initializeEnergyIqReportTimePolicySchema } from "./energyiq-report-time-policy-store.js";
 import { initializeEnergyIqSourceSyncSchema } from "./energyiq-source-sync-store.js";
 import { initializeEnergyIqLiveConnectorSchema } from "./energyiq-live-connector-store.js";
+import { initializeEnergyIqReadingRetentionSchema } from "./energyiq-reading-retention-store.js";
 import { ENERGYIQ_ORGANISATION_ADMIN_ROLE_ID, initializeEnergyIqAccessRoleSchema, upgradeSeededOrganisationAdminRole } from "./energyiq-access-role-store.js";
 import { initializeEnergyIqSavingsChecksSchema, initializeEnergyIqTargetsSchema, migrateEnergyIqTargetsPeakDemand } from "./energyiq-targets-store.js";
 import { initializeEnergyIqAiGovernanceSchema } from "./energyiq-ai-governance-store.js";
@@ -78,6 +79,7 @@ export * from "./energyiq-carbon.js";
 export * from "./energyiq-targets-store.js";
 export * from "./energyiq-ai-governance-store.js";
 export * from "./auth-two-step-store.js";
+export * from "./energyiq-reading-retention-store.js";
 export * from "./energyiq-import-readiness.js";
 export * from "./energyiq-saved-analysis-store.js";
 export * from "./energyiq-scope-metadata-resolver.js";
@@ -4890,6 +4892,15 @@ const runMigrations = (db: DatabaseSync): void => {
     "Add the changes recorded on site for proof of savings",
     () => {
       initializeEnergyIqSavingsChecksSchema(db);
+    },
+    { atomic: true },
+  );
+  runSchemaMigration(
+    db,
+    "0059_energyiq_reading_retention",
+    "Add the per-client limit on how long meter readings are kept (none means for as long as the client is subscribed)",
+    () => {
+      initializeEnergyIqReadingRetentionSchema(db);
     },
     { atomic: true },
   );
