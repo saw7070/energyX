@@ -142,6 +142,34 @@ describe("Notification bell", () => {
     expect(api.markEnergyProjectAlertRead).toHaveBeenCalledWith("p1", offlineKey(offline));
   });
 
+  it("shows the meter alerts the server keeps, with their own icons and links, and does not repeat a stopped meter", async () => {
+    const meterAlerts = [
+      { key: "meter-offline:a:20261002T1830", readKey: "meter-offline:a:20261002T1830", kind: "meter_offline", status: "open", openedAt: "2026-10-03T00:00:00.000Z",
+        details: { location: "Block 264F", since: "2026-10-02T10:30:00.000Z", meters: ["m5", "m6", "x3", "x4"].map((id, index) => ({ id, name: `Meter 0${index + 5}`, since: "2026-10-02T10:30:00.000Z" })) } },
+      { key: "meter-offline:b:20260920T0900", readKey: "meter-offline:b:20260920T0900:back", kind: "meter_offline", status: "resolved", openedAt: "2026-10-02T23:00:00.000Z", resolvedAt: "2026-10-02T23:30:00.000Z",
+        details: { since: "2026-10-01T01:00:00.000Z", back: "2026-10-02T23:00:00.000Z", filledLateKwh: 1.2, meters: [{ id: "p1", name: "Pavilion 1", since: "2026-10-01T01:00:00.000Z" }] } },
+      { key: "never-used:c:20261001T2300", readKey: "never-used:c:20261001T2300", kind: "never_used", status: "resolved", openedAt: "2026-10-02T20:00:00.000Z", resolvedAt: "2026-10-02T20:00:00.000Z",
+        details: { meterName: "Pavilion DL & fan", start: "2026-10-01T15:00:00.000Z", hours: 2, totalKwh: 0.55, ongoing: false } },
+      { key: "usage-pattern:d:20261001T2200", readKey: "usage-pattern:d:20261001T2200", kind: "usage_pattern", status: "open", openedAt: "2026-10-02T19:00:00.000Z",
+        details: { meterName: "Block 264F L2–L17", direction: "high", at: "2026-10-01T14:00:00.000Z", start: "2026-10-01T14:00:00.000Z", hours: 2, kwh: 6.1, usualKwh: 4, ongoing: true } },
+    ];
+    api.getEnergyProjectAlerts.mockResolvedValue({ ...alerts, sync: undefined, reports: [], meterAlerts });
+    await openBell();
+    const rows = [...container.querySelectorAll("li")];
+    const row = (text: string) => rows.find((item) => item.textContent?.includes(text))!;
+    expect(row("4 meters in Block 264F stopped sending at 6:30 pm — likely their gateway").textContent).toContain("Meter 05, Meter 06, Meter 07, Meter 08. Check that their gateway still has power and is online.");
+    expect(row("Pavilion 1 has stopped sending readings since 1 Oct, 9:00 am").textContent).toContain("Back since 3 Oct, 7:00 am; readings sent late were filled in.");
+    expect(row("Pavilion DL & fan used 0.55 kWh at 11 pm — it should never use power").textContent).toContain("2 hours in a row from 1 Oct, 11:00 pm. Someone may be using it without leave.");
+    expect(row("Block 264F L2–L17 used 6.1 kW at 10 pm, usually about 4.0 kW").textContent).toContain("2 hours in a row");
+    expect(rows.map((item) => item.getAttribute("data-kind"))).toEqual(expect.arrayContaining(["meter-offline", "never-used", "pattern"]));
+    expect(row("Block 264F stopped").querySelector("a")!.getAttribute("href")).toBe("/energyiq/project-configuration?projectId=p1&tab=availability");
+    expect(row("Pavilion DL & fan").querySelector("a")!.getAttribute("href")).toBe("/energyiq/analysis?projectId=p1");
+    // Meters 05 and 06 are in the gateway alert, so the older "stopped sending" line is not shown for them.
+    expect(rows.some((item) => item.textContent?.includes("meters stopped sending readings"))).toBe(false);
+    await act(async () => { row("Pavilion 1").querySelector("button")!.click(); });
+    expect(api.markEnergyProjectAlertRead).toHaveBeenCalledWith("p1", "meter-offline:b:20260920T0900:back");
+  });
+
   it("treats a site without the action pilot as having no action results, not as a failure", async () => {
     api.reportActionRequest.mockRejectedValue(new Error("ACTION_ACCESS_NOT_ENABLED"));
     api.getEnergyProjectAlerts.mockResolvedValue({ reports: [], readKeys: [] });

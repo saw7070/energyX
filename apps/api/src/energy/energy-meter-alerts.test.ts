@@ -206,7 +206,7 @@ describe("Meter alerts: who hears and when", () => {
       store.setSettings(PROJECT, { hardwareEmails: ["Gateway-Team@Example.test"] }, "admin");
       const fan = (date: string, hour: number) => (date === "2026-11-17" && hour === 23 ? 0.3 : 0);
       const read = vi.fn(async () => sktc({ through: "2026-11-18T02", blockQuiet: "2026-11-17T10:30", fan }));
-      const send = vi.fn(async (_message: { to: string[]; subject: string; text: string }) => undefined);
+      const send = vi.fn<(message: { to: string[]; subject: string; text: string }) => Promise<void>>(async () => undefined);
       const now = new Date(sg("2026-11-18T03:00"));
 
       // Production keeps alert e-mails off: the bell still gets the alerts, nobody is emailed.

@@ -73,7 +73,7 @@ it("shows each meter against the target, the outages and stuck readings, and let
     await act(async () => reason("Other reason…").click());
     const save = () => Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Save")!;
     expect(save().disabled).toBe(true);
-    const input = host.querySelector("input")!;
+    const input = host.querySelector<HTMLInputElement>('input:not([type="checkbox"])')!;
     await act(async () => {
       Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!.call(input, "Kept for events only");
       input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -132,5 +132,35 @@ it("shows a meter that is online but using nothing in neutral words, never as st
     const outage = Array.from(host.querySelectorAll("tbody tr")).at(-1)!.textContent!;
     expect(outage).toContain("Still using nothing");
     expect(outage).toContain("Online, but its reading has not changed, so no new readings came in.");
+  } finally { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); }
+});
+
+it("lets an editor mark a meter that should never use power, and shows the mark to everyone else", async () => {
+  vi.stubGlobal("React", React); vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
+  vi.spyOn(configApi, "getEnergyDataAvailability").mockResolvedValue(data);
+  const onSave = vi.fn();
+  const render = (document: EnergyProjectSetupDocumentDto, canEdit: boolean) => act(async () => root.render(<EnergyIqLocaleProvider><DataAvailability projectId="tuya-office" siteName="Tuya Office" document={document} canEdit={canEdit} busy={false} error="" onSave={onSave} /></EnergyIqLocaleProvider>));
+  try {
+    await render(document_, true);
+    await act(async () => undefined);
+    const row = () => Array.from(host.querySelectorAll("tbody tr")).find(item => item.textContent!.startsWith("Showroom Blind"))!;
+    const box = () => row().querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    expect(box().parentElement!.textContent).toBe("Should never use power (alert me if it does)");
+    expect(box().checked).toBe(false);
+    // A meter marked not in use is not watched for use.
+    expect(Array.from(host.querySelectorAll("tbody tr")).find(item => item.textContent!.startsWith("Side door"))!.querySelector('input[type="checkbox"]')).toBeNull();
+    await act(async () => box().click());
+    const [saved, message] = onSave.mock.calls[0]! as [EnergyProjectSetupDocumentDto, string];
+    expect(saved.meter_mapping!.rows[0]!.presentation).toEqual({ never_used: "true" });
+    expect(message).toBe("You will be alerted whenever Showroom Blind uses any power.");
+    await render(saved, true);
+    expect(box().checked).toBe(true);
+    await act(async () => box().click());
+    expect(onSave.mock.calls[1]![1]).toBe("Showroom Blind is no longer watched for use.");
+    // Someone who cannot change it sees the mark as a note.
+    await render(saved, false);
+    expect(row().querySelector('input[type="checkbox"]')).toBeNull();
+    expect(row().textContent).toContain("Should never use power: any use raises an alert.");
   } finally { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); }
 });

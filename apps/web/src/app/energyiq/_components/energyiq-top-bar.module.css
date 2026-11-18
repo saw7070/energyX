@@ -57,6 +57,9 @@
 .entry[data-kind="peak"] .entryIcon { background:#fdf3d7; color:#9a6a00; }
 .entry[data-kind="report"] .entryIcon { background:#e4f1ea; color:#23744f; }
 .entry[data-kind="action"] .entryIcon { background:#e8eefb; color:#3a5bc7; }
+.entry[data-kind="never-used"] .entryIcon { background:#fce8e8; color:#c2353a; }
+.entry[data-kind="pattern"] .entryIcon { background:#fdf3d7; color:#9a6a00; }
+.entry[data-kind="meter-offline"][data-tone="warning"] .entryIcon { background:#fdeedd; color:#c4600f; }
 .entryText { display:grid; gap:2px; min-width:0; }
 .popover .entryText strong { font-size:14px; font-weight:650; line-height:1.35; color:#1c2620; }
 .popover .entryText small { margin-top:0; font-size:12.5px; color:#7a867d; }
@@ -104,6 +107,9 @@
 :global(:where(html[data-energyiq-theme="dark"])) .entry[data-kind="peak"] .entryIcon { background:#251d07; color:#cc9a46; }
 :global(:where(html[data-energyiq-theme="dark"])) .entry[data-kind="report"] .entryIcon { background:#19231e; color:#72c096; }
 :global(:where(html[data-energyiq-theme="dark"])) .entry[data-kind="action"] .entryIcon { background:#1c2029; color:#89a8f7; }
+:global(:where(html[data-energyiq-theme="dark"])) .entry[data-kind="never-used"] .entryIcon { background:#2a1c1c; color:#e88782; }
+:global(:where(html[data-energyiq-theme="dark"])) .entry[data-kind="pattern"] .entryIcon { background:#251d07; color:#cc9a46; }
+:global(:where(html[data-energyiq-theme="dark"])) .entry[data-kind="meter-offline"][data-tone="warning"] .entryIcon { background:#271d10; color:#d98755; }
 :global(:where(html[data-energyiq-theme="dark"])) .popover .entryText strong { color:#c6d3cb; }
 :global(:where(html[data-energyiq-theme="dark"])) .popover .entryText small { color:#95a198; }
 :global(:where(html[data-energyiq-theme="dark"])) .popoverFoot { border-top:1px solid #323530; }

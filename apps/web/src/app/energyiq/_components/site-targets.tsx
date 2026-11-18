@@ -7,6 +7,7 @@ import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { intlLocale } from "./energyiq-messages";
 import { friendlyErrorMessage } from "./friendly-error";
 import { EnergyIcon, type EnergyIconName } from "./icons";
+import { getMeterAlertSettings, updateMeterAlertSettings, type MeterAlertSettingsDto } from "./meter-alerts-model";
 import { withCurrency } from "./money";
 import { siteTargetsMessages } from "./site-targets-messages";
 import styles from "./site-targets.module.css";
@@ -85,6 +86,7 @@ export function SiteTargetsView({ targets, busy, error, notice, onSave }: {
       <div className={styles.lower}>
         <PeakCard targets={targets} busy={busy} onSave={onSave} />
         <AlertsCard targets={targets} busy={busy} onSave={onSave} />
+        <PatternCard projectId={targets.projectId} />
       </div>
     </section>
   );
@@ -388,6 +390,50 @@ function PeakCard({ targets, busy, onSave }: CardProps) {
           )}
         </>
       )}
+    </Card>
+  );
+}
+
+/** Unusual hourly use alerts for the site: on unless someone turns them off. Kept with the meter alerts, not the targets. */
+export function PatternCard({ projectId }: { projectId: string }) {
+  const t = useMessages(siteTargetsMessages);
+  // Kept with the site it was read for, so another site never shows this one's setting while its own loads.
+  const [loaded, setLoaded] = useState<{ projectId: string; settings: MeterAlertSettingsDto | null; failed: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    getMeterAlertSettings(projectId)
+      .then((value) => { if (alive) setLoaded({ projectId, settings: value, failed: false }); })
+      .catch(() => { if (alive) setLoaded({ projectId, settings: null, failed: true }); });
+    return () => { alive = false; };
+  }, [projectId]);
+  const current = loaded?.projectId === projectId ? loaded : null;
+  const settings = current?.settings ?? null;
+  const failed = current?.failed ?? false;
+  const setSettings = (value: MeterAlertSettingsDto) => setLoaded({ projectId, settings: value, failed: false });
+  const setFailed = () => setLoaded({ projectId, settings, failed: true });
+  const enabled = settings?.patternAlerts ?? true;
+  const toggle = async () => {
+    setBusy(true);
+    try {
+      setSettings(await updateMeterAlertSettings(projectId, { patternAlerts: !enabled }));
+    } catch {
+      setFailed();
+    } finally {
+      setBusy(false);
+    }
+  };
+  const action = settings && (
+    <button type="button" role="switch" aria-checked={enabled} aria-label={t("patternSwitch")} className={styles.switch} disabled={!settings.canEditPattern || busy} onClick={() => void toggle()}>
+      <span />
+    </button>
+  );
+  return (
+    <Card icon="spark" tone="teal" title={t("patternTitle")} subtitle={settings ? t(enabled ? "patternOn" : "patternOff") : undefined} action={action}>
+      <p className={styles.quiet}>{t("patternBody")}</p>
+      {failed && <p role="alert" className={`${styles.callout} ${styles.calloutWarn}`}><EnergyIcon name="alert" className="h-4 w-4 shrink-0" />{t("patternLoadFailed")}</p>}
+      {settings && !enabled && <p className={`${styles.callout} ${styles.calloutOff}`}>{t("patternPaused")}</p>}
+      <small className={styles.hint}>{t("neverUsedHint")}</small>
     </Card>
   );
 }

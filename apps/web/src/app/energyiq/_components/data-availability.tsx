@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { configApi, type EnergyDataAvailabilityDto, type EnergyProjectSetupDocumentDto } from "../../../lib/config-api";
-import { applyMeterNotInUse, availabilityCsv, availabilityPeriods, NOT_IN_USE_REASONS, notInUsePreset, notInUseText } from "./data-availability-model";
+import { applyMeterNeverUsed, applyMeterNotInUse, availabilityCsv, availabilityPeriods, meterNeverUsed, NOT_IN_USE_REASONS, notInUsePreset, notInUseText } from "./data-availability-model";
 import { dataAvailabilityMessages } from "./data-availability-messages";
 import { intlLocale } from "./energyiq-messages";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
@@ -84,6 +84,9 @@ export function DataAvailability({ projectId, siteName, document, canEdit, busy,
     onSave(applyMeterNotInUse(document, meter.meterPointId, reason), t(reason ? "saved.notInUse" : "saved.inUse", { name: meter.name }));
     setEditing(null);
   };
+  // A meter that must never use power (a pavilion fan only residents could switch on): any use raises an alert.
+  const saveNeverUsed = (meter: Meter, neverUsed: boolean) =>
+    onSave(applyMeterNeverUsed(document, meter.meterPointId, neverUsed), t(neverUsed ? "saved.neverUsed" : "saved.neverUsedOff", { name: meter.name }));
 
   // Days of no use from a meter that is only using nothing now (idle: online, and able to) stay a quiet note beside it.
   // Anywhere else they still need a look: a lighting circuit sending 0 kWh for days may have lights that do not come on.
@@ -169,12 +172,13 @@ export function DataAvailability({ projectId, siteName, document, canEdit, busy,
                 <td>{meter.lastReadingAt ? when(meter.lastReadingAt) : <span className={styles.quiet}>—</span>}</td>
                 <td>{meter.offlineSince
                   ? <><span className={`${styles.badge} ${styles.badgeBad}`}><i aria-hidden="true" />{t("status.offline_now")}</span><small className={styles.note}>{t("offlineSince", { when: when(meter.offlineSince) })}</small></>
-                  : <span className={`${styles.badge} ${badgeClass(meter.status)}`}><i aria-hidden="true" />{statusText(meter.status, meter)}</span>}{meter.notInUse && <small className={styles.note}>{reasonText(meter.notInUse)}</small>}{meter.status === "idle" && !meter.offlineSince && <small className={styles.note}>{t("idle.note")}</small>}</td>
+                  : <span className={`${styles.badge} ${badgeClass(meter.status)}`}><i aria-hidden="true" />{statusText(meter.status, meter)}</span>}{meter.notInUse && <small className={styles.note}>{reasonText(meter.notInUse)}</small>}{meter.status === "idle" && !meter.offlineSince && <small className={styles.note}>{t("idle.note")}</small>}{!canEdit && meter.status !== "not_in_use" && meterNeverUsed(document, meter.meterPointId) && <small className={styles.note}>{t("neverUsed.note")}</small>}</td>
                 {/* A meter only using nothing (idle) is in use, just rarely, so it is not offered "Mark not in use". */}
                 {canEdit && <td className={styles.actionCell}>{meter.status === "not_in_use"
                   ? <button type="button" className={styles.rowAction} disabled={busy} onClick={() => save(meter, null)}>{t("action.inUse")}</button>
                   : meter.status === "idle" ? null
-                  : <button type="button" className={styles.rowAction} disabled={busy} aria-expanded={editing?.meterId === meter.meterPointId} onClick={() => setEditing(editing?.meterId === meter.meterPointId ? null : { meterId: meter.meterPointId, other: false, reason: "" })}>{t("action.notInUse")}</button>}</td>}
+                  : <button type="button" className={styles.rowAction} disabled={busy} aria-expanded={editing?.meterId === meter.meterPointId} onClick={() => setEditing(editing?.meterId === meter.meterPointId ? null : { meterId: meter.meterPointId, other: false, reason: "" })}>{t("action.notInUse")}</button>}
+                  {meter.status !== "not_in_use" && <label className={styles.neverUsed}><input type="checkbox" checked={meterNeverUsed(document, meter.meterPointId)} disabled={busy} onChange={event => saveNeverUsed(meter, event.target.checked)} />{t("neverUsed.label")}</label>}</td>}
               </tr>;
               if (editing?.meterId !== meter.meterPointId || meter.status === "idle") return [row];
               return [row, <tr key={`${meter.meterPointId}-edit`} className={styles.pickerRow}><td colSpan={columns}>

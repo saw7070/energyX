@@ -124,6 +124,9 @@ it("writes each suggested change in the reader's language, keeping the server's 
   expect(label("meter_not_in_use", { meterId: "m1", meterName: "Pavilion 2", reason: "Closed for repairs" }, "ms")).toBe("Tandakan Pavilion 2 sebagai tidak digunakan (Closed for repairs)");
   expect(label("meter_in_use", { meterId: "m1", meterName: "Pavilion 2" }, "zh-Hans")).toBe("将 Pavilion 2 标为恢复使用");
   expect(label("meter_always_on", { meterId: "m1", meterName: "Server room", alwaysOn: true }, "ms")).toBe("Tandakan Server room sebagai sentiasa hidup mengikut reka bentuk");
+  expect(label("meter_never_used", { meterId: "m1", meterName: "Pavilion DL & fan", neverUsed: true }, "zh-Hans")).toBe("Pavilion DL & fan 一用电就提醒（它本应完全不用电）");
+  expect(label("meter_never_used", { meterId: "m1", meterName: "Pavilion DL & fan", neverUsed: false }, "ms")).toBe("Berhenti memberi amaran apabila Pavilion DL & fan menggunakan kuasa");
+  expect(label("meter_never_used", { meterId: "m1", meterName: "Pavilion DL & fan" }, "ms")).toBe("English sentence");
   expect(label("light_count", { meterId: "m1", meterName: "DB1 Light", count: 24 }, "zh-Hans")).toBe("把 DB1 Light 的灯具数量设为 24");
   expect(label("holiday", { date: "2026-12-25", label: "Christmas", closed: true, classification: "public_holiday" }, "zh-Hans")).toBe("把 2026年12月25日 加为公共假期：Christmas");
   expect(label("holiday", { date: "2026-12-26", label: "Year-end clean", closed: true, classification: "special_closure" }, "ms")).toMatch(/^Tambah 26 Dis 2026 sebagai hari tutup yang dirancang: Year-end clean$/);

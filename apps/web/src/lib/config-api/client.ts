@@ -410,6 +410,10 @@ export const configApi = {
   sendEnergyReportScheduleNow(id: string): Promise<EnergyReportSchedulesDto & { outcome: { status: "sent" | "failed" | "skipped"; recipientCount: number; error?: string } }> {
     return requestEnvelope(`/api/v1/energy/report-schedules/${encodeURIComponent(id)}/send`, { method: "POST" });
   },
+  /** A site's meter-alert settings (unusual-use switch, extra addresses for stopped meters); see meter-alerts-model.ts. */
+  meterAlertSettingsRequest<T>(projectId: string, init?: RequestInit): Promise<T> {
+    return requestEnvelope<T>(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/meter-alerts/settings`, init);
+  },
   markEnergyProjectAlertRead(projectId: string, key: string): Promise<{ read: boolean }> {
     return requestEnvelope(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/alerts/read`, { method: "POST", body: JSON.stringify({ key }) });
   },

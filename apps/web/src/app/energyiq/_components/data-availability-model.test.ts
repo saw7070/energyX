@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EnergyDataAvailabilityDto, EnergyProjectSetupDocumentDto } from "../../../lib/config-api";
-import { applyMeterNotInUse, availabilityCsv, availabilityPeriods, notInUsePreset, notInUseText, siteDateTime } from "./data-availability-model";
+import { applyMeterNeverUsed, applyMeterNotInUse, availabilityCsv, availabilityPeriods, meterNeverUsed, notInUsePreset, notInUseText, siteDateTime } from "./data-availability-model";
 
 const document = {
   project: { name: "Tuya Office", timezone: "Asia/Singapore" }, tier_structure_locked: true, tiers: [], nodes: [],
@@ -33,6 +33,17 @@ describe("data availability model", () => {
     const back = applyMeterNotInUse(marked, "blind", null);
     expect(back.meter_mapping!.rows[0]!.presentation).toEqual({ device_name: "Showroom Blind (L2P8)" });
     expect(applyMeterNotInUse(applyMeterNotInUse(document, "tv", "Spare"), "tv", null).meter_mapping!.rows[1]).not.toHaveProperty("presentation");
+  });
+
+  it("marks a meter that should never use power, and clears it, touching nothing else", () => {
+    const marked = applyMeterNeverUsed(document, "blind", true);
+    expect(marked.meter_mapping!.rows[0]!.presentation).toEqual({ device_name: "Showroom Blind (L2P8)", never_used: "true" });
+    expect(marked.meter_mapping!.rows[1]).toBe(document.meter_mapping!.rows[1]);
+    expect(meterNeverUsed(marked, "blind")).toBe(true);
+    expect(meterNeverUsed(marked, "tv")).toBe(false);
+    const cleared = applyMeterNeverUsed(marked, "blind", false);
+    expect(cleared.meter_mapping!.rows[0]!.presentation).toEqual({ device_name: "Showroom Blind (L2P8)" });
+    expect(applyMeterNeverUsed(applyMeterNeverUsed(document, "tv", true), "tv", false).meter_mapping!.rows[1]).not.toHaveProperty("presentation");
   });
 
   it("writes one row per meter and one per outage, in the site's own time, ready for Excel", () => {
