@@ -45,6 +45,18 @@ const data: AnalysisData = {
   holidays: new Map(), openingHours: { monday: [hours], tuesday: [hours], wednesday: [hours], thursday: [hours], friday: [hours] }, actions: [],
 };
 
+// Two locations, and Wednesday 12 Aug at twice a normal weekday: one unusual weekday.
+const SPIKE = "2026-08-12";
+const spiked = (date: string, hour: number) => siteKwh(date, hour) * (date === SPIKE ? 2 : 1);
+const spikedUsage = usage + 84;
+const twoLevels: AnalysisData = {
+  ...data, circuits: [],
+  current: {
+    project: scope("project", "Office", { total: series("__scope__", spiked), types: { load: series("__category__:load", spiked) }, usageKwh: spikedUsage, typeTotals: { load: spikedUsage }, cost: { amount: spikedUsage * 0.3, currency: "SGD", note: "0.3 SGD/kWh" } }),
+    spaces: [scope("l1", "Level 1", { usageKwh: 360, typeTotals: { load: 360 } }), scope("l2", "Level 2", { usageKwh: 240, typeTotals: { load: 240 } })],
+  },
+};
+
 afterEach(() => { mock.params = ""; mock.noReport = false; mock.load.mockReset(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 async function render(input: AnalysisData = data) {
@@ -129,8 +141,9 @@ describe("Analysis as one flowing page", () => {
     // The averages per kind of day are in Daily patterns once, not again in "Daily use at a glance".
     expect(page.text().match(/Weekday average/g)?.length).toBe(2); // Daily patterns' tile and step 3's chart button
     expect(page.text()).not.toContain("Weekday daily average");
-    // The flow chart no longer repeats step 1's takeaway in its own words.
-    expect(page.text()).not.toContain("of the site's electricity.");
+    // The flow chart keeps its takeaway: here it names a space and a share step 1 does not give.
+    expect(page.host.querySelector("#story-money")!.textContent).toContain("DB1 Power accounts for 70% of the bill, and power load is the largest type of use.");
+    expect(page.text().match(/Level 1 uses 100% of the site's electricity\. Across the site, Power Load is the biggest use \(100%\)\./g)).toHaveLength(1);
     // The same charts as before: the daily chart, the daily split, the split by type, the flow, a typical day and step 3's hours.
     expect(page.host.querySelectorAll(".recharts-responsive-container").length).toBe(6);
 
@@ -144,6 +157,24 @@ describe("Analysis as one flowing page", () => {
     const page = await render(ESTATE);
     await page.click(page.host.querySelector("button[aria-controls='story-when-figures']"));
     expect(page.host.querySelector("#story-when-figures")!.textContent).toMatch(/Night-time use: this week vs your best week[\d.]+ kW vs [\d.]+ kW \(week to \d{1,2} Nov\)/);
+    await page.unmount();
+  });
+
+  it("keeps the facts the old written summary gave: biggest location against the next, the flow's takeaway once, and unusual days by kind", async () => {
+    const page = await render(twoLevels);
+    await page.click(page.button("Show all figures"));
+    const money = page.host.querySelector<HTMLElement>("#story-money")!;
+    // Level 1 used 360 of 600 kWh, 1.5 times Level 2's 240.
+    expect(money.querySelector("#story-money-figures")!.textContent).toContain("Biggest location: Level 1, 360 kWh (60% of total), about 1.5 times Level 2 (240 kWh).");
+    // Step 1 already says Level 1 accounts for 60%; the flow chart says only what it adds, the type's share.
+    expect(money.textContent).toContain("Level 1 accounts for 60% of the bill");
+    expect(money.textContent).not.toContain("Level 1 uses 60% of the site's electricity.");
+    expect(money.textContent).toContain("Across the site, Power Load is the biggest use (100%).");
+    // The unusual-day line gives every kind of day at the chosen location, whichever kind the chart shows.
+    const days = page.host.querySelector<HTMLElement>("#story-days-figures")!;
+    expect(days.textContent).toContain("Unusual days: 1 of 5 complete weekday days · all kinds of day: 1 weekday, 0 weekend");
+    await page.click([...days.querySelectorAll('[role="group"][aria-label="Kind of day"] button')].find(item => item.textContent === "Weekend"));
+    expect(days.textContent).toContain("Unusual days: 0 of 2 complete weekend days · all kinds of day: 1 weekday, 0 weekend");
     await page.unmount();
   });
 
@@ -175,7 +206,7 @@ describe("links into the Analysis page", () => {
     expect(analysisLinkTarget(new URLSearchParams("section=story-about")).section).toBe("story-about");
 
     const page = await render();
-    for (const id of fromOverview) expect(page.host.querySelector(`#${id}`), id).not.toBeNull();
+    for (const id of fromOverview) expect(page.host.querySelector(`#${id}`), String(id)).not.toBeNull();
     const scrolled: string[] = [];
     Element.prototype.scrollIntoView ??= function scrollIntoView() { /* not in this test DOM */ };
     vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (this: Element) { scrolled.push(this.id); });

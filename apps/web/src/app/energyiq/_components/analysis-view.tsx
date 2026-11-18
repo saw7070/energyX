@@ -217,11 +217,12 @@ function AnalysisBody({ data, derived, loading }: { data: AnalysisData; derived:
     // 1 · Where the money goes: the totals and cost, the split by day, by type or group and by space, and the biggest circuits.
     "story-money": {
       contents: [t("kh.title"), t("cb.title"), t("ed.title"), flow("title"), t("cr.title")],
-      content: () => <>
+      content: (_where, said) => <>
+        <TopLocation data={data} />
         <KeyHighlights data={data} derived={derived} />
         <ConsumptionBreakdown data={data} derived={derived} />
         <EnergyDistribution data={data} derived={derived} />
-        <EnergyFlow data={data} />
+        <EnergyFlow data={data} said={said} />
         <CircuitRanking data={data} />
       </>,
     },
@@ -268,6 +269,18 @@ function AboutFigures({ data }: { data: AnalysisData }) {
       <Link href={`/energyiq/reports?${new URLSearchParams({ projectId: data.projectId, sessionId: "new" })}`} className="shrink-0 rounded-md bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-500">{t("report.generate")}</Link>
     </div>
   </>;
+}
+
+/** The location that used the most, its share of the site, and how many times the next one it used. */
+function TopLocation({ data }: { data: AnalysisData }) {
+  const t = useMessages(viewMessages);
+  const project = data.current.project;
+  const [top, second] = [...data.current.spaces].sort((a, b) => (b.usageKwh ?? 0) - (a.usageKwh ?? 0));
+  if (!top) return null;
+  const pct = project.usageKwh ? num((top.usageKwh ?? 0) / project.usageKwh * 100) : "—";
+  return <p className={`${SUB} px-3 py-2 text-sm text-slate-700`}>{second?.usageKwh
+    ? t("top.spaceVs", { name: top.name, kwh: kwh(top.usageKwh), pct, ratio: num((top.usageKwh ?? 0) / second.usageKwh, 2), second: second.name, secondKwh: kwh(second.usageKwh) })
+    : t("top.space", { name: top.name, kwh: kwh(top.usageKwh), pct })}</p>;
 }
 
 /** The busiest complete day of the whole site, and what each location used that day. */
@@ -339,6 +352,8 @@ function DailyTotalTrend({ data, derived, inStep = false }: { data: AnalysisData
   const complete = shown.filter(day => day.complete);
   const incomplete = shown.filter(day => !day.complete && day.totalKwh > 0).length;
   const anomalies = lighting ? selected.anomalies : selected.anomalies.filter(item => item.dayType === dayType);
+  // Unusual days of each kind at the chosen location, whichever kind the chart shows.
+  const byKind = (type: AnalysisDayType) => selected.anomalies.filter(item => item.dayType === type).length;
   const threshold = baseline.expectedKwh == null ? null : baseline.expectedKwh * (1 + ANOMALY_THRESHOLD_PCT / 100);
   // Why each day was different: against a usual day of its kind, split by the meters inside the chosen location.
   const explanations = useDayExplanations(selected.days, spaceItem?.scope ?? null, data.current, lighting, data.groups);
@@ -386,7 +401,7 @@ function DailyTotalTrend({ data, derived, inStep = false }: { data: AnalysisData
       </ResponsiveContainer> : <div className="flex h-full items-center justify-center rounded-md border border-dashed border-slate-200 text-sm text-slate-600">{lt("trend.noDays", { type: label })}</div>}
     </div>
     {rows.length > 0 && (!inStep || dayItems.some(item => item.status === "standout")) && <StandoutDayList items={dayItems} lighting={lighting} siteName={data.projectName} hint={t("standout.hint")} {...(inStep ? { title: t("standout.eachDay"), rule: false } : {})} />}
-    <div className="mb-2 text-sm text-slate-700">{rich(lt(complete.length === 1 ? "trend.detected.one" : "trend.detected.other", { total: complete.length, type: label }), { count: <span className="font-semibold text-rose-700">{anomalies.length}</span> })}</div>
+    <div className="mb-2 text-sm text-slate-700">{rich(lt(complete.length === 1 ? "trend.detected.one" : "trend.detected.other", { total: complete.length, type: label }), { count: <span className="font-semibold text-rose-700">{anomalies.length}</span> })} · {t(byKind("public_holiday") ? "trend.byKindHoliday" : "trend.byKind", { weekday: byKind("weekday"), weekend: byKind("weekend"), holiday: byKind("public_holiday") })}</div>
     <div className="rounded-md border border-slate-200">
       <div className="border-b border-slate-200 bg-white px-3 py-2"><Title className="text-xs font-medium text-slate-700" guide={{ summary: t("anomalies.summary"), dataAcquisition: [t("anomalies.data1")], chartGeneration: [t("anomalies.chart1")] }}>{t("anomalies.title")}</Title></div>
       <div className="max-h-72 overflow-auto">

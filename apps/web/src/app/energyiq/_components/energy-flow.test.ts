@@ -36,3 +36,12 @@ it("has nothing to draw without a measured space", () => {
   expect(energyFlowData(scope("Site", 500, {}), [], words)).toBeNull();
   expect(energyFlowData(scope("Site", 0, {}), [scope("A", 10, {})], words)).toBeNull();
 });
+
+it("sums up the flow in one sentence: the biggest space and the biggest use", async () => {
+  const { energyFlowSummary } = await import("./energy-flow");
+  const flow = energyFlowData(scope("Site", 1000, { aircon: 600, light: 400 }), [
+    scope("Level 1", 300, { aircon: 100, light: 200 }),
+    scope("Level 2", 700, { aircon: 500, light: 200 }),
+  ], words)!;
+  expect(energyFlowSummary(flow)).toEqual({ space: { name: "Level 2", share: 70 }, type: { category: "aircon", share: 60 } });
+});

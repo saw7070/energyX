@@ -4,6 +4,8 @@ import { defineMessages } from "./energyiq-messages";
 export const energyFlowMessages = defineMessages({
   title: "Energy flow: site → spaces → uses",
   body: "Read left to right: the whole site's electricity, split by space, then by what it was used for. The wider a band, the more electricity.",
+  summarySpace: "{space} uses {share}% of the site's electricity.",
+  summaryType: "Across the site, {type} is the biggest use ({share}%).",
   columnSite: "Whole site",
   columnSpaces: "By space",
   columnUses: "By use",
@@ -19,6 +21,8 @@ export const energyFlowMessages = defineMessages({
   "zh-Hans": {
     title: "用电流向：全场 → 空间 → 用途",
     body: "从左往右看：全场用电，先按空间分，再按用途分。带越宽，用电越多。",
+    summarySpace: "{space} 用了全场 {share}% 的电。",
+    summaryType: "全场来看，{type} 是最大的用途（{share}%）。",
     columnSite: "全场",
     columnSpaces: "按空间",
     columnUses: "按用途",
@@ -34,6 +38,8 @@ export const energyFlowMessages = defineMessages({
   ms: {
     title: "Aliran tenaga: tapak → ruang → kegunaan",
     body: "Baca dari kiri ke kanan: elektrik seluruh tapak, dibahagikan mengikut ruang, kemudian mengikut kegunaan. Lebih lebar jalur, lebih banyak elektrik.",
+    summarySpace: "{space} menggunakan {share}% elektrik tapak.",
+    summaryType: "Bagi seluruh tapak, {type} ialah kegunaan terbesar ({share}%).",
     columnSite: "Seluruh tapak",
     columnSpaces: "Mengikut ruang",
     columnUses: "Mengikut kegunaan",

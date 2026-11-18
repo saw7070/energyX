@@ -60,7 +60,12 @@ export type StoryStepId = "story-money" | "story-on" | "story-when" | "story-day
  * themselves. `where` is "about" when the step is missing (the days that stood out need the site report) and the
  * figures move to "About these figures" at the end instead.
  */
-export type StoryFigure = { contents: string[]; content: (where: "step" | "about") => ReactNode };
+export type StoryFigure = { contents: string[]; content: (where: "step" | "about", said: StepSaid) => ReactNode };
+/**
+ * What a step's own takeaway already says, so a figure under it can leave out a sentence that would only repeat it:
+ * the largest part and its whole percentage, and the largest type of use (with its percentage when the takeaway gives one).
+ */
+export type StepSaid = { lead?: { name: string; share: number }; type?: { category: string; share?: number } };
 export type StoryFigures = Partial<Record<StoryStepId, StoryFigure>>;
 type FiguresState = { figures: StoryFigures; open: ReadonlySet<string>; toggle: (id: string) => void };
 const FiguresContext = createContext<FiguresState | null>(null);
@@ -156,7 +161,7 @@ export function DecisionSummary(props: StoryInput & { figures?: StoryFigures; ab
   const given = props.figures ?? {};
   const placed: StoryFigures = story.report ? given : Object.fromEntries(Object.entries(given).filter(([id]) => id !== "story-days"));
   const homeless = story.report ? undefined : given["story-days"];
-  const about = homeless || props.about ? <>{homeless?.content("about")}{props.about}</> : null;
+  const about = homeless || props.about ? <>{homeless?.content("about", {})}{props.about}</> : null;
   const figureIds = Object.keys(placed);
   const [openFigures, setOpenFigures] = useState<ReadonlySet<string>>(() => new Set());
   const allOpen = figureIds.length > 0 && figureIds.every(id => openFigures.has(id));
@@ -259,7 +264,7 @@ function BaselineTag({ viewBox, text, colour }: { viewBox?: { x?: number; y?: nu
     <text x={x} y={y} fill={colour} fontSize={11} fontWeight={600}>{text}</text>
   </g>;
 }
-function StoryCard({ id, step, title, takeaway, children }: { id: string; step?: number; title: string; takeaway: ReactNode; children: ReactNode }) {
+function StoryCard({ id, step, title, takeaway, said = {}, children }: { id: string; step?: number; title: string; takeaway: ReactNode; said?: StepSaid; children: ReactNode }) {
   const figures = useContext(FiguresContext);
   const figure = figures?.figures[id as StoryStepId];
   return <section id={id} aria-labelledby={`${id}-title`} className="scroll-mt-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -271,11 +276,11 @@ function StoryCard({ id, step, title, takeaway, children }: { id: string; step?:
       </div>
     </div>
     {children}
-    {figure && figures && <StepFigures id={id} figure={figure} open={figures.open.has(id)} onToggle={() => figures.toggle(id)} />}
+    {figure && figures && <StepFigures id={id} figure={figure} said={said} open={figures.open.has(id)} onToggle={() => figures.toggle(id)} />}
   </section>;
 }
 /** "Show the figures": a step's detailed charts and tables, directly under its summary, drawn only once opened. */
-function StepFigures({ id, figure, open, onToggle }: { id: string; figure: StoryFigure; open: boolean; onToggle: () => void }) {
+function StepFigures({ id, figure, said, open, onToggle }: { id: string; figure: StoryFigure; said: StepSaid; open: boolean; onToggle: () => void }) {
   const t = useMessages(storyMessages);
   const { locale } = useEnergyIqLocale();
   return <div className="mt-6 border-t border-slate-200 pt-4">
@@ -285,7 +290,7 @@ function StepFigures({ id, figure, open, onToggle }: { id: string; figure: Story
       </button>
       {figure.contents.length > 0 && <p className="text-sm text-slate-500">{joinText(figure.contents, locale)}</p>}
     </div>
-    <div id={`${id}-figures`} hidden={!open} className="mt-4 space-y-4">{open ? figure.content("step") : null}</div>
+    <div id={`${id}-figures`} hidden={!open} className="mt-4 space-y-4">{open ? figure.content("step", said) : null}</div>
   </div>;
 }
 function ShareBars({ title, rows, format }: { title: string; rows: Array<{ key: string; label: string; value: number; color: string; hint?: ReactNode }>; format: (value: number) => string }) {
@@ -358,7 +363,15 @@ function MoneySection({ story, data, money }: { story: Story; data: AnalysisData
   const takeaway = groupLead ? groupLead.kind === "unmetered" ? t("money.takeawayUnmetered", { pct: groupLead.pct }) : leadSentence(groupLead.name, groupLead.pct, true)
     : lead[0]?.key === UNMETERED_KEY ? t("money.takeawayUnmetered", { pct: num(lead[0].value / Math.max(all, 0.001) * 100, 0) })
     : lead[0] ? leadSentence(lead[0].label, num(lead[0].value / Math.max(all, 0.001) * 100, 0), split.length > 0) : t("money.none");
-  return <StoryCard id="story-money" step={1} title={t(rate != null ? "money.title" : "money.titleEnergy")} takeaway={takeaway}>
+  // The same facts as data, for the figures under this step: the largest line and its share, and the type of use named
+  // with it. Without a split by area or group, the largest line is itself the largest type, with its share.
+  const leadShare = lead[0] ? Math.round(lead[0].value / Math.max(all, 0.001) * 100) : 0;
+  const said: StepSaid = groupLead
+    ? groupLead.kind === "unmetered" ? {} : { lead: { name: groupLead.name, share: groupLead.pct }, ...(firstType ? { type: { category: firstType.key } } : {}) }
+    : !lead[0] || lead[0].key === UNMETERED_KEY ? {}
+    : split.length ? { lead: { name: lead[0].label, share: leadShare }, ...(firstType ? { type: { category: firstType.key } } : {}) }
+    : { type: { category: lead[0].key, share: leadShare } };
+  return <StoryCard id="story-money" step={1} title={t(rate != null ? "money.title" : "money.titleEnergy")} takeaway={takeaway} said={said}>
     <div className={`grid gap-8 ${(groupRows || split.length) && shownTypes.length ? "lg:grid-cols-2" : ""}`}>
       {groupRows && <GroupSplit rows={groupRows} title={t("money.byGroup")} note={t("money.byGroupDayNote")} look={SPLIT_LOOK} />}
       {tree && <div>
