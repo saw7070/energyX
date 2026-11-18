@@ -71,6 +71,34 @@ export type AnalysisData = {
    * energy review shows carbon with it. Absent on older readings.
    */
   carbon?: { kgCo2ePerKwh: number; year: number; source: string } | undefined;
+  /**
+   * What the site's people told the AI about earlier reports and an admin approved ("the pavilion fan must never run").
+   * Active memory only; `date` is when it was written. The energy review lists it in its appendix. Absent on older
+   * readings and when there is none.
+   */
+  feedbackMemory?: FeedbackMemoryItem[] | undefined;
+  /**
+   * Things the AI was asked to check in a later report, from feedback on an earlier one: open ones, and ones closed in
+   * the last 31 days. The energy review shows them after its points to check. Absent on older readings and when there
+   * are none.
+   */
+  followUps?: ReportFollowUp[] | undefined;
+  /**
+   * Points to check that an admin marked as known (a meter that is offline on purpose). The energy review leaves out
+   * any point whose key is here; see EnergyReviewCheck.key. Absent on older readings and when there are none.
+   */
+  dismissedChecks?: DismissedCheck[] | undefined;
 };
 /** A meter and how many light points it feeds; `name` as readers know it. */
 export type LightCountMeter = { id: string; name: string; count: number };
+/** One thing the AI remembers about the site, from feedback on a report. */
+export type FeedbackMemoryItem = { text: string; date: string };
+export type ReportFollowUpStatus = "open" | "done" | "dropped";
+export type ReportFollowUpVerdict = "resolved" | "ongoing" | "unclear";
+/** One follow-up; `lastCheck` is the AI's latest look at it against the readings, when it has looked. */
+export type ReportFollowUp = {
+  text: string; status: ReportFollowUpStatus; createdAt: string;
+  lastCheck?: { at: string; verdict: ReportFollowUpVerdict; evidence: string } | undefined;
+};
+/** A point to check left out of the reports: its stable key, the title it had, and why it was set aside. */
+export type DismissedCheck = { key: string; title: string; reason: string };

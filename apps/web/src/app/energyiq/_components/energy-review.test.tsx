@@ -7,7 +7,7 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it, vi } from "vitest";
-import { buildEnergyReview, type AnalysisData, type ScopeMeter, type TrendSeries } from "@datafoundry/site-report";
+import { assembleAnalysisData, buildEnergyReview, type AnalysisData, type AnalysisSource, type ProjectInformationSource, type ScopeMeter, type TrendSeries } from "@datafoundry/site-report";
 import { EnergyReviewDocument, renderEnergyReviewHtml, renderEnergyReviewMarkup } from "@datafoundry/site-report/energy-review-document";
 import { renderStyledSiteReportHtml } from "@datafoundry/site-report/management-review-document";
 
@@ -366,5 +366,182 @@ describe("the energy review as a working page", () => {
       host.remove();
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("feedback on the report reaches the energy review", () => {
+  // A site whose meters all report every day, with the driveway lamp left on all of one day: a day that stands out.
+  const without = (meter: Meter, key: "stopAfter" | "nightOnly"): Meter => { const copy = { ...meter }; delete copy[key]; return copy; };
+  const linkway = without(METERS.linkway!, "stopAfter"), shelter = without(METERS.shelter!, "nightOnly");
+  const SPIKE = "2026-11-10";
+  const STEADY: Record<string, Meter> = { ...METERS, linkway, shelter, driveway: { ...METERS.driveway!, kwh: (date, hour) => date === SPIKE ? 1.5 : lit(4)(date, hour) },
+    carpark: { name: "Carpark lights", group: "common", kwh: () => 0 } };
+  const FOLLOW_UPS: NonNullable<AnalysisData["followUps"]> = [
+    { text: "The pavilion fan must never run at night.", status: "done", createdAt: "2026-11-03T02:00:00Z" },
+    { text: "See whether Block A ground floor drops after the timer change.", status: "open", createdAt: "2026-11-05T02:00:00Z",
+      lastCheck: { at: "2026-11-16T02:00:00Z", verdict: "resolved", evidence: "Ground floor fell from 7.8 to 6.1 kWh a night after 9 Nov." } },
+    { text: "Watch the linkway lights after the repair.", status: "open", createdAt: "2026-11-06T02:00:00Z",
+      lastCheck: { at: "2026-11-16T02:00:00Z", verdict: "ongoing", evidence: "Still no readings since 4 Nov." } },
+    { text: "Check the playground lights after the new fittings.", status: "open", createdAt: "2026-11-07T02:00:00Z" },
+    { text: "Shelter lights rewiring.", status: "dropped", createdAt: "2026-11-02T02:00:00Z" },
+  ];
+  const MEMORY: NonNullable<AnalysisData["feedbackMemory"]> = [
+    { text: "Pavilion 2 loses power by day; that is normal.", date: "2026-11-04" },
+    { text: "The lights go off at 7:10 am, not 6:45 am.", date: "2026-11-12" },
+  ];
+  const withFeedback = (locale: "en" | "zh-Hans" | "ms" = "en") => buildEnergyReview(estate({ followUps: FOLLOW_UPS, feedbackMemory: MEMORY }), null, GENERATED, locale);
+
+  it("gives every point to check a stable key, the same in every language and every build", () => {
+    expect(review.checks.map(check => check.key)).toEqual(["stopped:linkway"]);
+    const offline = (locale: "en" | "zh-Hans" | "ms") => buildEnergyReview(estate({ notInUse: [{ id: "linkway", name: "Linkway lights", reason: "Waiting for a site check" }] }), null, GENERATED, locale).checks.map(check => check.key);
+    expect(offline("en")).toEqual(["offline:linkway"]);
+    expect(offline("zh-Hans")).toEqual(offline("en"));
+    expect(offline("ms")).toEqual(offline("en"));
+    // A day that stood out, a lighting meter that used nothing, and daytime use worth a visit.
+    const steady = buildEnergyReview(estate({}, { meters: { ...STEADY, "a-high": { ...METERS["a-high"]!, kwh: lit(8, 0.2) } } }), null, GENERATED);
+    const keys = steady.checks.map(check => check.key);
+    expect(keys).toEqual(expect.arrayContaining([`standout:${SPIKE}`, "daytime", "noUse:carpark"]));
+    expect(buildEnergyReview(estate({}, { meters: { ...STEADY, "a-high": { ...METERS["a-high"]!, kwh: lit(8, 0.2) } } }), null, GENERATED).checks.map(check => check.key)).toEqual(keys);
+    // A meter set aside as not in use that still reports, on an opening-hours site.
+    const office = buildEnergyReview(estate({ hoursMeaning: undefined, notInUse: [{ id: "fan", name: "Pavilion fan", reason: "Spare circuit" }],
+      openingHours: Object.fromEntries(["monday", "tuesday", "wednesday", "thursday", "friday"].map(day => [day, [{ from: "09:00", to: "18:00" }]])) }), null, GENERATED);
+    expect(office.checks.find(check => check.key === "notInUse:fan")?.title).toBe("Pavilion fan is marked not in use.");
+    for (const check of [...review.checks, ...steady.checks, ...office.checks]) expect(check.key).toMatch(/^(stopped|offline|notInUse|noUse):[\w-]+$|^standout:\d{4}-\d\d-\d\d$|^daytime$/);
+  });
+
+  it("leaves out a point an admin set aside, with its next step, and says so in the appendix", () => {
+    const quiet = buildEnergyReview(estate({ dismissedChecks: [{ key: "stopped:linkway", title: "Linkway lights has stopped reporting.", reason: "Taken out for the renovation." }] }), null, GENERATED);
+    expect(quiet.checks).toEqual([]);
+    expect(quiet.nextSteps.map(step => step.action)).not.toContain("Check Linkway lights: breaker, meter power, gateway pairing and fittings");
+    expect(quiet.summary.answers.find(answer => answer.id === "profile")!.answer).toMatch(/ Nothing needs checking\.$/);
+    expect(quiet.method.setAside).toEqual([{ title: "Linkway lights has stopped reporting.", reason: "Taken out for the renovation." }]);
+    const page = renderEnergyReviewHtml(quiet);
+    expect(page).not.toContain('id="er-checks"');
+    expect(plain(page)).toContain("Points to check left out");
+    expect(plain(page)).toContain("Linkway lights has stopped reporting. Taken out for the renovation.");
+    // A key that matches nothing changes nothing.
+    const other = buildEnergyReview(estate({ dismissedChecks: [{ key: "stopped:driveway", title: "Driveway lamp has stopped reporting.", reason: "" }] }), null, GENERATED);
+    expect(other.checks.map(check => check.key)).toEqual(["stopped:linkway"]);
+    expect(other.method.setAside).toEqual([]);
+    expect(review.method.setAside).toEqual([]);
+    // A day set aside makes room for the next one; daytime use set aside drops its step too.
+    const daytime = buildEnergyReview(estate({ dismissedChecks: [{ key: "daytime", title: "Daytime use on lighting circuits.", reason: "Cleaning crew" }] }, { meters: { ...METERS, "a-high": { ...METERS["a-high"]!, kwh: lit(8, 0.2) } } }), null, GENERATED);
+    expect(daytime.checks.map(check => check.key)).not.toContain("daytime");
+    expect(daytime.nextSteps.some(step => step.action.startsWith("Find the source of the daytime use"))).toBe(false);
+    expect(daytime.method.setAside.map(item => item.title)).toEqual(["Daytime use on lighting circuits."]);
+    const spike = buildEnergyReview(estate({ dismissedChecks: [{ key: `standout:${SPIKE}`, title: "", reason: "Fair on the driveway" }] }, { meters: STEADY }), null, GENERATED);
+    expect(spike.checks.map(check => check.key)).not.toContain(`standout:${SPIKE}`);
+    expect(spike.method.setAside).toEqual([{ title: expect.stringContaining("10 Nov"), reason: "Fair on the driveway" }]);
+  });
+
+  it("carries follow-ups, open ones first, and what the AI remembers, newest first", () => {
+    const built = withFeedback();
+    expect(built.followUps.map(item => [item.status, item.verdict])).toEqual([
+      ["open", "resolved"], ["open", "ongoing"], ["open", null], ["done", null], ["dropped", null],
+    ]);
+    expect(built.followUps[0]).toEqual({ text: "See whether Block A ground floor drops after the timer change.", status: "open", verdict: "resolved", evidence: "Ground floor fell from 7.8 to 6.1 kWh a night after 9 Nov." });
+    expect(built.followUps[2]!.evidence).toBeNull();
+    expect(built.memory).toEqual(["The lights go off at 7:10 am, not 6:45 am.", "Pavilion 2 loses power by day; that is normal."]);
+    expect(review.followUps).toEqual([]);
+    expect(review.memory).toEqual([]);
+    // At most ten remembered facts, each quoted at a readable length.
+    const many = buildEnergyReview(estate({ feedbackMemory: Array.from({ length: 14 }, (_, index) => ({ text: `Fact ${index} ${"x".repeat(index === 13 ? 900 : 5)}`, date: `2026-11-${String(index + 1).padStart(2, "0")}` })) }), null, GENERATED);
+    expect(many.memory).toHaveLength(10);
+    expect(many.memory[0]!.startsWith("Fact 13")).toBe(true);
+    expect(many.memory[0]!.length).toBeLessThanOrEqual(300);
+    expect(many.memory[0]!.endsWith("…")).toBe(true);
+  });
+
+  it("shows the follow-ups after the points to check and the remembered facts in the appendix, in a saved copy too", () => {
+    const html = renderEnergyReviewHtml(withFeedback());
+    const text = plain(html);
+    expect(html).toContain('id="er-followups"');
+    expect(html).toContain('href="#er-followups"');
+    expect(html.indexOf('id="er-followups"')).toBeGreaterThan(html.indexOf('id="er-checks"'));
+    expect(html.indexOf('id="er-followups"')).toBeLessThan(html.indexOf('id="er-method"'));
+    expect(text).toContain("Follow-ups from your feedback");
+    for (const chip of ["Looks resolved", "Still open", "Open", "Done", "Dropped"]) expect(html).toContain(`>${chip}</span>`);
+    expect(text).toContain("Last check: Ground floor fell from 7.8 to 6.1 kWh a night after 9 Nov.");
+    expect(text).toContain("What we know about the site (from your feedback)");
+    expect(text).toContain("The lights go off at 7:10 am, not 6:45 am.");
+    expect(html).not.toMatch(/<button|<input|<script/);
+    // Without feedback there is no such section, nav item or list.
+    const bare = renderEnergyReviewHtml(review);
+    expect(bare).not.toContain("er-followups");
+    expect(plain(bare)).not.toContain("What we know about the site");
+  });
+
+  it("words follow-ups, remembered facts and set-aside points in every language with no gaps", () => {
+    for (const locale of ["en", "zh-Hans", "ms"] as const) {
+      const built = buildEnergyReview(estate({ followUps: FOLLOW_UPS, feedbackMemory: MEMORY, dismissedChecks: [{ key: "stopped:linkway", title: "Linkway lights has stopped reporting.", reason: "Taken out." }] }), null, GENERATED, locale);
+      const html = renderEnergyReviewHtml(built);
+      expect(plain(html)).not.toMatch(/undefined|NaN|\{\w+\}/);
+      expect(html).toContain('id="er-followups"');
+      expect(built.method.setAside).toHaveLength(1);
+      expect(html).toContain({ en: ">Looks resolved<", "zh-Hans": ">似乎已解决<", ms: ">Nampaknya selesai<" }[locale]);
+      expect(plain(renderEnergyReviewMarkup(built))).not.toMatch(/undefined|NaN|\{\w+\}/);
+    }
+  });
+
+  it("offers \"Tell the AI about this\" on each point to check only on the live page, and only when the page asks for feedback", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); vi.stubGlobal("React", React);
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    const onCheckFeedback = vi.fn();
+    const built = withFeedback();
+    try {
+      await act(async () => root.render(<EnergyReviewDocument review={built} onCheckFeedback={onCheckFeedback} />));
+      const asks = [...host.querySelectorAll<HTMLButtonElement>("#er-checks button.er-ask")];
+      expect(asks).toHaveLength(built.checks.length);
+      expect(asks[0]!.textContent).toBe("Tell the AI about this");
+      expect(asks[0]!.getAttribute("aria-label")).toBe("Tell the AI about this: Linkway lights has stopped reporting.");
+      await act(async () => asks[0]!.click());
+      expect(onCheckFeedback).toHaveBeenCalledWith({ key: "stopped:linkway", title: "Linkway lights has stopped reporting." });
+      // The follow-ups are live too, with their place in the bar of sections.
+      const nav = [...host.querySelectorAll('nav[aria-label="Sections of the review"] a')].map(link => link.textContent);
+      expect(nav.slice(nav.indexOf("Checks"), nav.indexOf("Checks") + 2)).toEqual(["Checks", "Follow-ups"]);
+      expect(host.querySelectorAll("#er-followups li")).toHaveLength(FOLLOW_UPS.length);
+      expect([...host.querySelectorAll("#er-method .er-known li")].map(item => item.textContent)).toEqual(built.memory);
+
+      // Without the prop, no button.
+      await act(async () => root.render(<EnergyReviewDocument review={built} />));
+      expect(host.querySelector(".er-ask")).toBeNull();
+      // A saved copy never has one, even with the prop.
+      await act(async () => root.render(<EnergyReviewDocument review={built} standalone onCheckFeedback={onCheckFeedback} />));
+      expect(host.querySelector(".er-ask")).toBeNull();
+      expect(host.querySelector("#er-followups")).not.toBeNull();
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("travels from the project information into the readings, dropping anything it cannot read", () => {
+    const source: AnalysisSource = {
+      context: { projectName: "Riverside", scopeId: "estate", scopeName: "Riverside", timezone: "Asia/Singapore", from: "2026-11-01T16:00:00.000Z", to: "2026-11-03T16:00:00.000Z" },
+      summary: { usageKwh: 10, peakKw: 1, validIntervalCount: 96 }, categories: [], childScopes: [], circuits: [], cost: { status: "unavailable" },
+    };
+    const assemble = (information: ProjectInformationSource) => assembleAnalysisData({ projectId: "estate", project: source, spaces: [], spaceCurrent: [], previousProject: null, spacePrevious: [], history: null, information, actions: [] });
+    const data = assemble({
+      name: "Riverside", calendar: null,
+      feedbackMemory: [{ text: "  The pavilion fan must never run. ", date: "2026-11-12" }, { text: "   ", date: "2026-11-12" }],
+      followUps: [
+        { text: "Watch the linkway.", status: "open", createdAt: "2026-11-06T02:00:00Z", lastCheck: { at: "2026-11-16T02:00:00Z", verdict: "ongoing", evidence: "No readings." } },
+        { text: "Odd status", status: "paused" as "open", createdAt: "2026-11-06T02:00:00Z" },
+        { text: "Odd verdict", status: "done", createdAt: "2026-11-06T02:00:00Z", lastCheck: { at: "2026-11-16T02:00:00Z", verdict: "maybe" as "unclear", evidence: "?" } },
+      ],
+      dismissedChecks: [{ key: "stopped:linkway", title: "Linkway lights has stopped reporting.", reason: "Renovation" }, { key: "", title: "Nothing", reason: "" }],
+    });
+    expect(data.feedbackMemory).toEqual([{ text: "The pavilion fan must never run.", date: "2026-11-12" }]);
+    expect(data.followUps).toEqual([
+      { text: "Watch the linkway.", status: "open", createdAt: "2026-11-06T02:00:00Z", lastCheck: { at: "2026-11-16T02:00:00Z", verdict: "ongoing", evidence: "No readings." } },
+      { text: "Odd verdict", status: "done", createdAt: "2026-11-06T02:00:00Z" },
+    ]);
+    expect(data.dismissedChecks).toEqual([{ key: "stopped:linkway", title: "Linkway lights has stopped reporting.", reason: "Renovation" }]);
+    // Older servers send none of it, and the readings then carry none of it.
+    const older = assemble({ name: "Riverside", calendar: null });
+    expect("feedbackMemory" in older || "followUps" in older || "dismissedChecks" in older).toBe(false);
   });
 });
