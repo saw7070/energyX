@@ -78,8 +78,8 @@ export type EnergyReview = {
   /** The questions present, in order. */
   questions: EnergyReviewQuestion[];
   cover: { kicker: string; title: string; subtitle: string; preparedFor: string[]; period: string[]; issued: string[] };
-  summary: { intro: string; figures: Array<{ value: string; unit: string; label: string }>; answers: Array<{ id: EnergyReviewQuestion; question: string; answer: string }>; note: string };
-  total: { heading: string; intro: string; days: EnergyReviewDay[]; caption: string; projection: Array<{ label: string; kwh: number; cost: number | null; co2Kg: number | null }> } | null;
+  summary: { intro: string; figures: Array<{ value: string; unit: string; label: string; /** The section that explains the figure. */ target: EnergyReviewQuestion }>; answers: Array<{ id: EnergyReviewQuestion; question: string; answer: string }>; note: string };
+  total: { heading: string; intro: string; days: EnergyReviewDay[]; caption: string; /** What the line of costs under the bars is, for the printed chart; empty without a price. */ costCaption: string; projection: Array<{ label: string; kwh: number; cost: number | null; co2Kg: number | null }> } | null;
   groups: { heading: string; intro: string; centre: string; unit: string; slices: EnergyReviewSlice[] } | null;
   largest: { heading: string; intro: string; blocks: Array<{ key: string; name: string; centre: string; slices: EnergyReviewSlice[] }>; note: string } | null;
   comparison: { heading: string; intro: string; title: string; groups: Array<{ name: string; colour: string }>; rows: Array<{ name: string; perDay: number[] }>; callout: string } | null;
@@ -215,7 +215,8 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
       typicalKwh != null ? t(cost(typicalKwh) != null ? "total.typicalCost" : "total.typical", { kwh: kwhText(typicalKwh), cost: cost(typicalKwh) != null ? money(cost(typicalKwh)!, 2) : "", basis: costBasis ? locale === "zh-Hans" ? costBasis : ` ${costBasis}` : "" }) : "",
     ]),
     days,
-    caption: paragraph([t("total.caption", { count: meterCount }), rate != null ? t(costBasis ? "total.captionCostBasis" : "total.captionCost", { basis: costBasis }) : ""]),
+    caption: t("total.caption", { count: meterCount }),
+    costCaption: rate != null ? t(costBasis ? "total.captionCostBasis" : "total.captionCost", { basis: costBasis }) : "",
     projection,
   } : null;
 
@@ -569,12 +570,12 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
     biggestLayer && biggestShare != null && biggestShare >= 0.25 ? t("sum.biggest", { name: biggestLayer.name, pct: pctText(biggestShare) }) : "",
   ]);
   const figures = [
-    typicalKwh != null ? { value: num(typicalKwh), unit: "kWh", label: t("fig.day") } : null,
-    typicalKwh != null ? { value: grouped(typicalKwh * REVIEW_MONTH_DAYS), unit: "kWh", label: t("fig.month", { days: REVIEW_MONTH_DAYS }) } : null,
-    typicalKwh != null && rate != null ? { value: money(typicalKwh * REVIEW_MONTH_DAYS * rate), unit: "", label: costBasis ? t("fig.billBasis", { basis: costBasis }) : t("fig.bill") } : null,
-    typicalKwh != null && carbonFactor != null ? { value: tonnes(typicalKwh * 365 * carbonFactor), unit: t("fig.co2Unit"), label: t("fig.co2") } : null,
-    savingKwh > 0 && (carbonFactor == null || rate == null) ? { value: savingCost != null ? money(savingCost) : grouped(savingKwh), unit: savingCost != null ? "" : "kWh", label: t("fig.saving") } : null,
-  ].filter((figure): figure is { value: string; unit: string; label: string } => !!figure).slice(0, 4);
+    typicalKwh != null ? { value: num(typicalKwh), unit: "kWh", label: t("fig.day"), target: "total" as const } : null,
+    typicalKwh != null ? { value: grouped(typicalKwh * REVIEW_MONTH_DAYS), unit: "kWh", label: t("fig.month", { days: REVIEW_MONTH_DAYS }), target: "total" as const } : null,
+    typicalKwh != null && rate != null ? { value: money(typicalKwh * REVIEW_MONTH_DAYS * rate), unit: "", label: costBasis ? t("fig.billBasis", { basis: costBasis }) : t("fig.bill"), target: "total" as const } : null,
+    typicalKwh != null && carbonFactor != null ? { value: tonnes(typicalKwh * 365 * carbonFactor), unit: t("fig.co2Unit"), label: t("fig.co2"), target: "total" as const } : null,
+    savingKwh > 0 && (carbonFactor == null || rate == null) ? { value: savingCost != null ? money(savingCost) : grouped(savingKwh), unit: savingCost != null ? "" : "kWh", label: t("fig.saving"), target: "savings" as const } : null,
+  ].filter((figure): figure is { value: string; unit: string; label: string; target: "total" | "savings" } => !!figure).slice(0, 4);
 
   const questions: EnergyReviewQuestion[] = ([
     total ? "total" : null, groups ? "groups" : null, largest ? "largest" : null, comparison ? "comparison" : null,
