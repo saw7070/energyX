@@ -38,6 +38,7 @@ export type ClassifyInput = {
 };
 
 export type ClassifyResult = {
+  /** Empty when the model gave none; the page then thanks the person in their own language. */
   reply: string;
   memory: Array<{ text: string; kind: MemoryKind }>;
   /** Setting changes, report points not to flag included (as "dismiss_check"). */
@@ -54,13 +55,13 @@ const MAX_DISMISS = 3;
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 
 const SUGGESTION_GUIDE = `Suggestion kinds and their payloads (use only these):
-- "operating_hours": {"weekly":{"mon":[{"from":"HH:MM","to":"HH:MM"}],"tue":[...],"wed":[...],"thu":[...],"fri":[...],"sat":[...],"sun":[...]}}. 24-hour times. An end before the start runs past midnight (19:00 to 07:10). An empty list means closed (or no lights) that day. Give all seven days.
+- "operating_hours": {"weekly":{"mon":[{"from":"HH:MM","to":"HH:MM"}],"tue":[...],"wed":[...],"thu":[...],"fri":[...],"sat":[...],"sun":[...]}}. 24-hour times. An end before the start runs past midnight (19:00 to 07:10). An empty list means closed (or no lights) that day. Give the days that change; days left out keep their current hours.
 - "meter_not_in_use": {"meterId":"<id from meters>","reason":"<why, up to 160 characters>"}
 - "meter_in_use": {"meterId":"<id from meters>"} (only for a meter now marked not in use)
 - "meter_always_on": {"meterId":"<id from meters>","alwaysOn":true|false} (true: meant to run day and night, like emergency lighting)
 - "light_count": {"meterId":"<id from meters>","count":<whole number 1 to 9999>} (how many light points the meter feeds)
 - "holiday": {"date":"YYYY-MM-DD","label":"<name>","closed":true,"classification":"public_holiday"|"special_closure"}
-- "electricity_rate": {"ratePerKwh":<number>,"effectiveFrom":"YYYY-MM-DD"} (same currency as the current rate)`;
+- "electricity_rate": {"ratePerKwh":<number>,"effectiveFrom":"YYYY-MM-DD"} (in the current rate's currency)`;
 
 const CLASSIFY_SYSTEM = `You help a building energy team keep their site's energy reports accurate and useful.
 Someone has given feedback about a report. Decide what to remember about the site, which setting changes to suggest, and what a later report should check.
@@ -72,14 +73,14 @@ Rules:
 - Suggest only the kinds listed below. When unsure, prefer memory over a suggestion.
 - Memory is for lasting facts about the site, rules that must hold (for example "the pavilion fan must never run"), and explanations of past readings (for example why a day was low). Do not repeat what is already in memory.
 - Add a follow-up only when something should be checked in a later report, for example whether a repair worked.
-- Use dismissChecks only when the feedback says a point to check in the report is expected or not a problem. checkKey must be a key from user_data.report_context.checks or user_data.about.
+- Use dismissChecks only when the feedback says a point to check in the report is expected or not a problem. checkKey must be a key from user_data.report_context.checks or user_data.about; the report words the point itself.
 - Write the reply, memory and follow-ups in the same language as the feedback, in plain words and short sentences.
 - The reply (up to 600 characters) tells the person what you will remember and what you suggest. Do not claim anything has been changed.
 
 ${SUGGESTION_GUIDE}
 
 Answer with one JSON object and nothing else:
-{"reply":"...","memory":[{"text":"up to 300 characters","kind":"fact"|"rule"|"explanation"}],"suggestions":[{"kind":"...","payload":{...}}],"followUps":[{"text":"up to 300 characters","checkBy":"next_report"|"next_month"}],"dismissChecks":[{"checkKey":"...","title":"...","reason":"..."}]}
+{"reply":"...","memory":[{"text":"up to 300 characters","kind":"fact"|"rule"|"explanation"}],"suggestions":[{"kind":"...","payload":{...}}],"followUps":[{"text":"up to 300 characters","checkBy":"next_report"|"next_month"}],"dismissChecks":[{"checkKey":"...","reason":"..."}]}
 Use empty lists when there is nothing of a kind.`;
 
 /** The two messages sent for one feedback. User text only ever appears JSON-encoded inside "user_data". */
@@ -110,10 +111,7 @@ export function buildClassifyPrompt(input: ClassifyInput): { system: string; use
 export async function classifyFeedback(input: ClassifyInput, options: FeedbackAiOptions): Promise<ClassifyResult> {
   const prompt = buildClassifyPrompt(input);
   const text = await callFeedbackModel(options, prompt.system, prompt.user, 8000);
-  return parseClassification(text, {
-    site: input.site,
-    checkKeys: new Set([...(input.reportContext?.checks.map(check => check.key) ?? []), ...(input.about?.kind === "check" ? [input.about.key] : [])]),
-  }, input.memory);
+  return parseClassification(text, { site: input.site }, input.memory);
 }
 
 const classificationShape = z.object({
@@ -127,7 +125,7 @@ const classificationShape = z.object({
 const memoryItem = z.object({ text: z.string().trim().min(1).max(600), kind: z.enum(["fact", "rule", "explanation"]).catch("fact") }).passthrough();
 const followUpItem = z.object({ text: z.string().trim().min(1).max(600), checkBy: z.enum(["next_report", "next_month"]).catch("next_report") }).passthrough();
 const suggestionItem = z.object({ kind: z.string(), payload: z.unknown() }).passthrough();
-const dismissItem = z.object({ checkKey: z.unknown(), title: z.unknown(), reason: z.unknown() }).passthrough();
+const dismissItem = z.object({ checkKey: z.unknown(), reason: z.unknown() }).passthrough();
 
 /**
  * Reads the model's answer. A reply that is not JSON at all throws; inside it, each item is checked on its own and
@@ -174,15 +172,14 @@ export function parseClassification(text: string, context: SuggestionContext, ex
   for (const raw of value.dismissChecks ?? []) {
     const item = dismissItem.safeParse(raw);
     if (!item.success) continue;
-    const suggestion = normalizeSuggestion("dismiss_check", { checkKey: item.data.checkKey, title: item.data.title, reason: item.data.reason }, context);
+    // A title the model wrote is ignored: the point is named the way the report names it.
+    const suggestion = normalizeSuggestion("dismiss_check", { checkKey: item.data.checkKey, reason: item.data.reason }, context);
     if (!suggestion || suggestion.kind !== "dismiss_check") continue;
-    dismissChecks.push(suggestion.payload);
+    dismissChecks.push({ checkKey: suggestion.payload.checkKey, title: suggestion.payload.title, reason: suggestion.payload.reason });
     add(suggestion);
     if (dismissChecks.length >= MAX_DISMISS) break;
   }
-  const reply = typeof value.reply === "string" && value.reply.trim()
-    ? truncate(value.reply.trim(), MAX_REPLY)
-    : "Thank you. Your feedback is saved.";
+  const reply = typeof value.reply === "string" && value.reply.trim() ? truncate(value.reply.trim(), MAX_REPLY) : "";
   return { reply, memory, suggestions, followUps, dismissChecks };
 }
 
@@ -247,7 +244,7 @@ function extractJson(text: string): unknown {
   }
 }
 
-const truncate = (text: string, max: number) => (text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`);
+export const truncate = (text: string, max: number) => (text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`);
 
 /**
  * One request to the organisation's model, counted against its AI limit under the Overview feature. Throws

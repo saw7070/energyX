@@ -3,9 +3,14 @@
  * sentence an administrator reads before applying it.
  *
  * The sentence is written here from the payload, never taken from the model, so what the administrator reads is
- * exactly what Apply does. Meter names are taken from the site, not from the model, for the same reason.
+ * exactly what Apply does. Meter names, the names of report points and the rate's currency are taken from the site,
+ * not from the model or the page, for the same reason.
+ *
+ * An hours change keeps only the days it changes, with those days' hours as they were when it was suggested and the
+ * calendar entry they belong to; Apply changes only those days, and only while they still read as they did.
  */
 import { z } from "zod";
+import { energyReviewCheckTitle, ENERGY_REVIEW_CHECK_KEY } from "@datafoundry/site-report";
 import type { SuggestionKind } from "./report-feedback-store.js";
 import { WEEK_DAYS, type FeedbackSite, type TimeRange, type WeekDay, type WeeklyHours } from "./report-feedback-site.js";
 
@@ -31,9 +36,16 @@ const dateText = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
 }, "Invalid date");
 const meterId = z.string().trim().min(1).max(200);
 const meterName = z.string().trim().max(200).optional();
+const checkKey = z.string().trim().min(1).max(300);
+const someDays = z.object(Object.fromEntries(WEEK_DAYS.map(day => [day, dayRanges.optional()])) as Record<WeekDay, z.ZodOptional<typeof dayRanges>>).strict();
+const rate = z.number().positive().max(100);
 
+/** What a stored suggestion carries; checked again before it is applied. */
 export const PAYLOAD_SCHEMAS = {
-  operating_hours: z.object({ weekly: z.object(Object.fromEntries(WEEK_DAYS.map(day => [day, dayRanges.optional()])) as Record<WeekDay, z.ZodOptional<typeof dayRanges>>).strict() }).strict(),
+  operating_hours: z.object({
+    weekly: someDays.refine(days => Object.keys(days).length > 0, "No days"),
+    base: z.object({ entryId: z.string().trim().min(1).max(300), weekly: someDays }).strict(),
+  }).strict().refine(value => Object.keys(value.weekly).every(day => day in value.base.weekly), "Missing base"),
   meter_not_in_use: z.object({ meterId, meterName, reason: z.string().trim().min(1).max(160) }).strict(),
   meter_in_use: z.object({ meterId, meterName }).strict(),
   meter_always_on: z.object({ meterId, meterName, alwaysOn: z.boolean() }).strict(),
@@ -42,51 +54,61 @@ export const PAYLOAD_SCHEMAS = {
     date: dateText, label: z.string().trim().min(1).max(80), closed: z.literal(true),
     classification: z.enum(["public_holiday", "special_closure"]).optional(),
   }).strict(),
-  electricity_rate: z.object({ ratePerKwh: z.number().positive().max(100), effectiveFrom: dateText }).strict(),
-  dismiss_check: z.object({ checkKey: z.string().trim().min(1).max(300), title: z.string().trim().min(1).max(300), reason: z.string().trim().min(1).max(300) }).strict(),
+  electricity_rate: z.object({ ratePerKwh: rate, effectiveFrom: dateText, currency: z.string().trim().min(1).max(10) }).strict(),
+  dismiss_check: z.object({ checkKey, title: z.string().trim().min(1).max(300), reason: z.string().trim().min(1).max(300), meterName }).strict(),
 } as const;
 
+/**
+ * What the model may write, where it differs from what is stored: hours as days and times only (the base is the
+ * site's own), a rate without a currency (it keeps the site's), a report point by its key (its title is the report's).
+ */
+const MODEL_SCHEMAS: Partial<Record<SuggestionKind, z.ZodTypeAny>> = {
+  operating_hours: z.object({ weekly: someDays }).strict(),
+  electricity_rate: z.object({ ratePerKwh: rate, effectiveFrom: dateText, currency: z.unknown().optional() }).strict(),
+  dismiss_check: z.object({ checkKey, title: z.unknown().optional(), reason: z.string().trim().min(1).max(300) }).strict(),
+};
+
+export type HoursBase = { entryId: string; weekly: Partial<WeeklyHours> };
 export type SuggestionPayloads = {
-  operating_hours: { weekly: WeeklyHours };
+  /** `weekly`: only the days that change. `base`: those days' hours when it was suggested, and their calendar entry. */
+  operating_hours: { weekly: Partial<WeeklyHours>; base: HoursBase };
   meter_not_in_use: { meterId: string; meterName: string; reason: string };
   meter_in_use: { meterId: string; meterName: string };
   meter_always_on: { meterId: string; meterName: string; alwaysOn: boolean };
   light_count: { meterId: string; meterName: string; count: number };
   holiday: { date: string; label: string; closed: true; classification: "public_holiday" | "special_closure" };
-  electricity_rate: { ratePerKwh: number; effectiveFrom: string };
-  dismiss_check: { checkKey: string; title: string; reason: string };
+  electricity_rate: { ratePerKwh: number; effectiveFrom: string; currency: string };
+  /** `title` and `meterName` are the report's own, from the key and the site. */
+  dismiss_check: { checkKey: string; title: string; reason: string; meterName?: string };
 };
 export type NormalizedSuggestion = { [K in SuggestionKind]: { kind: K; label: string; payload: SuggestionPayloads[K] } }[SuggestionKind];
 
-/** Stable report point keys (EnergyReviewCheck.key). Meter keys must name a real meter. */
-const CHECK_KEY = /^(?:(stopped|offline|notInUse|noUse):(.+)|standout:\d{4}-\d{2}-\d{2}|daytime)$/;
-
-export type SuggestionContext = {
-  site: FeedbackSite;
-  /** Report point keys the person could see (the report context they sent, and the point the feedback is about). */
-  checkKeys: ReadonlySet<string>;
-};
+export type SuggestionContext = { site: FeedbackSite };
 
 /**
- * Checks one suggestion and puts it in the form Apply uses: the meter's real name, every day of the week, and a
- * plain sentence. Anything not valid for this site, or that would change nothing, gives null and is left out.
+ * Checks one suggestion and puts it in the form Apply uses: the meter's real name, the changed days with the hours
+ * they replace, and a plain sentence. Anything not valid for this site, or that would change nothing, gives null.
  */
 export function normalizeSuggestion(kind: unknown, rawPayload: unknown, context: SuggestionContext): NormalizedSuggestion | null {
   if (typeof kind !== "string" || !(kind in PAYLOAD_SCHEMAS)) return null;
-  const parsed = PAYLOAD_SCHEMAS[kind as SuggestionKind].safeParse(kind === "operating_hours" ? withShortDayNames(rawPayload) : rawPayload);
+  const schema = MODEL_SCHEMAS[kind as SuggestionKind] ?? PAYLOAD_SCHEMAS[kind as SuggestionKind];
+  const parsed = schema.safeParse(kind === "operating_hours" ? withShortDayNames(rawPayload) : rawPayload);
   if (!parsed.success) return null;
   const { site } = context;
   const meterOf = (id: string) => site.meters.find(meter => meter.id === id);
   switch (kind as SuggestionKind) {
     case "operating_hours": {
-      const value = parsed.data as z.infer<typeof PAYLOAD_SCHEMAS.operating_hours>;
-      const current = site.hours?.weekly;
-      // A day the model left out keeps its current hours; with no current hours every day must be given.
-      if (!current && WEEK_DAYS.some(day => !value.weekly[day])) return null;
-      const weekly = Object.fromEntries(WEEK_DAYS.map(day => [day, sortRanges(value.weekly[day] ?? current![day])])) as WeeklyHours;
-      if (current && WEEK_DAYS.every(day => sameRanges(weekly[day], current[day]))) return null;
-      const payload = { weekly };
-      return { kind: "operating_hours", payload, label: hoursLabel(weekly, current ?? null, site.hours?.meaning ?? "opening") };
+      const value = parsed.data as { weekly: Partial<WeeklyHours> };
+      const hours = site.hours;
+      // Hours are changed in the project's own calendar entry; with none there is nothing to apply them to.
+      if (!hours) return null;
+      const changed = WEEK_DAYS.filter(day => value.weekly[day] && !sameRanges(value.weekly[day]!, hours.weekly[day]));
+      if (!changed.length) return null;
+      const payload: SuggestionPayloads["operating_hours"] = {
+        weekly: Object.fromEntries(changed.map(day => [day, sortRanges(value.weekly[day]!)])),
+        base: { entryId: hours.entryId, weekly: Object.fromEntries(changed.map(day => [day, sortRanges(hours.weekly[day])])) },
+      };
+      return { kind: "operating_hours", payload, label: hoursLabel({ ...hours.weekly, ...payload.weekly }, hours.weekly, hours.meaning) };
     }
     case "meter_not_in_use": {
       const value = parsed.data as z.infer<typeof PAYLOAD_SCHEMAS.meter_not_in_use>;
@@ -125,24 +147,40 @@ export function normalizeSuggestion(kind: unknown, rawPayload: unknown, context:
       return { kind: "holiday", payload, label: `Add ${longDate(value.date)} as ${classification === "special_closure" ? "a planned closure" : "a public holiday"}: ${payload.label}` };
     }
     case "electricity_rate": {
-      const value = parsed.data as z.infer<typeof PAYLOAD_SCHEMAS.electricity_rate>;
-      const rate = site.electricityRate;
+      const value = parsed.data as { ratePerKwh: number; effectiveFrom: string };
+      const current = site.electricityRate;
       // The new rate keeps the current entry's currency and tax, so there must be one; peak pricing is changed in Facility.
-      if (!rate || rate.peakPricing) return null;
+      if (!current || current.peakPricing) return null;
       const ratePerKwh = Math.round(value.ratePerKwh * 10_000) / 10_000;
-      if (ratePerKwh <= 0 || (ratePerKwh === rate.ratePerKwh && value.effectiveFrom >= rate.from)) return null;
-      return {
-        kind: "electricity_rate", payload: { ratePerKwh, effectiveFrom: value.effectiveFrom },
-        label: `Change the electricity rate to ${rate.currency} ${ratePerKwh} per kWh from ${longDate(value.effectiveFrom)}`,
-      };
+      if (ratePerKwh <= 0 || (ratePerKwh === current.ratePerKwh && value.effectiveFrom >= current.from)) return null;
+      const payload = { ratePerKwh, effectiveFrom: value.effectiveFrom, currency: current.currency };
+      return { kind: "electricity_rate", payload, label: rateLabel(payload) };
     }
     case "dismiss_check": {
-      const value = parsed.data as z.infer<typeof PAYLOAD_SCHEMAS.dismiss_check>;
-      if (!validCheckKey(value.checkKey, context)) return null;
-      const payload = { checkKey: value.checkKey, title: oneLine(value.title).slice(0, 300), reason: oneLine(value.reason).slice(0, 300) };
-      return { kind: "dismiss_check", payload, label: `Stop flagging “${payload.title}” in reports` };
+      const value = parsed.data as { checkKey: string; reason: string };
+      const subject = checkSubject(value.checkKey, site);
+      if (!subject) return null;
+      const payload = { checkKey: value.checkKey, title: subject.title, reason: oneLine(value.reason).slice(0, 300), ...(subject.meterName ? { meterName: subject.meterName } : {}) };
+      return { kind: "dismiss_check", payload, label: dismissLabel(payload.title) };
     }
   }
+}
+
+export const rateLabel = (payload: { ratePerKwh: number; effectiveFrom: string; currency: string }) =>
+  `Change the electricity rate to ${payload.currency} ${payload.ratePerKwh} per kWh from ${longDate(payload.effectiveFrom)}`;
+export const dismissLabel = (title: string) => `Stop flagging “${title}” in reports`;
+
+/**
+ * The report point a key names, worded as the report words it, with the meter's name from the site. Only the
+ * report's own keys, and for a meter point only a meter of this site; anything else gives null.
+ */
+export function checkSubject(key: string, site: Pick<FeedbackSite, "meters">): { title: string; meterName?: string } | null {
+  const match = ENERGY_REVIEW_CHECK_KEY.exec(key);
+  if (!match) return null;
+  const meter = match[1] ? site.meters.find(item => item.id === match[2]) : undefined;
+  if (match[1] && !meter) return null;
+  const title = energyReviewCheckTitle(key, meter?.name, "en");
+  return title ? { title: title.slice(0, 300), ...(meter ? { meterName: meter.name } : {}) } : null;
 }
 
 const FULL_DAY_NAMES: Record<string, WeekDay> = { monday: "mon", tuesday: "tue", wednesday: "wed", thursday: "thu", friday: "fri", saturday: "sat", sunday: "sun" };
@@ -153,18 +191,10 @@ function withShortDayNames(payload: unknown): unknown {
   return { ...(payload as object), weekly: Object.fromEntries(Object.entries(weekly).map(([day, ranges]) => [FULL_DAY_NAMES[day.toLowerCase()] ?? day.toLowerCase(), ranges])) };
 }
 
-/** A report point key the person could see, or a stable key that names a real meter (or a date, or daytime use). */
-export function validCheckKey(key: string, context: SuggestionContext): boolean {
-  if (context.checkKeys.has(key)) return true;
-  const match = CHECK_KEY.exec(key);
-  if (!match) return false;
-  return !match[1] || context.site.meters.some(meter => meter.id === match[2]);
-}
-
 export const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
 
-const sortRanges = (ranges: TimeRange[]): TimeRange[] => [...ranges].map(item => ({ from: item.from, to: item.to })).sort((a, b) => minutes(a.from) - minutes(b.from));
-const sameRanges = (left: TimeRange[], right: TimeRange[]) =>
+export const sortRanges = (ranges: TimeRange[]): TimeRange[] => [...ranges].map(item => ({ from: item.from, to: item.to })).sort((a, b) => minutes(a.from) - minutes(b.from));
+export const sameRanges = (left: TimeRange[], right: TimeRange[]) =>
   left.length === right.length && sortRanges(left).every((item, index) => {
     const other = sortRanges(right)[index]!;
     return item.from === other.from && normalEnd(item.to) === normalEnd(other.to);

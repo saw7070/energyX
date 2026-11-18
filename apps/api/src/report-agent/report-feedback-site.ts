@@ -32,8 +32,8 @@ export type FeedbackSite = {
   timezone: string;
   today: string;
   meters: FeedbackSiteMeter[];
-  /** The project's own hours in use today (or its latest), as the site sees them. */
-  hours: { meaning: "opening" | "lights_on"; weekly: WeeklyHours; effectiveFrom: string } | null;
+  /** The project's own hours in use today (or its latest), as the site sees them, and the calendar entry they are in. */
+  hours: { meaning: "opening" | "lights_on"; weekly: WeeklyHours; effectiveFrom: string; entryId: string } | null;
   /** Holidays and closures from today on, for the next few months. */
   upcomingClosures: Array<{ date: string; label: string; classification: string | null }>;
   /** The project's own rate in use today (or its latest). */
@@ -123,7 +123,7 @@ export function readFeedbackSite(metadata: MetadataStore, projectId: string, now
   const tariff = projectTariffEntry(activeTariff(metadata, projectId), now.getTime());
   return {
     projectName, timezone, today, meters,
-    hours: entry ? { meaning: entry.hours_meaning === "lights_on" ? "lights_on" : "opening", weekly: weeklyFromEntry(entry), effectiveFrom: entry.effective_from } : null,
+    hours: entry ? { meaning: entry.hours_meaning === "lights_on" ? "lights_on" : "opening", weekly: weeklyFromEntry(entry), effectiveFrom: entry.effective_from, entryId: entry.id } : null,
     upcomingClosures,
     electricityRate: tariff ? {
       currency: tariff.currency, ratePerKwh: tariff.rate_per_kwh, from: localDate(tariff.effective_from, timezone),

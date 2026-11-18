@@ -329,22 +329,39 @@ it("keeps every weekly, monthly and custom report listed however many daily repo
   expect(dailyListed).toEqual(daily.slice(-92));
 });
 
-it("checks report feedback follow-ups in the background after a scheduled weekly or monthly report, never holding it up", async () => {
+it("checks report feedback follow-ups with a scheduled weekly or monthly report, never holding it up for long", async () => {
   const { publish, settings } = setup();
   const reviewFollowUps = vi.fn(() => new Promise<unknown>(() => undefined));
-  const weekly = await publish({ reviewFollowUps });
+  const weekly = await publish({ reviewFollowUps, followUpReviewTimeoutMs: 5 });
   expect(weekly.created).toBe(true);
   expect(reviewFollowUps).toHaveBeenCalledTimes(1);
   expect(reviewFollowUps).toHaveBeenCalledWith(expect.objectContaining({
-    workspaceId: "workspace", projectId: "project", actorUserId: settings.actorUserId, cadence: "weekly", generatedAt: "2026-08-17T02:00:00Z",
+    workspaceId: "workspace", projectId: "project", actorUserId: settings.actorUserId, cadence: "weekly", frequency: "weekly", generatedAt: "2026-08-17T02:00:00Z",
     data: expect.objectContaining({ projectName: "Tuya Office" }), reference: null,
   }));
   // The same period again publishes nothing, so nothing is checked again.
-  await publish({ reviewFollowUps });
+  await publish({ reviewFollowUps, followUpReviewTimeoutMs: 5 });
   expect(reviewFollowUps).toHaveBeenCalledTimes(1);
-  // A daily report does not spend an AI request on follow-ups.
-  await publish({ reviewFollowUps, cadence: "daily", period: { from: "2026-08-16", toExclusive: "2026-08-17" } });
+  // A daily report does not spend an AI request on follow-ups while the site also has weekly reports.
+  await publish({ reviewFollowUps, followUpReviewTimeoutMs: 5, cadence: "daily", period: { from: "2026-08-16", toExclusive: "2026-08-17" } });
   expect(reviewFollowUps).toHaveBeenCalledTimes(1);
+  // On a site with daily reports alone, the daily report is where follow-ups get checked.
+  await publish({ reviewFollowUps, followUpReviewTimeoutMs: 5, settings: { ...settings, frequency: "daily" }, cadence: "daily", period: { from: "2026-08-15", toExclusive: "2026-08-16" } });
+  expect(reviewFollowUps).toHaveBeenCalledTimes(2);
+});
+
+it("saves the report with the follow-up check it made itself", async () => {
+  const opened = { text: "Check the lights go off at 7:10", status: "open" as const, createdAt: "2026-08-10T00:00:00Z" };
+  const { publish, root } = setup({ loadSiteReportData: async () => ({ data: { ...analysisData(), followUps: [opened] }, dataSnapshotId: "snapshot-1" }) });
+  const checked = { ...opened, lastCheck: { at: "2026-08-17T02:00:00Z", verdict: "resolved" as const, evidence: "Off by 7:10 every day." } };
+  const { run } = await publish({ reviewFollowUps: async () => [checked] });
+  const snapshot = parseSiteReportSnapshot(JSON.parse(readFileSync(join(root, run.id, "outputs", "site-report-input.json"), "utf8")));
+  expect(snapshot.data.followUps).toEqual([checked]);
+  // A report whose reader may not see follow-ups never takes them from the check.
+  const hidden = setup();
+  const second = await hidden.publish({ reviewFollowUps: async () => [checked] });
+  const plain = parseSiteReportSnapshot(JSON.parse(readFileSync(join(hidden.root, second.run.id, "outputs", "site-report-input.json"), "utf8")));
+  expect(plain.data.followUps).toBeUndefined();
 });
 
 it("still publishes the report when checking follow-ups fails", async () => {

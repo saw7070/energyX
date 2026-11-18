@@ -3,15 +3,20 @@
  *
  * Anyone who may read the project's reports can give feedback. The AI reads it and keeps what matters as project
  * memory, suggests setting changes, and writes follow-ups the next report checks. Nothing about the site changes
- * until a platform administrator applies a suggestion; memory from anyone else waits for an administrator's approval
- * before reports and the advisor use it.
+ * until a platform administrator applies a suggestion; memory and follow-ups from anyone else wait for an
+ * administrator's approval before the reports, the AI and the advisor use them.
+ *
+ * Someone who is not an administrator can send only so much feedback (RATE_LIMITS), and what they send never pushes
+ * out anyone else's: waiting items make room only from the same person's, and when the project is full the new
+ * feedback is refused instead.
  *
  *   GET    ""                          the feedback state
- *   POST   ""                          give feedback (idempotent per requestId)
+ *   POST   ""                          give feedback (idempotent per requestId; 409 while the first is still read)
  *   POST   "suggestions/:id/apply"     administrators: make the change
  *   POST   "suggestions/:id/dismiss"   administrators
  *   POST   "memory/:id/approve"        administrators
  *   DELETE "memory/:id"                administrators, or the author while it is still waiting
+ *   POST   "follow-ups/:id/approve"    administrators: let a waiting follow-up through
  *   POST   "follow-ups/:id/status"     administrators: open, done or dropped
  *   POST   "follow-ups/review"         administrators: check open follow-ups against the latest readings now
  */
@@ -24,13 +29,16 @@ import type { ConfigApiContext, ConfigApiResponse } from "../routes/types.js";
 import { resolveEnergyProjectCapabilities } from "../energy/energy-project-capabilities.js";
 import { resolveEnergyIqUserRole } from "../energy/energy-user-role.js";
 import { resolvePiReportModel, type PiReportModel } from "./pi-report-harness.js";
-import { classifyFeedback, type ClassifyResult } from "./report-feedback-ai.js";
-import { ApplyError, applySuggestionChange } from "./report-feedback-apply.js";
+import { classifyFeedback, truncate, type ClassifyResult } from "./report-feedback-ai.js";
+import { ApplyError, applySuggestionChange, type ApplyResult } from "./report-feedback-apply.js";
 import { followUpNoteLine, memoryNoteLine, updateAdvisorNotes, type NotesStore } from "./report-feedback-notes.js";
 import { loadFollowUpSummary, recordFollowUpReview } from "./report-feedback-review.js";
 import { readFeedbackSite } from "./report-feedback-site.js";
+import { oneLine } from "./report-feedback-suggestions.js";
 import {
   localDate,
+  MAX_PENDING_FOLLOW_UPS,
+  MAX_PENDING_MEMORY,
   ReportFeedbackStore,
   toFeedbackDto,
   type FeedbackRecord,
@@ -71,6 +79,16 @@ const followUpStatusSchema = z.object({ status: z.enum(["open", "done", "dropped
 /** Requests being applied right now, so two clicks never apply the same change twice. */
 const applying = new Set<string>();
 
+/**
+ * How much feedback someone who is not an administrator may send: per person in a short and a long window, and for
+ * the whole project in a day. Each one can cost an AI request from the organisation's monthly allowance.
+ */
+export const RATE_LIMITS = { perPersonShort: { count: 5, minutes: 10 }, perPersonDay: 30, perProjectDay: 100 } as const;
+/** Feedback still marked as being read after this long was cut off (the server stopped); it is kept as a note instead. */
+export const STALE_PROCESSING_MS = 3 * 60_000;
+/** The longest memory item, as the AI's own are. */
+const MAX_MEMORY_TEXT = 300;
+
 class FeedbackHttpError extends Error {
   constructor(readonly status: number, message: string) {
     super(message);
@@ -110,7 +128,7 @@ export async function handleReportFeedbackApi(
         return false;
       }
     };
-    const state = (): ReportFeedbackState => store.state(projectId, { canGive: true, canManage: admin, aiAvailable: aiAvailable() });
+    const state = (): ReportFeedbackState => store.state(projectId, { canGive: true, canManage: admin, aiAvailable: aiAvailable() }, now(), project.timezone || "UTC");
     const notes = (add: string[], remove: string[]) => updateAdvisorNotes({
       metadata, projectId, workspaceId: context.workspaceId, actorUserId: user.id, add, remove, store: dependencies.notesStore,
     });
@@ -125,27 +143,78 @@ export async function handleReportFeedbackApi(
     const requireAdmin = () => {
       if (!admin) throw new FeedbackHttpError(403, "REPORT_FEEDBACK_ADMIN_REQUIRED");
     };
+    /** A waiting follow-up let through: open, in the reports and the advisor's notes from today. */
+    const approveFollowUp = (current: FollowUpRecord) => {
+      const approved = store.approveFollowUp(projectId, current.id, now());
+      const line = followUpNoteLine(today(), approved.followUp.text);
+      store.saveFollowUp({ ...approved.followUp, noteLine: line });
+      notes([line], unusedLines(approved.evicted.map(item => item.noteLine)));
+    };
     const rest = segments.slice(1);
     const method = (request.method ?? "GET").toUpperCase();
 
-    if (rest.length === 0 && method === "GET") return ok(state());
+    /**
+     * Keeps feedback as one memory item when the AI is not used: off, failing, or cut off. The point it was about goes
+     * in front, so a short "that's normal" still means something later; it is cut to the length of the AI's own.
+     */
+    const saveAsNote = (record: FeedbackRecord): FeedbackRecord => {
+      const words = oneLine(record.text);
+      const noteText = truncate(record.about ? `“${oneLine(record.about.title)}”: ${words}` : words, MAX_MEMORY_TEXT);
+      const added = store.addMemory(projectId, {
+        text: noteText, kind: "fact", status: record.authorRole === "admin" ? "active" : "pending",
+        authorUserId: record.authorUserId, authorName: record.authorName, sourceFeedbackId: record.id,
+      }, now());
+      const addLines: string[] = [];
+      if (added.memory.status === "active") {
+        const line = memoryNoteLine(today(), added.memory.text);
+        store.saveMemory({ ...added.memory, noteLine: line });
+        addLines.push(line);
+      }
+      const saved = store.saveFeedback({ ...record, status: "saved", reply: null, memoryIds: [added.memory.id] });
+      notes(addLines, unusedLines(added.evicted.map(item => item.noteLine)));
+      return saved;
+    };
+    /** Feedback the server stopped reading part-way (it restarted): kept as a note, as when the AI is off. */
+    const recoverStale = () => {
+      for (const record of store.staleProcessing(projectId, new Date(now().getTime() - STALE_PROCESSING_MS).toISOString())) {
+        console.warn(`[report-feedback] feedback was not finished, kept as a note project=${projectId} feedback=${record.id}`);
+        saveAsNote(record);
+      }
+    };
+
+    if (rest.length === 0 && method === "GET") {
+      recoverStale();
+      return ok(state());
+    }
 
     if (rest.length === 0 && method === "POST") {
       const input = submitSchema.parse(await readBody(request));
-      const existing = store.findFeedbackByRequest(projectId, user.id, input.requestId);
-      if (existing) {
+      recoverStale();
+      /** The same request again: the finished feedback, or "still processing" while the first is being read. */
+      const repeat = (existing: FeedbackRecord): ConfigApiResponse => {
         if (existing.text !== input.text) return fail(409, "REPORT_FEEDBACK_REQUEST_CONFLICT");
+        if (existing.status === "processing") return fail(409, "REPORT_FEEDBACK_STILL_PROCESSING");
         return ok({ feedback: toFeedbackDto(existing), state: state() });
+      };
+      const existing = store.findFeedbackByRequest(projectId, user.id, input.requestId);
+      if (existing) return repeat(existing);
+      if (!admin) {
+        const at = now().getTime();
+        const since = (minutes: number) => new Date(at - minutes * 60_000).toISOString();
+        if (store.countFeedbackSince(projectId, since(RATE_LIMITS.perPersonShort.minutes), { authorUserId: user.id }) >= RATE_LIMITS.perPersonShort.count
+          || store.countFeedbackSince(projectId, since(24 * 60), { authorUserId: user.id }) >= RATE_LIMITS.perPersonDay
+          || store.countFeedbackSince(projectId, since(24 * 60), { nonAdmin: true }) >= RATE_LIMITS.perProjectDay) {
+          return fail(429, "REPORT_FEEDBACK_RATE_LIMITED");
+        }
+        // Full: refused rather than pushing out feedback or waiting memory someone else is counting on.
+        if (!store.hasFeedbackRoom(projectId, false) || store.countPendingMemory(projectId) >= MAX_PENDING_MEMORY) return fail(409, "REPORT_FEEDBACK_FULL");
       }
       const createdAt = now().toISOString();
       const inserted = store.insertFeedback({
-        id: randomUUID(), projectId, requestId: input.requestId, text: input.text, about: input.about ?? null,
-        authorUserId: user.id, authorName: authorNameOf(user), createdAt, status: "saved", reply: null, memoryIds: [], followUpIds: [], suggestions: [],
+        id: randomUUID(), projectId, requestId: input.requestId, text: input.text, about: input.about ?? null, authorRole: admin ? "admin" : "member",
+        authorUserId: user.id, authorName: authorNameOf(user), createdAt, status: "processing", reply: null, memoryIds: [], followUpIds: [], suggestions: [],
       });
-      if (!inserted.created) {
-        if (inserted.record.text !== input.text) return fail(409, "REPORT_FEEDBACK_REQUEST_CONFLICT");
-        return ok({ feedback: toFeedbackDto(inserted.record), state: state() });
-      }
+      if (!inserted.created) return repeat(inserted.record);
       let record: FeedbackRecord = inserted.record;
       const memoryStatus = admin ? "active" as const : "pending" as const;
       let result: ClassifyResult | null = null;
@@ -166,6 +235,13 @@ export async function handleReportFeedbackApi(
         console.warn(`[report-feedback] AI not used project=${projectId} code=${error instanceof Error ? error.message : "unknown"}`);
         result = null;
       }
+      // Kept as a note meanwhile (the AI took too long and this was taken as cut off): that stands.
+      const current = store.getFeedback(projectId, record.id);
+      if (!current || current.status !== "processing") return current ? ok({ feedback: toFeedbackDto(current), state: state() }) : fail(404, "REPORT_FEEDBACK_NOT_FOUND");
+      if (!result) {
+        record = saveAsNote(record);
+        return ok({ feedback: toFeedbackDto(record), state: state() });
+      }
       const addLines: string[] = [];
       const evictedLines: Array<string | undefined> = [];
       const remember = (memoryText: string, kind: MemoryRecord["kind"]): string => {
@@ -178,26 +254,23 @@ export async function handleReportFeedbackApi(
         }
         return added.memory.id;
       };
-      if (result) {
-        const memoryIds = result.memory.map(item => remember(item.text, item.kind));
-        // Follow-ups reach the advisor's notes only from someone who may edit those notes themselves; anyone else's
-        // still show in the reports, and go to the notes if an administrator re-opens them.
-        const writesNotes = admin || capabilities.editNotes;
-        const followUpIds = result.followUps.map(item => {
-          const added = store.addFollowUp(projectId, { text: item.text, checkBy: item.checkBy, sourceFeedbackId: record.id, authorUserId: user.id }, now());
-          evictedLines.push(...added.evicted.map(evicted => evicted.noteLine));
-          if (writesNotes) {
-            const line = followUpNoteLine(today(), added.followUp.text);
-            store.saveFollowUp({ ...added.followUp, noteLine: line });
-            addLines.push(line);
-          }
-          return added.followUp.id;
-        });
-        const suggestions: SuggestionDto[] = result.suggestions.map(item => ({ id: randomUUID(), kind: item.kind, label: item.label, payload: item.payload as Record<string, unknown>, status: "open" }));
-        record = { ...record, status: "processed", reply: result.reply, memoryIds, followUpIds, suggestions };
-      } else {
-        record = { ...record, memoryIds: [remember(input.text, "fact")] };
-      }
+      const memoryIds = result.memory.map(item => remember(item.text, item.kind));
+      // An administrator's follow-ups are open, and in the advisor's notes, straight away. Anyone else's wait for an
+      // administrator, like their memory: until then no report, prompt or note carries their words. Once the project
+      // has as many waiting as it keeps, more are not kept.
+      const pendingRoom = admin ? Number.POSITIVE_INFINITY : MAX_PENDING_FOLLOW_UPS - store.countPendingFollowUps(projectId);
+      const followUpIds = result.followUps.slice(0, Math.max(0, pendingRoom)).map(item => {
+        const added = store.addFollowUp(projectId, { text: item.text, checkBy: item.checkBy, sourceFeedbackId: record.id, authorUserId: user.id, status: admin ? "open" : "pending" }, now());
+        evictedLines.push(...added.evicted.map(evicted => evicted.noteLine));
+        if (added.followUp.status === "open") {
+          const line = followUpNoteLine(today(), added.followUp.text);
+          store.saveFollowUp({ ...added.followUp, noteLine: line });
+          addLines.push(line);
+        }
+        return added.followUp.id;
+      });
+      const suggestions: SuggestionDto[] = result.suggestions.map(item => ({ id: randomUUID(), kind: item.kind, label: item.label, payload: item.payload as Record<string, unknown>, status: "open" }));
+      record = { ...record, status: "processed", reply: result.reply || null, memoryIds, followUpIds, suggestions };
       store.saveFeedback(record);
       notes(addLines, unusedLines(evictedLines));
       return ok({ feedback: toFeedbackDto(record), state: state() });
@@ -218,27 +291,31 @@ export async function handleReportFeedbackApi(
       const lock = `${projectId}:${suggestionId}`;
       if (applying.has(lock)) return fail(409, "REPORT_FEEDBACK_ALREADY_APPLYING");
       applying.add(lock);
+      let result: ApplyResult;
       try {
-        await applySuggestionChange({
+        result = await applySuggestionChange({
           context, projectId, user, store, now: now(),
           applyProjectChanges: dependencies.applyProjectChanges ?? defaultApplyProjectChanges,
         }, found.suggestion);
       } catch (error) {
-        const failure = error instanceof ApplyError ? error : new ApplyError(409, "The change could not be made. Try again, or make it in Facility.");
+        // Nothing was saved. The suggestion keeps the reason as a code the page words, and in English for the record.
+        const failure = error instanceof ApplyError ? error : new ApplyError(409, { code: "failed" }, "The change could not be made. Try again, or make it in Facility.");
         if (!(error instanceof ApplyError)) console.warn(`[report-feedback] apply failed project=${projectId} code=${error instanceof Error ? error.message : "unknown"}`);
-        store.updateSuggestion(projectId, suggestionId, current => ({ ...current, status: "failed", error: failure.message }));
-        return fail(failure.status, failure.message);
+        store.updateSuggestion(projectId, suggestionId, current => ({ ...current, status: "failed", error: failure.message, problem: failure.problem }));
+        return fail(failure.status, `REPORT_FEEDBACK_APPLY_${failure.problem.code.toUpperCase()}`);
       } finally {
         applying.delete(lock);
       }
+      // Saved, so applied, even when it is not live yet: recorded either way, and never applied a second time.
       const appliedAt = now().toISOString();
       const applied = store.updateSuggestion(projectId, suggestionId, current => {
-        const next: SuggestionDto = { ...current, status: "applied", appliedAt, appliedByName: authorNameOf(user) };
+        const next: SuggestionDto = { ...current, status: "applied", appliedAt, appliedByName: authorNameOf(user), ...(result.label ? { label: result.label } : {}) };
         delete next.error;
-        return next;
+        delete next.problem;
+        return result.live ? next : { ...next, ...(result.message ? { error: result.message } : {}), ...(result.problem ? { problem: result.problem } : {}) };
       });
-      recordApplied(metadata, user, context.workspaceId, projectId, applied);
-      return ok({ state: state(), applied: applied.label });
+      recordApplied(metadata, user, context.workspaceId, projectId, applied, result.live ? "live" : "saved_not_live");
+      return ok({ state: state(), applied: applied.label, live: result.live });
     }
 
     if (rest[0] === "memory" && rest[1] && rest.length === 3 && rest[2] === "approve" && method === "POST") {
@@ -260,6 +337,15 @@ export async function handleReportFeedbackApi(
       const { noteLine, ...kept } = current;
       store.saveMemory({ ...kept, status: "removed", updatedAt: now().toISOString() });
       notes([], unusedLines([noteLine]));
+      return ok({ state: state() });
+    }
+
+    if (rest[0] === "follow-ups" && rest[1] && rest[1] !== "review" && rest.length === 3 && rest[2] === "approve" && method === "POST") {
+      requireAdmin();
+      const current = store.getFollowUp(projectId, rest[1]);
+      if (!current) return fail(404, "REPORT_FEEDBACK_NOT_FOUND");
+      if (current.status !== "pending") return current.status === "open" ? ok({ state: state() }) : fail(409, "REPORT_FEEDBACK_FOLLOW_UP_CLOSED");
+      approveFollowUp(current);
       return ok({ state: state() });
     }
 
@@ -300,11 +386,15 @@ export async function handleReportFeedbackApi(
       }
       if (input.status === current.status) {
         store.saveFollowUp(next);
+      } else if (input.status === "open" && current.status === "pending") {
+        store.saveFollowUp(next);
+        approveFollowUp(store.getFollowUp(projectId, current.id)!);
       } else if (input.status === "open") {
-        // Re-opened: back in the advisor's notes, dated today.
+        // Re-opened by an administrator (which lets it through if it never was): back in the advisor's notes, dated today.
         const line = followUpNoteLine(today(), current.text);
         delete next.closedAt;
-        store.saveFollowUp({ ...next, status: "open", noteLine: line });
+        delete next.closedReason;
+        store.saveFollowUp({ ...next, status: "open", noteLine: line, activatedAt: next.activatedAt ?? at });
         const evicted = store.enforceFollowUpLimit(projectId, now());
         notes([line], unusedLines(evicted.map(item => item.noteLine)));
       } else {
@@ -331,19 +421,24 @@ const errorCode = (status: number): AppErrorCode =>
   status === 403 ? "FORBIDDEN"
     : status === 404 ? "RESOURCE_NOT_FOUND"
       : status === 409 ? "CONFLICT"
-        : status === 503 ? "NOT_ENABLED"
-          : status >= 500 ? "INTERNAL_ERROR"
-            : "BAD_REQUEST";
+        : status === 429 ? "RATE_LIMITED"
+          : status === 503 ? "NOT_ENABLED"
+            : status >= 500 ? "INTERNAL_ERROR"
+              : "BAD_REQUEST";
 
-/** Who applied which change, in the same audit history as other project changes. Never fails the change itself. */
-function recordApplied(metadata: MetadataStore, user: UserRecord, workspaceId: string, projectId: string, suggestion: SuggestionDto): void {
+/**
+ * Who applied which change, in the same audit history as other project changes. Never fails the change itself.
+ * `outcome` "saved_not_live": the change is saved (a new calendar or tariff version, or the setup draft) but making it
+ * live failed; it is recorded all the same, since the saved version is already in use for editing.
+ */
+function recordApplied(metadata: MetadataStore, user: UserRecord, workspaceId: string, projectId: string, suggestion: SuggestionDto, outcome: "live" | "saved_not_live"): void {
   try {
     metadata.authAuditEvents.append({
       id: randomUUID(),
       event_type: "energyiq.report_feedback_applied",
       user_id: user.id,
       ...(user.email ? { email: user.email } : {}),
-      metadata: { workspaceId, projectId, kind: suggestion.kind, suggestionId: suggestion.id, label: suggestion.label },
+      metadata: { workspaceId, projectId, kind: suggestion.kind, suggestionId: suggestion.id, label: suggestion.label, outcome },
     });
   } catch (error) {
     console.warn(`[audit] could not record energyiq.report_feedback_applied: ${error instanceof Error ? error.message : "unknown"}`);

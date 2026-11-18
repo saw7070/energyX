@@ -24,7 +24,7 @@ const site: FeedbackSite = {
     { id: "m-p2", name: "Pavilion 2 lights", group: "Pavilion", lightCount: 10 },
     { id: "m-old", name: "Old store", group: "Store", notInUse: "Store closed" },
   ],
-  hours: { meaning: "lights_on", weekly: weekly("18:45", "06:45"), effectiveFrom: "2026-01-01" },
+  hours: { meaning: "lights_on", weekly: weekly("18:45", "06:45"), effectiveFrom: "2026-01-01", entryId: "entry-1" },
   upcomingClosures: [],
   electricityRate: { currency: "SGD", ratePerKwh: 0.3, from: "2026-01-01", taxBasis: "tax_exclusive", peakPricing: false },
 };
@@ -67,7 +67,7 @@ it("keeps valid items and drops unknown meters, bad times and out-of-range count
     followUps: [{ text: "Check the pavilion lights go off at 7:10 am.", checkBy: "next_report" }, { text: 42 }],
     dismissChecks: [{ checkKey: "daytime", title: "Daytime use", reason: "Cleaners work by day" }, { checkKey: "stopped:made-up", title: "x", reason: "y" }],
   });
-  const result = parseClassification(`Here you go:\n\`\`\`json\n${answer}\n\`\`\``, { site, checkKeys: new Set(["daytime"]) });
+  const result = parseClassification(`Here you go:\n\`\`\`json\n${answer}\n\`\`\``, { site });
   expect(result.reply).toBe("I will remember the lights-off time and suggest the change.");
   expect(result.memory).toEqual([{ text: "The pavilion fan must never run.", kind: "rule" }, { text: "Weird kind", kind: "fact" }]);
   expect(result.followUps).toEqual([{ text: "Check the pavilion lights go off at 7:10 am.", checkBy: "next_report" }]);
@@ -75,10 +75,39 @@ it("keeps valid items and drops unknown meters, bad times and out-of-range count
   expect(result.suggestions[0]!.label).toBe("Change lights-off to 7:10 am, every day");
   // The meter's name comes from the site, never from the model.
   expect(result.suggestions[1]).toEqual({ kind: "light_count", label: "Set Pavilion 2 lights to 12 lights", payload: { meterId: "m-p2", meterName: "Pavilion 2 lights", count: 12 } });
-  expect(result.dismissChecks).toEqual([{ checkKey: "daytime", title: "Daytime use", reason: "Cleaners work by day" }]);
+  // The point is named the way the report names it, whatever title the model wrote.
+  expect(result.dismissChecks).toEqual([{ checkKey: "daytime", title: "Daytime use on lighting circuits", reason: "Cleaners work by day" }]);
 });
 
-it("drops suggestions that would change nothing and fills days the model left out from the current hours", () => {
+it("names a report point from its key and the site, never from the model or the page", () => {
+  const result = parseClassification(JSON.stringify({
+    reply: "ok",
+    dismissChecks: [
+      // A harmless-sounding title on a must-run meter's alert: the card names the real point.
+      { checkKey: "noUse:m-fan", title: "Hallway bulb flicker", reason: "Known" },
+      // Keys the report never uses are refused, whatever the page sent.
+      { checkKey: "anything-the-page-sent", title: "x", reason: "y" },
+      { checkKey: "offline:not-a-meter", title: "x", reason: "y" },
+      { checkKey: "standout:2026-11-17", reason: "Open day" },
+    ],
+  }), { site });
+  expect(result.suggestions).toEqual([
+    { kind: "dismiss_check", label: "Stop flagging “Pavilion fan used nothing” in reports", payload: { checkKey: "noUse:m-fan", title: "Pavilion fan used nothing", reason: "Known", meterName: "Pavilion fan" } },
+    { kind: "dismiss_check", label: "Stop flagging “Tue 17 Nov stood out” in reports", payload: { checkKey: "standout:2026-11-17", title: "Tue 17 Nov stood out", reason: "Open day" } },
+  ]);
+});
+
+it("keeps the site's currency with a new rate, and never lets the model choose the hours a change replaces", () => {
+  const result = parseClassification(JSON.stringify({ suggestions: [
+    { kind: "electricity_rate", payload: { ratePerKwh: 0.31, effectiveFrom: "2026-12-01", currency: "USD" } },
+    { kind: "operating_hours", payload: { weekly: { sat: [] }, base: { entryId: "other", weekly: { sat: [] } } } },
+  ] }), { site });
+  expect(result.suggestions).toEqual([
+    { kind: "electricity_rate", label: "Change the electricity rate to SGD 0.31 per kWh from 1 Dec 2026", payload: { ratePerKwh: 0.31, effectiveFrom: "2026-12-01", currency: "SGD" } },
+  ]);
+});
+
+it("drops suggestions that would change nothing and keeps only the days a change touches, with the hours they replace", () => {
   const result = parseClassification(JSON.stringify({
     reply: "ok",
     suggestions: [
@@ -88,19 +117,23 @@ it("drops suggestions that would change nothing and fills days the model left ou
       { kind: "meter_in_use", payload: { meterId: "m-fan" } },
       { kind: "meter_in_use", payload: { meterId: "m-old" } },
     ],
-  }), { site, checkKeys: new Set() });
+  }), { site });
   expect(result.suggestions.map(item => item.kind)).toEqual(["operating_hours", "meter_in_use"]);
   const hours = result.suggestions[0]!;
-  expect(hours.kind === "operating_hours" && hours.payload.weekly.mon).toEqual([{ from: "18:45", to: "06:45" }]);
-  expect(hours.kind === "operating_hours" && hours.payload.weekly.sat).toEqual([]);
+  expect(hours.payload).toEqual({
+    weekly: { sat: [], sun: [] },
+    base: { entryId: "entry-1", weekly: { sat: [{ from: "18:45", to: "06:45" }], sun: [{ from: "18:45", to: "06:45" }] } },
+  });
   expect(hours.label).toBe("Change lights-on hours to Sat–Sun closed");
   // Days written in full are read the same way.
-  const full = parseClassification(JSON.stringify({ suggestions: [{ kind: "operating_hours", payload: { weekly: { Saturday: [], sunday: [] } } }] }), { site, checkKeys: new Set() });
+  const full = parseClassification(JSON.stringify({ suggestions: [{ kind: "operating_hours", payload: { weekly: { Saturday: [], sunday: [] } } }] }), { site });
   expect(full.suggestions[0]?.payload).toEqual(hours.payload);
 });
 
 it("refuses an answer that is not JSON at all", () => {
-  expect(() => parseClassification("Sorry, I cannot help with that.", { site, checkKeys: new Set() })).toThrow("REPORT_FEEDBACK_AI_UNREADABLE");
+  expect(() => parseClassification("Sorry, I cannot help with that.", { site })).toThrow("REPORT_FEEDBACK_AI_UNREADABLE");
+  // JSON with no reply: the page thanks the person in their own language.
+  expect(parseClassification("{}", { site }).reply).toBe("");
 });
 
 it("calls the organisation's model once, counts it under the Overview feature and reads an OpenAI-style answer", async () => {

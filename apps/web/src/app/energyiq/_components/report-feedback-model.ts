@@ -9,7 +9,7 @@
  * the panel, rather than with the shared API types.
  */
 import { useCallback, useEffect, useState } from "react";
-import type { EnergyReview } from "@datafoundry/site-report";
+import { energyReviewCheckTitle, type EnergyReview } from "@datafoundry/site-report";
 import { configApi, ConfigApiError } from "../../../lib/config-api";
 import { intlLocale, type EnergyIqLocale, type Translate } from "./energyiq-messages";
 import type { reportFeedbackMessages } from "./report-feedback-messages";
@@ -28,6 +28,13 @@ export type SuggestionKind =
   | "electricity_rate"
   | "dismiss_check";
 
+/** Why a change could not be made, or ("not_live") why an applied change is not live yet: worded by the page. */
+export type ApplyProblemCode =
+  | "invalid" | "no_hours" | "hours_changed" | "no_hours_for_date" | "hours_not_saved" | "day_off_not_saved" | "no_rate"
+  | "peak_pricing" | "rate_changed" | "rate_not_saved" | "meter_missing" | "meter_invalid" | "setup_conflict" | "failed" | "not_live";
+export type ApplyProblemDetail = "overlap" | "outside_range" | "bad_time" | "admin_required" | "setup_invalid" | "data_not_ready" | "conflict" | "other";
+export type SuggestionProblem = { code: ApplyProblemCode; detail?: ApplyProblemDetail; name?: string; date?: string };
+
 export type SuggestionDto = {
   id: string;
   kind: SuggestionKind;
@@ -37,7 +44,10 @@ export type SuggestionDto = {
   status: "open" | "applied" | "dismissed" | "failed";
   appliedAt?: string;
   appliedByName?: string;
+  /** The problem in English; shown only when the page cannot word `problem`. */
   error?: string;
+  /** On a failed suggestion, why; on an applied one, "not_live": saved but not live yet. */
+  problem?: SuggestionProblem;
 };
 
 export type FeedbackDto = {
@@ -47,8 +57,8 @@ export type FeedbackDto = {
   authorUserId: string;
   authorName: string;
   createdAt: string;
-  /** `saved`: kept as a note without the AI (it was off or failed). */
-  status: "processed" | "saved" | "failed";
+  /** `processing`: the AI is still reading it. `saved`: kept as a note without the AI (it was off or failed). */
+  status: "processing" | "processed" | "saved" | "failed";
   reply: string | null;
   memoryIds: string[];
   followUpIds: string[];
@@ -64,11 +74,14 @@ export type MemoryDto = {
   authorUserId: string;
   authorName: string;
   createdAt: string;
+  /** When an admin wrote or approved it. */
+  activatedAt?: string;
   sourceFeedbackId: string | null;
 };
 
 export type FollowUpVerdict = "resolved" | "ongoing" | "unclear";
-export type FollowUpStatus = "open" | "done" | "dropped";
+/** `pending`: from someone who is not an admin; the reports and the AI ignore it until an admin approves it. */
+export type FollowUpStatus = "pending" | "open" | "done" | "dropped";
 
 export type FollowUpDto = {
   id: string;
@@ -78,7 +91,12 @@ export type FollowUpDto = {
   createdAt: string;
   sourceFeedbackId: string | null;
   lastCheck?: { at: string; verdict: FollowUpVerdict; evidence: string };
+  /** An admin's own note. */
   note?: string;
+  /** When it was marked done or dropped. */
+  closedAt?: string;
+  /** "made_room": dropped to keep within the limit, not by a person. */
+  closedReason?: "made_room";
 };
 
 export type DismissedCheckDto = { key: string; title: string; reason: string; createdAt: string };
@@ -94,6 +112,8 @@ export type ReportFeedbackState = {
   /** Open first, then the most recently closed. */
   followUps: FollowUpDto[];
   dismissedChecks: DismissedCheckDto[];
+  /** Exactly what the reports read now (the server's own reckoning); older servers leave it out. */
+  reportInputs?: ReportFeedbackReadings;
 };
 
 /** What the report on screen says, so the AI reads the feedback against it. */
@@ -115,15 +135,18 @@ export const reportFeedbackApi = {
     configApi.reportFeedbackRequest<ReportFeedbackState>(projectId, "", signal ? { signal } : undefined),
   send: (projectId: string, body: SendFeedbackBody) =>
     configApi.reportFeedbackRequest<{ feedback: FeedbackDto; state: ReportFeedbackState }>(projectId, "", post(body)),
+  /** `live` false: the change is saved but not live yet (the suggestion's problem says why). */
   applySuggestion: (projectId: string, id: string) =>
-    configApi.reportFeedbackRequest<{ state: ReportFeedbackState; applied: string }>(projectId, `suggestions/${segment(id)}/apply`, post()),
+    configApi.reportFeedbackRequest<{ state: ReportFeedbackState; applied: string; live?: boolean }>(projectId, `suggestions/${segment(id)}/apply`, post()),
   dismissSuggestion: (projectId: string, id: string) =>
     configApi.reportFeedbackRequest<{ state: ReportFeedbackState }>(projectId, `suggestions/${segment(id)}/dismiss`, post()),
   approveMemory: (projectId: string, id: string) =>
     configApi.reportFeedbackRequest<{ state: ReportFeedbackState }>(projectId, `memory/${segment(id)}/approve`, post()),
+  approveFollowUp: (projectId: string, id: string) =>
+    configApi.reportFeedbackRequest<{ state: ReportFeedbackState }>(projectId, `follow-ups/${segment(id)}/approve`, post()),
   removeMemory: (projectId: string, id: string) =>
     configApi.reportFeedbackRequest<{ state: ReportFeedbackState }>(projectId, `memory/${segment(id)}`, { method: "DELETE" }),
-  setFollowUpStatus: (projectId: string, id: string, status: FollowUpStatus, note?: string) =>
+  setFollowUpStatus: (projectId: string, id: string, status: Exclude<FollowUpStatus, "pending">, note?: string) =>
     configApi.reportFeedbackRequest<{ state: ReportFeedbackState }>(projectId, `follow-ups/${segment(id)}/status`, post(note ? { status, note } : { status })),
   reviewFollowUps: (projectId: string) =>
     configApi.reportFeedbackRequest<{ state: ReportFeedbackState }>(projectId, "follow-ups/review", post()),
@@ -156,22 +179,35 @@ export function reportContextOf(review: EnergyReview | null | undefined, report:
 /** What the reports read from feedback, in the shape of the report readings (AnalysisData). */
 export type ReportFeedbackReadings = {
   feedbackMemory: Array<{ text: string; date: string }>;
-  followUps: Array<{ text: string; status: FollowUpStatus; createdAt: string; lastCheck?: { at: string; verdict: FollowUpVerdict; evidence: string } }>;
+  followUps: Array<{ text: string; status: Exclude<FollowUpStatus, "pending">; createdAt: string; lastCheck?: { at: string; verdict: FollowUpVerdict; evidence: string } }>;
   dismissedChecks: Array<{ key: string; title: string; reason: string }>;
+};
+
+/** The site's own calendar date for an instant (the reports date memory this way); UTC if the zone is unknown. */
+const siteDate = (iso: string, timezone: string | undefined) => {
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: timezone || "UTC", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
+  } catch {
+    return iso.slice(0, 10);
+  }
 };
 
 /**
  * The feedback the report on screen should reflect now: active memory only, open follow-ups and those closed in the
  * last 31 days, and the dismissed checks. A saved report keeps what was known when it was written; laying this over
- * its readings shows an admin's change straight away.
+ * its readings shows an admin's change straight away. The server works this out exactly as the scheduled reports do
+ * (`reportInputs`); for an older server the page works it out the same way, by activation and close dates.
  */
-export function readingsFromFeedback(state: ReportFeedbackState, now = Date.now()): ReportFeedbackReadings {
+export function readingsFromFeedback(state: ReportFeedbackState, now = Date.now(), timezone?: string): ReportFeedbackReadings {
+  if (state.reportInputs) return state.reportInputs;
   const monthAgo = now - 31 * 24 * 60 * 60_000;
   return {
-    feedbackMemory: state.memory.filter(item => item.status === "active").map(item => ({ text: item.text, date: item.createdAt.slice(0, 10) })),
-    followUps: state.followUps
-      .filter(item => item.status === "open" || Date.parse(item.lastCheck?.at ?? item.createdAt) >= monthAgo)
-      .map(item => ({ text: item.text, status: item.status, createdAt: item.createdAt, ...(item.lastCheck ? { lastCheck: item.lastCheck } : {}) })),
+    feedbackMemory: state.memory.filter(item => item.status === "active").map(item => ({ text: item.text, date: siteDate(item.activatedAt ?? item.createdAt, timezone) })),
+    followUps: state.followUps.flatMap(item => {
+      if (item.status === "pending") return [];
+      if (item.status !== "open" && Date.parse(item.closedAt ?? item.lastCheck?.at ?? item.createdAt) < monthAgo) return [];
+      return [{ text: item.text, status: item.status, createdAt: item.createdAt, ...(item.lastCheck ? { lastCheck: item.lastCheck } : {}) }];
+    }),
     dismissedChecks: state.dismissedChecks.map(item => ({ key: item.key, title: item.title, reason: item.reason })),
   };
 }
@@ -182,24 +218,27 @@ const TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$|^24:00$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const textField = (value: unknown) => typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
 
-/** The hours in a suggestion, with days that share them side by side: "周一–周五 07:00–19:10；周六 关闭". */
+/**
+ * The hours in a suggestion, with days that share them side by side: "周一–周五 07:00–19:10；周六 关闭". A suggestion
+ * names only the days it changes; the others keep their hours and are not listed.
+ */
 function hoursText(weekly: unknown, locale: EnergyIqLocale, t: FeedbackTranslate): string | null {
   if (!weekly || typeof weekly !== "object") return null;
-  const days = WEEK_DAYS.map(day => (weekly as Record<string, unknown>)[day]);
+  const present = WEEK_DAYS.flatMap((day, index) => day in (weekly as object) ? [{ index, ranges: (weekly as Record<string, unknown>)[day] }] : []);
   const valid = (ranges: unknown): ranges is Array<{ from: string; to: string }> => Array.isArray(ranges)
     && ranges.every(range => !!range && typeof range === "object" && TIME.test(String((range as { from?: unknown }).from)) && TIME.test(String((range as { to?: unknown }).to)));
-  if (!days.every(valid)) return null;
+  if (!present.length || !present.every(day => valid(day.ranges))) return null;
   const rangesOf = (ranges: Array<{ from: string; to: string }>) => ranges.length ? ranges.map(range => `${range.from}–${range.to}`).join(", ") : t("label.closed");
-  const texts = days.map(ranges => rangesOf(ranges as Array<{ from: string; to: string }>));
-  if (texts.every(text => text === texts[0])) return `${t("label.everyDay")} ${texts[0]}`;
+  const days = present.map(day => ({ index: day.index, text: rangesOf(day.ranges as Array<{ from: string; to: string }>) }));
+  if (days.length === WEEK_DAYS.length && days.every(day => day.text === days[0]!.text)) return `${t("label.everyDay")} ${days[0]!.text}`;
   // Monday 1 January 2024 starts the week the day names are read from.
   const dayName = (index: number) => new Date(Date.UTC(2024, 0, 1 + index)).toLocaleDateString(intlLocale(locale), { weekday: "short", timeZone: "UTC" });
   const groups: Array<{ first: number; last: number; text: string }> = [];
-  texts.forEach((text, index) => {
+  for (const day of days) {
     const previous = groups.at(-1);
-    if (previous && previous.text === text) previous.last = index;
-    else groups.push({ first: index, last: index, text });
-  });
+    if (previous && previous.text === day.text && previous.last === day.index - 1) previous.last = day.index;
+    else groups.push({ first: day.index, last: day.index, text: day.text });
+  }
   return groups.map(group => `${group.first === group.last ? dayName(group.first) : `${dayName(group.first)}–${dayName(group.last)}`} ${group.text}`).join(t("label.separator"));
 }
 
@@ -235,11 +274,14 @@ function localSuggestionLabel(suggestion: SuggestionDto, locale: EnergyIqLocale,
     case "electricity_rate": {
       const rate = payload.ratePerKwh;
       const from = textField(payload.effectiveFrom);
-      if (typeof rate !== "number" || !(rate > 0) || !DAY.test(from)) return null;
-      return t("label.rate", { rate: rate.toLocaleString(intlLocale(locale), { maximumFractionDigits: 4 }), date: dayText(from, locale) });
+      const currency = textField(payload.currency);
+      // The currency is part of the change: without it the sentence would hide which money the figure is in.
+      if (typeof rate !== "number" || !(rate > 0) || !DAY.test(from) || !currency) return null;
+      return t("label.rate", { currency, rate: rate.toLocaleString(intlLocale(locale), { maximumFractionDigits: 4 }), date: dayText(from, locale) });
     }
     case "dismiss_check": {
-      const title = textField(payload.title);
+      // Named the way the report names the point, in the reader's language.
+      const title = energyReviewCheckTitle(textField(payload.checkKey), name || null, locale);
       return title ? t("label.dismissCheck", { title }) : null;
     }
     default: return null;
@@ -255,6 +297,26 @@ export function suggestionLabel(suggestion: SuggestionDto, locale: EnergyIqLocal
   if (locale === "en") return suggestion.label;
   return localSuggestionLabel(suggestion, locale, t) ?? suggestion.label;
 }
+
+/** What went wrong with a change (or why an applied one is not live yet) in the reader's language, from its code. */
+export function problemText(problem: SuggestionProblem | undefined, locale: EnergyIqLocale, t: FeedbackTranslate): string | null {
+  if (!problem || !PROBLEM_CODES.has(problem.code)) return null;
+  const name = textField(problem.name);
+  const date = DAY.test(textField(problem.date)) ? dayText(textField(problem.date), locale) : "";
+  if ((problem.code === "meter_missing" || problem.code === "meter_invalid") && !name) return null;
+  if (problem.code === "no_hours_for_date" && !date) return null;
+  const main = t(`problem.${problem.code}`, { name, date });
+  const detail = problem.detail && PROBLEM_DETAILS.has(problem.detail) ? t(`problem.detail.${problem.detail}`) : "";
+  return detail ? sentences([main, detail], locale) : main;
+}
+
+/** Sentences one after another: with a space, but none in Chinese. */
+export const sentences = (parts: string[], locale: EnergyIqLocale) => parts.filter(Boolean).join(locale === "zh-Hans" ? "" : " ");
+/** Why an applied change is not live yet, as the one sentence that says what to do. */
+export const notLiveReason = (problem: SuggestionProblem | undefined, t: FeedbackTranslate): string =>
+  t(`problem.detail.${problem?.detail && PROBLEM_DETAILS.has(problem.detail) ? problem.detail : "other"}`);
+const PROBLEM_CODES: ReadonlySet<ApplyProblemCode> = new Set(["invalid", "no_hours", "hours_changed", "no_hours_for_date", "hours_not_saved", "day_off_not_saved", "no_rate", "peak_pricing", "rate_changed", "rate_not_saved", "meter_missing", "meter_invalid", "setup_conflict", "failed", "not_live"]);
+const PROBLEM_DETAILS: ReadonlySet<ApplyProblemDetail> = new Set(["overlap", "outside_range", "bad_time", "admin_required", "setup_invalid", "data_not_ready", "conflict", "other"]);
 
 /** Every suggestion with the feedback it came from: open and failed first, then the most recently closed. */
 export function suggestionsOf(state: ReportFeedbackState, closedLimit = 6): Array<SuggestionDto & { feedbackId: string }> {

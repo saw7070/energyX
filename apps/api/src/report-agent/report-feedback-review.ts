@@ -1,6 +1,6 @@
 /**
  * Checking follow-ups from report feedback against the latest readings: when an administrator asks ("Check
- * follow-ups now"), and after each scheduled weekly or monthly site report.
+ * follow-ups now"), and with each scheduled site report, before it is saved, so the report shows its own check.
  *
  * The model is given a compact summary of the same readings the site report is built from (loadSiteReportData) and
  * of the energy review those readings give: each day's kWh, the points to check, and the meters not in use or quiet.
@@ -11,8 +11,9 @@ import type { LocalDataGateway } from "@datafoundry/data-gateway";
 import { readProjectSpatialReference, type ProjectSpatialReference } from "@datafoundry/contracts";
 import { buildEnergyReview, type AnalysisData, type EnergyReview } from "@datafoundry/site-report";
 import type { PiReportModel } from "./pi-report-harness.js";
+import type { ReportFrequency } from "./report-calendar.js";
 import { reviewFollowUps } from "./report-feedback-ai.js";
-import { localDate, ReportFeedbackStore, type FollowUpRecord } from "./report-feedback-store.js";
+import { localDate, ReportFeedbackStore, type FollowUpRecord, type ReportFeedbackInputs } from "./report-feedback-store.js";
 import { shiftDate } from "./report-feedback-site.js";
 
 const round = (value: number) => Math.round(value * 10) / 10;
@@ -116,9 +117,36 @@ export async function recordFollowUpReview(input: {
   return updated;
 }
 
+const DAY_MS = 86_400_000;
+/** A "next month" follow-up this old is due at any report, for sites with no monthly report or that missed one. */
+const MONTH_DUE_DAYS = 28;
+/** On a site with daily reports only, a follow-up is checked again once this long has passed since its last check. */
+const DAILY_RECHECK_DAYS = 6;
+
 /**
- * After a scheduled site report: checks the open follow-ups against that report's own readings. A weekly report
- * checks the ones waiting for the next report; a monthly report checks them all. Never throws.
+ * The open follow-ups a scheduled report checks. A monthly report checks them all. A weekly report checks those
+ * waiting for the next report, and "next month" ones once they are about a month old, or straight away when the site
+ * has no monthly report. A daily report checks only on a site with daily reports alone, about once a week.
+ */
+export function followUpsDue(followUps: FollowUpRecord[], cadence: "daily" | "weekly" | "monthly" | "custom", frequency: ReportFrequency | undefined, generatedAt: string): FollowUpRecord[] {
+  const at = Date.parse(generatedAt);
+  const ageDays = (iso: string) => (at - Date.parse(iso)) / DAY_MS;
+  const monthDue = (item: FollowUpRecord) => item.checkBy === "next_report" || ageDays(item.createdAt) >= MONTH_DUE_DAYS;
+  if (cadence === "monthly") return followUps;
+  if (cadence === "weekly") return followUps.filter(item => monthDue(item) || (!!frequency && !frequency.includes("monthly")));
+  if (cadence === "daily" && frequency === "daily") return followUps.filter(item => monthDue(item) && (!item.lastCheck || ageDays(item.lastCheck.at) >= DAILY_RECHECK_DAYS));
+  return [];
+}
+
+/** The follow-ups a report shows (open, and closed in the last 31 days), with their latest checks. */
+export function followUpsForReport(metadata: MetadataStore, projectId: string, generatedAt: string): ReportFeedbackInputs["followUps"] {
+  const project = metadata.energyIq.getProject(projectId);
+  return new ReportFeedbackStore(metadata.db).reportInputs(projectId, new Date(generatedAt), project.timezone || "UTC").followUps;
+}
+
+/**
+ * With a scheduled site report: checks the open follow-ups due (followUpsDue) against that report's own readings.
+ * Returns how many were checked. Never throws.
  */
 export async function reviewFollowUpsAfterSiteReport(input: {
   metadata: MetadataStore;
@@ -126,15 +154,15 @@ export async function reviewFollowUpsAfterSiteReport(input: {
   projectId: string;
   actorUserId: string;
   cadence: "daily" | "weekly" | "monthly" | "custom";
+  frequency?: ReportFrequency | undefined;
   data: AnalysisData;
   reference: ProjectSpatialReference | null;
   generatedAt: string;
 } & ReviewModelOptions): Promise<number> {
   try {
-    if (input.cadence !== "weekly" && input.cadence !== "monthly") return 0;
     const store = new ReportFeedbackStore(input.metadata.db);
     if (!store.hasOpenFollowUps(input.projectId)) return 0;
-    const followUps = store.openFollowUps(input.projectId).filter(item => input.cadence === "monthly" || item.checkBy === "next_report");
+    const followUps = followUpsDue(store.openFollowUps(input.projectId), input.cadence, input.frequency, input.generatedAt);
     if (!followUps.length) return 0;
     return await recordFollowUpReview({
       metadata: input.metadata, workspaceId: input.workspaceId, projectId: input.projectId, userId: input.actorUserId,

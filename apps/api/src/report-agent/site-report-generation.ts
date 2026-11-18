@@ -32,7 +32,7 @@ import { renderStyledSiteReportHtml } from "@datafoundry/site-report/management-
 import { writtenStyleOf } from "@datafoundry/site-report";
 import { loadSiteReportData, type SiteReportPeriod } from "./site-report-data.js";
 import type { ReportRun, ReportSettings, ReportStore } from "./report-store.js";
-import { validateReportPeriod } from "./report-calendar.js";
+import { validateReportPeriod, type ReportFrequency } from "./report-calendar.js";
 
 /**
  * What makes one site report unique. The scheduler wakes up every half minute; this key is what stops it publishing
@@ -62,10 +62,12 @@ export type PublishSiteReportInput = {
   generatedAt?: string;
   loadData?: typeof loadSiteReportData;
   /**
-   * After a scheduled weekly or monthly report is saved: check the open follow-ups from report feedback against its
-   * readings. Started in the background; it never delays or fails the report.
+   * Before a scheduled report is saved: check the open follow-ups from report feedback against its readings. It may
+   * answer with the follow-ups as the report should show them, with the new checks. It is given a short time
+   * (followUpReviewTimeoutMs); past that, or if it fails, the report is saved as it is and the check finishes alone.
    */
   reviewFollowUps?: (input: FollowUpReviewAfterReport) => Promise<unknown>;
+  followUpReviewTimeoutMs?: number;
 };
 
 export type FollowUpReviewAfterReport = {
@@ -74,16 +76,51 @@ export type FollowUpReviewAfterReport = {
   projectId: string;
   actorUserId: string;
   cadence: SiteReportCadence | "custom";
+  /** The site's report schedule, so a site without monthly (or weekly) reports still has its follow-ups checked. */
+  frequency: ReportFrequency;
   data: SiteReportSnapshot["data"];
   reference: ProjectSpatialReference | null;
   generatedAt: string;
 };
 
-/** Loaded on first use, in the background, so publishing a report never waits on the AI modules. */
-const reviewFollowUpsInBackground = async (input: FollowUpReviewAfterReport): Promise<unknown> => {
-  const { reviewFollowUpsAfterSiteReport } = await import("./report-feedback-review.js");
-  return reviewFollowUpsAfterSiteReport(input);
+/** How long a scheduled report waits for the follow-up check before it is saved without the new verdicts. */
+export const FOLLOW_UP_REVIEW_TIMEOUT_MS = 20_000;
+
+/** Loaded on first use, so publishing a report never loads the AI modules it does not need. */
+const reviewFollowUpsForReport = async (input: FollowUpReviewAfterReport): Promise<unknown> => {
+  const { followUpsForReport, reviewFollowUpsAfterSiteReport } = await import("./report-feedback-review.js");
+  const checked = await reviewFollowUpsAfterSiteReport(input);
+  return checked > 0 ? followUpsForReport(input.metadata, input.projectId, input.generatedAt) : undefined;
 };
+
+/**
+ * Checks the report's follow-ups before it is saved and, when the check answers in time, shows its verdicts in the
+ * report. Only a report that already lists follow-ups takes them (so a reader who may not see them never does), and
+ * the report never fails or waits long because of it.
+ */
+async function withFollowUpChecks(input: Omit<PublishSiteReportInput, "cadence"> & { cadence: SiteReportCadence | "custom"; actorUserId: string }, data: SiteReportSnapshot["data"], reference: ProjectSpatialReference | null, generatedAt: string): Promise<SiteReportSnapshot["data"]> {
+  const due = input.cadence === "weekly" || input.cadence === "monthly" || (input.cadence === "daily" && input.settings.frequency === "daily");
+  if (!due) return data;
+  const failed = (error: unknown) => {
+    console.warn(`[site-report] follow-up check failed project=${input.settings.projectId} code=${error instanceof Error ? error.message : "unknown"}`);
+    return undefined;
+  };
+  let check: Promise<unknown>;
+  try {
+    check = Promise.resolve((input.reviewFollowUps ?? reviewFollowUpsForReport)({
+      metadata: input.metadata, workspaceId: input.settings.workspaceId, projectId: input.settings.projectId, actorUserId: input.actorUserId,
+      cadence: input.cadence, frequency: input.settings.frequency, data, reference, generatedAt,
+    })).catch(failed);
+  } catch (error) {
+    failed(error);
+    return data;
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), input.followUpReviewTimeoutMs ?? FOLLOW_UP_REVIEW_TIMEOUT_MS); });
+  const followUps = await Promise.race([check, timeout]);
+  clearTimeout(timer);
+  return Array.isArray(followUps) && data.followUps?.length ? { ...data, followUps: followUps as NonNullable<SiteReportSnapshot["data"]["followUps"]> } : data;
+}
 
 export type PublishedSiteReport = { run: ReportRun; created: boolean; scheduleKey: string };
 
@@ -121,7 +158,7 @@ export async function publishCustomSiteReport(input: PublishCustomSiteReportInpu
 async function writeSiteReport(input: Omit<PublishSiteReportInput, "cadence"> & { cadence: SiteReportCadence | "custom"; style: SiteReportStyle; actorUserId: string; scheduleKey: string | undefined }): Promise<{ run: ReportRun; created: boolean }> {
   const generatedAt = input.generatedAt ?? new Date().toISOString();
   // All readings ever taken are not part of this report, and for a long-running site they dwarf everything else.
-  const { data } = await (input.loadData ?? loadSiteReportData)({
+  const { data: loaded } = await (input.loadData ?? loadSiteReportData)({
     metadata: input.metadata,
     dataGateway: input.dataGateway,
     workspaceId: input.settings.workspaceId,
@@ -131,6 +168,7 @@ async function writeSiteReport(input: Omit<PublishSiteReportInput, "cadence"> & 
     includeHistory: false,
   });
   const reference = readProjectSpatialReference(input.settings.contextNotes ?? "", input.settings.projectId)?.reference ?? null;
+  const data = await withFollowUpChecks(input, loaded, reference, generatedAt);
   // English for now. The readings saved beside the page let the web app word the same report in any language.
   const html = renderStyledSiteReportHtml(input.style, data, reference, generatedAt, "en");
   // What the page actually is: a one-day report in the energy review style is the management review.
@@ -159,16 +197,6 @@ async function writeSiteReport(input: Omit<PublishSiteReportInput, "cadence"> & 
     });
     // Someone else published this period while we were building it; theirs is the one readers already have.
     if (!saved.created) rmSync(directory, { recursive: true, force: true });
-    if (saved.created && (input.cadence === "weekly" || input.cadence === "monthly")) {
-      try {
-        void (input.reviewFollowUps ?? reviewFollowUpsInBackground)({
-          metadata: input.metadata, workspaceId: input.settings.workspaceId, projectId: input.settings.projectId, actorUserId: input.actorUserId,
-          cadence: input.cadence, data, reference, generatedAt,
-        }).catch(error => console.warn(`[site-report] follow-up check failed project=${input.settings.projectId} code=${error instanceof Error ? error.message : "unknown"}`));
-      } catch (error) {
-        console.warn(`[site-report] follow-up check not started project=${input.settings.projectId} code=${error instanceof Error ? error.message : "unknown"}`);
-      }
-    }
     return saved;
   } catch (error) {
     rmSync(directory, { recursive: true, force: true });

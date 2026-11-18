@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { PiReportModel } from "./pi-report-harness.js";
-import { followUpSummary, reviewFollowUpsAfterSiteReport, summaryFromReadings } from "./report-feedback-review.js";
+import { followUpSummary, followUpsDue, reviewFollowUpsAfterSiteReport, summaryFromReadings } from "./report-feedback-review.js";
 import { ReportFeedbackStore } from "./report-feedback-store.js";
 
 let root: string;
@@ -76,4 +76,26 @@ it("does nothing for daily or custom reports, or with no open follow-ups, and ne
   expect(fetchImpl).not.toHaveBeenCalled();
   const failing = vi.fn(async () => new Response("down", { status: 503 }));
   expect(await reviewFollowUpsAfterSiteReport({ ...base, cadence: "monthly", fetchImpl: failing as unknown as typeof fetch })).toBe(0);
+});
+
+it("checks month-long follow-ups on sites without a monthly report, and on sites with daily reports alone", () => {
+  const at = "2026-11-18T00:00:00Z";
+  const item = (id: string, checkBy: "next_report" | "next_month", createdAt: string, lastCheckAt?: string) => ({
+    id, projectId: "p", authorUserId: "u", text: id, checkBy, status: "open" as const, createdAt, updatedAt: createdAt, sourceFeedbackId: null,
+    ...(lastCheckAt ? { lastCheck: { at: lastCheckAt, verdict: "ongoing" as const, evidence: "" } } : {}),
+  });
+  const soon = item("soon", "next_report", "2026-11-15T00:00:00Z");
+  const monthNew = item("month-new", "next_month", "2026-11-10T00:00:00Z");
+  const monthOld = item("month-old", "next_month", "2026-10-15T00:00:00Z");
+  const all = [soon, monthNew, monthOld];
+  const ids = (list: Array<{ id: string }>) => list.map(entry => entry.id);
+  expect(ids(followUpsDue(all, "monthly", "weekly-monthly", at))).toEqual(["soon", "month-new", "month-old"]);
+  // Weekly with a monthly report too: next-month ones wait for it, unless they are about a month old already.
+  expect(ids(followUpsDue(all, "weekly", "weekly-monthly", at))).toEqual(["soon", "month-old"]);
+  // Weekly with no monthly report: the weekly report checks them all.
+  expect(ids(followUpsDue(all, "weekly", "weekly", at))).toEqual(["soon", "month-new", "month-old"]);
+  // Daily reports alone: about once a week each.
+  expect(ids(followUpsDue([...all, item("checked", "next_report", "2026-11-01T00:00:00Z", "2026-11-16T00:00:00Z")], "daily", "daily", at))).toEqual(["soon", "month-old"]);
+  expect(followUpsDue(all, "daily", "daily-weekly-monthly", at)).toEqual([]);
+  expect(followUpsDue(all, "custom", "weekly", at)).toEqual([]);
 });

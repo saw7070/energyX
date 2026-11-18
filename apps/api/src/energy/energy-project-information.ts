@@ -40,11 +40,16 @@ export function circuitGroupIds(nodes: GroupNode[], meters: GroupMeter[]): Set<s
  *
  * Also carries what people told the AI about the site's reports (report feedback): active memory, follow-ups that are
  * open or closed in the last 31 days, and report points the site said not to flag. The site's own reports read them.
+ * They belong to the reports, so only someone who may read the reports gets them; anyone else gets empty lists.
  */
 export function readEnergyProjectInformation(metadata: MetadataStore, userId: string, workspaceId: string, projectId: string) {
-  if (!resolveEnergyProjectCapabilities({ metadataStore: metadata, userId, workspaceId, projectId }).readProjectInformation) throw Error("ENERGYIQ_PROJECT_FORBIDDEN");
+  const capabilities = resolveEnergyProjectCapabilities({ metadataStore: metadata, userId, workspaceId, projectId });
+  if (!capabilities.readProjectInformation) throw Error("ENERGYIQ_PROJECT_FORBIDDEN");
   const information = buildEnergyProjectInformation(metadata, projectId);
-  return { ...information, ...new ReportFeedbackStore(metadata.db).reportInputs(projectId, new Date(), information.timezone) };
+  const feedback = capabilities.readReports
+    ? new ReportFeedbackStore(metadata.db).reportInputs(projectId, new Date(), information.timezone)
+    : { feedbackMemory: [], followUps: [], dismissedChecks: [] };
+  return { ...information, ...feedback };
 }
 
 /**

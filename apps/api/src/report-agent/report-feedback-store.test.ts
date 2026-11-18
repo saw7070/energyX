@@ -4,7 +4,8 @@ import {
   MAX_ACTIVE_MEMORY,
   MAX_FEEDBACK,
   MAX_OPEN_FOLLOW_UPS,
-  MAX_PENDING_MEMORY,
+  MAX_PENDING_FOLLOW_UPS_PER_AUTHOR,
+  MAX_PENDING_MEMORY_PER_AUTHOR,
   ReportFeedbackStore,
   type FeedbackRecord,
 } from "./report-feedback-store.js";
@@ -19,7 +20,7 @@ const feedback = (overrides: Partial<FeedbackRecord> = {}): FeedbackRecord => ({
   authorUserId: "u", authorName: "U", createdAt: new Date().toISOString(), status: "saved", reply: null, memoryIds: [], followUpIds: [], suggestions: [],
   ...overrides,
 });
-const memoryInput = (text: string, status: "active" | "pending" = "active") => ({ text, kind: "fact" as const, status, authorUserId: "u", authorName: "U", sourceFeedbackId: null });
+const memoryInput = (text: string, status: "active" | "pending" = "active", authorUserId = "u") => ({ text, kind: "fact" as const, status, authorUserId, authorName: "U", sourceFeedbackId: null });
 
 it("keeps one feedback per person and request, and hands the first one back on a repeat", () => {
   const first = feedback({ requestId: "r1" });
@@ -67,9 +68,57 @@ it("keeps waiting memory out of the reports until it is approved", () => {
   expect(activated.memory.status).toBe("active");
   expect(activated.memory.activatedAt).toBeTruthy();
   expect(store.reportInputs("p").feedbackMemory.map(item => item.text).sort()).toEqual(["known", "waiting"]);
-  // Waiting memory has its own limit, so one person cannot crowd out the rest.
-  for (let index = 0; index < MAX_PENDING_MEMORY + 2; index += 1) store.addMemory("p", memoryInput(`wait ${index}`, "pending"));
-  expect(store.listMemory("p", ["pending"])).toHaveLength(MAX_PENDING_MEMORY);
+  // Waiting memory has a limit per person: one person's flood sets aside only their own oldest, never anyone else's.
+  const other = store.addMemory("p", memoryInput("someone else's", "pending", "other")).memory;
+  for (let index = 0; index < MAX_PENDING_MEMORY_PER_AUTHOR + 5; index += 1) store.addMemory("p", memoryInput(`wait ${index}`, "pending"));
+  expect(store.listMemory("p", ["pending"]).filter(item => item.authorUserId === "u")).toHaveLength(MAX_PENDING_MEMORY_PER_AUTHOR);
+  expect(store.getMemory("p", other.id)?.status).toBe("pending");
+  expect(store.countPendingMemory("p")).toBe(MAX_PENDING_MEMORY_PER_AUTHOR + 1);
+});
+
+it("never makes room by dropping feedback with a change still waiting for an administrator", () => {
+  const waiting = feedback({ text: "oldest, with a change waiting", suggestions: [{ id: "s-old", kind: "dismiss_check", label: "Stop", payload: {}, status: "open" }] });
+  store.insertFeedback(waiting);
+  for (let index = 1; index < MAX_FEEDBACK; index += 1) store.insertFeedback(feedback({ text: `#${index}`, suggestions: [{ id: `s${index}`, kind: "dismiss_check", label: "Stop", payload: {}, status: "open" }] }));
+  // Full, and nothing can make room.
+  expect(store.hasFeedbackRoom("p")).toBe(false);
+  store.updateSuggestion("p", "s1", current => ({ ...current, status: "applied" }));
+  expect(store.hasFeedbackRoom("p")).toBe(true);
+  store.insertFeedback(feedback({ text: "newest" }));
+  expect(store.listFeedback("p", 1000)).toHaveLength(MAX_FEEDBACK);
+  expect(store.getFeedback("p", waiting.id)).toBeTruthy();
+  expect(store.listFeedback("p", 1000).some(item => item.text === "#1")).toBe(false);
+});
+
+it("never pushes out an administrator's feedback to make room for someone else's", () => {
+  const admin = feedback({ text: "admin's", authorRole: "admin", authorUserId: "admin" });
+  store.insertFeedback(admin);
+  for (let index = 1; index < MAX_FEEDBACK; index += 1) store.insertFeedback(feedback({ text: `#${index}`, authorRole: "member", suggestions: [{ id: `s${index}`, kind: "dismiss_check", label: "Stop", payload: {}, status: "open" }] }));
+  expect(store.hasFeedbackRoom("p")).toBe(false);
+  expect(store.hasFeedbackRoom("p", true)).toBe(true);
+  store.insertFeedback(feedback({ text: "from an admin", authorRole: "admin", authorUserId: "admin" }));
+  expect(store.getFeedback("p", admin.id)).toBeUndefined();
+});
+
+it("keeps follow-ups waiting for an administrator out of the reports, and lets one person's flood drop only their own", () => {
+  const now = new Date("2026-11-18T00:00:00Z");
+  const other = store.addFollowUp("p", { text: "someone else's", checkBy: "next_report", sourceFeedbackId: null, authorUserId: "other", status: "pending" }, now).followUp;
+  let evicted: string[] = [];
+  for (let index = 0; index < MAX_PENDING_FOLLOW_UPS_PER_AUTHOR + 2; index += 1) {
+    evicted = [...evicted, ...store.addFollowUp("p", { text: `wait ${index}`, checkBy: "next_report", sourceFeedbackId: null, authorUserId: "u", status: "pending" }, now).evicted.map(item => item.text)];
+  }
+  expect(evicted).toEqual(["wait 0", "wait 1"]);
+  expect(store.getFollowUp("p", other.id)?.status).toBe("pending");
+  expect(store.openFollowUps("p")).toEqual([]);
+  expect(store.reportInputs("p", now).followUps).toEqual([]);
+  // Dropped to make room: said with a code the page words, not an English sentence.
+  const state = store.state("p", { canGive: true, canManage: true, aiAvailable: true }, now);
+  expect(state.followUps.find(item => item.text === "wait 0")).toMatchObject({ status: "dropped", closedReason: "made_room", closedAt: now.toISOString() });
+  expect(state.followUps.find(item => item.text === "wait 0")?.note).toBeUndefined();
+  // Approved, it reaches the reports.
+  store.approveFollowUp("p", other.id, now);
+  expect(store.reportInputs("p", now).followUps).toEqual([{ text: "someone else's", status: "open", createdAt: now.toISOString() }]);
+  expect(state.reportInputs.followUps).toEqual([]);
 });
 
 it("dates memory in the site's own time zone for the reports", () => {

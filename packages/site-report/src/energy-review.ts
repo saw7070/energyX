@@ -30,6 +30,34 @@ import { clock, inWindow, kwhText as baseKwhText, kwText, moneyText, openingWind
 type T = Translate<EnergyReviewKey>;
 const reviewText = (locale: EnergyIqLocale, meaning: HoursMeaning): T => forHoursMeaning(translatorFor(energyReviewMessages, locale), energyReviewMessages, meaning);
 
+/**
+ * The stable keys of the review's points to check (EnergyReviewCheck.key): a meter point names the meter's id (group
+ * 2), a day that stood out names the day (group 3).
+ */
+export const ENERGY_REVIEW_CHECK_KEY = /^(?:(stopped|offline|notInUse|noUse):(.+)|standout:(\d{4}-\d{2}-\d{2})|daytime)$/;
+
+/**
+ * The title a point to check carries in the review, worded from its key alone and without the closing full stop:
+ * "Pavilion 2 has stopped reporting", "Tue 17 Nov stood out". A meter point needs the meter's name. Null for a key that
+ * is not one of the review's own, so nobody can choose the words shown for a point.
+ */
+export function energyReviewCheckTitle(key: string, meterName: string | null | undefined, locale: EnergyIqLocale = "en"): string | null {
+  const match = ENERGY_REVIEW_CHECK_KEY.exec(key);
+  if (!match) return null;
+  const t = translatorFor(energyReviewMessages, locale);
+  let title: string;
+  if (match[1]) {
+    const name = meterName?.trim();
+    if (!name) return null;
+    title = t(`check.${match[1]}.title` as EnergyReviewKey, { name });
+  } else if (match[3]) {
+    title = t("check.standout.title", { date: `${weekdayOf(match[3], locale)} ${shortDate(match[3], locale)}` });
+  } else {
+    title = t("check.daytime.title");
+  }
+  return title.replace(/[.。]\s*$/u, "");
+}
+
 /** The questions a review answers, in reading order; the document numbers the ones present as it goes. */
 export const ENERGY_REVIEW_QUESTIONS = ["total", "groups", "largest", "comparison", "profile", "littleUse", "perLight", "savings"] as const;
 export type EnergyReviewQuestion = typeof ENERGY_REVIEW_QUESTIONS[number];

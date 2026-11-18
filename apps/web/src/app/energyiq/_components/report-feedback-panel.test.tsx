@@ -282,3 +282,67 @@ it("speaks the reader's language", async () => {
   expect(card("Change lights-off").textContent).toContain("Pentadbir boleh menggunakan perubahan ini.");
   expect(buttons().length).toBeGreaterThan(0);
 });
+
+it("shows follow-ups from people who are not admins as waiting, and lets an admin approve or drop them", async () => {
+  const waiting = { id: "fu3", text: "Check the store room light", checkBy: "next_report" as const, status: "pending" as const, createdAt: "2026-11-18T01:00:00Z", sourceFeedbackId: "f1" };
+  const made = { id: "fu4", text: "An old follow-up", checkBy: "next_report" as const, status: "dropped" as const, createdAt: "2026-10-01T01:00:00Z", closedAt: "2026-11-18T01:00:00Z", closedReason: "made_room" as const, sourceFeedbackId: null };
+  server = () => stateWith({ followUps: [...stateWith().followUps, waiting, made] });
+  await render();
+  expect(card("store room light").textContent).toContain("Waiting for an admin");
+  expect(button("Approve", card("store room light"))).toBeUndefined();
+  expect(card("An old follow-up").textContent).toContain("Dropped to make room for newer follow-ups.");
+  await act(async () => root.unmount()); host.remove();
+  who.value = { access: { role: "admin", user: { id: "u-admin" } } };
+  server = call => call.method === "GET" ? stateWith({ canManage: true, followUps: [...stateWith().followUps, waiting] }) : { state: stateWith({ canManage: true }) };
+  await render();
+  await click(button("Approve: Check the store room light"));
+  expect(calls.filter(call => call.method === "POST").map(call => call.path)).toEqual(["follow-ups/fu3/approve"]);
+});
+
+it("says in the reader's language why a change could not be applied, or that it is saved but not live yet", async () => {
+  who.value = { access: { role: "admin", user: { id: "u-admin" } } };
+  const failed = { ...suggestion, id: "s2", status: "failed" as const, error: "Pavilion 2 is no longer in this site's setup.", problem: { code: "meter_missing" as const, name: "Pavilion 2" } };
+  const notLive = { ...suggestion, id: "s3", label: "Set Pavilion 3 to 8 lights", kind: "light_count" as const, payload: { meterId: "m3", meterName: "Pavilion 3", count: 8 }, status: "applied" as const, appliedAt: "2026-11-18T04:00:00Z", appliedByName: "Andrew",
+    error: "The change is saved but not live yet. The site's readings are not ready. Try again later.", problem: { code: "not_live" as const, detail: "data_not_ready" as const } };
+  server = () => stateWith({ canManage: true, feedback: [{ ...first, suggestions: [failed, notLive] }] });
+  await render({}, "zh-Hans");
+  expect(card("Pavilion 2 已不在").textContent).toContain("无法应用：Pavilion 2 已不在此场地的设置中。");
+  expect(card("Pavilion 3").textContent).toContain("更改已保存，但尚未生效。此场地的读数还没有准备好。请稍后再试。");
+  expect(host.textContent).not.toContain("no longer in this site's setup");
+});
+
+it("tells an admin when an applied change is saved but not live yet", async () => {
+  who.value = { access: { role: "admin", user: { id: "u-admin" } } };
+  const applied = stateWith({ canManage: true, feedback: [{ ...first, suggestions: [{ ...suggestion, status: "applied", appliedAt: "2026-11-18T04:00:00Z", appliedByName: "Andrew", problem: { code: "not_live", detail: "admin_required" } }] }] });
+  server = call => call.method === "GET" ? (calls.filter(item => item.method === "GET").length > 1 ? applied : stateWith({ canManage: true }))
+    : { state: applied, applied: "Change lights-off to 7:10 am, every day", live: false };
+  await render();
+  await click(button("Apply"));
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe("Saved, but not live yet: Change lights-off to 7:10 am, every day. Only a platform admin can make changes live.");
+  expect(card("Change lights-off").textContent).toContain("Applied by Andrew on 18 Nov 2026. The change is saved but not live yet. Only a platform admin can make changes live.");
+});
+
+it("says the AI is still reading when the same feedback is sent again too soon, and shows where it stands", async () => {
+  const reading: FeedbackDto = { ...first, id: "f5", text: "Still being read", status: "processing", reply: null, suggestions: [] };
+  let posted = false;
+  server = call => {
+    if (call.method === "GET") return posted ? stateWith({ feedback: [reading, first] }) : stateWith();
+    posted = true;
+    throw new ConfigApiError("CONFLICT", "REPORT_FEEDBACK_STILL_PROCESSING", 409);
+  };
+  await render();
+  await type("Still being read");
+  await submit();
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe("The AI is still reading your feedback. It will show here in a minute.");
+  expect(textarea().value).toBe("Still being read");
+  expect(calls.filter(call => call.method === "GET")).toHaveLength(2);
+  expect(host.querySelector("details")!.textContent).toContain("The AI is still reading this.");
+});
+
+it("says plainly when someone has sent too much feedback", async () => {
+  server = call => { if (call.method === "GET") return stateWith(); throw new ConfigApiError("RATE_LIMITED", "REPORT_FEEDBACK_RATE_LIMITED", 429); };
+  await render({}, "ms");
+  await type("Satu lagi");
+  await submit();
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe("Anda telah menghantar banyak maklum balas sebentar tadi. Tunggu beberapa minit dan cuba lagi.");
+});

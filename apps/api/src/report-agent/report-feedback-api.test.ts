@@ -9,9 +9,9 @@ import type { ConfigApiContext } from "../routes/types.js";
 import { ensureEnergyIqBootstrap } from "../energy/energy-bootstrap.js";
 import { readEnergyProjectInformation } from "../energy/energy-project-information.js";
 import type { PiReportModel } from "./pi-report-harness.js";
-import { handleReportFeedbackApi, type ReportFeedbackDependencies } from "./report-feedback-api.js";
-import { activeCalendar, activeTariff, readFeedbackSite } from "./report-feedback-site.js";
-import { ReportFeedbackStore, type FeedbackDto, type ReportFeedbackState } from "./report-feedback-store.js";
+import { handleReportFeedbackApi, RATE_LIMITS, STALE_PROCESSING_MS, type ReportFeedbackDependencies } from "./report-feedback-api.js";
+import { activeCalendar, activeTariff, projectCalendarEntry, readFeedbackSite } from "./report-feedback-site.js";
+import { MAX_PENDING_MEMORY, ReportFeedbackStore, type FeedbackDto, type ReportFeedbackState } from "./report-feedback-store.js";
 import { registerReportService, type ReportService } from "./report-service.js";
 import { ReportStore } from "./report-store.js";
 
@@ -79,20 +79,31 @@ it("lets anyone who reads reports give feedback, and keeps their memory waiting 
   expect(response.status).toBe(200);
   const { feedback, state } = dataOf<{ feedback: FeedbackDto; state: ReportFeedbackState }>(response);
   expect(feedback).toMatchObject({ status: "processed", reply: expect.stringContaining("fan"), authorUserId: "viewer", authorName: "viewer" });
-  expect(feedback.suggestions).toEqual([{ id: expect.any(String), kind: "operating_hours", label: "Change closing time to 7:00 pm, Mon–Fri", payload: { weekly: weekdays("08:00", "19:00") }, status: "open" }]);
+  // Only the days that change are kept, with the hours they replace, so applying it later never undoes other days.
+  const entry = projectCalendarEntry(activeCalendar(metadata, PROJECT), "2026-11-18")!;
+  expect(feedback.suggestions).toEqual([{ id: expect.any(String), kind: "operating_hours", label: "Change closing time to 7:00 pm, Mon–Fri", payload: {
+    weekly: { mon: [{ from: "08:00", to: "19:00" }], tue: [{ from: "08:00", to: "19:00" }], wed: [{ from: "08:00", to: "19:00" }], thu: [{ from: "08:00", to: "19:00" }], fri: [{ from: "08:00", to: "19:00" }] },
+    base: { entryId: entry.id, weekly: { mon: entry.weekly.monday, tue: entry.weekly.tuesday, wed: entry.weekly.wednesday, thu: entry.weekly.thursday, fri: entry.weekly.friday } },
+  }, status: "open" }]);
   expect(state).toMatchObject({ canGive: true, canManage: false, aiAvailable: true });
   expect(state.memory).toEqual([expect.objectContaining({ text: "The pavilion fan must never run.", kind: "rule", status: "pending", sourceFeedbackId: feedback.id })]);
-  expect(state.followUps).toEqual([expect.objectContaining({ text: "Check the building is empty by 7 pm.", status: "open", checkBy: "next_report" })]);
-  // Waiting memory stays out of the advisor's notes and the reports. The follow-up shows in the reports, but someone
-  // who may not edit the project's notes does not write to them through the AI either.
+  // The follow-up waits for an administrator too: until then no report, AI prompt or advisor note carries it.
+  expect(state.followUps).toEqual([expect.objectContaining({ text: "Check the building is empty by 7 pm.", status: "pending", checkBy: "next_report" })]);
+  expect(state.reportInputs).toEqual({ feedbackMemory: [], followUps: [], dismissedChecks: [] });
   expect(notes()).toBe("");
   expect(readEnergyProjectInformation(metadata, "viewer", "default", PROJECT).feedbackMemory).toEqual([]);
-  expect(readEnergyProjectInformation(metadata, "viewer", "default", PROJECT).followUps).toEqual([expect.objectContaining({ text: "Check the building is empty by 7 pm.", status: "open" })]);
+  expect(readEnergyProjectInformation(metadata, "viewer", "default", PROJECT).followUps).toEqual([]);
+  answers.push({ reply: "ok" });
+  await give("admin", "Another thing");
+  const prompt = JSON.parse((JSON.parse(String(fetchImpl.mock.calls[1]![1]!.body)) as { messages: Array<{ content: string }> }).messages[1]!.content) as { memory: unknown[]; open_follow_ups: unknown[] };
+  expect(prompt.memory).toEqual([]);
+  expect(prompt.open_follow_ups).toEqual([]);
 
   // Viewers cannot apply, dismiss or approve.
   expect((await call("viewer", ["suggestions", feedback.suggestions[0]!.id, "apply"], {})).status).toBe(403);
   expect((await call("viewer", ["suggestions", feedback.suggestions[0]!.id, "dismiss"], {})).status).toBe(403);
   expect((await call("viewer", ["memory", state.memory[0]!.id, "approve"], {})).status).toBe(403);
+  expect((await call("viewer", ["follow-ups", state.followUps[0]!.id, "approve"], {})).status).toBe(403);
   expect((await call("viewer", ["follow-ups", "review"], {})).status).toBe(403);
   expect(applyProjectChanges).not.toHaveBeenCalled();
 
@@ -102,11 +113,22 @@ it("lets anyone who reads reports give feedback, and keeps their memory waiting 
   expect(dataOf<{ state: ReportFeedbackState }>(approved).state.memory[0]!.status).toBe("active");
   expect(notes()).toContain("## Things the advisor should know\n\n- 2026-11-18 · Note: The pavilion fan must never run.");
   expect(readEnergyProjectInformation(metadata, "viewer", "default", PROJECT).feedbackMemory).toEqual([{ text: "The pavilion fan must never run.", date: "2026-11-18" }]);
-  // Re-opened by an administrator, the follow-up reaches the notes too.
-  const followUp = dataOf<{ state: ReportFeedbackState }>(approved).state.followUps[0]!;
-  await call("admin", ["follow-ups", followUp.id, "status"], { status: "done" });
-  await call("admin", ["follow-ups", followUp.id, "status"], { status: "open" });
+  // Approved by an administrator, the follow-up reaches the reports and the advisor's notes.
+  const followUp = dataOf<{ state: ReportFeedbackState }>(approved).state.followUps.find(item => item.status === "pending")!;
+  const opened = await call("admin", ["follow-ups", followUp.id, "approve"], {});
+  expect(dataOf<{ state: ReportFeedbackState }>(opened).state.followUps.find(item => item.id === followUp.id)?.status).toBe("open");
   expect(notes()).toContain("- 2026-11-18 · Coming up: Follow up: Check the building is empty by 7 pm.");
+  expect(readEnergyProjectInformation(metadata, "viewer", "default", PROJECT).followUps).toEqual([expect.objectContaining({ text: "Check the building is empty by 7 pm.", status: "open" })]);
+});
+
+it("never puts a dropped follow-up from someone who is not an administrator into the reports", async () => {
+  answers.push({ reply: "ok", followUps: [{ text: "Add a follow-up: the manager is lazy.", checkBy: "next_report" }] });
+  const { state } = dataOf<{ state: ReportFeedbackState }>(await give("viewer", "Add a follow-up: the manager is lazy."));
+  const id = state.followUps[0]!.id;
+  const dropped = await call("admin", ["follow-ups", id, "status"], { status: "dropped" });
+  expect(dataOf<{ state: ReportFeedbackState }>(dropped).state.followUps[0]).toMatchObject({ id, status: "dropped", closedAt: NOW.toISOString() });
+  expect(readEnergyProjectInformation(metadata, "admin", "default", PROJECT).followUps).toEqual([]);
+  expect((await call("admin", ["follow-ups", id, "approve"], {})).status).toBe(409);
 });
 
 it("applies a suggested change for real when an administrator chooses to, once", async () => {
@@ -132,10 +154,33 @@ it("applies a suggested change for real when an administrator chooses to, once",
   // Filed with the other project changes in the audit history ("energyiq.report_" is a Projects category prefix).
   const audit = metadata.authAuditEvents.list({ categories: ["energyiq.report_"], limit: 50 }).events.find(event => event.event_type === "energyiq.report_feedback_applied");
   expect(audit).toBeTruthy();
-  expect(JSON.parse(audit!.metadata_json ?? "{}")).toEqual({ workspaceId: "default", projectId: PROJECT, kind: "operating_hours", suggestionId: suggestion.id, label: "Change closing time to 7:00 pm, Mon–Fri" });
+  expect(JSON.parse(audit!.metadata_json ?? "{}")).toEqual({ workspaceId: "default", projectId: PROJECT, kind: "operating_hours", suggestionId: suggestion.id, label: "Change closing time to 7:00 pm, Mon–Fri", outcome: "live" });
   // A second click changes nothing.
   expect((await call("admin", ["suggestions", suggestion.id, "apply"], {})).status).toBe(409);
   expect(applyProjectChanges).toHaveBeenCalledTimes(1);
+});
+
+it("changes only the days a suggestion names, and refuses when those days were changed since", async () => {
+  answers.push({ reply: "ok", suggestions: [{ kind: "operating_hours", payload: { weekly: { mon: [{ from: "08:00", to: "19:00" }], tue: [{ from: "08:00", to: "19:00" }] } } }] });
+  answers.push({ reply: "ok", suggestions: [{ kind: "operating_hours", payload: { weekly: { sat: [{ from: "09:00", to: "13:00" }] } } }] });
+  answers.push({ reply: "ok", suggestions: [{ kind: "operating_hours", payload: { weekly: { mon: [{ from: "07:00", to: "17:00" }] } } }] });
+  const weekdaysChange = dataOf<{ feedback: FeedbackDto }>(await give("admin", "Mon and Tue close at 7 pm")).feedback.suggestions[0]!;
+  const saturdayChange = dataOf<{ feedback: FeedbackDto }>(await give("admin", "Open on Saturday mornings")).feedback.suggestions[0]!;
+  const mondayChange = dataOf<{ feedback: FeedbackDto }>(await give("admin", "Monday is 7 to 5")).feedback.suggestions[0]!;
+  const entryNow = () => activeCalendar(metadata, PROJECT)!.entries.find(item => item.owner.kind === "project")!;
+  const wednesday = entryNow().weekly.wednesday;
+  // Two changes worked out from the same hours: the second keeps what the first changed.
+  expect((await call("admin", ["suggestions", weekdaysChange.id, "apply"], {})).status).toBe(200);
+  expect((await call("admin", ["suggestions", saturdayChange.id, "apply"], {})).status).toBe(200);
+  expect(entryNow().weekly).toMatchObject({ monday: [{ from: "08:00", to: "19:00" }], tuesday: [{ from: "08:00", to: "19:00" }], wednesday, saturday: [{ from: "09:00", to: "13:00" }] });
+  // Monday changed since the third was suggested: it is refused, and nothing changes.
+  const before = activeCalendar(metadata, PROJECT)!.version_id;
+  const refused = await call("admin", ["suggestions", mondayChange.id, "apply"], {});
+  expect(refused.status).toBe(409);
+  expect(refused.body.error?.message).toBe("REPORT_FEEDBACK_APPLY_HOURS_CHANGED");
+  expect(activeCalendar(metadata, PROJECT)!.version_id).toBe(before);
+  const failed = dataOf<ReportFeedbackState>(await call("admin", [])).feedback.flatMap(item => item.suggestions).find(item => item.id === mondayChange.id)!;
+  expect(failed).toMatchObject({ status: "failed", problem: { code: "hours_changed" }, error: "The hours changed since this suggestion. Send your feedback again." });
 });
 
 it("treats a repeated request as the same feedback and refuses a different text under the same request id", async () => {
@@ -159,7 +204,12 @@ it("keeps the feedback as a note when the AI is not available", async () => {
   const { feedback, state } = dataOf<{ feedback: FeedbackDto; state: ReportFeedbackState }>(viewer);
   expect(feedback).toMatchObject({ status: "saved", reply: null, suggestions: [], followUpIds: [] });
   expect(state.aiAvailable).toBe(false);
-  expect(state.memory).toEqual([expect.objectContaining({ id: feedback.memoryIds[0], text, kind: "fact", status: "pending" })]);
+  expect(state.memory).toEqual([expect.objectContaining({ id: feedback.memoryIds[0], text: "Pavilion 2 loses power by day, that's normal. It is on a timer.", kind: "fact", status: "pending" })]);
+  // Sent about a point to check, the point goes in front, and the note is cut to the length of the AI's own.
+  const about = await call("viewer", [], { requestId: crypto.randomUUID(), text: `That's normal. ${"x".repeat(400)}`, about: { kind: "check", key: `stopped:${meterId}`, title: "Pavilion 2 has stopped reporting" } }, "POST", offline);
+  const aboutMemory = dataOf<{ state: ReportFeedbackState }>(about).state.memory[0]!;
+  expect(aboutMemory.text.startsWith("“Pavilion 2 has stopped reporting”: That's normal.")).toBe(true);
+  expect(aboutMemory.text).toHaveLength(300);
   expect(fetchImpl).not.toHaveBeenCalled();
   // From an administrator it is in use straight away, on one line in the advisor's notes.
   const admin = await call("admin", [], { requestId: crypto.randomUUID(), text }, "POST", offline);
@@ -214,20 +264,30 @@ it("refuses to apply to a meter that is no longer in the setup, and says so", as
   });
   const response = await call("admin", ["suggestions", "gone", "apply"], {});
   expect(response.status).toBe(409);
-  expect(response.body.error?.message).toBe("Gone is no longer in this site's setup.");
-  expect(store.findSuggestion(PROJECT, "gone")?.suggestion).toMatchObject({ status: "failed", error: "Gone is no longer in this site's setup." });
+  // A code for the page to word in the reader's language; the English sentence stays with the record.
+  expect(response.body.error?.message).toBe("REPORT_FEEDBACK_APPLY_METER_MISSING");
+  expect(store.findSuggestion(PROJECT, "gone")?.suggestion).toMatchObject({ status: "failed", problem: { code: "meter_missing", name: "Gone" }, error: "Gone is no longer in this site's setup." });
   expect(applyProjectChanges).not.toHaveBeenCalled();
 });
 
-it("says a change is saved but not live when making it live fails", async () => {
+it("records a change that is saved but not live yet as applied, with the reason, and never applies it twice", async () => {
   answers.push({ reply: "ok", suggestions: [{ kind: "light_count", payload: { meterId, count: 8 } }] });
   const { feedback } = dataOf<{ feedback: FeedbackDto }>(await give("admin", "8 lights"));
   const failing = vi.fn(async () => { throw new Error("ENERGYIQ_PROJECT_DATA_NOT_READY:SNAPSHOT_MISSING"); });
   const response = await call("admin", ["suggestions", feedback.suggestions[0]!.id, "apply"], {}, "POST", { applyProjectChanges: failing });
-  expect(response.status).toBe(409);
-  expect(response.body.error?.message).toBe("The change is saved but not live yet. The site's readings are not ready. Try again later.");
-  // It can be tried again.
-  expect((await call("admin", ["suggestions", feedback.suggestions[0]!.id, "apply"], {})).status).toBe(200);
+  expect(response.status).toBe(200);
+  const result = dataOf<{ state: ReportFeedbackState; live: boolean }>(response);
+  expect(result.live).toBe(false);
+  expect(result.state.feedback[0]!.suggestions[0]).toMatchObject({
+    status: "applied", appliedByName: "admin", problem: { code: "not_live", detail: "data_not_ready" },
+    error: "The change is saved but not live yet. The site's readings are not ready. Try again later.",
+  });
+  // The draft holds the change, and the audit history says so.
+  const row = metadata.energyIq.projectSetup.getDraft({ project_id: PROJECT, user_id: "admin" }).document.meter_mapping!.rows.find(item => item.id === meterId)!;
+  expect(row.presentation?.light_count).toBe("8");
+  const audit = metadata.authAuditEvents.list({ categories: ["energyiq.report_"], limit: 50 }).events.find(event => event.event_type === "energyiq.report_feedback_applied");
+  expect(JSON.parse(audit!.metadata_json ?? "{}")).toMatchObject({ kind: "light_count", outcome: "saved_not_live" });
+  expect((await call("admin", ["suggestions", feedback.suggestions[0]!.id, "apply"], {})).status).toBe(409);
 });
 
 it("adds a day off and a new electricity rate from a date", async () => {
@@ -257,12 +317,13 @@ it("stops flagging a report point once an administrator agrees", async () => {
     reportContext: { checks: [{ key: "daytime", title: "Daytime use" }], figures: ["1,200 kWh this week"] },
   }));
   expect(feedback.about).toEqual({ kind: "check", key: "daytime", title: "Daytime use" });
-  expect(feedback.suggestions).toEqual([expect.objectContaining({ kind: "dismiss_check", label: "Stop flagging “Daytime use” in reports", payload: { checkKey: "daytime", title: "Daytime use", reason: "Cleaners work by day" } })]);
+  // The card names the point the way the report does, whatever title the page or the AI gave it.
+  expect(feedback.suggestions).toEqual([expect.objectContaining({ kind: "dismiss_check", label: "Stop flagging “Daytime use on lighting circuits” in reports", payload: { checkKey: "daytime", title: "Daytime use on lighting circuits", reason: "Cleaners work by day" } })]);
   const prompt = JSON.parse((JSON.parse(String(fetchImpl.mock.calls[0]![1]!.body)) as { messages: Array<{ content: string }> }).messages[1]!.content) as { user_data: unknown };
   expect(prompt.user_data).toMatchObject({ report_context: { checks: [{ key: "daytime" }], figures: ["1,200 kWh this week"] } });
   const applied = await call("admin", ["suggestions", feedback.suggestions[0]!.id, "apply"], {});
-  expect(dataOf<{ state: ReportFeedbackState }>(applied).state.dismissedChecks).toEqual([{ key: "daytime", title: "Daytime use", reason: "Cleaners work by day", createdAt: NOW.toISOString() }]);
-  expect(readEnergyProjectInformation(metadata, "viewer", "default", PROJECT).dismissedChecks).toEqual([{ key: "daytime", title: "Daytime use", reason: "Cleaners work by day" }]);
+  expect(dataOf<{ state: ReportFeedbackState }>(applied).state.dismissedChecks).toEqual([{ key: "daytime", title: "Daytime use on lighting circuits", reason: "Cleaners work by day", createdAt: NOW.toISOString() }]);
+  expect(readEnergyProjectInformation(metadata, "viewer", "default", PROJECT).dismissedChecks).toEqual([{ key: "daytime", title: "Daytime use on lighting circuits", reason: "Cleaners work by day" }]);
   expect(applyProjectChanges).not.toHaveBeenCalled();
 });
 
@@ -326,7 +387,7 @@ it("hides everything from people who cannot read the project's reports", async (
   expect((await give("outsider", "hello")).status).toBe(404);
   const state = await call("viewer", []);
   expect(state.status).toBe(200);
-  expect(dataOf<ReportFeedbackState>(state)).toEqual({ canGive: true, canManage: false, aiAvailable: true, feedback: [], memory: [], followUps: [], dismissedChecks: [] });
+  expect(dataOf<ReportFeedbackState>(state)).toEqual({ canGive: true, canManage: false, aiAvailable: true, feedback: [], memory: [], followUps: [], dismissedChecks: [], reportInputs: { feedbackMemory: [], followUps: [], dismissedChecks: [] } });
   expect(dataOf<ReportFeedbackState>(await call("admin", [])).canManage).toBe(true);
 });
 
@@ -336,4 +397,74 @@ it("refuses feedback that is empty, too long or malformed", async () => {
   expect((await call("viewer", [], { requestId: "not-a-uuid", text: "hi" })).status).toBe(422);
   expect((await give("viewer", "hi", { reportContext: { checks: Array.from({ length: 41 }, (_, index) => ({ key: `k${index}`, title: "t" })), figures: [] } })).status).toBe(422);
   expect(fetchImpl).not.toHaveBeenCalled();
+});
+
+it("limits how much feedback someone who is not an administrator can send", async () => {
+  const offline = { resolveModel: () => { throw new Error("REPORT_MODEL_NOT_CONFIGURED"); } };
+  for (let index = 0; index < RATE_LIMITS.perPersonShort.count; index += 1) {
+    expect((await call("viewer", [], { requestId: crypto.randomUUID(), text: `Note ${index}` }, "POST", offline)).status).toBe(200);
+  }
+  const limited = await call("viewer", [], { requestId: crypto.randomUUID(), text: "One more" }, "POST", offline);
+  expect(limited.status).toBe(429);
+  expect(limited.body.error?.message).toBe("REPORT_FEEDBACK_RATE_LIMITED");
+  // Someone else, and an administrator, can still send.
+  expect((await call("viewer2", [], { requestId: crypto.randomUUID(), text: "Mine" }, "POST", offline)).status).toBe(200);
+  expect((await call("admin", [], { requestId: crypto.randomUUID(), text: "Admin note" }, "POST", offline)).status).toBe(200);
+  // Ten minutes later the same person can send again.
+  const later = { ...offline, now: () => new Date(NOW.getTime() + 11 * 60_000) };
+  expect((await call("viewer", [], { requestId: crypto.randomUUID(), text: "Later" }, "POST", later)).status).toBe(200);
+});
+
+it("refuses new feedback rather than pushing out what others are waiting on", async () => {
+  const offline = { resolveModel: () => { throw new Error("REPORT_MODEL_NOT_CONFIGURED"); } };
+  const store = new ReportFeedbackStore(metadata.db);
+  for (let index = 0; index < MAX_PENDING_MEMORY; index += 1) {
+    store.addMemory(PROJECT, { text: `waiting ${index}`, kind: "fact", status: "pending", authorUserId: `someone-${index}`, authorName: "Someone", sourceFeedbackId: null });
+  }
+  const refused = await call("viewer", [], { requestId: crypto.randomUUID(), text: "Mine" }, "POST", offline);
+  expect(refused.status).toBe(409);
+  expect(refused.body.error?.message).toBe("REPORT_FEEDBACK_FULL");
+  expect(store.listMemory(PROJECT, ["pending"])).toHaveLength(MAX_PENDING_MEMORY);
+  // An administrator's feedback is in use straight away and needs no room among the waiting.
+  expect((await call("admin", [], { requestId: crypto.randomUUID(), text: "Admin note" }, "POST", offline)).status).toBe(200);
+});
+
+it("answers a repeat that arrives while the AI is still reading with 'still processing', then with the finished feedback", async () => {
+  let release: (value: Response) => void = () => undefined;
+  fetchImpl.mockImplementationOnce(() => new Promise<Response>(resolve => { release = resolve; }));
+  const requestId = crypto.randomUUID();
+  const first = call("viewer", [], { requestId, text: "The fan must never run." });
+  await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
+  const repeat = await call("viewer", [], { requestId, text: "The fan must never run." });
+  expect(repeat.status).toBe(409);
+  expect(repeat.body.error?.message).toBe("REPORT_FEEDBACK_STILL_PROCESSING");
+  expect(dataOf<ReportFeedbackState>(await call("viewer", [])).feedback[0]).toMatchObject({ status: "processing", reply: null });
+  release(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ reply: "Noted.", memory: [{ text: "The fan must never run.", kind: "rule" }] }) } }] })));
+  expect((await first).status).toBe(200);
+  const finished = await call("viewer", [], { requestId, text: "The fan must never run." });
+  expect(dataOf<{ feedback: FeedbackDto }>(finished).feedback).toMatchObject({ status: "processed", reply: "Noted." });
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+});
+
+it("keeps feedback the server stopped reading part-way as a note", async () => {
+  const store = new ReportFeedbackStore(metadata.db);
+  store.insertFeedback({
+    id: "cut-off", projectId: PROJECT, requestId: crypto.randomUUID(), text: "Lights go off at 7:10", about: null, authorRole: "member",
+    authorUserId: "viewer", authorName: "viewer", createdAt: new Date(NOW.getTime() - STALE_PROCESSING_MS - 1000).toISOString(),
+    status: "processing", reply: null, memoryIds: [], followUpIds: [], suggestions: [],
+  });
+  const state = dataOf<ReportFeedbackState>(await call("viewer", []));
+  expect(state.feedback[0]).toMatchObject({ id: "cut-off", status: "saved", reply: null });
+  expect(state.memory).toEqual([expect.objectContaining({ id: state.feedback[0]!.memoryIds[0], text: "Lights go off at 7:10", status: "pending" })]);
+});
+
+it("gives report feedback in the project information only to people who may read the reports", () => {
+  const role = metadata.energyIq.roles.create({ id: "facility-reader", name: "Facility reader", permissions: { facility: "read" } });
+  metadata.users.createPasswordUser({ id: "facility", email: "facility@example.test" });
+  metadata.workspaceMemberships.upsert({ workspace_id: "default", user_id: "facility", role: "member", role_id: role.id });
+  new ReportFeedbackStore(metadata.db).addMemory(PROJECT, { text: "The fan must never run.", kind: "rule", status: "active", authorUserId: "admin", authorName: "admin", sourceFeedbackId: null }, NOW);
+  const information = readEnergyProjectInformation(metadata, "facility", "default", PROJECT);
+  expect(information.meters.length).toBeGreaterThan(0);
+  expect(information).toMatchObject({ feedbackMemory: [], followUps: [], dismissedChecks: [] });
+  expect(readEnergyProjectInformation(metadata, "viewer", "default", PROJECT).feedbackMemory).toEqual([{ text: "The fan must never run.", date: "2026-11-18" }]);
 });

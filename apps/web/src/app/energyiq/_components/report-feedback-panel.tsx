@@ -5,10 +5,12 @@
  * changes and writes follow-ups the next report checks.
  *
  * Nothing on the site changes from here without an admin: an admin applies or dismisses each suggested change,
- * approves memory written by others, and closes follow-ups. Everyone else sees what is waiting for an admin.
+ * approves memory and follow-ups written by others, and closes follow-ups. Everyone else sees what is waiting for an
+ * admin. What went wrong is said in the reader's language, from the codes the server gives.
  */
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import type { EnergyReview } from "@datafoundry/site-report";
+import { ConfigApiError } from "../../../lib/config-api";
 import { useEnergyIqAccess } from "./energyiq-access";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { intlLocale, type EnergyIqLocale } from "./energyiq-messages";
@@ -16,7 +18,10 @@ import { useFriendlyError } from "./friendly-error";
 import { reportFeedbackMessages } from "./report-feedback-messages";
 import {
   FEEDBACK_MAX_LENGTH,
+  notLiveReason,
+  problemText,
   reportContextOf,
+  sentences,
   reportFeedbackApi,
   suggestionLabel,
   suggestionsOf,
@@ -125,23 +130,32 @@ export function ReportFeedbackPanel({ projectId, feedback, review, report, focus
       setSent(result.feedback);
       setText(""); setAbout(null); setAttempt(null);
     } catch (reason) {
-      setSendError(friendly(reason, t("sendFailed")));
+      const code = reason instanceof ConfigApiError ? reason.message : "";
+      if (code === "REPORT_FEEDBACK_STILL_PROCESSING") {
+        // The first try is still being read: show it as it stands, and keep the words for another try.
+        setSendError(t("stillProcessing"));
+        controller.reload();
+      } else if (code === "REPORT_FEEDBACK_RATE_LIMITED") setSendError(t("rateLimited"));
+      else if (code === "REPORT_FEEDBACK_FULL") setSendError(t("full"));
+      else setSendError(friendly(reason, t("sendFailed")));
     } finally {
       setSending(false);
     }
   }
 
   /** One change at a time; each answers with the new state. A failure reloads the state, which says what happened. */
-  async function run<R extends { state: ReportFeedbackState }>(key: string, change: () => Promise<R>, fallback: string, done?: (result: R) => string | null) {
+  async function run<R extends { state: ReportFeedbackState }>(key: string, change: () => Promise<R>, fallback: string, done?: (result: R) => { tone: "ok" | "error"; text: string } | string | null) {
     if (busy) return;
     setBusy(key); setNotice(null);
     try {
       const result = await change();
       controller.setState(result.state);
       const message = done?.(result) ?? null;
-      if (message) setNotice({ tone: "ok", text: message });
+      if (message) setNotice(typeof message === "string" ? { tone: "ok", text: message } : message);
     } catch (reason) {
-      setNotice({ tone: "error", text: friendly(reason, fallback) });
+      // A change that could not be applied says why on its own card; the notice only says it did not work.
+      const applyProblem = reason instanceof ConfigApiError && reason.message.startsWith("REPORT_FEEDBACK_APPLY_");
+      setNotice({ tone: "error", text: applyProblem ? fallback : friendly(reason, fallback) });
       controller.reload();
     } finally {
       setBusy(null);
@@ -153,12 +167,17 @@ export function ReportFeedbackPanel({ projectId, feedback, review, report, focus
     controller.reload();
     onSiteChanged?.();
     // The server's sentence is English; other readers see the change in their own words.
-    return t("appliedNow", { applied: (locale === "en" && result.applied?.trim()) || suggestionLabel(suggestion, locale, t) });
+    const applied = (locale === "en" && result.applied?.trim()) || suggestionLabel(suggestion, locale, t);
+    if (result.live !== false) return t("appliedNow", { applied });
+    // Saved, but making it live failed: say so, and why, so nobody takes it as done.
+    const after = result.state.feedback.flatMap(item => item.suggestions).find(item => item.id === suggestion.id);
+    return { tone: "error", text: t("savedNotLive", { applied: applied.replace(/[.。]$/u, ""), reason: notLiveReason(after?.problem, t) }) };
   });
   const dismiss = (suggestion: SuggestionDto) => run(`dismiss:${suggestion.id}`, () => reportFeedbackApi.dismissSuggestion(projectId, suggestion.id), t("actionFailed"));
   const approve = (memory: MemoryDto) => run(`approve:${memory.id}`, () => reportFeedbackApi.approveMemory(projectId, memory.id), t("actionFailed"));
+  const approveFollowUp = (followUp: FollowUpDto) => run(`approve:${followUp.id}`, () => reportFeedbackApi.approveFollowUp(projectId, followUp.id), t("actionFailed"));
   const remove = (memory: MemoryDto) => run(`remove:${memory.id}`, () => reportFeedbackApi.removeMemory(projectId, memory.id), t("actionFailed"));
-  const setStatus = (followUp: FollowUpDto, status: FollowUpStatus) => run(`status:${followUp.id}`, () => reportFeedbackApi.setFollowUpStatus(projectId, followUp.id, status), t("actionFailed"));
+  const setStatus = (followUp: FollowUpDto, status: Exclude<FollowUpStatus, "pending">) => run(`status:${followUp.id}`, () => reportFeedbackApi.setFollowUpStatus(projectId, followUp.id, status), t("actionFailed"));
   const checkNow = () => run("review", () => reportFeedbackApi.reviewFollowUps(projectId), t("reviewFailed"), () => t("checked"));
 
   const suggestions = state ? suggestionsOf(state) : [];
@@ -169,12 +188,18 @@ export function ReportFeedbackPanel({ projectId, feedback, review, report, focus
   const nothingYet = !!state && !history.length && !memory.length && !followUps.length && !suggestions.length;
   const sentPending = !!sent && !!state && sent.memoryIds.some(id => state.memory.find(item => item.id === id)?.status === "pending");
 
+  /** The server's English sentence only when this page cannot word the problem's code itself. */
+  const problemOf = (suggestion: SuggestionDto) => problemText(suggestion.problem, locale, t) ?? (locale === "en" ? suggestion.error?.trim() : "") ?? "";
   const suggestionStatus = (suggestion: SuggestionDto) => {
-    if (suggestion.status === "applied") return suggestion.appliedByName
-      ? t("appliedBy", { name: suggestion.appliedByName, date: dateText(suggestion.appliedAt, locale) })
-      : t("applied", { date: dateText(suggestion.appliedAt, locale) });
+    if (suggestion.status === "applied") {
+      const applied = suggestion.appliedByName
+        ? t("appliedBy", { name: suggestion.appliedByName, date: dateText(suggestion.appliedAt, locale) })
+        : t("applied", { date: dateText(suggestion.appliedAt, locale) });
+      const notLive = suggestion.problem?.code === "not_live" ? problemOf(suggestion) : "";
+      return sentences([applied, notLive], locale);
+    }
     if (suggestion.status === "dismissed") return t("dismissed");
-    if (suggestion.status === "failed") return t("failedApply", { error: suggestion.error?.trim() || t("applyFailed") });
+    if (suggestion.status === "failed") return t("failedApply", { error: problemOf(suggestion) || t("applyFailed") });
     return null;
   };
 
@@ -205,7 +230,8 @@ export function ReportFeedbackPanel({ projectId, feedback, review, report, focus
           {sendError && <p role="alert" className={styles.error}>{sendError}</p>}
         </form>
         {sent && <div role="status" className={styles.reply}>
-          {sent.reply ? <><strong>{t("replyHeading")}</strong><p>{sent.reply}</p></> : <p>{t(state.aiAvailable ? "savedAiFailed" : "savedNoAi")}</p>}
+          {sent.reply ? <><strong>{t("replyHeading")}</strong><p>{sent.reply}</p></>
+            : <p>{sent.status === "processed" ? t("replyDefault") : t(state.aiAvailable ? "savedAiFailed" : "savedNoAi")}</p>}
           {sentPending && <p className={styles.note}>{t("pendingNote")}</p>}
         </div>}
         {notice && <p role={notice.tone === "error" ? "alert" : "status"} className={notice.tone === "error" ? styles.error : styles.done}>{notice.text}</p>}
@@ -221,7 +247,7 @@ export function ReportFeedbackPanel({ projectId, feedback, review, report, focus
             return <li key={suggestion.id} className={styles.card} data-status={suggestion.status}>
               {KINDS.has(suggestion.kind) && <span className={styles.kind}>{t(`kind.${suggestion.kind}`)}</span>}
               <p className={styles.cardText}>{label}</p>
-              {status && <p className={suggestion.status === "failed" ? styles.cardError : styles.meta}>{status}</p>}
+              {status && <p className={suggestion.status === "failed" || suggestion.problem?.code === "not_live" ? styles.cardError : styles.meta}>{status}</p>}
               {waiting && (canManage
                 ? <div className={styles.actions}>
                   <button type="button" className={styles.primary} disabled={!!busy} aria-label={itemLabel(t("apply"), label)} onClick={() => { void apply(suggestion); }}>{busy === `apply:${suggestion.id}` ? t("applying") : t("apply")}</button>
@@ -268,22 +294,28 @@ export function ReportFeedbackPanel({ projectId, feedback, review, report, focus
           <ul className={styles.list}>{followUps.map(item => <li key={item.id} className={styles.card} data-status={item.status}>
             <p className={styles.cardText}>{item.text}</p>
             <p className={styles.meta}>
-              <span className={styles.status} data-status={item.status}>{t(`status.${item.status}`)}</span>
-              {item.status === "open" && <span>{t(`checkBy.${item.checkBy}`)}</span>}
+              <span className={item.status === "pending" ? styles.pending : styles.status} data-status={item.status}>{t(`status.${item.status}`)}</span>
+              {(item.status === "open" || item.status === "pending") && <span>{t(`checkBy.${item.checkBy}`)}</span>}
             </p>
             {item.lastCheck && <p className={styles.check} data-verdict={item.lastCheck.verdict}>
               <strong>{t("lastCheck", { date: dateText(item.lastCheck.at, locale), verdict: t(`verdict.${item.lastCheck.verdict}`) })}</strong>
               {item.lastCheck.evidence ? ` ${item.lastCheck.evidence}` : ""}
             </p>}
             {item.status === "open" && item.lastCheck?.verdict === "resolved" && <p className={styles.note}>{t("resolvedHint")}</p>}
+            {item.closedReason === "made_room" && <p className={styles.meta}>{t("madeRoom")}</p>}
             {item.note && <p className={styles.meta}>{t("note", { note: item.note })}</p>}
             {canManage && <div className={styles.actions}>
-              {item.status === "open"
+              {item.status === "pending"
                 ? <>
-                  <button type="button" className={styles.primary} disabled={!!busy} aria-label={itemLabel(t("markDone"), item.text)} onClick={() => { void setStatus(item, "done"); }}>{t("markDone")}</button>
+                  <button type="button" className={styles.primary} disabled={!!busy} aria-label={itemLabel(t("approve"), item.text)} onClick={() => { void approveFollowUp(item); }}>{t("approve")}</button>
                   <button type="button" className={styles.secondary} disabled={!!busy} aria-label={itemLabel(t("drop"), item.text)} onClick={() => { void setStatus(item, "dropped"); }}>{t("drop")}</button>
                 </>
-                : <button type="button" className={styles.secondary} disabled={!!busy} aria-label={itemLabel(t("reopen"), item.text)} onClick={() => { void setStatus(item, "open"); }}>{t("reopen")}</button>}
+                : item.status === "open"
+                  ? <>
+                    <button type="button" className={styles.primary} disabled={!!busy} aria-label={itemLabel(t("markDone"), item.text)} onClick={() => { void setStatus(item, "done"); }}>{t("markDone")}</button>
+                    <button type="button" className={styles.secondary} disabled={!!busy} aria-label={itemLabel(t("drop"), item.text)} onClick={() => { void setStatus(item, "dropped"); }}>{t("drop")}</button>
+                  </>
+                  : <button type="button" className={styles.secondary} disabled={!!busy} aria-label={itemLabel(t("reopen"), item.text)} onClick={() => { void setStatus(item, "open"); }}>{t("reopen")}</button>}
             </div>}
           </li>)}</ul>
         </section>}
@@ -296,7 +328,7 @@ export function ReportFeedbackPanel({ projectId, feedback, review, report, focus
               {item.about && <span className={styles.kind}>{t("aboutChip", { title: item.about.title })}</span>}
               <span>{t("byOn", { name: item.authorName, date: dateText(item.createdAt, locale) })}</span>
             </p>
-            <p className={styles.historyReply}>{item.reply ?? t("historyNoReply")}</p>
+            <p className={styles.historyReply}>{item.reply ?? (item.status === "processing" ? t("processing") : item.status === "processed" ? t("replyDefault") : t("historyNoReply"))}</p>
           </li>)}</ul>
         </details>}
       </div>}

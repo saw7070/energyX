@@ -25,6 +25,30 @@ export const SUGGESTION_KINDS = [
 ] as const;
 export type SuggestionKind = (typeof SUGGESTION_KINDS)[number];
 
+/**
+ * Why a change could not be made, or (code "not_live") why an applied change is saved but not live yet, as a stable
+ * code the page words in the reader's language. `detail` narrows "not_live" and the "*_not_saved" codes; `name` is the
+ * meter's name and `date` a YYYY-MM-DD day, where the sentence needs one.
+ */
+export type ApplyProblemCode =
+  | "invalid"
+  | "no_hours"
+  | "hours_changed"
+  | "no_hours_for_date"
+  | "hours_not_saved"
+  | "day_off_not_saved"
+  | "no_rate"
+  | "peak_pricing"
+  | "rate_changed"
+  | "rate_not_saved"
+  | "meter_missing"
+  | "meter_invalid"
+  | "setup_conflict"
+  | "failed"
+  | "not_live";
+export type ApplyProblemDetail = "overlap" | "outside_range" | "bad_time" | "admin_required" | "setup_invalid" | "data_not_ready" | "conflict" | "other";
+export type SuggestionProblem = { code: ApplyProblemCode; detail?: ApplyProblemDetail; name?: string; date?: string };
+
 export type SuggestionDto = {
   id: string;
   kind: SuggestionKind;
@@ -34,7 +58,10 @@ export type SuggestionDto = {
   status: "open" | "applied" | "dismissed" | "failed";
   appliedAt?: string;
   appliedByName?: string;
+  /** The same problem in English, for readers of the raw record; the page words `problem` instead. */
   error?: string;
+  /** On a failed suggestion: why. On an applied one: only "not_live", the change is saved but not live yet. */
+  problem?: SuggestionProblem;
 };
 
 export type FeedbackDto = {
@@ -44,7 +71,8 @@ export type FeedbackDto = {
   authorUserId: string;
   authorName: string;
   createdAt: string;
-  status: "processed" | "saved" | "failed";
+  /** `processing`: the AI is still reading it; `saved`: kept as one memory item without the AI. */
+  status: "processing" | "processed" | "saved" | "failed";
   reply: string | null;
   memoryIds: string[];
   followUpIds: string[];
@@ -60,22 +88,41 @@ export type MemoryDto = {
   authorUserId: string;
   authorName: string;
   createdAt: string;
+  /** When it became active (an administrator wrote or approved it); the date the reports give it. */
+  activatedAt?: string;
   sourceFeedbackId: string | null;
 };
 
 export type FollowUpVerdict = "resolved" | "ongoing" | "unclear";
+/**
+ * `pending`: from someone who is not an administrator. Like their memory, it waits for an administrator before the
+ * reports, the AI and the advisor's notes use it.
+ */
+export type FollowUpStatus = "pending" | "open" | "done" | "dropped";
 export type FollowUpDto = {
   id: string;
   text: string;
   checkBy: "next_report" | "next_month";
-  status: "open" | "done" | "dropped";
+  status: FollowUpStatus;
   createdAt: string;
   sourceFeedbackId: string | null;
   lastCheck?: { at: string; verdict: FollowUpVerdict; evidence: string };
+  /** An administrator's own note. */
   note?: string;
+  /** When it was marked done or dropped. */
+  closedAt?: string;
+  /** "made_room": dropped to keep within the limit, not by a person. */
+  closedReason?: "made_room";
 };
 
 export type DismissedCheckDto = { key: string; title: string; reason: string; createdAt: string };
+
+/** What the site's own reports read from feedback (AnalysisData's feedbackMemory, followUps and dismissedChecks). */
+export type ReportFeedbackInputs = {
+  feedbackMemory: Array<{ text: string; date: string }>;
+  followUps: Array<{ text: string; status: "open" | "done" | "dropped"; createdAt: string; lastCheck?: FollowUpDto["lastCheck"] }>;
+  dismissedChecks: Array<{ key: string; title: string; reason: string }>;
+};
 
 export type ReportFeedbackState = {
   canGive: boolean;
@@ -85,10 +132,17 @@ export type ReportFeedbackState = {
   memory: MemoryDto[];
   followUps: FollowUpDto[];
   dismissedChecks: DismissedCheckDto[];
+  /** Exactly what the reports read now, so the page shows the same as the next scheduled report. */
+  reportInputs: ReportFeedbackInputs;
 };
 
 /** Stored shapes: the DTO plus the few fields only the server needs. */
-export type FeedbackRecord = FeedbackDto & { projectId: string; requestId: string };
+export type FeedbackRecord = FeedbackDto & {
+  projectId: string;
+  requestId: string;
+  /** Whether a platform administrator wrote it: what it leads to is in use straight away, or waits for one. */
+  authorRole?: "admin" | "member";
+};
 export type MemoryRecord = MemoryDto & {
   projectId: string;
   updatedAt: string;
@@ -101,19 +155,26 @@ export type FollowUpRecord = FollowUpDto & {
   projectId: string;
   authorUserId: string;
   updatedAt: string;
-  closedAt?: string;
+  /** When an administrator wrote, approved or re-opened it. Only follow-ups with this reach the reports. */
+  activatedAt?: string;
   noteLine?: string;
 };
 export type DismissedCheckRecord = DismissedCheckDto & { id: string; projectId: string; suggestionId: string | null };
 
-/** Most feedback kept per project; the oldest goes first. */
+/** Most feedback kept per project; the oldest goes first, except feedback with a change still waiting to be applied. */
 export const MAX_FEEDBACK = 200;
 /** Most memory in use per project; the oldest is set aside first. */
 export const MAX_ACTIVE_MEMORY = 100;
-/** Most memory waiting for an administrator per project; the oldest waiting item is set aside first. */
+/** Most memory waiting for an administrator per project. When it is full, new feedback from others is refused. */
 export const MAX_PENDING_MEMORY = 50;
-/** Most open follow-ups per project; the oldest is dropped first. */
+/** Most memory one person may have waiting; their own oldest waiting item is set aside first, never anyone else's. */
+export const MAX_PENDING_MEMORY_PER_AUTHOR = 20;
+/** Most open follow-ups per project; the oldest is dropped first. Only administrators open follow-ups. */
 export const MAX_OPEN_FOLLOW_UPS = 50;
+/** Most follow-ups waiting for an administrator per project; past it, new ones from others are not kept. */
+export const MAX_PENDING_FOLLOW_UPS = 50;
+/** Most follow-ups one person may have waiting; their own oldest is dropped first. */
+export const MAX_PENDING_FOLLOW_UPS_PER_AUTHOR = 10;
 /** Closed follow-ups and removed memory are kept this long in number, for the record, then deleted. */
 const MAX_CLOSED_FOLLOW_UPS = 100;
 const MAX_REMOVED_MEMORY = 200;
@@ -138,12 +199,24 @@ export const toFeedbackDto = (record: FeedbackRecord): FeedbackDto => ({
 });
 export const toMemoryDto = (record: MemoryRecord): MemoryDto => ({
   id: record.id, text: record.text, kind: record.kind, status: record.status, authorUserId: record.authorUserId,
-  authorName: record.authorName, createdAt: record.createdAt, sourceFeedbackId: record.sourceFeedbackId,
+  authorName: record.authorName, createdAt: record.createdAt, ...(record.status === "active" && record.activatedAt ? { activatedAt: record.activatedAt } : {}),
+  sourceFeedbackId: record.sourceFeedbackId,
 });
 export const toFollowUpDto = (record: FollowUpRecord): FollowUpDto => ({
   id: record.id, text: record.text, checkBy: record.checkBy, status: record.status, createdAt: record.createdAt,
   sourceFeedbackId: record.sourceFeedbackId, ...(record.lastCheck ? { lastCheck: record.lastCheck } : {}), ...(record.note ? { note: record.note } : {}),
+  ...(record.status !== "open" && record.status !== "pending" && record.closedAt ? { closedAt: record.closedAt } : {}),
+  ...(record.closedReason ? { closedReason: record.closedReason } : {}),
 });
+
+/** A suggestion an administrator has not acted on yet. */
+const waiting = (suggestion: SuggestionDto) => suggestion.status === "open" || suggestion.status === "failed";
+/**
+ * Feedback that may make room for newer feedback: not still being read, and with no change waiting to be applied.
+ * Someone who is not an administrator never makes room by pushing out an administrator's feedback.
+ */
+const evictable = (record: FeedbackRecord, forAdmin: boolean) =>
+  record.status !== "processing" && !record.suggestions.some(waiting) && (forAdmin || record.authorRole !== "admin");
 export const toDismissedDto = (record: DismissedCheckRecord): DismissedCheckDto => ({
   key: record.key, title: record.title, reason: record.reason, createdAt: record.createdAt,
 });
@@ -173,14 +246,41 @@ export class ReportFeedbackStore {
       .get(projectId, authorUserId, requestId));
   }
 
-  /** Saves new feedback; the same person sending the same request twice gets the first one back. */
+  /**
+   * Saves new feedback; the same person sending the same request twice gets the first one back. Past the limit the
+   * oldest feedback goes, but never feedback still being read or with a change still waiting for an administrator.
+   */
   insertFeedback(record: FeedbackRecord): { record: FeedbackRecord; created: boolean } {
     const result = this.db.prepare("INSERT OR IGNORE INTO energyiq_report_feedback (id, project_id, author_id, request_id, document) VALUES (?,?,?,?,?)")
       .run(record.id, record.projectId, record.authorUserId, record.requestId, JSON.stringify(record));
     if (!Number(result.changes)) return { record: this.findFeedbackByRequest(record.projectId, record.authorUserId, record.requestId)!, created: false };
-    this.db.prepare(`DELETE FROM energyiq_report_feedback WHERE project_id=? AND rowid NOT IN (
-      SELECT rowid FROM energyiq_report_feedback WHERE project_id=? ORDER BY rowid DESC LIMIT ?)`).run(record.projectId, record.projectId, MAX_FEEDBACK);
+    const rows = this.db.prepare("SELECT rowid AS position, document FROM energyiq_report_feedback WHERE project_id=? ORDER BY rowid ASC").all(record.projectId);
+    const over = rows.length - MAX_FEEDBACK;
+    if (over > 0) {
+      const remove = this.db.prepare("DELETE FROM energyiq_report_feedback WHERE rowid=?");
+      rows.filter(row => { const item = parse<FeedbackRecord>(row)!; return item.id !== record.id && evictable(item, record.authorRole === "admin"); })
+        .slice(0, over).forEach(row => remove.run(Number(row.position)));
+    }
     return { record, created: true };
+  }
+
+  /** Whether new feedback fits: under the limit, or older feedback can make room for it. */
+  hasFeedbackRoom(projectId: string, forAdmin = false): boolean {
+    const rows = this.db.prepare("SELECT document FROM energyiq_report_feedback WHERE project_id=?").all(projectId).map(row => parse<FeedbackRecord>(row)!);
+    return rows.length < MAX_FEEDBACK || rows.some(item => evictable(item, forAdmin));
+  }
+
+  /** How much feedback was sent since an instant: by one person, or (with `nonAdmin`) by everyone but administrators. */
+  countFeedbackSince(projectId: string, since: string, filter: { authorUserId?: string; nonAdmin?: boolean } = {}): number {
+    return this.db.prepare("SELECT document FROM energyiq_report_feedback WHERE project_id=? AND json_extract(document,'$.createdAt') >= ?")
+      .all(projectId, since).map(row => parse<FeedbackRecord>(row)!)
+      .filter(item => (!filter.authorUserId || item.authorUserId === filter.authorUserId) && (!filter.nonAdmin || item.authorRole !== "admin")).length;
+  }
+
+  /** Feedback the AI started reading before an instant and never finished (the server stopped, or it is stuck). */
+  staleProcessing(projectId: string, before: string): FeedbackRecord[] {
+    return this.db.prepare("SELECT document FROM energyiq_report_feedback WHERE project_id=? AND json_extract(document,'$.status')='processing' AND json_extract(document,'$.createdAt') < ?")
+      .all(projectId, before).map(row => parse<FeedbackRecord>(row)!);
   }
 
   saveFeedback(record: FeedbackRecord): FeedbackRecord {
@@ -228,8 +328,14 @@ export class ReportFeedbackStore {
     };
     this.db.prepare("INSERT INTO energyiq_report_feedback_memory (id, project_id, status, document) VALUES (?,?,?,?)")
       .run(memory.id, projectId, memory.status, JSON.stringify(memory));
-    const evicted = memory.status === "removed" ? [] : this.enforceMemoryLimit(projectId, memory.status, now);
+    const evicted = memory.status === "active" ? this.enforceMemoryLimit(projectId, now)
+      : memory.status === "pending" ? this.enforcePendingMemoryLimit(projectId, memory.authorUserId, now) : [];
     return { memory, evicted };
+  }
+
+  /** How much memory waits for an administrator, in all. */
+  countPendingMemory(projectId: string): number {
+    return Number((this.db.prepare("SELECT COUNT(*) AS count FROM energyiq_report_feedback_memory WHERE project_id=? AND status='pending'").get(projectId) as { count: number }).count);
   }
 
   getMemory(projectId: string, id: string): MemoryRecord | undefined {
@@ -256,13 +362,18 @@ export class ReportFeedbackStore {
     if (!current || current.status === "removed") throw new Error("REPORT_FEEDBACK_NOT_FOUND");
     if (current.status === "active") return { memory: current, evicted: [] };
     const memory = this.saveMemory({ ...current, status: "active", activatedAt: now.toISOString(), updatedAt: now.toISOString() });
-    return { memory, evicted: this.enforceMemoryLimit(projectId, "active", now) };
+    return { memory, evicted: this.enforceMemoryLimit(projectId, now) };
   }
 
-  private enforceMemoryLimit(projectId: string, status: "active" | "pending", now: Date): MemoryRecord[] {
-    const limit = status === "active" ? MAX_ACTIVE_MEMORY : MAX_PENDING_MEMORY;
-    const items = this.listMemory(projectId, [status]);
-    return items.slice(limit).map(item => this.saveMemory({ ...item, status: "removed", updatedAt: now.toISOString() }));
+  /** Active memory grows only by an administrator's hand, so the oldest active memory makes room. */
+  private enforceMemoryLimit(projectId: string, now: Date): MemoryRecord[] {
+    return this.listMemory(projectId, ["active"]).slice(MAX_ACTIVE_MEMORY).map(item => this.saveMemory({ ...item, status: "removed", updatedAt: now.toISOString() }));
+  }
+
+  /** One person's waiting memory makes room only from their own oldest waiting items. */
+  private enforcePendingMemoryLimit(projectId: string, authorUserId: string, now: Date): MemoryRecord[] {
+    return this.listMemory(projectId, ["pending"]).filter(item => item.authorUserId === authorUserId).slice(MAX_PENDING_MEMORY_PER_AUTHOR)
+      .map(item => this.saveMemory({ ...item, status: "removed", updatedAt: now.toISOString() }));
   }
 
   private pruneRemovedMemory(projectId: string): void {
@@ -273,16 +384,37 @@ export class ReportFeedbackStore {
 
   // Follow-ups -------------------------------------------------------------------------------------------------
 
-  /** Adds an open follow-up. Returns any follow-ups dropped to stay within the limit, oldest first. */
-  addFollowUp(projectId: string, input: Pick<FollowUpDto, "text" | "checkBy" | "sourceFeedbackId"> & { authorUserId: string }, now = new Date()): { followUp: FollowUpRecord; evicted: FollowUpRecord[] } {
+  /**
+   * Adds a follow-up: open when an administrator wrote it, else waiting for one. Returns any follow-ups dropped to
+   * stay within the limits, oldest first: open ones for an administrator's, only the same person's for anyone else's.
+   */
+  addFollowUp(projectId: string, input: Pick<FollowUpDto, "text" | "checkBy" | "sourceFeedbackId"> & { authorUserId: string; status?: "open" | "pending" }, now = new Date()): { followUp: FollowUpRecord; evicted: FollowUpRecord[] } {
     const at = now.toISOString();
+    const status = input.status ?? "open";
     const followUp: FollowUpRecord = {
-      id: randomUUID(), projectId, text: input.text, checkBy: input.checkBy, status: "open", createdAt: at, updatedAt: at,
-      sourceFeedbackId: input.sourceFeedbackId, authorUserId: input.authorUserId,
+      id: randomUUID(), projectId, text: input.text, checkBy: input.checkBy, status, createdAt: at, updatedAt: at,
+      sourceFeedbackId: input.sourceFeedbackId, authorUserId: input.authorUserId, ...(status === "open" ? { activatedAt: at } : {}),
     };
     this.db.prepare("INSERT INTO energyiq_report_feedback_followups (id, project_id, status, document) VALUES (?,?,?,?)")
-      .run(followUp.id, projectId, "open", JSON.stringify(followUp));
+      .run(followUp.id, projectId, status, JSON.stringify(followUp));
+    const evicted = status === "open" ? this.enforceFollowUpLimit(projectId, now) : this.enforcePendingFollowUpLimit(projectId, input.authorUserId, now);
+    return { followUp, evicted };
+  }
+
+  /** An administrator lets a waiting follow-up through. Returns it and any open ones dropped to stay within the limit. */
+  approveFollowUp(projectId: string, id: string, now = new Date()): { followUp: FollowUpRecord; evicted: FollowUpRecord[] } {
+    const current = this.getFollowUp(projectId, id);
+    if (!current) throw new Error("REPORT_FEEDBACK_NOT_FOUND");
+    if (current.status !== "pending") return { followUp: current, evicted: [] };
+    const at = now.toISOString();
+    const followUp = this.saveFollowUp({ ...current, status: "open", activatedAt: at, updatedAt: at });
     return { followUp, evicted: this.enforceFollowUpLimit(projectId, now) };
+  }
+
+  /** Follow-ups waiting for an administrator, newest first. */
+  pendingFollowUps(projectId: string): FollowUpRecord[] {
+    return this.db.prepare("SELECT document FROM energyiq_report_feedback_followups WHERE project_id=? AND status='pending' ORDER BY rowid DESC")
+      .all(projectId).map(row => parse<FollowUpRecord>(row)!);
   }
 
   getFollowUp(projectId: string, id: string): FollowUpRecord | undefined {
@@ -292,7 +424,7 @@ export class ReportFeedbackStore {
   saveFollowUp(record: FollowUpRecord): FollowUpRecord {
     this.db.prepare("UPDATE energyiq_report_feedback_followups SET status=?, document=? WHERE id=? AND project_id=?")
       .run(record.status, JSON.stringify(record), record.id, record.projectId);
-    if (record.status !== "open") this.pruneClosedFollowUps(record.projectId);
+    if (record.status === "done" || record.status === "dropped") this.pruneClosedFollowUps(record.projectId);
     return record;
   }
 
@@ -304,7 +436,7 @@ export class ReportFeedbackStore {
 
   /** Closed follow-ups, most recently closed first. */
   closedFollowUps(projectId: string, limit = 10): FollowUpRecord[] {
-    return this.db.prepare(`SELECT document FROM energyiq_report_feedback_followups WHERE project_id=? AND status!='open'
+    return this.db.prepare(`SELECT document FROM energyiq_report_feedback_followups WHERE project_id=? AND status IN ('done','dropped')
       ORDER BY COALESCE(json_extract(document,'$.closedAt'), json_extract(document,'$.updatedAt')) DESC, rowid DESC LIMIT ?`)
       .all(projectId, limit).map(row => parse<FollowUpRecord>(row)!);
   }
@@ -315,15 +447,27 @@ export class ReportFeedbackStore {
 
   /** Re-opening a follow-up can take it over the limit too; the caller handles what comes back. */
   enforceFollowUpLimit(projectId: string, now = new Date()): FollowUpRecord[] {
-    const open = this.openFollowUps(projectId);
-    return open.slice(MAX_OPEN_FOLLOW_UPS).map(item => this.saveFollowUp({
-      ...item, status: "dropped", note: "Dropped to make room for newer follow-ups.", updatedAt: now.toISOString(), closedAt: now.toISOString(),
-    }));
+    return this.openFollowUps(projectId).slice(MAX_OPEN_FOLLOW_UPS).map(item => this.dropToMakeRoom(item, now));
+  }
+
+  /** How many follow-ups wait for an administrator, in all. */
+  countPendingFollowUps(projectId: string): number {
+    return Number((this.db.prepare("SELECT COUNT(*) AS count FROM energyiq_report_feedback_followups WHERE project_id=? AND status='pending'").get(projectId) as { count: number }).count);
+  }
+
+  private enforcePendingFollowUpLimit(projectId: string, authorUserId: string, now: Date): FollowUpRecord[] {
+    return this.pendingFollowUps(projectId).filter(item => item.authorUserId === authorUserId).slice(MAX_PENDING_FOLLOW_UPS_PER_AUTHOR)
+      .map(item => this.dropToMakeRoom(item, now));
+  }
+
+  /** Keeps its note line, so the caller can take it out of the advisor's notes. */
+  private dropToMakeRoom(item: FollowUpRecord, now: Date): FollowUpRecord {
+    return this.saveFollowUp({ ...item, status: "dropped", closedReason: "made_room", updatedAt: now.toISOString(), closedAt: now.toISOString() });
   }
 
   private pruneClosedFollowUps(projectId: string): void {
-    this.db.prepare(`DELETE FROM energyiq_report_feedback_followups WHERE project_id=? AND status!='open' AND rowid NOT IN (
-      SELECT rowid FROM energyiq_report_feedback_followups WHERE project_id=? AND status!='open' ORDER BY rowid DESC LIMIT ?)`)
+    this.db.prepare(`DELETE FROM energyiq_report_feedback_followups WHERE project_id=? AND status IN ('done','dropped') AND rowid NOT IN (
+      SELECT rowid FROM energyiq_report_feedback_followups WHERE project_id=? AND status IN ('done','dropped') ORDER BY rowid DESC LIMIT ?)`)
       .run(projectId, projectId, MAX_CLOSED_FOLLOW_UPS);
   }
 
@@ -344,33 +488,31 @@ export class ReportFeedbackStore {
 
   // Read models ------------------------------------------------------------------------------------------------
 
-  state(projectId: string, flags: Pick<ReportFeedbackState, "canGive" | "canManage" | "aiAvailable">): ReportFeedbackState {
+  state(projectId: string, flags: Pick<ReportFeedbackState, "canGive" | "canManage" | "aiAvailable">, now = new Date(), timezone = "UTC"): ReportFeedbackState {
     return {
       ...flags,
       feedback: this.listFeedback(projectId, 30).map(toFeedbackDto),
       memory: this.listMemory(projectId).map(toMemoryDto),
-      followUps: [...this.openFollowUps(projectId), ...this.closedFollowUps(projectId, 10)].map(toFollowUpDto),
+      followUps: [...this.openFollowUps(projectId), ...this.pendingFollowUps(projectId), ...this.closedFollowUps(projectId, 10)].map(toFollowUpDto),
       dismissedChecks: this.listDismissed(projectId).map(toDismissedDto),
+      reportInputs: this.reportInputs(projectId, now, timezone),
     };
   }
 
   /**
    * What the site's own reports read: active memory, open follow-ups and the ones closed in the last 31 days, and the
-   * report points not to flag. Pending memory is left out until an administrator approves it.
+   * report points not to flag. Memory and follow-ups waiting for an administrator are left out until one approves
+   * them, and so is a follow-up closed without ever being approved.
    */
-  reportInputs(projectId: string, now = new Date(), timezone = "UTC"): {
-    feedbackMemory: Array<{ text: string; date: string }>;
-    followUps: Array<{ text: string; status: FollowUpDto["status"]; createdAt: string; lastCheck?: FollowUpDto["lastCheck"] }>;
-    dismissedChecks: Array<{ key: string; title: string; reason: string }>;
-  } {
+  reportInputs(projectId: string, now = new Date(), timezone = "UTC"): ReportFeedbackInputs {
     const since = now.getTime() - 31 * 86_400_000;
-    const closed = this.db.prepare("SELECT document FROM energyiq_report_feedback_followups WHERE project_id=? AND status!='open' ORDER BY rowid DESC LIMIT ?")
+    const closed = this.db.prepare("SELECT document FROM energyiq_report_feedback_followups WHERE project_id=? AND status IN ('done','dropped') ORDER BY rowid DESC LIMIT ?")
       .all(projectId, MAX_CLOSED_FOLLOW_UPS).map(row => parse<FollowUpRecord>(row)!)
-      .filter(item => Date.parse(item.closedAt ?? item.updatedAt) >= since);
+      .filter(item => !!item.activatedAt && Date.parse(item.closedAt ?? item.updatedAt) >= since);
     return {
       feedbackMemory: this.listMemory(projectId, ["active"]).map(item => ({ text: item.text, date: localDate(item.activatedAt ?? item.createdAt, timezone) })),
       followUps: [...this.openFollowUps(projectId), ...closed].map(item => ({
-        text: item.text, status: item.status, createdAt: item.createdAt, ...(item.lastCheck ? { lastCheck: item.lastCheck } : {}),
+        text: item.text, status: item.status as "open" | "done" | "dropped", createdAt: item.createdAt, ...(item.lastCheck ? { lastCheck: item.lastCheck } : {}),
       })),
       dismissedChecks: this.listDismissed(projectId).map(item => ({ key: item.key, title: item.title, reason: item.reason })),
     };
