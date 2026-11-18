@@ -262,6 +262,18 @@ describe("the energy review on a live site's readings", () => {
     expect(halved.comparison!.intro).toContain("Block A uses twice as much on emergency lights as Block B");
   });
 
+  it("calls a meter set aside as not in use offline once it has gone quiet, even one that reported only at night", () => {
+    const built = buildEnergyReview(estate({ notInUse: [
+      { id: "linkway", name: "Linkway lights", reason: "Offline since 4 Nov, waiting for a site check" },
+      { id: "shelter", name: "Shelter lights", reason: "Daytime readings missing (loses power with its lights)" },
+    ] }), null, GENERATED);
+    // The linkway reported every night until 4 Nov, then nothing: offline. The shelter still reports every night: by design.
+    expect(built.checks.map(check => check.title)).toEqual(["Linkway lights is offline."]);
+    expect(built.checks[0]!.text).toContain("No readings since 4 Nov, 6 pm");
+    expect(built.checks[0]!.text).toContain("Note on file: Offline since 4 Nov, waiting for a site check.");
+    expect(built.nextSteps[0]!.action).toBe("Check Linkway lights: breaker, meter power, gateway pairing and fittings");
+  });
+
   it("names daytime use on lighting only when it is worth a visit (about 100 kWh a year)", () => {
     const withDay = (kwh: number) => buildEnergyReview(estate({}, { meters: { ...METERS, "a-high": { ...METERS["a-high"]!, kwh: lit(8, kwh) } } }), null, GENERATED);
     // 0.02 kWh an hour for 12 daytime hours is under 90 kWh a year: not a point to check, not a saving.

@@ -12,7 +12,7 @@
  */
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ENERGY_REVIEW_PALETTE as P, type EnergyReview, type EnergyReviewMeter, type EnergyReviewQuestion, type EnergyReviewSlice } from "./energy-review.js";
+import { ENERGY_REVIEW_PALETTE as P, worthSaying, type EnergyReview, type EnergyReviewMeter, type EnergyReviewQuestion, type EnergyReviewSlice } from "./energy-review.js";
 import { energyReviewMessages } from "./energy-review-messages.js";
 import { forHoursMeaning, translatorFor } from "./locale.js";
 import { Rich } from "./rich.js";
@@ -378,7 +378,7 @@ function DailyBars({ review, live }: { review: EnergyReview; live: boolean }) {
         <TipRow label={t("chart.energy")} value={`${num(day.kwh)} kWh`} />
         {day.cost != null && <TipRow label={review.costBasis ? `${t("chart.cost")} (${review.costBasis})` : t("chart.cost")} value={moneyText(day.cost, review.currency, 2)} />}
         {typical && typical.kwh > 0 && <TipRow label={t("chart.vsTypical")} value={`${day.kwh >= typical.kwh ? "+" : "−"}${pct(Math.abs(day.kwh / typical.kwh - 1))}`} />}
-        {day.recoveredKwh >= 0.05 ? <em>{t("chart.recovered", { kwh: kwhLabel(day.recoveredKwh) })}</em> : !day.complete && <em>{t("total.missingDay")}</em>}
+        {worthSaying(day.recoveredKwh, day.kwh) ? <em>{t("chart.recovered", { kwh: kwhLabel(day.recoveredKwh) })}</em> : !day.complete && <em>{t("total.missingDay")}</em>}
       </Tip>}
     </div>
     {review.total!.outage && <div className="er-alert" role="note"><b aria-hidden="true">!</b><p>{review.total!.outage}</p></div>}

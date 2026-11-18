@@ -104,6 +104,8 @@ export type EnergyReview = {
   footer: { left: string };
 };
 
+/** Energy sent late is worth saying on a day from half a kWh and 2% of the day: a meter catching up a few minutes is not news. */
+export const worthSaying = (recoveredKwh: number, dayKwh: number) => recoveredKwh >= Math.max(0.5, 0.02 * dayKwh);
 /** kWh as the first SKTC review wrote it: one decimal below 100 ("48.7 kWh"), two below 1, whole numbers above. */
 const kwhText = (value: number) => value < 100 ? `${num(value, value < 1 ? 2 : 1)} kWh` : baseKwhText(value);
 const mean = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
@@ -217,7 +219,7 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
   ];
   const firstStopped = stopped[0];
   // Meters that were offline kept counting and sent the energy when they came back: it is in those days' totals.
-  const outageDays = shownDays.filter(day => day.recoveredKwh >= 0.05);
+  const outageDays = shownDays.filter(day => worthSaying(day.recoveredKwh, day.kwh));
   const outageText = outageDays.length ? t(outageDays.length === 1 ? "total.outage.one" : "total.outage.other", {
     dates: list(outageDays.map(day => shortDate(day.date, locale))), kwh: kwhText(outageDays.reduce((sum, day) => sum + day.recoveredKwh, 0)),
   }) : "";
@@ -569,9 +571,10 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
   for (const item of notInUse) {
     const meter = allMeters.find(candidate => candidate.id === item.id);
     const cells = meter?.series?.cells.filter(cell => dates.includes(cell[0])) ?? [];
-    if (lighting && cells.length && receivedShare(cells, true) >= POWERED_NIGHT_SHARE) continue;
     const last = meter?.series ? lastReading(meter.series.cells) : null;
     const quiet = !last || !Number.isFinite(siteLast) || siteLast - hourIndex(last.date, last.hour) > REVIEW_STOPPED_HOURS;
+    // Gone quiet comes first: a meter powered with its lights still reports every night, so one silent for days is offline.
+    if (!quiet && lighting && cells.length && receivedShare(cells, true) >= POWERED_NIGHT_SHARE) continue;
     const reason = item.reason && !item.reason.startsWith("reason:") ? item.reason : "";
     if (quiet) { offlineTitles.add(t("check.offline.title", { name: item.name })); offlineNames.set(t("check.offline.title", { name: item.name }), item.name); }
     checks.push(quiet ? { title: t("check.offline.title", { name: item.name }), text: paragraph([

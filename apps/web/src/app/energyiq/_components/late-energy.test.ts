@@ -4,7 +4,7 @@
  * type. Otherwise a day after an outage reads short on the Overview while the readings have the energy.
  */
 import { describe, expect, it } from "vitest";
-import { inUseTotal } from "@datafoundry/site-report";
+import { inUseTotal, worthSaying } from "@datafoundry/site-report";
 import { scopeDays, type ScopeData, type TrendSeries } from "@datafoundry/site-report";
 
 const series = (id: string, expected: number, cells: TrendSeries["cells"]): TrendSeries => ({ id, expectedMinutesPerHour: expected, cells });
@@ -25,5 +25,12 @@ describe("energy sent late after an outage", () => {
     expect(day!.totalKwh).toBeCloseTo(3.1, 9);
     expect(day!.recoveredKwh).toBeCloseTo(2, 9);
     expect(day!.complete).toBe(false);
+  });
+
+  it("is said on a day only when it matters: half a kWh and 2% of the day", () => {
+    expect(worthSaying(12, 48)).toBe(true);
+    expect(worthSaying(0.3, 47)).toBe(false);
+    expect(worthSaying(0.8, 47)).toBe(false);
+    expect(worthSaying(1, 47)).toBe(true);
   });
 });

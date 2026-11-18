@@ -7,7 +7,7 @@
  */
 // React itself, not only its hooks: tests compile JSX with the classic runtime, so the module needs it in scope.
 import React from "react";
-import { moneyText, type SiteReport } from "@datafoundry/site-report";
+import { moneyText, worthSaying, type SiteReport } from "@datafoundry/site-report";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
 import { intlLocale, type EnergyIqLocale } from "./energyiq-messages";
 import { keyPointsMessages } from "./key-points-messages";
@@ -54,7 +54,7 @@ export function DailyEnergyChart({ report }: { report: SiteReport }) {
   const barW = Math.min(44, Math.max(4, band * 0.62));
   const every = band >= 40 ? 1 : band >= 20 ? 2 : 7;
   const day = hover == null ? null : days[hover]!;
-  const outage = days.filter(item => item.recoveredKwh >= 0.05);
+  const outage = days.filter(item => worthSaying(item.recoveredKwh, item.kwh));
   const label = (kwh: number) => costMode ? num(valueOf(kwh), 2) : num(kwh);
   const tipX = hover == null ? 0 : m.l + band * (hover + 0.5);
   return <figure className={styles.daily}>
@@ -94,7 +94,7 @@ export function DailyEnergyChart({ report }: { report: SiteReport }) {
         <span>{t("dailyEnergy")}: {num(day.kwh)} kWh</span>
         {rate != null && <span>{t("dailyCost")}: {moneyText(day.kwh * rate, report.currency, 2)}</span>}
         {typical != null && typical > 0 && <span>{t("dailyAgainst")}: {day.kwh >= typical ? "+" : "−"}{Math.round(Math.abs(day.kwh / typical - 1) * 100)}%</span>}
-        {day.recoveredKwh >= 0.05 ? <em>{t("dailyRecovered", { kwh: `${num(day.recoveredKwh)} kWh` })}</em> : !day.complete && <em>{t("dailyPartial")}</em>}
+        {worthSaying(day.recoveredKwh, day.kwh) ? <em>{t("dailyRecovered", { kwh: `${num(day.recoveredKwh)} kWh` })}</em> : !day.complete && <em>{t("dailyPartial")}</em>}
       </div>}
     </div>
     {outage.length > 0 && <p className={styles.dailyAlert} role="note"><b aria-hidden="true">!</b>{t("dailyOutage", { dates: outage.map(item => shortDay(item.date, locale)).join(", "), kwh: `${num(outage.reduce((sum, item) => sum + item.recoveredKwh, 0))} kWh` })}</p>}
