@@ -99,11 +99,14 @@ function ProjectMenu({ access, activeProject, projects, allowDrafts, allowArchiv
       throw reason;
     }
   };
-  // Archive, delete and customer changes alter the access context itself, so reload it wholesale.
+  // Renaming, archiving, deleting and customer changes alter the access context itself, so reload it wholesale: a new
+  // name then shows everywhere at once, from the top bar to the Portfolio.
   const confirmAction = async (current: AdminAction, typed: string) => {
     if (current.kind === "archive" || current.kind === "restore") await configApi.setEnergyAdminProjectArchived(current.projectId, current.kind === "archive");
     else if (current.kind === "deleteProject") await configApi.deleteEnergyAdminProject(current.projectId, typed);
     else if (current.kind === "deleteCustomer") await configApi.deleteEnergyAdminOrganisation(current.id);
+    else if (current.kind === "renameProject") await configApi.renameEnergyAdminProject(current.projectId, typed);
+    else if (current.kind === "renameCustomer") await configApi.updateEnergyAdminOrganisation(current.id, { name: typed });
     else {
       const created = await configApi.createEnergyAdminOrganisation({ name: typed });
       // After the reload, the shell opens New project for the new client: it cannot be opened until it has one.
@@ -141,6 +144,7 @@ function ProjectMenu({ access, activeProject, projects, allowDrafts, allowArchiv
       const count = groups[workspace.id]?.length;
       return <section key={workspace.id} aria-label={workspace.name} className={`${styles.client} ${isDropTarget ? styles.dropTarget : ""}`} {...dropProps(workspace.id, workspace.name)}><h3 className={styles.clientHeader}><span className={styles.clientIcon} aria-hidden="true"><EnergyIcon name="building" /></span><span className={styles.clientText}><span className={styles.groupName}>{workspace.name}</span><small><span className={styles.clientTag}>{t("project.clientTag")}</span>{count !== undefined && <> · {count === 1 ? t("project.countOne") : t("project.countMany", { count })}</>}</small></span>{isDropTarget && <span className={styles.dropLabel}>{t("project.dropHere")}</span>}{canMove && workspace.kind === "customer" && !isDropTarget && <RowMenu open={menuFor === customerMenu} label={t("project.actions", { name: workspace.name })} disabled={pending} onToggle={() => setMenuFor(menuFor === customerMenu ? null : customerMenu)} items={[
         ...(workspace.disabled ? [] : [{ label: t("project.createHere"), onSelect: () => { setMenuFor(null); close(); onCreate(workspace.id); } }]),
+        { label: t("project.menuRename"), onSelect: () => { setMenuFor(null); setAction({ kind: "renameCustomer", id: workspace.id, name: workspace.name }); } },
         { label: t("project.customerDeleteMenu"), danger: true, onSelect: () => { setMenuFor(null); setAction({ kind: "deleteCustomer", id: workspace.id, name: workspace.name }); } },
       ]} />}</h3><div className={styles.clientProjects}>{failures.includes(workspace.id) ? <button onClick={() => { setFailures([]); setRevision(value => value + 1); }}>{t("project.loadFailed")}</button> : !visible ? <p>{t("project.loading")}</p> : !visible.length ? (canMove && workspace.kind === "customer" && !workspace.disabled
         ? <button type="button" className={styles.createFirst} disabled={pending} onClick={() => { close(); onCreate(workspace.id); }}><EnergyIcon name="plus" />{t("project.createFirst")}</button>
@@ -148,6 +152,7 @@ function ProjectMenu({ access, activeProject, projects, allowDrafts, allowArchiv
         const projectMenu = `p:${project.id}`;
         const archived = project.status === "archived";
         return <div key={project.id} className={styles.projectRow}><button data-project disabled={pending} draggable={canMove && !pending} onDragStart={canMove ? event => { setMenuFor(null); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", project.name); setDragging({ projectId: project.id, projectName: project.name, fromId: workspace.id, fromName: workspace.name }); } : undefined} onDragEnd={canMove ? () => { setDragging(null); setDropTarget(null); } : undefined} className={dragging?.projectId === project.id ? styles.dragSource : undefined} aria-current={project.id === activeProject?.id && workspace.id === access.activeWorkspaceId ? "true" : undefined} onClick={() => void choose(workspace.id, project.id)}><EnergyIcon name="explorer" /><span>{project.name}<small>{[t("project.kindProject"), project.status === "draft" ? t("project.setupInProgress") : archived ? t("project.archived") : ""].filter(Boolean).join(" · ")}</small></span>{project.dataSource && <DataSourceBadge source={project.dataSource} />}{project.id === activeProject?.id && workspace.id === access.activeWorkspaceId && <EnergyIcon name="check" />}</button>{canMove && <RowMenu open={menuFor === projectMenu} label={t("project.actions", { name: project.name })} disabled={pending} onToggle={() => setMenuFor(menuFor === projectMenu ? null : projectMenu)} items={[
+          { label: t("project.menuRename"), onSelect: () => { setMenuFor(null); setAction({ kind: "renameProject", projectId: project.id, name: project.name }); } },
           { label: t("project.menuMove"), onSelect: () => { setMenuFor(null); setProposal({ projectId: project.id, projectName: project.name, fromId: workspace.id, fromName: workspace.name, targetId: null, targetName: project.name, choose: true }); } },
           { label: t(archived ? "project.menuRestore" : "project.menuArchive"), onSelect: () => { setMenuFor(null); setAction({ kind: archived ? "restore" : "archive", projectId: project.id, name: project.name }); } },
           { label: t("project.menuDelete"), danger: true, onSelect: () => { setMenuFor(null); setAction({ kind: "deleteProject", projectId: project.id, name: project.name }); } },
@@ -173,8 +178,8 @@ function DataSourceBadge({ source }: { source: "live" | "upload" | "none" }) {
 
 type MoveProposal = { projectId: string; projectName: string; fromId: string; fromName: string; targetId: string | null; targetName: string; choose: boolean };
 type AdminAction =
-  | { kind: "archive" | "restore" | "deleteProject"; projectId: string; name: string }
-  | { kind: "deleteCustomer"; id: string; name: string }
+  | { kind: "archive" | "restore" | "deleteProject" | "renameProject"; projectId: string; name: string }
+  | { kind: "deleteCustomer" | "renameCustomer"; id: string; name: string }
   | { kind: "createCustomer" };
 
 function RowMenu({ open, label, disabled, onToggle, items }: {
@@ -252,24 +257,35 @@ function AdminActionModal({ action, onCancel, onConfirm }: {
   const { t } = useEnergyIqLocale();
   const friendly = useFriendlyError();
   const modal = useRef<HTMLDialogElement>(null);
-  const [typed, setTyped] = useState("");
+  const name = "name" in action ? action.name : "";
+  const renaming = action.kind === "renameProject" || action.kind === "renameCustomer";
+  // A rename starts from the current name, so a small correction is a small edit.
+  const [typed, setTyped] = useState(renaming ? name : "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const name = "name" in action ? action.name : "";
   const copy = {
     archive: { title: t("project.archiveTitle", { project: name }), body: t("project.archiveBody"), submit: t("project.archiveSubmit"), danger: false },
     restore: { title: t("project.restoreTitle", { project: name }), body: t("project.restoreBody"), submit: t("project.restoreSubmit"), danger: false },
     deleteProject: { title: t("project.deleteTitle", { project: name }), body: t("project.deleteBody"), submit: t("project.deleteSubmit"), danger: true },
     deleteCustomer: { title: t("project.customerDeleteTitle", { customer: name }), body: t("project.customerDeleteBody"), submit: t("project.customerDeleteSubmit"), danger: true },
     createCustomer: { title: t("project.customerCreateTitle"), body: "", submit: t("project.customerCreateSubmit"), danger: false },
+    renameProject: { title: t("project.renameProjectTitle", { project: name }), body: t("project.renameBody"), submit: t("project.renameSubmit"), danger: false },
+    renameCustomer: { title: t("project.renameCustomerTitle", { customer: name }), body: t("project.renameBody"), submit: t("project.renameSubmit"), danger: false },
   }[action.kind];
-  const icon = action.kind === "createCustomer" ? "building" as const : copy.danger ? "alert" as const : "document" as const;
+  const icon = action.kind === "createCustomer" || action.kind === "renameCustomer" ? "building" as const : action.kind === "renameProject" ? "explorer" as const : copy.danger ? "alert" as const : "document" as const;
   const creating = action.kind === "createCustomer";
-  const needsText = action.kind === "deleteProject" || action.kind === "createCustomer";
-  const ready = action.kind === "deleteProject" ? typed.trim() === name.trim() : action.kind === "createCustomer" ? typed.trim().length > 0 : true;
+  const needsText = action.kind === "deleteProject" || creating || renaming;
+  // The same limits as when they were created: 120 characters for a client, 200 for a project.
+  const limit = creating || action.kind === "renameCustomer" ? 120 : 200;
+  const cleaned = typed.replace(/\s+/gu, " ").trim();
+  const ready = action.kind === "deleteProject" ? typed.trim() === name.trim()
+    : creating ? cleaned.length > 0
+      : renaming ? cleaned.length > 0 && cleaned !== name
+        : true;
   useEffect(() => {
     modal.current?.showModal();
-    (modal.current?.querySelector<HTMLInputElement>("input") ?? modal.current?.querySelector<HTMLButtonElement>("button[type=submit]"))?.focus();
+    const input = modal.current?.querySelector<HTMLInputElement>("input");
+    if (input) { input.focus(); if (input.value) input.select(); } else modal.current?.querySelector<HTMLButtonElement>("button[type=submit]")?.focus();
   }, []);
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -287,9 +303,9 @@ function AdminActionModal({ action, onCancel, onConfirm }: {
       </header>
       {copy.body && <p className={copy.danger ? styles.dangerNote : styles.moveBody}>{copy.body}</p>}
       {needsText && <label className={styles.moveField}>
-        <span>{action.kind === "deleteProject" ? t("project.deleteConfirmLabel", { project: name }) : t("project.customerNameLabel")}</span>
-        <input value={typed} disabled={saving} maxLength={120} autoComplete="off" {...(creating ? { placeholder: t("project.customerNamePlaceholder") } : {})} onChange={event => setTyped(event.target.value)} />
-        {creating && <small className={styles.fieldHint}><span>{t("project.customerNameHint")}</span><span>{typed.length}/120</span></small>}
+        <span>{action.kind === "deleteProject" ? t("project.deleteConfirmLabel", { project: name }) : renaming ? t("project.renameLabel") : t("project.customerNameLabel")}</span>
+        <input value={typed} disabled={saving} maxLength={limit} autoComplete="off" {...(creating ? { placeholder: t("project.customerNamePlaceholder") } : {})} onChange={event => setTyped(event.target.value)} />
+        {(creating || renaming) && <small className={styles.fieldHint}><span>{creating ? t("project.customerNameHint") : ""}</span><span>{typed.length}/{limit}</span></small>}
       </label>}
       {creating && <div className={styles.nextSteps}>
         <strong>{t("project.customerCreateNext")}</strong>

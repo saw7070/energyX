@@ -509,7 +509,20 @@ export const handleEnergyApiRequest = async (
             actorUserId: user.id,
             id: decodeURIComponent(segments[2]),
             name: requireNonEmptyString(body.name, "ENERGYIQ_ORGANISATION_NAME_REQUIRED"),
-            disabled: body.disabled === true
+            // Left out, the Organisation keeps its status: a rename only.
+            ...(typeof body.disabled === "boolean" ? { disabled: body.disabled } : {})
+          }))
+        };
+      }
+      if (segments[1] === "projects" && segments[2] && segments[3] === "rename"
+        && segments.length === 4 && request.method === "POST") {
+        const body = requireRecord(await readJsonBody(request));
+        return {
+          status: 200,
+          body: createSuccessResult(service.renameProject({
+            actorUserId: user.id,
+            projectId: decodeURIComponent(segments[2]),
+            name: requireNonEmptyString(body.name, "ENERGYIQ_PROJECT_NAME_REQUIRED")
           }))
         };
       }

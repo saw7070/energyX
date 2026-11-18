@@ -125,6 +125,12 @@
 .spark { display:block; width:104px; height:28px; overflow:visible; }
 .spark polyline { fill:none; stroke:var(--primary); stroke-width:1.5; stroke-linejoin:round; stroke-linecap:round; }
 .spark circle { fill:var(--primary); }
+/* One day's readout: hover, tap, or the arrow keys once the line has keyboard focus. */
+.sparkWrap { position:relative; display:inline-block; vertical-align:middle; border-radius:4px; cursor:crosshair; }
+.sparkWrap:focus-visible { outline:2px solid var(--primary); outline-offset:3px; }
+.spark .sparkGuide { stroke:var(--text-tertiary); stroke-width:1; stroke-dasharray:2 2; }
+.spark .sparkDot { fill:var(--surface); stroke:var(--primary); stroke-width:1.5; }
+.sparkTip { position:absolute; bottom:calc(100% + 4px); z-index:2; padding:3px 7px; border-radius:6px; background:var(--foreground); color:var(--surface); font-size:11.5px; font-weight:600; line-height:1.3; white-space:nowrap; pointer-events:none; box-shadow:0 2px 6px rgb(0 0 0 / 18%); }
 /* On a phone the table scrolls sideways; the site name stays in view so every figure can be matched to its site. */
 @media (max-width: 640px) {
   .table tr > :first-child { position:sticky; left:0; z-index:1; background:var(--surface); }

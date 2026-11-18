@@ -38,6 +38,31 @@ export const setEnergyProjectArchived = (input: {
   return { projectId: project.id, status };
 };
 
+/** The longest project name, as on the New project form. */
+export const MAX_PROJECT_NAME_LENGTH = 200;
+
+/**
+ * Gives a project a new name. Every page and new report reads the name from the project, so it changes everywhere;
+ * reports already made keep the name they were made with. Spaces are tidied the way client names are.
+ */
+export const renameEnergyProject = (input: {
+  metadataStore: MetadataStore;
+  projectId: string;
+  name: string;
+  actorUserId: string;
+}): { projectId: string; workspaceId: string; previousName: string; name: string; changed: boolean } => {
+  const project = requireProject(input.metadataStore, input.projectId);
+  const name = input.name.replace(/\s+/gu, " ").trim();
+  if (!name) throw new AuthError(400, "BAD_REQUEST", "Project name is required.");
+  if (name.length > MAX_PROJECT_NAME_LENGTH) {
+    throw new AuthError(400, "BAD_REQUEST", `Keep the project name to ${MAX_PROJECT_NAME_LENGTH} characters or fewer.`);
+  }
+  const result = { projectId: project.id, workspaceId: project.workspace_id, previousName: project.name, name };
+  if (name === project.name) return { ...result, changed: false };
+  input.metadataStore.energyIq.projectSetup.renameProject({ project_id: project.id, name, user_id: input.actorUserId });
+  return { ...result, changed: true };
+};
+
 /**
  * Permanently deletes a project with its setup, readings, reports, actions and history.
  * Chat conversations that mentioned the project are kept and simply unlinked from it.
