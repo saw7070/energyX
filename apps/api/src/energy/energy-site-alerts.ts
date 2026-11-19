@@ -53,6 +53,11 @@ export type SiteAlerts = {
   meterAlerts: SiteAlertMeter[];
   sync?: SiteAlertSync;
   readKeys: string[];
+  /**
+   * Whether this reader looks after the hardware (may manage the live connection). Only they see meters that stopped
+   * sending or went offline: the bell leaves those out for everyone else, who cannot fix a meter.
+   */
+  hardware: boolean;
 };
 
 /** Only recent reports are news; older ones live in Reports. */
@@ -132,7 +137,7 @@ export const readSiteAlerts = (input: {
       // Meters sending again are their own news, shown once.
       readKey: alert.kind === "meter_offline" && alert.status === "resolved" ? `${alert.key}:back` : alert.key,
     }));
-  return { reports, targets, meterAlerts, ...(sync ? { sync } : {}), readKeys: readKeys(input.metadataStore.db, input.userId, input.projectId) };
+  return { reports, targets, meterAlerts, ...(sync ? { sync } : {}), readKeys: readKeys(input.metadataStore.db, input.userId, input.projectId), hardware: input.includeHardware === true };
 };
 
 export const markSiteAlertRead = (input: { db: DatabaseSync; userId: string; projectId: string; key: unknown; now?: number }): void => {

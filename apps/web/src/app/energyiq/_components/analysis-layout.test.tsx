@@ -191,6 +191,18 @@ describe("Analysis as one flowing page", () => {
     expect(about.textContent).toContain("A day is called out when");
     await page.unmount();
   });
+
+  it("does not compare with an earlier period that had too few readings, and says why instead of raising an alarm", async () => {
+    const page = await render({ ...data, previous: null, previousTooFew: { coverage: 6.7 } });
+    const health = page.host.querySelector<HTMLElement>("#story-health")!;
+    const row = [...health.querySelectorAll("li")].find(item => item.textContent?.includes("Change vs previous"))!;
+    expect(row.textContent).toContain("Not yet");
+    expect(row.textContent).toContain("Only 7% of the readings came in during the previous 7 days");
+    expect(row.textContent).not.toMatch(/rising|falling|steady/i);
+    expect(page.host.textContent).toContain("too few earlier readings to compare");
+    expect(page.host.textContent).not.toMatch(/% vs previous/);
+    await page.unmount();
+  });
 });
 
 describe("links into the Analysis page", () => {

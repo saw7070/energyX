@@ -22,7 +22,8 @@ export type MeterAlertDto = {
   resolvedAt?: string;
   details: Record<string, unknown>;
 };
-export type ProjectAlertsWithMetersDto = EnergyProjectAlertsDto & { meterAlerts?: MeterAlertDto[] };
+/** `hardware`: whether this reader looks after the hardware; absent from servers before it was sent (then treated as true). */
+export type ProjectAlertsWithMetersDto = EnergyProjectAlertsDto & { meterAlerts?: MeterAlertDto[]; hardware?: boolean };
 
 export type MeterAlertSettingsDto = {
   projectId: string;

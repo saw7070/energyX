@@ -206,6 +206,9 @@ export function projectCalendarEntry(information: ProjectInformationSource, date
   return entries.find(entry => entry.location === information?.name && entry.from <= date && (!entry.toExclusive || entry.toExclusive > date)) ?? entries.find(entry => entry.location === information?.name) ?? entries[0];
 }
 
+/** The share of expected readings (%) the period before needs before any change against it is worked out. */
+export const MIN_PREVIOUS_COVERAGE = 80;
+
 /** Everything the readings are made of, once the caller has loaded each piece. Order of spaces follows childScopes. */
 export function assembleAnalysisData(input: {
   projectId: string;
@@ -223,7 +226,11 @@ export function assembleAnalysisData(input: {
   const holidays = calendarHolidays(information);
   const lastDate = analysisScopeDates(project).at(-1) ?? "";
   const projectEntry = projectCalendarEntry(information, lastDate);
-  const hasPrevious = !!input.previousProject && input.previousProject.summary.validIntervalCount > 0;
+  // The period before is compared only when most of its readings came in: against days before the meters were
+  // installed, or a long outage, any change would be a meaningless jump.
+  const previousCoverage = input.previousProject && input.previousProject.summary.validIntervalCount > 0 ? toScope(input.previousProject, locations).coverage : null;
+  const previousTooFew = previousCoverage != null && previousCoverage < MIN_PREVIOUS_COVERAGE;
+  const hasPrevious = !!input.previousProject && input.previousProject.summary.validIntervalCount > 0 && !previousTooFew;
   const groups = analysisGroups(project, information);
   // Meters someone said are not in use: named as readers know them, with the reason they gave.
   const meterNames = new Map((project.explorerMeters ?? []).map(meter => [meter.id, meter.name]));
@@ -251,6 +258,7 @@ export function assembleAnalysisData(input: {
     timezone: project.context.timezone, snapshotId: project.context.dataSnapshotId ?? null,
     current: period(project, input.spaceCurrent),
     previous: hasPrevious ? period(input.previousProject!, input.spacePrevious) : null,
+    ...(previousTooFew ? { previousTooFew: { coverage: previousCoverage! } } : {}),
     history: input.history && input.history.summary.validIntervalCount > 0 ? toScope(input.history, locations) : null,
     circuits: rankCircuits(loadedSpaces.length ? loadedSpaces : [project], hasPrevious ? input.previousProject : null, locations),
     holidays, openingHours: (projectEntry?.weekly ?? null) as AnalysisData["openingHours"], actions: input.actions,

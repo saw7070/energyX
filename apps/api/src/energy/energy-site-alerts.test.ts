@@ -66,6 +66,9 @@ describe("Site alerts", () => {
       expect(alerts.sync).toEqual({ key: "sync:2026-10-01", failedAt: "2026-10-01T18:00:05.000Z", reason: "ip-blocked" });
       expect(read(false).sync).toBeUndefined();
       expect(alerts.readKeys).toEqual([]);
+      // Only the people who look after the hardware are told so; the bell leaves offline meters out for everyone else.
+      expect(alerts.hardware).toBe(false);
+      expect(readSiteAlerts({ metadataStore: metadata, projectId: TUYA_OFFICE_PROJECT_ID, userId: "dev-user", includeReports: true, includeSync: true, includeHardware: true, reportRuns, now: NOW }).hardware).toBe(true);
 
       markSiteAlertRead({ db: metadata.db, userId: "dev-user", projectId: TUYA_OFFICE_PROJECT_ID, key: "report:weekly-report" });
       markSiteAlertRead({ db: metadata.db, userId: "dev-user", projectId: TUYA_OFFICE_PROJECT_ID, key: "report:weekly-report" });

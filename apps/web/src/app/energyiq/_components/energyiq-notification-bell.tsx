@@ -123,7 +123,10 @@ export function EnergyIqNotificationBell({ projectId }: { projectId: string }) {
         href: `/energyiq/project-configuration?${new URLSearchParams({ projectId, connection: "live" })}`,
       });
     }
-    if (offline.length) {
+    // Meters that went offline or stopped sending are for the people who look after the hardware: the site's own
+    // staff cannot fix a meter, and the reports already say which days lack readings. Unknown until the alerts load.
+    const hardwareView = alerts ? alerts.hardware !== false : false;
+    if (hardwareView && offline.length) {
       const key = offlineKey(offline);
       const first = offline[0]!;
       list.push({
@@ -140,7 +143,7 @@ export function EnergyIqNotificationBell({ projectId }: { projectId: string }) {
     const quietInAlerts = new Set(meterEntries.flatMap((entry) => entry.quietMeterIds));
     for (const entry of meterEntries) list.push({ key: entry.key, readKey: entry.readKey, tone: entry.tone, kind: entry.kind, at: entry.at, title: entry.title, detail: entry.detail, href: entry.href });
     // A meter already shown as offline now, or in a stopped-sending alert above, is not repeated as stopped.
-    const stopped = health ? stoppedMeters(health.meters).filter((meter) => !offline.some((item) => item.meterPointId === meter.meterPointId) && !quietInAlerts.has(meter.meterPointId)) : [];
+    const stopped = hardwareView && health ? stoppedMeters(health.meters).filter((meter) => !offline.some((item) => item.meterPointId === meter.meterPointId) && !quietInAlerts.has(meter.meterPointId)) : [];
     if (stopped.length) {
       const key = stoppedKey(stopped);
       const first = stopped[0]!;

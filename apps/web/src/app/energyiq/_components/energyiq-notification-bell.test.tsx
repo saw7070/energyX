@@ -142,6 +142,32 @@ describe("Notification bell", () => {
     expect(api.markEnergyProjectAlertRead).toHaveBeenCalledWith("p1", offlineKey(offline));
   });
 
+  it("leaves offline and stopped meters out for people who do not look after the hardware", async () => {
+    const offline = [{ meterPointId: "m5", name: "Meter 05", since: "2026-10-03T06:15:00.000Z" }];
+    api.getEnergyLiveReadings.mockResolvedValue({ connected: true, officialMeterCount: 0, reportingMeterCount: 0, meters: [], offline, intervalMinutes: 15 });
+    const neverUsed = { key: "never-used:m9:20261002", readKey: "never-used:m9:20261002", kind: "never_used", status: "open", openedAt: "2026-10-02T12:00:00.000Z",
+      details: { meterId: "m9", meterName: "Pavilion fan", totalKwh: 0.4, start: "2026-10-02T11:00:00.000Z", hours: 1 } };
+    api.getEnergyProjectAlerts.mockResolvedValue({ ...alerts, hardware: false, meterAlerts: [neverUsed] });
+    await openBell();
+    const text = container.textContent ?? "";
+    expect(text).not.toContain("went offline");
+    expect(text).not.toContain("stopped sending");
+    // Everything else the site's staff should know still shows.
+    expect(text).toContain("Your weekly report is ready");
+    expect(text).toContain("Switch off the LED wall at night");
+    expect(text).toContain("Pavilion fan");
+  });
+
+  it("still shows offline and stopped meters to the people who look after the hardware", async () => {
+    const offline = [{ meterPointId: "m5", name: "Meter 05", since: "2026-10-03T06:15:00.000Z" }];
+    api.getEnergyLiveReadings.mockResolvedValue({ connected: true, officialMeterCount: 0, reportingMeterCount: 0, meters: [], offline, intervalMinutes: 15 });
+    api.getEnergyProjectAlerts.mockResolvedValue({ ...alerts, hardware: true });
+    await openBell();
+    const text = container.textContent ?? "";
+    expect(text).toContain("Meter 05 went offline");
+    expect(text).toContain("Meter 06 stopped sending readings");
+  });
+
   it("shows the meter alerts the server keeps, with their own icons and links, and does not repeat a stopped meter", async () => {
     const meterAlerts = [
       { key: "meter-offline:a:20261002T1830", readKey: "meter-offline:a:20261002T1830", kind: "meter_offline", status: "open", openedAt: "2026-10-03T00:00:00.000Z",
