@@ -2,7 +2,8 @@
  * The meter alerts the server keeps (apps/api energy-meter-alerts.ts), as the bell shows them: meters that stopped
  * sending (for the people who look after the hardware), a meter that used power it should never use, and hours of
  * unusual use (for the people who run the site). The server sends only what this reader may see; the wording is the
- * page's, in the reader's language.
+ * page's, in the reader's language. Alerts seen within the hour from live readings (`details.live`) say so, with the
+ * hour they are about.
  *
  * The shapes match the API (`GET /api/v1/energy/projects/:id/alerts` → `meterAlerts`, and
  * `/api/v1/energy/projects/:id/meter-alerts/settings`) field for field.
@@ -75,6 +76,8 @@ export function meterAlertEntries(alerts: readonly MeterAlertDto[], input: { t: 
   const when = (iso: string) => new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone }).format(new Date(iso));
   const clock = (iso: string) => new Intl.DateTimeFormat(locale, { hour: "numeric", minute: new Date(iso).getUTCMinutes() ? "2-digit" : undefined, timeZone }).format(new Date(iso));
   const day = (iso: string) => new Intl.DateTimeFormat(locale, { weekday: "short", day: "numeric", month: "short", timeZone }).format(new Date(iso));
+  /** A span of whole hours, such as "2–3 pm" (with plain spaces: Intl puts narrow ones before "pm"). */
+  const span = (from: string, to: string) => new Intl.DateTimeFormat(locale, { hour: "numeric", timeZone }).formatRange(new Date(from), new Date(to)).replace(/[\u2009\u202f]/gu, " ");
   const energy = (value: number, unit: "kW" | "kWh") => `${value.toLocaleString(locale, { maximumFractionDigits: value < 1 ? 2 : 1, minimumFractionDigits: value < 1 ? 2 : 1 })} ${unit}`;
   const facility = `/energyiq/project-configuration?${new URLSearchParams({ projectId, tab: "availability" })}`;
   const analysis = `/energyiq/analysis?${new URLSearchParams({ projectId })}`;
@@ -110,6 +113,7 @@ export function meterAlertEntries(alerts: readonly MeterAlertDto[], input: { t: 
       const detail = [
         hours > 1 ? t("neverUsed.detailMany", { hours, when: when(start) }) : t("neverUsed.detailOne", { date: day(start) }),
         details.ongoing === true ? t("neverUsed.still") : "",
+        details.live === true ? t("neverUsed.live") : "",
       ].filter(Boolean).join(" ");
       return [{
         ...base, tone: "warning", kind: "never-used", href: analysis, quietMeterIds: [],
@@ -121,6 +125,23 @@ export function meterAlertEntries(alerts: readonly MeterAlertDto[], input: { t: 
       const direction = details.direction === "zero" || details.direction === "low" ? details.direction : "high";
       const hours = Math.max(1, number(details.hours));
       const end = text(details.end);
+      if (details.live === true) {
+        // Seen within the hour from live readings: named by its hour (or, for use that stopped, its hours).
+        const start = text(details.start) || at;
+        const from = direction === "zero" ? start : at;
+        const to = direction === "zero" && end ? end : new Date(Date.parse(from) + 3_600_000).toISOString();
+        const values = { name: text(details.meterName), kw: energy(number(details.kwh), "kW"), usual: energy(number(details.usualKwh), "kW"), window: span(from, to) };
+        return [{
+          ...base, tone: "warning", kind: "pattern", href: analysis, quietMeterIds: [],
+          // The whole site (its official total), named by the site.
+          title: details.scope === "site"
+            ? (direction === "high" ? t("pattern.siteHigh", values) : t("pattern.siteLow", values))
+            : direction === "zero" ? t("pattern.liveZero", values) : direction === "low" ? t("pattern.liveLow", values) : t("pattern.liveHigh", values),
+          detail: alert.status === "resolved" && end && details.ongoing === false
+            ? t("pattern.liveBack", { date: day(start), time: clock(end) })
+            : hours > 1 ? t("pattern.liveMany", { date: day(start), hours }) : t("pattern.liveHour", { date: day(start) }),
+        }];
+      }
       return [{
         ...base, tone: "warning", kind: "pattern", href: analysis, quietMeterIds: [],
         title: t(`pattern.${direction}`, { name: text(details.meterName), kw: energy(number(details.kwh), "kW"), usual: energy(number(details.usualKwh), "kW"), time: clock(at) }),

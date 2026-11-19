@@ -5,6 +5,9 @@
  * per episode, so checking the same readings again (the nightly update, its hourly retries, an upload) changes nothing
  * and never adds a second bell entry. Tables are created here, like the report-agent's own stores, rather than by a
  * numbered migration.
+ *
+ * An alert raised from live readings that the daily readings later showed to be wrong is kept for the record with
+ * `withdrawn: true` in its payload, and is then as if it never happened: not in the bell, not counted in a day's limit.
  */
 import type { DatabaseSync } from "node:sqlite";
 
@@ -224,8 +227,9 @@ export class MeterAlertStore {
   /**
    * Alerts for the bell, for the given audiences, newest first: every open one, and those resolved since `sinceIso`.
    * Left out before the limit, so they never push a real alert off the list: unusual use only counted in a summary
-   * (suppressed), a summary once resolved, and meters quiet that were not found to come back since `backSinceIso`
-   * (no longer watched, filled in on time, or already over at the site's first check).
+   * (suppressed), a summary once resolved, an alert from live readings the daily readings withdrew, and meters quiet
+   * that were not found to come back since `backSinceIso` (no longer watched, filled in on time, or already over at the
+   * site's first check).
    */
   listForBell(projectId: string, audiences: readonly MeterAlertAudience[], sinceIso: string, limit = 20, backSinceIso = sinceIso): MeterAlertRecord[] {
     if (!audiences.length) return [];
@@ -233,7 +237,7 @@ export class MeterAlertStore {
     const rows = this.db.prepare(`
       SELECT * FROM energyiq_meter_alerts
       WHERE project_id = ? AND audience IN (${marks}) AND (status = 'open' OR resolved_at >= ?)
-        AND NOT ${flag("suppressed")}
+        AND NOT ${flag("suppressed")} AND NOT ${flag("withdrawn")}
         AND NOT (kind = 'usage_pattern_more' AND status = 'resolved')
         AND NOT (kind = 'meter_offline' AND status = 'resolved'
           AND (json_extract(payload_json, '$.back') IS NULL OR ${flag("seeded")} OR resolved_at < ?))
@@ -242,19 +246,22 @@ export class MeterAlertStore {
     return rows.map(mapAlert);
   }
 
-  /** Alerts of a kind opened in [fromIso, toIso); `suppressed` picks those only counted in a summary, or the others. */
+  /**
+   * Alerts of a kind opened in [fromIso, toIso); `suppressed` picks those only counted in a summary, or the others.
+   * Withdrawn alerts are left out: they never happened.
+   */
   listOpened(projectId: string, kind: MeterAlertKind, fromIso: string, toIso: string, filter: { suppressed?: boolean } = {}): MeterAlertRecord[] {
     const suppressed = filter.suppressed === undefined ? "" : filter.suppressed ? `AND ${flag("suppressed")}` : `AND NOT ${flag("suppressed")}`;
     return (this.db.prepare(`
-      SELECT * FROM energyiq_meter_alerts WHERE project_id = ? AND kind = ? AND opened_at >= ? AND opened_at < ? ${suppressed} ORDER BY opened_at, alert_key
+      SELECT * FROM energyiq_meter_alerts WHERE project_id = ? AND kind = ? AND opened_at >= ? AND opened_at < ? ${suppressed} AND NOT ${flag("withdrawn")} ORDER BY opened_at, alert_key
     `).all(projectId, kind, fromIso, toIso) as Array<Record<string, unknown>>).map(mapAlert);
   }
 
-  /** How many alerts of a kind opened in [fromIso, toIso), counted in SQL. */
+  /** How many alerts of a kind opened in [fromIso, toIso), counted in SQL; withdrawn alerts are left out. */
   countOpened(projectId: string, kind: MeterAlertKind, fromIso: string, toIso: string, filter: { suppressed?: boolean } = {}): number {
     const suppressed = filter.suppressed === undefined ? "" : filter.suppressed ? `AND ${flag("suppressed")}` : `AND NOT ${flag("suppressed")}`;
     return Number((this.db.prepare(`
-      SELECT COUNT(*) AS count FROM energyiq_meter_alerts WHERE project_id = ? AND kind = ? AND opened_at >= ? AND opened_at < ? ${suppressed}
+      SELECT COUNT(*) AS count FROM energyiq_meter_alerts WHERE project_id = ? AND kind = ? AND opened_at >= ? AND opened_at < ? ${suppressed} AND NOT ${flag("withdrawn")}
     `).get(projectId, kind, fromIso, toIso) as { count: number }).count);
   }
 

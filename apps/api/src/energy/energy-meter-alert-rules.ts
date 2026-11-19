@@ -4,8 +4,8 @@
  * Hourly readings are the cells the Explorer and the site reports use (explorer-trends.ts): [local date, local hour,
  * kWh read on time, minutes read on time, intervals not read on time, kWh sent late]. Meters whose silence or zero use
  * is expected are left out the way the reports leave them out (meters-in-use.ts, energy-idle-meters.ts): a meter marked
- * not in use, one that is idle (online at the live check and able to rightly use nothing), and one that must never use
- * power (it is expected to send nothing).
+ * not in use, one that is idle (online at the live check and able to rightly use nothing), one that must never use
+ * power (it is expected to send nothing), and one used now and then (quiet spells are normal).
  *
  * 1. Stopped sending (meter_offline). A meter in use that sent nothing for more than 12 hours past when it would next
  *    have reported as usual, up to the newest data the site has. Its usual reporting hours are learned from the
@@ -36,6 +36,14 @@ export type MeterAlertInputMeter = {
   neverUsed?: boolean;
   /** Online at the latest live check and able to rightly use nothing (readIdleWhenQuietMeters). */
   idleWhenQuiet?: boolean;
+  /**
+   * Used now and then, quiet spells are normal (presentation.occasional_use). A Tuya meter sends only when its total
+   * moves, so such a meter looks stopped while idle and its next total looks sent late: it is never called stopped,
+   * and, its use being sporadic by design, never judged for unusual hourly use.
+   */
+  occasionalUse?: boolean;
+  /** Part of the site's official total (a project-level official aggregation route), for the whole-site check. */
+  official?: boolean;
   /** The end of the meter's last reading received on time (ISO); absent when it never sent one. */
   lastReadingAt?: string;
 };
@@ -208,7 +216,7 @@ export const OFFLINE_NEWS_MS = 3 * DAY_MS;
 export function findOfflineMeters(input: { meters: readonly MeterAlertInputMeter[]; cells: ReadonlyMap<string, readonly HourCell[]>; referenceMs: number; timezone: string; newsFromMs?: number }): OfflineMeter[] {
   const newsFrom = input.newsFromMs ?? input.referenceMs - OFFLINE_NEWS_MS;
   return input.meters.flatMap((meter) => {
-    if (meter.notInUse || meter.idleWhenQuiet || meter.neverUsed) return [];
+    if (meter.notInUse || meter.idleWhenQuiet || meter.neverUsed || meter.occasionalUse) return [];
     const own = input.cells.get(meter.id) ?? [];
     const usual = usualReportingHours(own);
     const place = { id: meter.id, name: meter.name, ...(meter.location ? { location: meter.location } : {}), ...(meter.locationId ? { locationId: meter.locationId } : {}) };

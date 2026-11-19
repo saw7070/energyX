@@ -75,6 +75,49 @@ describe("Meter alerts in the bell", () => {
     expect(meterAlertEntries([...seeded, ...cleared], { t, locale: "en", projectId: "sktc" })).toEqual([]);
   });
 
+  it("says an alert from live readings was seen within the hour, with the hour it is about, in every language", () => {
+    // Pavilion 1 used nothing 2–3 pm on 18 Nov; the booster pump drew 6.5 kW 10–11 pm, then back to usual from 11 pm.
+    const pavilion: MeterAlertDto = {
+      key: "usage-pattern:p1:20261118T1400", readKey: "usage-pattern:p1:20261118T1400", kind: "usage_pattern", status: "open", openedAt: "2026-11-18T08:20:00.000Z",
+      details: { meterName: "Pavilion 1", direction: "zero", at: "2026-11-18T06:00:00.000Z", start: "2026-11-18T06:00:00.000Z", end: "2026-11-18T07:00:00.000Z", hours: 1, kwh: 0, usualKwh: 0.4, ongoing: true, live: true, inferred: true },
+    };
+    const pump: MeterAlertDto = {
+      key: "usage-pattern:pump:20261118T2200", readKey: "usage-pattern:pump:20261118T2200", kind: "usage_pattern", status: "resolved", openedAt: "2026-11-18T15:15:00.000Z", resolvedAt: "2026-11-18T16:15:00.000Z",
+      details: { meterName: "Booster pump", direction: "high", at: "2026-11-18T14:00:00.000Z", start: "2026-11-18T14:00:00.000Z", end: "2026-11-18T15:00:00.000Z", hours: 1, kwh: 6.5, usualKwh: 4, ongoing: false, live: true },
+    };
+    const fanLive: MeterAlertDto = { ...fan, details: { ...fan.details, live: true } };
+    const show = (locale: EnergyIqLocale) => meterAlertEntries([pavilion, pump, fanLive], { t: translatorFor(notificationMessages, locale), locale, projectId: "sktc" });
+    const [zero, spike, used] = show("en");
+    expect(zero).toMatchObject({ tone: "warning", kind: "pattern", title: "Pavilion 1 used nothing 2–3 pm (usually 0.40 kW)", detail: "Seen within the hour from live readings, Wed, 18 Nov. Usual is that hour's typical use over the last three weeks." });
+    expect(spike).toMatchObject({ title: "Booster pump used 6.5 kW 10–11 pm, usually about 4.0 kW", detail: "Seen within the hour from live readings, Wed, 18 Nov. Back to usual from 11 pm." });
+    expect(used!.detail).toBe("On Fri, 13 Nov. Someone may be using it without leave. Still using power at the latest reading. Seen within the hour from live readings.");
+    expect(meterAlertEntries([{ ...pavilion, details: { ...pavilion.details, end: "2026-11-18T09:00:00.000Z", hours: 3 } }], { t: translatorFor(notificationMessages, "en"), locale: "en", projectId: "sktc" })[0])
+      .toMatchObject({ title: "Pavilion 1 used nothing 2–5 pm (usually 0.40 kW)", detail: "Seen within the hour from live readings, Wed, 18 Nov: 3 hours in a row." });
+    const zh = show("zh-Hans");
+    expect(zh[0]!.title).toBe("Pavilion 1 在 下午2时至3时 完全没有用电（平常 0.40 kW）");
+    expect(zh[0]!.detail).toMatch(/^由实时读数在一小时内发现，.+。“平常”指过去三周同一小时的典型用电。$/);
+    expect(zh[1]!.detail).toMatch(/^由实时读数在一小时内发现，.+。从 .+ 起恢复正常。$/);
+    expect(zh[2]!.detail).toMatch(/由实时读数在一小时内发现。$/);
+    const ms = show("ms");
+    expect(ms[0]!.title).toBe("Pavilion 1 tidak menggunakan kuasa langsung pada 2–3 PTG (biasanya 0.40 kW)");
+    expect(ms[1]!.title).toBe("Booster pump menggunakan 6.5 kW pada 10–11 PTG, biasanya kira-kira 4.0 kW");
+    expect(ms[2]!.detail).toMatch(/Dikesan dalam masa sejam daripada bacaan langsung\.$/);
+  });
+
+  it("names the whole site in an alert about the site's total, in every language", () => {
+    const whole: MeterAlertDto = {
+      key: "usage-pattern:site:20261118T2200", readKey: "usage-pattern:site:20261118T2200", kind: "usage_pattern", status: "open", openedAt: "2026-11-18T15:15:00.000Z",
+      details: { meterId: "site", meterName: "SKTC", scope: "site", direction: "high", at: "2026-11-18T14:00:00.000Z", start: "2026-11-18T14:00:00.000Z", end: "2026-11-18T15:00:00.000Z", hours: 1, kwh: 6, usualKwh: 4, ongoing: true, live: true },
+    };
+    const low: MeterAlertDto = { ...whole, details: { ...whole.details, direction: "low", kwh: 2 } };
+    const show = (locale: EnergyIqLocale) => meterAlertEntries([whole, low], { t: translatorFor(notificationMessages, locale), locale, projectId: "sktc" });
+    const [high, drop] = show("en");
+    expect(high).toMatchObject({ tone: "warning", kind: "pattern", title: "SKTC used 6.0 kW at 10–11 pm (usually 4.0 kW)", detail: "Seen within the hour from live readings, Wed, 18 Nov. Usual is that hour's typical use over the last three weeks." });
+    expect(drop!.title).toBe("SKTC used only 2.0 kW at 10–11 pm (usually 4.0 kW)");
+    expect(show("zh-Hans").map((entry) => entry.title)).toEqual([expect.stringMatching(/^SKTC 在 .+ 用电 6\.0 kW（平常 4\.0 kW）$/), expect.stringMatching(/^SKTC 在 .+ 只用电 2\.0 kW（平常 4\.0 kW）$/)]);
+    expect(show("ms").map((entry) => entry.title)).toEqual(["SKTC menggunakan 6.0 kW pada 10–11 PTG (biasanya 4.0 kW)", "SKTC hanya menggunakan 2.0 kW pada 10–11 PTG (biasanya 4.0 kW)"]);
+  });
+
   it("lists an open stopped-sending alert's meters so they are not shown again as stopped, and skips what it cannot read", () => {
     const open: MeterAlertDto = { ...gateway, readKey: gateway.key, status: "open", details: { ...gateway.details, back: undefined } };
     const [entry] = meterAlertEntries([open, { ...fan, details: {} as Record<string, unknown>, kind: "meter_offline" }], { t: translatorFor(notificationMessages, "en"), locale: "en", projectId: "sktc" });

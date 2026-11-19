@@ -222,6 +222,7 @@ import {
   registerEnergyLiveConnectionScheduler,
 } from "./energy/energy-live-connection-scheduler.js";
 import { createTuyaOpenApiClientFor, createTuyaOpenApiClientFromEnv, type TuyaOpenApiClient } from "./energy/tuya-openapi-client.js";
+import { createEnergyLiveHourAlerts } from "./energy/energy-live-hour-alerts.js";
 import { createEnergyLiveReadingsPoller } from "./energy/energy-live-readings.js";
 import { createEnergyReadingRetentionJob } from "./energy/energy-reading-retention.js";
 import type { EnergyTuyaPostMaterialization } from "./energy/energy-tuya-sync-runner.js";
@@ -1488,11 +1489,15 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
     }
     return client;
   };
+  // Unusual hourly use and never-use judged within the hour from what each live check just read (no extra Tuya call);
+  // off with ENERGYIQ_LIVE_HOUR_ALERTS_ENABLED=false.
+  const liveHourAlerts = createEnergyLiveHourAlerts({ metadataStore });
   const liveReadingsPoller = createEnergyLiveReadingsPoller({
     metadataStore,
     readLatestEnergy: ({ credentials, ...readInput }) => liveReadingClient(credentials).readLatestEnergy(readInput),
     // Which meters are online, for an alert within the hour when one goes offline.
     listDevices: ({ credentials, signal }) => liveReadingClient(credentials).listDevices(signal ? { signal } : {}),
+    afterPoll: (projectId) => liveHourAlerts.check(projectId),
   });
   // A release that restarts the API mid-publication leaves that journal open, and every read for the project then
   // refuses until a materialization rolls it back. Recover at boot so a deploy cannot strand a site until the next

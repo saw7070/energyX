@@ -3,6 +3,7 @@ import type { EnergyIqProjectSetupDocument, MetadataStore } from "@datafoundry/m
 
 import { defineBackgroundJob } from "../observability/background-jobs.js";
 import { logger } from "../observability/logger.js";
+import { recordLiveSamples } from "./energy-live-samples.js";
 import { resolveEnergyTuyaProjectConnector, type EnergyTuyaProjectConnector } from "./energy-tuya-connector.js";
 import { readOfflineMeters, recordDeviceStatus } from "./energy-live-status.js";
 import type { TuyaDeviceBinding, TuyaLatestEnergyReading } from "./tuya-openapi-client.js";
@@ -11,7 +12,9 @@ import type { TuyaDeviceBinding, TuyaLatestEnergyReading } from "./tuya-openapi-
  * Live readings: every 15 minutes each connected site's meters are read for their current cumulative energy. Two
  * readings give the average power in between; the first reading of the local day gives energy used today so far.
  * Nothing here is published: the daily update stays the official record, and these readings only show what is
- * happening now. Each meter keeps only its latest two readings and the first reading of the day.
+ * happening now. Each meter keeps only its latest two readings and the first reading of the day; each value is also
+ * kept for a day with the time the meter sent it, for the alerts within the hour (energy-live-hour-alerts.ts), which
+ * run after each site's check from what it already read.
  */
 export const LIVE_READING_INTERVAL_MS = 15 * 60_000;
 /** A meter whose last reading is older than this is not "live"; Overview says so instead of showing old power. */
@@ -47,7 +50,7 @@ export type LiveSiteReadings = {
   /** Official meters with a current (not stale) power value. */
   reportingMeterCount: number;
   meters: LiveMeterReading[];
-  /** Meters Tuya has reported offline for half an hour or more, longest first; meters marked not in use are left out. */
+  /** Meters Tuya has reported offline for half an hour or more, longest first; meters not in use or used now and then are left out. */
   offline: Array<{ meterPointId: string; name: string; since: string }>;
   intervalMinutes: number;
 };
@@ -125,6 +128,8 @@ export const readLiveSiteReadings = (input: {
   // The name people gave the meter, as everywhere else in the app; the panel label is the fallback.
   const names = new Map(rows.map((row) => [row.id, row.presentation?.short_name?.trim() || row.presentation?.device_name?.trim() || row.presentation?.circuit_name?.trim() || row.display_name]));
   const notInUse = new Set(rows.filter((row) => row.presentation?.not_in_use).map((row) => row.id));
+  // Used now and then (presentation.occasional_use): quiet, even offline, between uses is normal, so never an alert.
+  const occasional = new Set(rows.filter((row) => row.presentation?.occasional_use === "true").map((row) => row.id));
   const offWithLights = new Set(rows.filter((row) => row.presentation?.off_with_lights).map((row) => row.id));
   const official = officialProjectMeterIds(document);
   ensureTable(input.metadataStore.db);
@@ -164,7 +169,7 @@ export const readLiveSiteReadings = (input: {
     reportingMeterCount: reporting.length,
     meters,
     offline: readOfflineMeters({ db: input.metadataStore.db, projectId: input.projectId, now, offWithLights })
-      .filter((meter) => names.has(meter.meterPointId) && !notInUse.has(meter.meterPointId))
+      .filter((meter) => names.has(meter.meterPointId) && !notInUse.has(meter.meterPointId) && !occasional.has(meter.meterPointId))
       .map((meter) => ({ meterPointId: meter.meterPointId, name: names.get(meter.meterPointId)!, since: meter.offlineSince })),
     intervalMinutes: LIVE_READING_INTERVAL_MS / 60_000,
   };
@@ -199,6 +204,7 @@ export const pollLiveReadings = async (input: {
     readAt,
     readings,
   });
+  let online: Map<string, boolean> | undefined;
   if (input.listDevices) {
     // A failed status check must not cost the power readings above; the next poll tries again.
     try {
@@ -206,20 +212,46 @@ export const pollLiveReadings = async (input: {
         ...(input.connector.credentials ? { credentials: input.connector.credentials } : {}),
         ...(input.signal ? { signal: input.signal } : {}),
       });
-      const online = new Map(devices.map((device) => [device.id, device.online]));
+      online = new Map(devices.map((device) => [device.id, device.online]));
+      const status = online;
       recordDeviceStatus({
         db: input.metadataStore.db,
         projectId: input.connector.projectId,
         checkedAt: readAt,
         statuses: input.connector.devices.flatMap((binding) => {
           const meterPointId = meterByLabel.get(binding.sourceLabel);
-          const isOnline = online.get(binding.deviceId);
+          const isOnline = status.get(binding.deviceId);
           return meterPointId && isOnline !== undefined ? [{ meterPointId, online: isOnline }] : [];
         }),
       });
     } catch (error) {
       log.warn("status check failed", { project_id: input.connector.projectId, code: error instanceof Error ? error.message.slice(0, 160) : "unknown" });
     }
+  }
+  // Each value with the time the meter sent it, and whether it was online, for the alerts within the hour. Never at
+  // the cost of the readings above.
+  try {
+    const byLabel = new Map(latest.map((reading) => [reading.sourceLabel, reading]));
+    recordLiveSamples({
+      db: input.metadataStore.db,
+      projectId: input.connector.projectId,
+      polledAt: readAt,
+      samples: input.connector.devices.flatMap((binding) => {
+        const meterPointId = meterByLabel.get(binding.sourceLabel);
+        if (!meterPointId) return [];
+        const reading = byLabel.get(binding.sourceLabel);
+        const reportedAt = reading?.reportedAt ? Date.parse(reading.reportedAt) : Number.NaN;
+        const isOnline = online?.get(binding.deviceId);
+        return [{
+          meterPointId,
+          energyKwh: reading?.energyKwh ?? null,
+          ...(Number.isFinite(reportedAt) ? { reportedAt } : {}),
+          ...(isOnline !== undefined ? { online: isOnline } : {}),
+        }];
+      }),
+    });
+  } catch (error) {
+    log.warn("samples not kept", { project_id: input.connector.projectId, code: error instanceof Error ? error.message.slice(0, 160) : "unknown" });
   }
   return { read: readings.length, failed: latest.length - readings.length };
 };
@@ -242,6 +274,8 @@ export const createEnergyLiveReadingsPoller = (input: {
   env?: NodeJS.ProcessEnv;
   now?: () => number;
   intervalMs?: number;
+  /** After a site was read: the alerts within the hour (energy-live-hour-alerts.ts). Its failures never stop the poll. */
+  afterPoll?: (projectId: string) => Promise<unknown>;
 }): EnergyLiveReadingsPoller => {
   const env = input.env ?? process.env;
   const intervalMs = input.intervalMs ?? LIVE_READING_INTERVAL_MS;
@@ -274,6 +308,14 @@ export const createEnergyLiveReadingsPoller = (input: {
           } catch (error) {
             log.error("failed", { project_id: projectId, code: error instanceof Error ? error.message.slice(0, 160) : "unknown" });
             if (!controller.signal.aborted) job.failed(error, projectId);
+            continue;
+          }
+          if (input.afterPoll && !controller.signal.aborted) {
+            try {
+              await input.afterPoll(projectId);
+            } catch (error) {
+              log.warn("after-poll failed", { project_id: projectId, code: error instanceof Error ? error.message.slice(0, 160) : "unknown" });
+            }
           }
         }
       } finally {
