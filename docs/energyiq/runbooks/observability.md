@@ -26,7 +26,7 @@ All optional; put them in the API's environment (`.env` or a systemd drop-in) an
 
 ## Logs
 
-In production each line is one JSON object: `time`, `level`, `msg`, then the event's fields. `component` says which part of the API wrote it (`http`, `startup`, `tuya-sync`, `live-sync`, `live-readings`, `alert-email`, `target-alert`, `report-email`, `report-agent`, `process`, ...). Lines written while serving a request carry its `request_id`.
+In production each line is one JSON object: `time`, `level`, `msg`, then the event's fields. `component` says which part of the API wrote it (`http`, `startup`, `tuya-sync`, `live-sync`, `live-readings`, `live-hour-alert`, `alert-email`, `target-alert`, `report-email`, `report-agent`, `process`, ...). Lines written while serving a request carry its `request_id`.
 
 ```json
 {"time":"2026-10-30T02:00:04.118Z","level":"info","msg":"request","component":"http","request_id":"7f3c9a0e5b2d41c6a8e2f0b1c3d4e5f6","method":"GET","path":"/api/v1/energy/projects/tuya-office/overview","status":200,"duration_ms":84.2,"user_id":"u_8c1d","workspace_id":"ws_hima","client_ip":"203.0.113.9"}
@@ -179,7 +179,7 @@ All run on timers inside the API process. A job is only watched while it is swit
 |---|---|---|---|
 | `tuya-sync` | Daily sync for the server-configured Tuya site (`ENERGYIQ_TUYA_SYNC_ENABLED=true`) | Daily at `ENERGYIQ_TUYA_SYNC_LOCAL_HOUR` (Singapore), each catch-up pass | 26 h |
 | `live-sync` | Daily sync for sites connected in the app (Facility → Live connection) | Hourly, each sync pass | 3 h |
-| `live-readings` | Current meter readings for Overview's live power | Every 15 min | 1 h |
+| `live-readings` | Current meter readings for Overview's live power; after each site is read, unusual hourly use and never-use are judged within the hour from those readings (`live-hour-alert` log lines; `ENERGYIQ_LIVE_HOUR_ALERTS_ENABLED=false` turns that part off) | Every 15 min | 1 h |
 | `alert-email` | Emails about stopped or offline meters and failed syncs (`ENERGYIQ_ALERT_EMAILS_ENABLED=true` with SMTP) | Every 15 min | 1 h |
 | `target-alert` | Daily budget and overnight-use checks per site; meter alerts (stopped meters, power that should never be used, unusual hourly use) whenever a site has new readings (`ENERGYIQ_METER_ALERTS_ENABLED=false` turns them off) | Hourly | 3 h |
 | `report-email` | Scheduled portfolio report emails | Every 15 min | 1 h |
