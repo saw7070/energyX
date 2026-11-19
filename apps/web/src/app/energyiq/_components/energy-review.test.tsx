@@ -208,8 +208,12 @@ describe("the energy review answers the site's questions in order", () => {
       ["perLight", { value: "0.050", unit: "kWh per light a day", tone: "info" }],
       ["savings", { value: expect.stringMatching(/^S\$[\d,]+$/), unit: "a year", tone: "good" }],
     ]);
-    // Each headline is a figure from its own sentence.
-    for (const answer of review.summary.answers.filter(item => /\d/.test(item.headline.value) && item.id !== "comparison")) expect(answer.answer).toContain(answer.headline.value.replace(/ – .*/, ""));
+    // Each headline is a figure from its own sentence, except energy and cost, whose sentence goes on from the
+    // headline (the month ahead) rather than repeating it right under it.
+    for (const answer of review.summary.answers.filter(item => /\d/.test(item.headline.value) && item.id !== "comparison" && item.id !== "total")) expect(answer.answer).toContain(answer.headline.value.replace(/ – .*/, ""));
+    const total = review.summary.answers.find(answer => answer.id === "total")!;
+    expect(total.answer).not.toContain(total.headline.value);
+    expect(total.answer).toMatch(/projected for a 30-day month\.$/);
     expect(review.summary.answers.find(answer => answer.id === "savings")!.answer).toContain(review.summary.answers.find(answer => answer.id === "savings")!.headline.value);
     // Two blocks within 5% of each other are about the same, which is good news; every meter in use is too.
     const even: Record<string, Meter> = { ...METERS, "a-gate": { ...METERS["a-gate"]!, group: "common" }, "b-lobby": { ...METERS["b-lobby"]!, kwh: lit(3.6) }, "b-high": { ...METERS["b-high"]!, kwh: lit(8) }, "b-low": { ...METERS["b-low"]!, kwh: lit(3.4, 0.01) } };
@@ -372,7 +376,7 @@ describe("the energy review as a working page", () => {
       expect(check.getAttribute("aria-label")).toBe("Checks (Needs a check): 1 to check. Linkway lights has stopped reporting.");
       expect(cards[3]!.querySelector(".er-chip")!.textContent).toBe("Worth a look");
       expect(cards[0]!.querySelector(".er-chip")).toBeNull();
-      expect(cards[0]!.getAttribute("aria-label")).toMatch(/^Energy and cost: \d+\.\d kWh a day\. About \d+\.\d kWh a day; /);
+      expect(cards[0]!.getAttribute("aria-label")).toMatch(/^Energy and cost: \d+\.\d kWh a day\. [\d,]+ kWh .*projected for a 30-day month\.$/);
       expect(host.querySelector("#er-q-total .er-kicker")!.textContent).toBe("Energy and cost");
 
       // A figure and a key finding each take the reader to their section, without changing the address.
