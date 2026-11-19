@@ -33,6 +33,12 @@ export type ProjectAction = { id: string; title: string; recommendation: string;
 export type AnalysisData = {
   projectId: string; projectName: string; timezone: string; snapshotId: string | null;
   current: LoadedPeriod; previous: LoadedPeriod | null; history: ScopeData | null; circuits: ScopeCircuit[];
+  /**
+   * The period before had readings but too few to compare with (under MIN_PREVIOUS_COVERAGE of the expected readings,
+   * such as the days before the meters were installed), so `previous` is null and no change is worked out. Absent
+   * otherwise.
+   */
+  previousTooFew?: { coverage: number } | undefined;
   holidays: Map<string, string>; openingHours: HoursByDay | null; actions: ProjectAction[];
   /** What the published hours mean; absent means opening hours. "lights_on": lighting that should run in them, usually at night. */
   hoursMeaning?: HoursMeaning | undefined;

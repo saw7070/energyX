@@ -36,7 +36,10 @@ const FORECAST_CLOSED_CSS = `repeating-linear-gradient(45deg, ${FORECAST_CLOSED}
 const ALWAYS_ON_COLOR = "#8f8a84";
 const num = (value: number, digits = 1) => value.toLocaleString("en-SG", { maximumFractionDigits: digits });
 const hh = (hour: number) => `${String(hour).padStart(2, "0")}:00`;
-const STATUS: Record<HealthStatus, { icon: EnergyIconName; chip: string; ring: string }> = {
+/** "wait": nothing to judge yet (too few earlier readings to compare with); it never counts as good or bad. */
+type RowStatus = HealthStatus | "wait";
+const STATUS: Record<RowStatus, { icon: EnergyIconName; chip: string; ring: string }> = {
+  wait: { icon: "info", chip: "bg-slate-50 text-slate-600 ring-slate-200", ring: "border-slate-200" },
   good: { icon: "check", chip: "bg-emerald-50 text-emerald-700 ring-emerald-200", ring: "border-emerald-200" },
   watch: { icon: "info", chip: "bg-amber-50 text-amber-800 ring-amber-200", ring: "border-amber-200" },
   act: { icon: "alert", chip: "bg-rose-50 text-rose-700 ring-rose-200", ring: "border-rose-200" },
@@ -188,7 +191,7 @@ export function DecisionSummary(props: StoryInput & { figures?: StoryFigures; ab
       </div>
       <div className="mt-5 grid gap-px border-y border-slate-200 bg-slate-200/70 md:grid-cols-3">
         <Step index={1} label={t(story.periodCost != null ? "step.spent" : "step.used", { days: dates.length })} value={story.periodCost != null ? money(story.periodCost) : `${num(story.split.total, 0)} kWh`}
-          note={<>{story.periodCost != null ? `${num(story.project.usageKwh ?? story.split.total, 0)} kWh · ` : null}{shortDate(dates[0]!, locale)} – {shortDate(dates.at(-1)!, locale)}{story.change != null && <> · <span className={story.change > 0 ? "text-amber-700" : "text-emerald-700"}>{t("step.change", { change: `${story.change > 0 ? "+" : ""}${num(story.change)}`, days: dates.length })}</span></>}</>} />
+          note={<>{story.periodCost != null ? `${num(story.project.usageKwh ?? story.split.total, 0)} kWh · ` : null}{shortDate(dates[0]!, locale)} – {shortDate(dates.at(-1)!, locale)}{story.change != null && <> · <span className={story.change > 0 ? "text-amber-700" : "text-emerald-700"}>{t("step.change", { change: `${story.change > 0 ? "+" : ""}${num(story.change)}`, days: dates.length })}</span></>}{story.change == null && storyData.previousTooFew && <> · {t("step.noCompare")}</>}</>} />
         <Step index={2} label={t("step.after")} tone="amber" value={story.periodCost != null ? money(story.closedCost) : `${num(story.closedKwh, 0)} kWh`}
           note={<>{t(story.periodCost != null ? "step.afterNote" : "step.afterNoteEnergy", { pct: num(story.closedShare * 100, 0) })}{story.alwaysOn != null ? t("step.neverBelow", { kw: num(story.alwaysOn, 1), day: num(story.alwaysOn * 24, 1) }) : null}</>} />
         <Step index={3} label={t("step.save")} tone="emerald" value={savingRange(story, money, t)}
@@ -574,7 +577,7 @@ function HealthSection({ story, data, anomalies, floor, onJump, onInspectDay }: 
   const coverage = story.project.coverage;
   const gap = story.alwaysOn != null && floor ? (story.alwaysOn - floor.bestKw) / Math.max(floor.bestKw, 0.001) * 100 : null;
   type HealthAction = { label: string; onClick?: () => void; href?: string };
-  const items: Array<{ title: string; status: HealthStatus; value: string; text: string; days?: string[]; actions?: HealthAction[] }> = [
+  const items: Array<{ title: string; status: RowStatus; value: string; text: string; days?: string[]; actions?: HealthAction[] }> = [
     { title: t("health.unusual"), status: anomalies.length >= 3 ? "act" : anomalies.length ? "watch" : "good", value: `${anomalies.length}`,
       text: anomalies.length ? t("health.unusualSome", { days: joinText(anomalies.slice(0, 3).map(item => shortDate(item.date, locale)), locale) + (anomalies.length > 3 ? "…" : "") }) : t("health.unusualNone"),
       ...(anomalies.length ? { days: anomalies.slice(0, 4).map(item => item.date) } : {}) },
@@ -584,6 +587,8 @@ function HealthSection({ story, data, anomalies, floor, onJump, onInspectDay }: 
       text: gap >= 10 ? t("health.floorHigher", { kw: num(floor!.bestKw, 2), date: shortDate(floor!.bestTo, locale), pct: num(gap, 0) }) : gap < 1 ? t("health.floorAt") : t("health.floorWithin", { pct: num(gap, 0) }), actions: [{ label: t("health.seeStaysOn"), onClick: () => onJump("story-on") }] }] : []),
     ...(story.change != null ? [{ title: t("health.change", { days: story.days.length }), status: statusFor(story.change, 5, 15), value: `${story.change > 0 ? "+" : ""}${num(story.change)}%`,
       text: story.change >= 5 ? t("health.rising") : story.change <= -5 ? t("health.falling") : t("health.steady"), actions: [{ label: t("health.compareDays"), onClick: () => onJump("story-when") }] }] : []),
+    ...(story.change == null && data.previousTooFew ? [{ title: t("health.change", { days: story.days.length }), status: "wait" as const, value: "—",
+      text: t("health.changeTooFew", { pct: num(data.previousTooFew.coverage, 0), days: story.days.length }) }] : []),
     ...(coverage != null ? [{ title: t("health.readings"), status: statusFor(100 - coverage, 5, 20), value: `${num(coverage, 1)}%`,
       text: coverage >= 95 ? t("health.readingsOk") : t("health.readingsMissing", { pct: num(100 - coverage, 0) }),
       ...(coverage >= 95 ? {} : { actions: [{ label: t("health.checkDevices"), href: `/energyiq/project-configuration?${new URLSearchParams({ projectId: data.projectId, tab: "devices" })}` }] }) }] : []),

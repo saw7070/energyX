@@ -431,14 +431,14 @@ function KeyHighlights({ data, derived }: { data: AnalysisData; derived: Derived
   const peaks = topHours(project, 5);
   const previousLabel = previous ? `${dateWithDay(previous.dates[0]!, locale)} – ${dateWithDay(previous.dates.at(-1)!, locale)}` : "";
   const cards: Array<{ id: CardId | "peak"; icon: EnergyIconName; title: string; value: string; change: number | null; detail: string; link: string }> = [
-    { id: "total", icon: "bolt", title: t("kh.total"), value: kwh(project.usageKwh), change: percentChange(project.usageKwh, previous?.usageKwh), detail: previous ? t("kh.vsPrevious", { label: previousLabel, value: kwh(previous.usageKwh) }) : t("kh.noPrevious"), link: t("kh.viewBreakdown") },
+    { id: "total", icon: "bolt", title: t("kh.total"), value: kwh(project.usageKwh), change: percentChange(project.usageKwh, previous?.usageKwh), detail: previous ? t("kh.vsPrevious", { label: previousLabel, value: kwh(previous.usageKwh) }) : data.previousTooFew ? t("kh.previousTooFew", { pct: num(data.previousTooFew.coverage, 0) }) : t("kh.noPrevious"), link: t("kh.viewBreakdown") },
     { id: "average", icon: "calendar", title: t("kh.average"), value: dailyAvg == null ? "—" : t("unit.perDay", { value: num(dailyAvg) }), change: percentChange(dailyAvg, previousAvg), detail: previousAvg == null ? t("kh.completeOnly", { count: derived.complete.length, total: project.dates.length }) : t("kh.previousAverage", { value: t("unit.perDay", { value: num(previousAvg) }) }), link: t("kh.viewBreakdown") },
     { id: "peak", icon: "analysis", title: t("kh.peak"), value: peaks[0] ? `${num(peaks[0].kwh)} kWh` : "—", change: null, detail: peaks[0] ? `${dateWithDay(peaks[0].date, locale)} · ${hh(peaks[0].hour)}–${hh(peaks[0].hour + 1)}` : t("kh.noHour"), link: t("kh.viewPeaks") },
     { id: "cost", icon: "document", title: t("kh.cost"), value: project.cost ? money(project.cost.amount, project.cost.currency) : "—", change: percentChange(project.cost?.amount, previous?.cost?.amount), detail: project.cost ? t("kh.tariff", { note: tariffNote(project.cost, locale) }) + (previous?.cost ? t("kh.previousCost", { value: money(previous.cost.amount, previous.cost.currency) }) : "") : t("kh.noRate"), link: t("kh.viewBreakdown") },
   ];
   return <div>
     <h3 className="mb-3"><Title guide={{ summary: t("exec.summary"), dataAcquisition: [t("exec.data1"), t("exec.data2")], chartGeneration: [t("exec.chart1"), t("exec.chart2")] }}>{t("kh.title")}</Title></h3>
-    <p className="mb-3 text-sm text-slate-600">{previous ? t("kh.intro", { label: previousLabel }) : t("kh.introNone")}</p>
+    <p className="mb-3 text-sm text-slate-600">{previous ? t("kh.intro", { label: previousLabel }) : data.previousTooFew ? t("kh.introTooFew", { pct: num(data.previousTooFew.coverage, 0) }) : t("kh.introNone")}</p>
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{cards.map(card => <button key={card.id} type="button" onClick={() => setOpen(card.id)} className={`${PANEL} cursor-pointer p-4 text-left transition hover:border-blue-300 hover:bg-slate-50`}>
       <div className="mb-2 flex items-center justify-between">
         <span className="rounded-lg bg-blue-50 p-2 text-blue-700"><EnergyIcon name={card.icon} className="h-4 w-4" /></span>
