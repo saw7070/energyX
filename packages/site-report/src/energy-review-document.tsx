@@ -16,7 +16,7 @@ import { ENERGY_REVIEW_PALETTE as P, worthSaying, type EnergyReview, type Energy
 import { energyReviewMessages } from "./energy-review-messages.js";
 import { forHoursMeaning, translatorFor } from "./locale.js";
 import { Rich } from "./rich.js";
-import { niceTicks, useWidth } from "./site-report-document.js";
+import { niceTicks, textWidth, useWidth } from "./site-report-document.js";
 import { clock, moneyText } from "./site-report-model.js";
 
 type T = ReturnType<typeof reviewText>;
@@ -184,6 +184,34 @@ export const ENERGY_REVIEW_CSS = `
 .eiq-energy-review .er-timeline li{display:grid;grid-template-columns:minmax(92px,auto) minmax(0,1fr);gap:14px;align-items:baseline;padding:8px 0;border-bottom:1px dashed var(--er-line);font-size:13.5px}
 .eiq-energy-review .er-timeline li:last-child{border-bottom:0}
 .eiq-energy-review .er-timeline time{font-weight:700;color:var(--er-green);font-variant-numeric:tabular-nums;white-space:nowrap}
+.eiq-energy-review .er-timeline.er-marked li{grid-template-columns:18px minmax(92px,auto) minmax(0,1fr);margin:0 -8px;padding:8px;border-radius:8px;transition:background .15s}
+.eiq-energy-review .er-timeline li.er-on{background:var(--er-green-soft)}
+.eiq-energy-review .er-timeline li.er-on .er-badge{box-shadow:0 0 0 3px var(--er-green-soft)}
+.eiq-energy-review .er-timeline .er-badge-day,.eiq-energy-review .er-timeline .er-badge-none{align-self:start;margin-top:3px}
+/* the 24 hours: the day's total, the moments marked on the chart, the shaded daytime and their key */
+.eiq-energy-review .er-daytotal{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:var(--er-green)}
+.eiq-energy-review .er-daytotal::before{content:"";width:14px;height:9px;border-radius:2px 2px 0 0;background:linear-gradient(180deg,#9CC3AE 0 40%,var(--er-green) 40%);-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.eiq-energy-review .er-badge{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;border:1.5px solid var(--er-green);background:var(--er-green);color:#fff;font-size:10.5px;font-weight:700;font-style:normal;line-height:1;font-variant-numeric:tabular-nums;-webkit-print-color-adjust:exact;print-color-adjust:exact;transition:box-shadow .15s}
+.eiq-energy-review .er-badge-step{border-color:var(--er-muted);background:var(--er-muted)}
+.eiq-energy-review .er-badge-off{border-color:var(--er-faint);background:#fff;color:var(--er-muted)}
+.eiq-energy-review .er-badge-day{border-radius:4px;border-color:#C5D3CB;background:#EEF3F0}
+.eiq-energy-review .er-badge-none{visibility:hidden}
+.eiq-energy-review .er-mkey{display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;max-width:none;margin:12px 0 0;font-size:12px;line-height:1.4;color:var(--er-muted)}
+.eiq-energy-review .er-mkey span{display:inline-flex;align-items:center;gap:6px}
+.eiq-energy-review .er-mkey .er-badge{width:11px;height:11px}
+.eiq-energy-review .er-mkey .er-badge-day{width:15px}
+.eiq-energy-review svg .er-day rect{fill:#EEF3F0;transition:fill .15s}
+.eiq-energy-review svg .er-day.er-on rect{fill:#DCE8E1}
+.eiq-energy-review svg text.er-day-text{font-size:11px;fill:var(--er-muted);paint-order:stroke;stroke:#EEF3F0;stroke-width:3px;stroke-linejoin:round}
+.eiq-energy-review svg text.er-day-text.dark{font-size:11.5px;font-weight:650;fill:var(--er-ink)}
+.eiq-energy-review svg .er-mk{transition:opacity .15s}
+.eiq-energy-review svg .er-mks.er-focus .er-mk:not(.er-on){opacity:.25}
+.eiq-energy-review svg .er-mk.er-on .er-mk-line{stroke-width:2;stroke-dasharray:none}
+.eiq-energy-review svg .er-mk-ring{opacity:0;transition:opacity .15s}
+.eiq-energy-review svg .er-mk.er-on .er-mk-ring{opacity:1}
+.eiq-energy-review svg .er-mk-hit{fill:transparent;cursor:pointer}
+.eiq-energy-review svg text.er-mk-n{font-size:10px;font-weight:700;font-variant-numeric:tabular-nums}
+.eiq-energy-review svg text.er-mk-time{font-size:10.5px;font-weight:600;fill:var(--er-body);font-variant-numeric:tabular-nums}
 .eiq-energy-review .er-callout{display:flex;gap:14px;margin-top:20px;padding:14px 18px;border-radius:12px;background:var(--er-bronze-soft);max-width:none}
 .eiq-energy-review .er-callout::before{content:"";flex:none;width:3px;border-radius:2px;background:var(--er-bronze)}
 
@@ -270,6 +298,7 @@ export const ENERGY_REVIEW_CSS = `
   .eiq-energy-review .er-hint{display:none}
   .eiq-energy-review .er-follow li{grid-template-columns:1fr;padding:12px 14px}
   .eiq-energy-review .er-follow .er-chip{grid-row:1;justify-self:start}
+  .eiq-energy-review .er-timeline.er-marked li{grid-template-columns:18px minmax(74px,auto) minmax(0,1fr);gap:10px}
 }
 @media (prefers-reduced-motion:reduce){.eiq-energy-review *{transition:none!important}}
 @media print{
@@ -583,21 +612,101 @@ function Pairs({ review, t }: { review: EnergyReview; t: T }) {
 
 // ---------- 5. the average 24 hours ----------
 
-/** The average day hour by hour, the layers stacked as steps; layers can be hidden, and pointing at an hour reads it out. */
+/** The kinds of moment the chart marks, and their colour: switching on in the review's green, a step down muted, off grey. */
+type MarkKind = "on" | "step" | "off";
+const MARK_COLOUR: Record<MarkKind, string> = { on: P[0]!, step: MUTED, off: FAINT };
+const isMarkKind = (kind: unknown): kind is MarkKind => kind === "on" || kind === "step" || kind === "off";
+/** A moment's numbered badge on the chart: its radius, and how far apart two badges stay, centre to centre. */
+const BADGE_R = 8, BADGE_GAP = 2 * BADGE_R + 3;
+
+/**
+ * Badges along a line, each as near its own x as it can be, none closer than `gap` to the next and all within lo..hi:
+ * badges that would touch share the room around the middle of where they want to be. `xs` in order. Returns each
+ * badge's x and the runs (first and last index) of badges that had to share room.
+ */
+function spreadBadges(xs: readonly number[], gap: number, lo: number, hi: number): { at: number[]; runs: Array<[number, number]> } {
+  type Run = { from: number; to: number; sum: number };
+  const runs: Run[] = [];
+  const startOf = (run: Run) => { const count = run.to - run.from + 1; return Math.max(lo, Math.min(hi - (count - 1) * gap, run.sum / count - (count - 1) * gap / 2)); };
+  xs.forEach((x, index) => {
+    runs.push({ from: index, to: index, sum: x });
+    while (runs.length > 1) {
+      const last = runs.at(-1)!, before = runs.at(-2)!;
+      if (startOf(last) - (startOf(before) + (before.to - before.from) * gap) >= gap - 1e-6) break;
+      runs.splice(-2, 2, { from: before.from, to: last.to, sum: before.sum + last.sum });
+    }
+  });
+  const at: number[] = [];
+  for (const run of runs) { const start = startOf(run); for (let index = run.from; index <= run.to; index += 1) at[index] = start + (index - run.from) * gap; }
+  return { at, runs: runs.map(run => [run.from, run.to]) };
+}
+
+/** A label broken at its commas into lines no wider than `room`; null when a piece is wider on its own. */
+function wrapLabel(text: string, room: number, size: number): string[] | null {
+  const lines: string[] = [];
+  for (const part of text.split(/(?<=[,，])\s*/)) {
+    const last = lines.at(-1);
+    const joined = last === undefined ? part : `${last}${last.endsWith("，") ? "" : " "}${part}`;
+    if (last !== undefined && textWidth(joined, size) <= room) lines[lines.length - 1] = joined; else lines.push(part);
+  }
+  return lines.every(line => textWidth(line, size) <= room) ? lines : null;
+}
+
+/**
+ * The average day hour by hour, the layers stacked as steps; layers can be hidden, and pointing at an hour reads it out.
+ * The night's moments are marked where they happen, to the minute and on the same scale as the hours: a dashed line
+ * each, with a number at the top that the list under the chart repeats (moments a few minutes apart share the room
+ * above them, and their times are named together). The daytime, from the last light off to the first one on, is
+ * shaded and named. On the page, pointing at a moment in the list, or at its number, picks out both.
+ */
 function Layers({ review, live, t }: { review: EnergyReview; live: boolean; t: T }) {
   const profile = review.profile!;
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
   const [hover, setHover] = useState<number | null>(null);
-  const [ref, measured] = useWidth(780);
+  /** The moment picked out in the list or on the chart: its place in the timeline. */
+  const [picked, setPicked] = useState<number | null>(null);
+  // It fits a phone's width rather than scrolling: the moments are numbered there and the hours thinned out.
+  const [ref, measured] = useWidth(780, 300);
   const [scrollLeft, onScroll] = useScrollLeft();
-  const width = measured, height = 268;
-  const m = { l: 50, r: 12, t: 16, b: 30 };
-  const pw = width - m.l - m.r, ph = height - m.t - m.b;
+  const width = measured;
+  // The moments the chart marks, numbered in the list's order. Reviews saved before the chart marked them have none.
+  const marks = profile.timeline.flatMap((moment, index) => typeof moment.at === "number" && Number.isFinite(moment.at) && isMarkKind(moment.kind)
+    ? [{ index, at: Math.min(Math.max(moment.at, 0), 1439), kind: moment.kind, time: moment.time, text: moment.text }] : [])
+    .map((mark, order) => ({ ...mark, n: order + 1 }));
+  const markOf = new Map(marks.map(mark => [mark.index, mark]));
+  const daytime = profile.daytime;
+  const dayRow = daytime ? profile.timeline.findIndex(moment => moment.kind === "day") : -1;
+  const ml = 50, mr = 12, mb = 30;
+  const pw = width - ml - mr;
+  const x = (hour: number) => ml + hour / 24 * pw;
+  // The numbers above the plot, left to right, and over each run of them its times ("6:20 pm – 7 pm"); runs whose
+  // times would touch are named together when they are close in time too (the morning's switching off). Otherwise,
+  // as on a phone, the numbers stand alone: a name over moments hours apart would read as a span of time.
+  const byX = [...marks].sort((a, b) => a.at - b.at || a.index - b.index);
+  const { at: badgeX, runs } = spreadBadges(byX.map(mark => x(mark.at / 60)), BADGE_GAP, BADGE_R + 2, width - BADGE_R - 2);
+  const LABEL_SIZE = 10.5;
+  const labelText = (from: number, to: number) => from === to ? byX[from]!.time : `${byX[from]!.time} – ${byX[to]!.time}`;
+  const labelBox = (from: number, to: number) => {
+    const half = textWidth(labelText(from, to), LABEL_SIZE) / 2;
+    const centre = Math.max(half, Math.min(width - half, (badgeX[from]! + badgeX[to]!) / 2));
+    return { centre, left: centre - half, right: centre + half };
+  };
+  const labels = runs.map(([from, to]) => ({ from, to }));
+  let named = true;
+  for (let index = 1; index < labels.length;) {
+    const a = labels[index - 1]!, b = labels[index]!;
+    if (labelBox(a.from, a.to).right + 10 <= labelBox(b.from, b.to).left) { index += 1; continue; }
+    if (byX[b.from]!.at - byX[a.to]!.at > 90) { named = false; break; }
+    labels.splice(index - 1, 2, { from: a.from, to: b.to });
+    index = Math.max(1, index - 1);
+  }
+  const badgeY = named ? 27 : 12;
+  const m = { l: ml, r: mr, t: marks.length ? badgeY + BADGE_R + 9 : 16, b: mb };
+  const height = 268 + m.t - 16, ph = height - m.t - m.b;
   const shown = profile.layers.filter(layer => !hidden.has(layer.key));
   const stackTop = Array.from({ length: 24 }, (_, hour) => shown.reduce((sum, layer) => sum + (layer.hours[hour] ?? 0), 0));
   const ticks = niceTicks(Math.max(...stackTop, 0.001) * 1.12);
   const top = ticks.at(-1)!;
-  const x = (hour: number) => m.l + hour / 24 * pw;
   const y = (kw: number) => m.t + ph - kw / top * ph;
   const below = Array.from({ length: 24 }, () => 0);
   const shapes = shown.map(layer => {
@@ -607,6 +716,17 @@ function Layers({ review, live, t }: { review: EnergyReview; live: boolean; t: T
     const bottomLine = Array.from({ length: 24 }, (_, index) => 23 - index).map(hour => `L${x(hour + 1).toFixed(1)},${y(bottom[hour]!).toFixed(1)} L${x(hour).toFixed(1)},${y(bottom[hour]!).toFixed(1)}`).join(" ");
     return { layer, d: `M${x(0).toFixed(1)},${y(bottom[0]!).toFixed(1)} ${topLine} ${bottomLine} Z` };
   });
+  // The daytime band (in two parts when it runs across midnight), named inside its widest part when the name fits.
+  const spans = !daytime ? [] : daytime.from <= daytime.to ? [[daytime.from, daytime.to] as const] : [[daytime.from, 1440] as const, [0, daytime.to] as const];
+  const widest = spans.map(([from, to]) => ({ left: x(from / 60), right: x(to / 60) })).sort((a, b) => (b.right - b.left) - (a.right - a.left))[0];
+  const bandLines = daytime && widest && textWidth(daytime.title, 11.5) <= widest.right - widest.left - 12
+    ? [daytime.title, ...(daytime.detail ? wrapLabel(daytime.detail, widest.right - widest.left - 12, 11) ?? [] : [])] : [];
+  // The hours along the bottom every three hours, or every six when their names would touch.
+  const hourBox = (hour: number) => {
+    const w = textWidth(clock(hour % 24, review.locale), 11);
+    return hour === 0 ? [x(0), x(0) + w] : hour === 24 ? [x(24) - w, x(24)] : [x(hour) - w / 2, x(hour) + w / 2];
+  };
+  const hourStep = [3, 6, 12].find(step => Array.from({ length: 24 / step }, (_, index) => (index + 1) * step).every(hour => hourBox(hour)[0]! >= hourBox(hour - step)[1]! + 2)) ?? 12;
   const toggle = (key: string) => setHidden(current => {
     const next = new Set(current);
     if (next.has(key)) next.delete(key); else if (shown.length > 1) next.add(key);
@@ -616,9 +736,13 @@ function Layers({ review, live, t }: { review: EnergyReview; live: boolean; t: T
     const hour = Math.floor((svgX(event, width) - m.l) / pw * 24);
     setHover(hour >= 0 && hour < 24 ? hour : null);
   };
+  const pick = (index: number) => live ? { onPointerEnter: () => setPicked(index), onPointerLeave: () => setPicked(null) } : {};
   return <figure className="er-fig">
     <figcaption className="er-fig-head">
-      <span className="er-fig-title">{profile.title}</span>
+      <span style={{ display: "grid", gap: 4 }}>
+        <span className="er-fig-title">{profile.title}</span>
+        {profile.dayTotal && <span className="er-daytotal">{profile.dayTotal}</span>}
+      </span>
       {live && <span className="er-hint">{t("chart.hint")}</span>}
     </figcaption>
     <div className="er-key">
@@ -629,6 +753,10 @@ function Layers({ review, live, t }: { review: EnergyReview; live: boolean; t: T
     </div>
     <div className="er-plot">
       <div className="er-scroll" ref={ref} onScroll={onScroll}><svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={profile.title}>
+        {profile.description && <desc>{profile.description}</desc>}
+        {spans.length > 0 && <g className={`er-day${picked != null && picked === dayRow ? " er-on" : ""}`}>
+          {spans.map(([from, to]) => <rect key={from} x={x(from / 60)} y={m.t} width={Math.max(0, x(to / 60) - x(from / 60))} height={ph} />)}
+        </g>}
         {ticks.map(tick => <g key={tick}><line x1={m.l} x2={width - m.r} y1={y(tick)} y2={y(tick)} stroke={LINE} strokeDasharray={tick === 0 ? undefined : "2 4"} /><text x={m.l - 10} y={y(tick) + 4} textAnchor="end">{`${tick} kW`}</text></g>)}
         {shapes.map(shape => <path key={shape.layer.key} d={shape.d} fill={shape.layer.colour} stroke="#fff" strokeWidth={0.6} strokeOpacity={0.7}>{!live && <title>{shape.layer.name}</title>}</path>)}
         {hover != null && <g pointerEvents="none">
@@ -636,8 +764,27 @@ function Layers({ review, live, t }: { review: EnergyReview; live: boolean; t: T
           <line x1={x(hover)} x2={x(hover)} y1={m.t} y2={m.t + ph} stroke={INK} strokeOpacity={0.35} />
           <line x1={x(hover + 1)} x2={x(hover + 1)} y1={m.t} y2={m.t + ph} stroke={INK} strokeOpacity={0.35} />
         </g>}
+        {widest && bandLines.length > 0 && <g aria-hidden="true">{bandLines.map((line, index) =>
+          <text key={index} className={`er-day-text${index === 0 ? " dark" : ""}`} x={(widest.left + widest.right) / 2} y={m.t + 17 + index * 15} textAnchor="middle">{line}</text>)}
+        </g>}
+        {marks.length > 0 && <g className={`er-mks${picked != null && markOf.has(picked) ? " er-focus" : ""}`} aria-hidden="true">
+          {byX.map((mark, order) => {
+            const lx = x(mark.at / 60), bx = badgeX[order]!, colour = MARK_COLOUR[mark.kind];
+            return <g key={mark.index} className={`er-mk${picked === mark.index ? " er-on" : ""}`} {...pick(mark.index)} onPointerDown={live ? () => setPicked(mark.index) : undefined}>
+              {!live && <title>{`${mark.time} · ${mark.text}`}</title>}
+              <line x1={lx} x2={lx} y1={m.t} y2={y(0)} stroke="#fff" strokeWidth={3} strokeOpacity={0.8} />
+              <line className="er-mk-line" x1={lx} x2={lx} y1={m.t} y2={y(0)} stroke={colour} strokeWidth={1.25} strokeDasharray="3 3" />
+              <path d={`M${bx.toFixed(1)},${badgeY + BADGE_R} L${lx.toFixed(1)},${m.t}`} stroke={colour} strokeWidth={1} fill="none" />
+              {live && <circle className="er-mk-ring" cx={bx} cy={badgeY} r={BADGE_R + 3} fill="none" stroke={colour} strokeWidth={1.5} />}
+              <circle cx={bx} cy={badgeY} r={BADGE_R} fill={mark.kind === "off" ? "#fff" : colour} stroke={colour} strokeWidth={1.5} />
+              <text className="er-mk-n" x={bx} y={badgeY + 3.6} textAnchor="middle" style={{ fill: mark.kind === "off" ? MUTED : "#fff" }}>{mark.n}</text>
+              {live && <circle className="er-mk-hit" cx={bx} cy={badgeY} r={BADGE_R + 4} />}
+            </g>;
+          })}
+          {named && labels.map(label => <text key={label.from} className="er-mk-time" x={labelBox(label.from, label.to).centre} y={11} textAnchor="middle">{labelText(label.from, label.to)}</text>)}
+        </g>}
         <line x1={m.l} x2={width - m.r} y1={y(0)} y2={y(0)} stroke={MUTED} />
-        {[0, 3, 6, 9, 12, 15, 18, 21, 24].map(hour => <text key={hour} x={x(hour)} y={height - 8} textAnchor={hour === 0 ? "start" : hour === 24 ? "end" : "middle"}>{clock(hour % 24, review.locale)}</text>)}
+        {Array.from({ length: 24 / hourStep + 1 }, (_, index) => index * hourStep).map(hour => <text key={hour} x={x(hour)} y={height - 8} textAnchor={hour === 0 ? "start" : hour === 24 ? "end" : "middle"}>{clock(hour % 24, review.locale)}</text>)}
         {live && <rect className="er-hit" x={m.l} y={m.t} width={pw} height={ph} onPointerMove={onMove} onPointerDown={onMove} onPointerLeave={event => { if (event.pointerType === "mouse") setHover(null); }} />}
       </svg></div>
       {live && hover != null && <Tip x={x(hover + 0.5) - scrollLeft} y={y(stackTop[hover]!)} width={measured}>
@@ -646,7 +793,21 @@ function Layers({ review, live, t }: { review: EnergyReview; live: boolean; t: T
         {shown.length > 1 && <TipRow sum label={t("chart.total")} value={`${num(stackTop[hover]!, 2)} kW`} />}
       </Tip>}
     </div>
-    {profile.timeline.length > 0 && <ol className="er-timeline">{profile.timeline.map(moment => <li key={`${moment.time}|${moment.text}`}><time>{moment.time}</time><span>{moment.text}</span></li>)}</ol>}
+    {marks.length > 0 && <p className="er-mkey">
+      {(["on", "step", "off"] as const).filter(kind => marks.some(mark => mark.kind === kind)).map(kind => <span key={kind}><i className={`er-badge er-badge-${kind}`} aria-hidden="true" />{t(`mark.${kind}`)}</span>)}
+      {spans.length > 0 && <span><i className="er-badge er-badge-day" aria-hidden="true" />{t("mark.day")}</span>}
+      <span>{t("mark.note")}</span>
+    </p>}
+    {profile.timeline.length > 0 && <ol className={`er-timeline${marks.length ? " er-marked" : ""}`}>{profile.timeline.map((moment, index) => {
+      const mark = markOf.get(index), day = index === dayRow && spans.length > 0;
+      const linked = live && (!!mark || day);
+      return <li key={`${moment.time}|${moment.text}`} className={picked === index ? "er-on" : undefined} tabIndex={linked ? 0 : undefined}
+        {...(linked ? { ...pick(index), onFocus: () => setPicked(index), onBlur: () => setPicked(null) } : {})}>
+        {marks.length > 0 && (mark ? <b className={`er-badge er-badge-${mark.kind}`} aria-hidden="true">{mark.n}</b>
+          : <i className={`er-badge ${day ? "er-badge-day" : "er-badge-none"}`} aria-hidden="true" />)}
+        <time>{moment.time}</time><span>{moment.text}</span>
+      </li>;
+    })}</ol>}
   </figure>;
 }
 

@@ -55,9 +55,10 @@ const TOP_OF: Record<string, string> = { a: "Block A", b: "Block B", common: "Co
 
 /**
  * `byArea`: as on a live site, each meter's hour-by-hour readings come with the area it belongs to (data.current.spaces)
- * and the site's own meter list names the meters without readings.
+ * and the site's own meter list names the meters without readings. `groups` and `nights`: another estate's groups and
+ * lights-on hours.
  */
-function estate(extra: Partial<AnalysisData> = {}, options: { meters?: Record<string, Meter>; byArea?: boolean } = {}): AnalysisData {
+function estate(extra: Partial<AnalysisData> = {}, options: { meters?: Record<string, Meter>; byArea?: boolean; groups?: typeof GROUPS; nights?: typeof NIGHTS } = {}): AnalysisData {
   const table = options.meters ?? METERS;
   const keys = Object.keys(table);
   const meterOf = (id: string, withSeries: boolean): ScopeMeter => ({ id, name: table[id]!.name, location: table[id]!.group, category: table[id]!.category ?? "light", official: true, series: withSeries ? series(id, table) : null });
@@ -75,8 +76,8 @@ function estate(extra: Partial<AnalysisData> = {}, options: { meters?: Record<st
     projectId: "estate", projectName: "Riverside", timezone: "Asia/Singapore", snapshotId: null,
     current: { project: { id: "estate", name: "Riverside", dates: DATES, timezone: "Asia/Singapore", total, types: {}, meters, usageKwh: totalKwh, peakKw: null, peakAt: null,
       cost: { amount: totalKwh * 0.3, currency: "SGD", note: "0.3 SGD/kWh before tax", rates: [0.3], basis: "tax_exclusive" }, typeTotals: {}, coverage: 95 }, spaces },
-    previous: null, history: null, circuits: [], holidays: new Map(), openingHours: NIGHTS, actions: [], hoursMeaning: "lights_on",
-    groups: { list: GROUPS, meters: keys.map(id => ({ id, name: table[id]!.name, groupId: table[id]!.group, kwh: periodKwh(id, table) })) },
+    previous: null, history: null, circuits: [], holidays: new Map(), openingHours: options.nights ?? NIGHTS, actions: [], hoursMeaning: "lights_on",
+    groups: { list: options.groups ?? GROUPS, meters: keys.map(id => ({ id, name: table[id]!.name, groupId: table[id]!.group, kwh: periodKwh(id, table) })) },
     alwaysOnByDesign: [{ id: "a-emergency", name: "Block A emergency lights" }, { id: "b-emergency", name: "Block B emergency lights" }],
     lightCounts: [{ id: "playground", name: "Playground lights", count: 4 }],
     tariffTax: { name: "GST", ratePct: 9 },
@@ -153,13 +154,14 @@ describe("the energy review answers the site's questions in order", () => {
     expect(profile.layers[0]!.name).toBe("Emergency lights");
     expect(profile.layers.map(layer => layer.name)).toEqual(expect.arrayContaining(["Block lighting", "Ground floor", "Common area"]));
     expect(profile.intro).toContain("Lights switch on at about 7 pm and off at about 7 am.");
-    expect(profile.intro).toContain("mostly emergency lights");
+    // What stays on in the day is only the emergency lighting, ticked always on by design: the lights are off as planned.
+    expect(profile.intro).toMatch(/ During the day the lights are off as planned, apart from emergency lights \(on by design, about [\d.]+ kW\)\.$/);
     // The point to check is a key finding of its own, so the profile's finding says only when the lights run.
     expect(review.summary.answers[4]!.answer).toMatch(/^Lights on from about 7 pm to 7 am, peaking near \d\.\d kW\.$/);
     // The night in words: when the lights come on, the step down, when they go off, and what stays on in the day.
     expect(profile.timeline.map(moment => moment.time)).toEqual(expect.arrayContaining(["7 pm", "7 am"]));
     expect(profile.timeline.find(moment => moment.time === "7 pm")!.text).toMatch(/^First lights on: /);
-    expect(profile.timeline.at(-1)).toMatchObject({ time: "7 am to 7 pm", text: expect.stringMatching(/^Daytime: about [\d.]+ kW stays on, mostly emergency lights\.$/) });
+    expect(profile.timeline.at(-1)).toMatchObject({ time: "7 am to 7 pm", kind: "day", text: expect.stringMatching(/^Daytime: off as planned, apart from emergency lights \(on by design\), about [\d.]+ kW\.$/) });
   });
 
   it("lists what to check on site: a meter that stopped, not one wired to report only while its lights are on", () => {
@@ -419,6 +421,156 @@ describe("the energy review as a working page", () => {
       await act(async () => root.unmount());
       host.remove();
       vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("the 24-hour chart marks when the lights switch", () => {
+  // Two alike blocks and a common area on 10-minute timers, the block lighting stepped down after midnight, the
+  // emergency lights always on by design and lights-on hours of 18:00–08:00. The names are made up.
+  /** A circuit on a timer: on at `on`, off at `off`, and down to each later level at its time (hours: 18.5 is 6:30 pm). */
+  const timer = (kw: number, on: number, off: number, ...steps: Array<[at: number, kw: number]>): Profile => (_date, hour) => {
+    let sum = 0;
+    for (let minute = 0; minute < 60; minute += 1) {
+      const time = hour + (minute + 0.5) / 60;
+      if (time >= on) sum += kw;
+      else if (time < off) sum += steps.filter(([at]) => time >= at).at(-1)?.[1] ?? kw;
+    }
+    return sum / 60;
+  };
+  const BLOCKS: Record<string, Meter> = {
+    "a-l1": { name: "31A L1–L6", group: "a-lighting", kwh: timer(0.8, 18.5, 7 + 1 / 6, [1, 0.55]) },
+    "a-l2": { name: "31A L7–L17", group: "a-lighting", kwh: timer(0.5, 18.5, 7 + 1 / 6, [0.5, 0.32]) },
+    "a-lobby": { name: "31A lift lobby", group: "a-gf", kwh: timer(0.2, 18.5, 6.5) },
+    "a-deco": { name: "31A decorative light", group: "a-gf", kwh: timer(0.23, 18 + 2 / 3, 6.5) },
+    "a-emergency": { name: "31A emergency lights", group: "a-emergency", kwh: () => 0.2 },
+    "b-l1": { name: "31B L1–L6", group: "b-lighting", kwh: timer(0.5, 18.5, 7 + 1 / 3, [0.5, 0.32]) },
+    "b-l2": { name: "31B L7–L17", group: "b-lighting", kwh: timer(0.5, 18.5, 7 + 1 / 3, [0.5, 0.32]) },
+    "b-lobby": { name: "31B lift lobby", group: "b-gf", kwh: timer(0.2, 18.5, 6.5) },
+    "b-deco": { name: "31B decorative light", group: "b-gf", kwh: timer(0.23, 18 + 2 / 3, 6.5) },
+    "b-emergency": { name: "31B emergency lights", group: "b-emergency", kwh: () => 0.2 },
+    driveway: { name: "Driveway lamp", group: "common", kwh: timer(0.2, 18 + 1 / 3, 6.5) },
+    carpark: { name: "Carpark lights", group: "common", kwh: timer(0.15, 18.5, 6.5) },
+    playground: { name: "Playground lights", group: "common", kwh: timer(0.19, 18 + 2 / 3, 6.5) },
+  };
+  const LONG_NIGHTS = Object.fromEntries(Object.keys(NIGHTS).map(day => [day, [{ from: "18:00", to: "08:00" }]]));
+  const blocks = (extra: Partial<AnalysisData> = {}, meters = BLOCKS, locale: "en" | "zh-Hans" | "ms" = "en") => buildEnergyReview(estate(extra, { meters, nights: LONG_NIGHTS }), null, GENERATED, locale);
+  const built = blocks();
+
+  it("marks each moment at its minute, and gives the site's level just after a step from the minutes, not the next hour", () => {
+    const timeline = built.profile!.timeline;
+    expect(timeline.map(moment => [moment.time, moment.kind, moment.at])).toEqual([
+      ["6:20 pm", "on", 1100], ["6:30 pm", "on", 1110], ["6:40 pm", "on", 1120], ["7 pm", "on", 1140],
+      ["12:30 am", "step", 30], ["1 am", "step", 60],
+      ["6:30 am", "off", 390], ["7:10 am", "off", 430], ["7:20 am", "off", 440],
+      ["7:20 am to 6:20 pm", "day", undefined],
+    ]);
+    // Three circuits step down at 12:30 and the fourth at 1 am: in between the site is still above its 1 am level.
+    // Both used to read the hour after (3.3 kW).
+    expect(timeline[4]!.text).toBe("31A L7–L17, 31B L1–L6 and 31B L7–L17 step down; the site drops to about 3.6 kW.");
+    expect(timeline[5]!.text).toBe("31A L1–L6 step down; the site drops to about 3.3 kW.");
+  });
+
+  it("leaves the level out rather than guess it when a circuit is still dimming after its step", () => {
+    const dimming = blocks({}, { ...BLOCKS, "a-l1": { ...BLOCKS["a-l1"]!, kwh: timer(0.8, 18.5, 7 + 1 / 6, [1, 0.55], [2.5, 0.4]) } });
+    const steps = dimming.profile!.timeline.filter(moment => moment.kind === "step");
+    expect(steps.find(moment => moment.text.startsWith("31A L1–L6 "))!.text).toBe("31A L1–L6 step down.");
+    expect(steps.find(moment => moment.time === "12:30 am")!.text).toMatch(/ step down; the site drops to about 3\.6 kW\.$/);
+  });
+
+  it("shades the daytime, off as planned when only the meters ticked always on by design stay on", () => {
+    expect(built.profile!.daytime).toEqual({ from: 440, to: 1100, kw: expect.closeTo(0.4, 6), planned: true, title: "Off as planned", detail: "only emergency lights, about 0.4 kW" });
+    expect(built.profile!.intro).toMatch(/ During the day the lights are off as planned, apart from emergency lights \(on by design, about 0\.4 kW\)\.$/);
+    expect(built.profile!.timeline.at(-1)!.text).toBe("Daytime: off as planned, apart from emergency lights (on by design), about 0.4 kW.");
+  });
+
+  it("calls what stays on daytime use when it is not by design, going by the tick and never by a meter's name", () => {
+    // The same emergency lights without the tick, and a lift lobby left on all day.
+    const unticked = blocks({ alwaysOnByDesign: undefined });
+    expect(unticked.profile!.daytime).toMatchObject({ planned: false, title: "Daytime", detail: "about 0.4 kW still on" });
+    expect(unticked.profile!.intro).toMatch(/ During the day about 0\.4 kW remains, mostly emergency lights\.$/);
+    const leftOn = blocks({}, { ...BLOCKS, "a-lobby": { ...BLOCKS["a-lobby"]!, kwh: () => 0.2 } });
+    expect(leftOn.profile!.daytime).toMatchObject({ planned: false, title: "Daytime", detail: "about 0.6 kW still on" });
+    expect(leftOn.profile!.intro).not.toContain("off as planned");
+  });
+
+  it("gives the day's total as the typical day, which the average hours add up to", () => {
+    const typical = built.summary.figures[0]!.value;
+    expect(built.profile!.dayTotal).toBe(`About ${typical} kWh a day`);
+    expect(built.profile!.layers.reduce((sum, layer) => sum + layer.hours.reduce((total, value) => total + value, 0), 0)).toBeCloseTo(Number(typical), 0);
+    expect(built.profile!.description).toBe(`Average power for each hour of the day, the groups stacked, peaking at about 4.1 kW. Dashed lines numbered 1 to 9 mark the switching times in the list below the chart. The shaded part, 7:20 am to 6:20 pm, is the daytime. Off as planned: only emergency lights, about 0.4 kW. About ${typical} kWh a day.`);
+  });
+
+  it("draws the marks in a saved copy too, numbered like the list and on the same scale as the hours", () => {
+    const host = document.createElement("div");
+    host.innerHTML = renderEnergyReviewMarkup(built);
+    const profile = host.querySelector("#er-q-profile")!;
+    const marks = [...profile.querySelectorAll("svg .er-mk")];
+    const mark = (n: string) => marks.find(item => item.querySelector(".er-mk-n")!.textContent === n)!;
+    expect(marks.map(item => item.querySelector(".er-mk-n")!.textContent).sort((a, b) => Number(a) - Number(b))).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+    expect([...profile.querySelectorAll(".er-timeline li")].map(row => row.querySelector(".er-badge")!.textContent)).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9", ""]);
+    // A saved copy is 780 wide: hours from x 50 to 768, so 12:30 am is half an hour in and 6:20 pm at 18 h 20 min.
+    const x = (minutes: number) => 50 + 718 * minutes / 1440;
+    expect(Number(mark("5").querySelector(".er-mk-line")!.getAttribute("x1"))).toBeCloseTo(x(30), 3);
+    expect(Number(mark("1").querySelector(".er-mk-line")!.getAttribute("x1"))).toBeCloseTo(x(1100), 3);
+    const band = profile.querySelector("svg .er-day rect")!;
+    expect(Number(band.getAttribute("x"))).toBeCloseTo(x(440), 3);
+    expect(Number(band.getAttribute("width"))).toBeCloseTo(x(1100) - x(440), 3);
+    // Moments minutes apart share the room above them, their times named together.
+    expect([...profile.querySelectorAll("svg text.er-mk-time")].map(item => item.textContent)).toEqual(["12:30 am – 1 am", "6:30 am – 7:20 am", "6:20 pm – 7 pm"]);
+    expect([...profile.querySelectorAll("svg text.er-day-text")].map(item => item.textContent)).toEqual(["Off as planned", "only emergency lights, about 0.4 kW"]);
+    expect(profile.querySelector("svg desc")!.textContent).toBe(built.profile!.description);
+    expect(profile.querySelector(".er-daytotal")!.textContent).toBe(built.profile!.dayTotal);
+    expect(profile.querySelector(".er-mkey")!.textContent).toBe("Lights onStep downLights offDaytimeNumbers match the list below.");
+    // Nothing in it moves.
+    expect(profile.querySelector("[tabindex], button")).toBeNull();
+    // A review saved before the chart marked its moments shows its list as it did, with nothing marked.
+    const saved = { ...built, profile: { ...built.profile!, timeline: built.profile!.timeline.map(({ time, text }) => ({ time, text })), daytime: undefined, dayTotal: undefined, description: undefined } };
+    host.innerHTML = renderEnergyReviewMarkup(saved);
+    expect(host.querySelector("#er-q-profile svg .er-mk, #er-q-profile svg .er-day, #er-q-profile .er-badge, #er-q-profile .er-mkey, #er-q-profile .er-daytotal")).toBeNull();
+    expect(host.querySelectorAll("#er-q-profile .er-timeline:not(.er-marked) li")).toHaveLength(10);
+  });
+
+  it("picks out a moment's mark when its row is pointed at or focused, and its row when the mark is pointed at", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); vi.stubGlobal("React", React);
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => root.render(<EnergyReviewDocument review={built} />));
+      const rows = [...host.querySelectorAll<HTMLLIElement>("#er-q-profile .er-timeline li")];
+      const mark = (n: string) => [...host.querySelectorAll("#er-q-profile svg .er-mk")].find(item => item.querySelector(".er-mk-n")!.textContent === n)!;
+      const picked = () => [rows.findIndex(row => row.classList.contains("er-on")), [...host.querySelectorAll("#er-q-profile svg .er-mk.er-on .er-mk-n")].map(item => item.textContent)];
+      expect(rows.every(row => row.tabIndex === 0)).toBe(true);
+      await act(async () => { rows[4]!.dispatchEvent(new PointerEvent("pointerover", { bubbles: true })); });
+      expect(picked()).toEqual([4, ["5"]]);
+      expect(host.querySelector("#er-q-profile svg .er-mks")!.classList.contains("er-focus")).toBe(true);
+      await act(async () => { rows[4]!.dispatchEvent(new PointerEvent("pointerout", { bubbles: true })); });
+      expect(picked()).toEqual([-1, []]);
+      await act(async () => { mark("8").querySelector(".er-mk-hit")!.dispatchEvent(new PointerEvent("pointerover", { bubbles: true })); });
+      expect(picked()).toEqual([7, ["8"]]);
+      await act(async () => { mark("8").querySelector(".er-mk-hit")!.dispatchEvent(new PointerEvent("pointerout", { bubbles: true })); });
+      // The daytime row picks out the shaded band.
+      await act(async () => rows[9]!.focus());
+      expect(host.querySelector("#er-q-profile svg .er-day")!.classList.contains("er-on")).toBe(true);
+      await act(async () => rows[9]!.blur());
+      expect(host.querySelector("#er-q-profile svg .er-day")!.classList.contains("er-on")).toBe(false);
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("words the marks, the daytime and the day's total in every language with no gaps", () => {
+    for (const [locale, planned, total] of [["zh-Hans", "按计划关灯", "每天约"], ["ms", "Padam seperti dirancang", "Kira-kira"]] as const) {
+      const review = blocks({}, BLOCKS, locale);
+      const html = renderEnergyReviewHtml(review);
+      expect(plain(html)).not.toMatch(/undefined|NaN|\{\w+\}/);
+      expect(review.profile!.daytime!.title).toBe(planned);
+      expect(review.profile!.dayTotal).toContain(total);
+      expect(review.profile!.timeline.filter(moment => moment.kind === "step").map(moment => moment.text.match(/[\d.]+ kW/)?.[0])).toEqual(["3.6 kW", "3.3 kW"]);
+      for (const text of [review.profile!.intro, review.profile!.description!, ...review.profile!.timeline.map(moment => moment.text)]) expect(text).not.toMatch(/undefined|NaN|\{\w+\}/);
     }
   });
 });
