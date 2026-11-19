@@ -312,15 +312,17 @@ function ShareBars({ title, rows, format }: { title: string; rows: Array<{ key: 
  * The site report's breakdown by group on Analysis's cards: the same rows, numbers and opening groups as the Overview,
  * in the page's own colours (classes the page's light and dark themes both know).
  */
-const SPLIT_ROW = "grid w-full grid-cols-[minmax(min-content,1fr)_auto_14px] items-center gap-x-3 gap-y-1.5 rounded-lg px-3 text-left text-slate-800 sm:grid-cols-[minmax(0,1fr)_minmax(72px,28%)_auto_14px]";
+// Columns in the order GroupSplit writes each row: the arrow (or its blank space), the name, the bar, the value. On a
+// phone the bar drops to its own line under the name and value.
+const SPLIT_ROW = "grid w-full grid-cols-[14px_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 rounded-lg px-3 text-left text-slate-800 sm:grid-cols-[14px_minmax(0,1fr)_minmax(72px,28%)_auto]";
 const SPLIT_LOOK: GroupSplitLook = {
   section: "max-w-3xl", heading: "mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500", note: "mb-3 text-xs text-slate-500", list: "space-y-1",
   row: `${SPLIT_ROW} bg-slate-50 py-2 text-sm`, button: `${SPLIT_ROW} group cursor-pointer bg-slate-50 py-2 text-sm hover:bg-slate-100`, innerRow: `${SPLIT_ROW} py-1.5 text-sm`,
   name: "break-words font-medium text-slate-900", innerName: "break-words text-slate-800",
-  bar: "relative col-span-full row-start-2 h-2 overflow-hidden rounded-full bg-slate-200 sm:col-span-1 sm:row-start-auto",
+  bar: "relative col-[2/-1] row-start-2 h-2 overflow-hidden rounded-full bg-slate-200 sm:col-auto sm:row-start-auto",
   fill: "absolute inset-y-0 left-0 rounded-full bg-[#2f7a5b]", innerFill: "absolute inset-y-0 left-0 rounded-full bg-[#6fa98c]",
   value: "whitespace-nowrap text-sm tabular-nums text-slate-600",
-  chevron: "h-2 w-2 justify-self-end -rotate-45 border-b-2 border-r-2 border-current text-slate-500 transition-transform group-aria-expanded:rotate-45 motion-reduce:transition-none",
+  chevron: "h-2 w-2 justify-self-start -rotate-45 border-b-2 border-r-2 border-current text-slate-500 transition-transform group-aria-expanded:rotate-45 motion-reduce:transition-none",
   inner: "mb-1.5 ml-3.5 mt-0.5 border-l-2 border-slate-200 pl-2.5", hint: "mt-2 text-xs text-slate-500",
 };
 
