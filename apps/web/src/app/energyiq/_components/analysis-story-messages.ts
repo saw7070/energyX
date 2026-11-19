@@ -42,6 +42,7 @@ export const storyMessages = defineMessages({
   "range.upToLower": "up to {amount}",
 
   "nav.label": "On this page",
+  "nav.change": "Before and after",
   "nav.money": "1 · Where the money goes",
   "nav.energy": "1 · Where the energy goes",
   "nav.on": "2 · What stays on",
@@ -278,6 +279,7 @@ export const storyMessages = defineMessages({
     "range.upToLower": "最多 {amount}",
 
     "nav.label": "本页内容",
+    "nav.change": "改动前后对比",
     "nav.money": "1 · 钱花在哪里",
     "nav.energy": "1 · 电用在哪里",
     "nav.on": "2 · 哪些设备一直开着",
@@ -514,6 +516,7 @@ export const storyMessages = defineMessages({
     "range.upToLower": "sehingga {amount}",
 
     "nav.label": "Pada halaman ini",
+    "nav.change": "Sebelum dan selepas",
     "nav.money": "1 · Ke mana wang dibelanjakan",
     "nav.energy": "1 · Ke mana tenaga digunakan",
     "nav.on": "2 · Apa yang terus hidup",

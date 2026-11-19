@@ -329,18 +329,21 @@ export class EnergyIqTargetsStore {
   createSavingsCheck(projectId: string, input: { name: unknown; changeDate: unknown; meterIds?: unknown; note?: unknown }, userId: string, now = new Date()): EnergyIqSavingsCheckRecord {
     const count = Number((this.db.prepare("SELECT COUNT(*) AS count FROM energyiq_savings_checks WHERE project_id = ?").get(projectId) as { count: number }).count);
     if (count >= MAX_SAVINGS_CHECKS_PER_PROJECT) throw new Error("ENERGYIQ_SAVINGS_CHECK_LIMIT");
-    const name = typeof input.name === "string" ? input.name.trim().slice(0, 120) : "";
-    if (!name) throw new Error("ENERGYIQ_SAVINGS_CHECK_NAME_REQUIRED");
-    const changeDate = typeof input.changeDate === "string" ? input.changeDate.trim() : "";
-    if (!/^\d{4}-\d{2}-\d{2}$/u.test(changeDate) || Number.isNaN(Date.parse(`${changeDate}T00:00:00Z`))) throw new Error("ENERGYIQ_SAVINGS_CHECK_DATE_INVALID");
-    if (changeDate > now.toISOString().slice(0, 10)) throw new Error("ENERGYIQ_SAVINGS_CHECK_DATE_INVALID");
-    const meterIds = stringList(input.meterIds ?? [], 200, "ENERGYIQ_SAVINGS_CHECK_METERS_INVALID");
-    const note = typeof input.note === "string" && input.note.trim() ? input.note.trim().slice(0, 500) : undefined;
+    const { name, changeDate, meterIds, note } = normalizeSavingsCheck(input, now);
     const id = `savings-check-${randomUUID()}`;
     this.db.prepare(`
       INSERT INTO energyiq_savings_checks (id, project_id, name, change_date, meter_ids_json, note, created_by, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, projectId, name, changeDate, JSON.stringify(meterIds), note ?? null, userId, now.toISOString());
+    return this.getSavingsCheck(id)!;
+  }
+
+  /** Replaces what was recorded about a change (what, when, which meters, the note); who recorded it and when stay. */
+  updateSavingsCheck(id: string, input: { name: unknown; changeDate: unknown; meterIds?: unknown; note?: unknown }, now = new Date()): EnergyIqSavingsCheckRecord {
+    if (!this.getSavingsCheck(id)) throw new Error("ENERGYIQ_SAVINGS_CHECK_NOT_FOUND");
+    const { name, changeDate, meterIds, note } = normalizeSavingsCheck(input, now);
+    this.db.prepare("UPDATE energyiq_savings_checks SET name = ?, change_date = ?, meter_ids_json = ?, note = ? WHERE id = ?")
+      .run(name, changeDate, JSON.stringify(meterIds), note ?? null, id);
     return this.getSavingsCheck(id)!;
   }
 
@@ -505,6 +508,23 @@ const mapSchedule = (row: Record<string, unknown>): EnergyIqReportScheduleRecord
   createdAt: String(row.created_at),
   updatedAt: String(row.updated_at),
 });
+
+/** A change may be recorded ahead of time (planned work), up to this many days after today. */
+export const SAVINGS_CHECK_MAX_DAYS_AHEAD = 366;
+
+/** What a change needs: a name, a real calendar date no further ahead than a year, any meter ids, and an optional note. */
+const normalizeSavingsCheck = (input: { name: unknown; changeDate: unknown; meterIds?: unknown; note?: unknown }, now: Date) => {
+  const name = typeof input.name === "string" ? input.name.trim().slice(0, 120) : "";
+  if (!name) throw new Error("ENERGYIQ_SAVINGS_CHECK_NAME_REQUIRED");
+  const changeDate = typeof input.changeDate === "string" ? input.changeDate.trim() : "";
+  const parsed = Date.parse(`${changeDate}T00:00:00Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(changeDate) || Number.isNaN(parsed) || new Date(parsed).toISOString().slice(0, 10) !== changeDate) throw new Error("ENERGYIQ_SAVINGS_CHECK_DATE_INVALID");
+  const latest = new Date(Date.parse(`${now.toISOString().slice(0, 10)}T00:00:00Z`) + SAVINGS_CHECK_MAX_DAYS_AHEAD * 86_400_000).toISOString().slice(0, 10);
+  if (changeDate > latest) throw new Error("ENERGYIQ_SAVINGS_CHECK_DATE_INVALID");
+  const meterIds = stringList(input.meterIds ?? [], 200, "ENERGYIQ_SAVINGS_CHECK_METERS_INVALID");
+  const note = typeof input.note === "string" && input.note.trim() ? input.note.trim().slice(0, 500) : undefined;
+  return { name, changeDate, meterIds, note };
+};
 
 const mapSavingsCheck = (row: Record<string, unknown>): EnergyIqSavingsCheckRecord => ({
   id: String(row.id),

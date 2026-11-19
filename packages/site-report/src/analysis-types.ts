@@ -100,7 +100,18 @@ export type AnalysisData = {
    * any point whose key is here; see EnergyReviewCheck.key. Absent on older readings and when there are none.
    */
   dismissedChecks?: DismissedCheck[] | undefined;
+  /**
+   * Changes made on site whose effect is to be proven (Facility → Savings), newest first: what was done, the local
+   * date it started, and the meters it affects. Analysis shows each one's before and after (before-after.ts). Absent
+   * on older readings and when none is recorded.
+   */
+  changes?: SiteChange[] | undefined;
 };
+/**
+ * A change made on site, such as smart lighting dimmed 30% at night. `date` is the local date it started; `meterIds`
+ * are the meters it affects, and an empty list means the whole site.
+ */
+export type SiteChange = { id: string; title: string; date: string; note?: string | undefined; meterIds: string[] };
 /** A meter and how many light points it feeds; `name` as readers know it. */
 export type LightCountMeter = { id: string; name: string; count: number };
 /** One thing the AI remembers about the site, from feedback on a report. */

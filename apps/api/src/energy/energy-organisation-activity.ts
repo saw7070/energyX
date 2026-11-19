@@ -20,7 +20,7 @@ const TYPE_FILTERS: Record<string, { categories?: string[]; eventTypes?: string[
   people: { categories: ["energyiq.team_", "energyiq.user_", "energyiq.organisation_"] },
   projects: { categories: ["energyiq.project_", "energyiq.electricity_rate", "energyiq.hours_", "energyiq.policy_", "energyiq.setup_",
     "energyiq.changes_made_live", "energyiq.data_import", "energyiq.live_connection", "energyiq.locations_", "energyiq.analysis_rules",
-    "energyiq.overview_layout", "energyiq.budget_carbon", "energyiq.meter_alerts", "energyiq.report_"] },
+    "energyiq.overview_layout", "energyiq.budget_carbon", "energyiq.site_change", "energyiq.meter_alerts", "energyiq.report_"] },
   ai: { categories: ["energyiq.ai_"] },
   support: { eventTypes: [SUPPORT_ACCESS_EVENT] },
 };

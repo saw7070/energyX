@@ -17,6 +17,8 @@ export * from "./group-insights.js";
 export * from "./meters-in-use.js";
 export * from "./always-on-by-design.js";
 export * from "./daytime-use.js";
+export * from "./before-after.js";
+export * from "./before-after-messages.js";
 export * from "./report-style.js";
 export * from "./report-period.js";
 export * from "./site-report-snapshot.js";

@@ -7,7 +7,8 @@ import {
   effectiveHours, openingLabel, percentChange, quietHours, savingsPlan, shortDate, statusFor, storyProfile, timeBuckets,
   type AnalysisAnomaly, type AnalysisDay, type HealthStatus, type HoursMeaning, type overnightFloor,
 } from "./analysis-model";
-import { alwaysOnByDesignIds, alwaysOnByDesignKw, buildSiteReport, daytimeUse, forHoursMeaning, ON_TIME_MARGIN_MINUTES, type SiteReport } from "@datafoundry/site-report";
+import { alwaysOnByDesignIds, alwaysOnByDesignKw, beforeAfter, beforeAfterChanges, buildSiteReport, daytimeUse, forHoursMeaning, ON_TIME_MARGIN_MINUTES, type BeforeAfter, type SiteReport } from "@datafoundry/site-report";
+import { BeforeAfterSection } from "./analysis-before-after";
 import { Rich } from "@datafoundry/site-report/rich";
 import type { AnalysisData } from "./analysis-data";
 import { analysisMessages, categoryLabel, confidenceLabel, effortLabel, holidayName, joinText, rich, timeBucketLabel } from "./analysis-messages";
@@ -58,6 +59,12 @@ type Story = ReturnType<typeof buildStory>;
 
 /** The numbered steps, by the id each one's section (and its link) has. */
 export type StoryStepId = "story-money" | "story-on" | "story-when" | "story-days" | "story-plan" | "story-health" | "story-ahead";
+/** At most this many changes recorded on site are shown before and after, newest first. */
+const MAX_CHANGES = 3;
+/** The before and after of each change recorded on site in or before these dates (or still to come, at the latest dates). */
+function changesFor(data: AnalysisData): BeforeAfter[] {
+  try { return beforeAfterChanges(data).slice(0, MAX_CHANGES).map(change => beforeAfter(data, change)); } catch { return []; }
+}
 /**
  * A step's detailed figures, shown directly under it on request: the titles of what is inside, and the figures
  * themselves. `where` is "about" when the step is missing (the days that stood out need the site report) and the
@@ -136,6 +143,7 @@ export function DecisionSummary(props: StoryInput & { figures?: StoryFigures; ab
   const { data: storyData, days, anomalies, floor, rate } = props;
   const { locale } = useEnergyIqLocale();
   const story = useMemo(() => buildStory({ data: storyData, days, anomalies, floor, rate }, locale), [storyData, days, anomalies, floor, rate, locale]);
+  const changes = useMemo(() => changesFor(storyData), [storyData]);
   const t = useStoryText(story.meaning);
   // Lights-on hours: a calm headline unless daytime use is worth a look.
   const lightsOk = story.meaning === "lights_on" && story.closedShare * 100 < closedThresholds(story.meaning).watch;
@@ -170,7 +178,9 @@ export function DecisionSummary(props: StoryInput & { figures?: StoryFigures; ab
   const allOpen = figureIds.length > 0 && figureIds.every(id => openFigures.has(id));
   const toggleFigures = (id: string) => setOpenFigures(current => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   // The steps in the report's order, then the checks and the forecast the report does not have.
+  // A change recorded on site comes first: proving what it saved is why its readings are being watched.
   const steps = [
+    ...(changes.length ? [["story-change", "nav.change"] as const] : []),
     ["story-money", story.periodCost != null ? "nav.money" : "nav.energy"], ["story-on", "nav.on"], ["story-when", "nav.when"],
     ...(story.report ? [["story-days", "nav.days"] as const] : []), ["story-plan", "nav.plan"], ["story-health", "nav.health"], ["story-ahead", "nav.ahead"],
     ...(about ? [["story-about", "nav.about"] as const] : []),
@@ -218,6 +228,7 @@ export function DecisionSummary(props: StoryInput & { figures?: StoryFigures; ab
       </button>}
     </div>
 
+    <BeforeAfterSection projectId={data.projectId} results={changes} />
     <FiguresContext.Provider value={{ figures: placed, open: openFigures, toggle: toggleFigures }}>
       <MoneySection story={story} data={data} money={money} />
       <StaysOnSection story={story} money={money} />

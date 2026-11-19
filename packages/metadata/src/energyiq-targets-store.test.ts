@@ -76,11 +76,20 @@ describe("EnergyIQ targets store", () => {
     const led = targets.createSavingsCheck("site-a", { name: "LED fittings", changeDate: "2026-11-01", meterIds: ["m1", "m2", "m1"], note: "264E" }, "user-1", now);
     expect(led).toMatchObject({ name: "LED fittings", changeDate: "2026-11-01", meterIds: ["m1", "m2"], note: "264E", createdBy: "user-1" });
     expect(targets.listSavingsChecks("site-a").map((check) => check.name)).toEqual(["LED fittings", "Timer moved"]);
-    expect(() => targets.createSavingsCheck("site-a", { name: "x", changeDate: "2026-11-11" }, "user-1", now)).toThrow("ENERGYIQ_SAVINGS_CHECK_DATE_INVALID");
+    // Planned work can be recorded ahead of time, up to a year; no further, and never a date that does not exist.
+    expect(targets.createSavingsCheck("site-a", { name: "Smart lighting", changeDate: "2026-12-01" }, "user-1", now).changeDate).toBe("2026-12-01");
+    expect(() => targets.createSavingsCheck("site-a", { name: "x", changeDate: "2027-11-12" }, "user-1", now)).toThrow("ENERGYIQ_SAVINGS_CHECK_DATE_INVALID");
+    expect(() => targets.createSavingsCheck("site-a", { name: "x", changeDate: "2026-02-30" }, "user-1", now)).toThrow("ENERGYIQ_SAVINGS_CHECK_DATE_INVALID");
     expect(() => targets.createSavingsCheck("site-a", { name: "x", changeDate: "1 Nov" }, "user-1", now)).toThrow("ENERGYIQ_SAVINGS_CHECK_DATE_INVALID");
     expect(() => targets.createSavingsCheck("site-a", { name: " ", changeDate: "2026-11-01" }, "user-1", now)).toThrow("ENERGYIQ_SAVINGS_CHECK_NAME_REQUIRED");
+    expect(targets.listSavingsChecks("site-a").map((check) => check.name)).toEqual(["Smart lighting", "LED fittings", "Timer moved"]);
+    // Editing keeps who recorded it and when; a note left empty is removed.
+    const edited = targets.updateSavingsCheck(led.id, { name: "LED fittings, 264E", changeDate: "2026-11-02", meterIds: ["m2"], note: " " }, now);
+    expect(edited).toEqual({ id: led.id, projectId: "site-a", name: "LED fittings, 264E", changeDate: "2026-11-02", meterIds: ["m2"], createdBy: "user-1", createdAt: led.createdAt });
+    expect(() => targets.updateSavingsCheck(led.id, { name: "", changeDate: "2026-11-02" }, now)).toThrow("ENERGYIQ_SAVINGS_CHECK_NAME_REQUIRED");
+    expect(() => targets.updateSavingsCheck("missing", { name: "x", changeDate: "2026-11-02" }, now)).toThrow("ENERGYIQ_SAVINGS_CHECK_NOT_FOUND");
     expect(targets.deleteSavingsCheck(led.id)).toBe(true);
-    expect(targets.listSavingsChecks("site-a")).toHaveLength(1);
+    expect(targets.listSavingsChecks("site-a")).toHaveLength(2);
   });
 
   it("records each alert once and lists recent ones newest first", () => {

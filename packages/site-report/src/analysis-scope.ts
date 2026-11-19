@@ -7,7 +7,7 @@
  */
 import type { AnalysisCategory } from "./analysis-model.js";
 import { PLANNED_CLOSURE_SUFFIX } from "./analysis-messages.js";
-import type { AnalysisData, AnalysisGroups, DismissedCheck, FeedbackMemoryItem, LoadedPeriod, ProjectAction, ReportFollowUp, ReportFollowUpStatus, ReportFollowUpVerdict, ScopeCircuit, ScopeData, TrendCell, TrendSeries } from "./analysis-types.js";
+import type { AnalysisData, AnalysisGroups, DismissedCheck, FeedbackMemoryItem, LoadedPeriod, ProjectAction, ReportFollowUp, ReportFollowUpStatus, ReportFollowUpVerdict, ScopeCircuit, ScopeData, SiteChange, TrendCell, TrendSeries } from "./analysis-types.js";
 import { groupsFromLocations } from "./meter-groups.js";
 
 /**
@@ -51,6 +51,8 @@ export type ProjectInformationSource = {
   followUps?: Array<{ text: string; status: ReportFollowUpStatus; createdAt: string; lastCheck?: { at: string; verdict: ReportFollowUpVerdict; evidence: string } | undefined }> | undefined;
   /** Points to check an admin marked as known; the energy review leaves them out. Older servers leave it out. */
   dismissedChecks?: Array<{ key: string; title: string; reason: string }> | undefined;
+  /** Changes made on site whose effect is to be proven (Facility → Savings). `meterIds` empty: the whole site. Older servers leave it out. */
+  changes?: Array<{ id: string; title: string; date: string; note?: string | undefined; meterIds?: string[] | undefined }> | undefined;
 } | null;
 
 const CATEGORY_OF: Record<string, AnalysisCategory | "overall"> = { light: "light", load: "load", aircon: "aircon", it: "it", kitchen: "kitchen", plug: "plug", overall: "overall" };
@@ -250,6 +252,7 @@ export function assembleAnalysisData(input: {
   const tariffTax = tariffEntry?.tax && Number.isFinite(tariffEntry.tax.ratePct) && tariffEntry.tax.ratePct > 0 ? { name: tariffEntry.tax.name, ratePct: tariffEntry.tax.ratePct } : null;
   const carbon = information?.carbon && Number.isFinite(information.carbon.kgCo2ePerKwh) ? { kgCo2ePerKwh: information.carbon.kgCo2ePerKwh, year: information.carbon.year, source: information.carbon.source } : null;
   const { feedbackMemory, followUps, dismissedChecks } = reportFeedback(information);
+  const changes = siteChanges(information);
   const loadedSpaces = input.spaceCurrent.filter((item): item is AnalysisSource => !!item);
   const period = (project: AnalysisSource, loaded: Array<AnalysisSource | null>): LoadedPeriod => ({
     project: toScope(project, locations),
@@ -276,7 +279,22 @@ export function assembleAnalysisData(input: {
     ...(feedbackMemory.length ? { feedbackMemory } : {}),
     ...(followUps.length ? { followUps } : {}),
     ...(dismissedChecks.length ? { dismissedChecks } : {}),
+    ...(changes.length ? { changes } : {}),
   };
+}
+
+/**
+ * The changes recorded on site, newest first. They arrive over the wire, so one without an id, a title or a real
+ * calendar date is dropped, and meter ids are kept only as non-empty text.
+ */
+export function siteChanges(information: ProjectInformationSource): SiteChange[] {
+  const list = Array.isArray(information?.changes) ? information.changes : [];
+  return list.flatMap((item): SiteChange[] => {
+    const id = textOf(item?.id), title = textOf(item?.title), date = textOf(item?.date), note = textOf(item?.note);
+    if (!id || !title || !/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) return [];
+    const meterIds = Array.isArray(item.meterIds) ? [...new Set(item.meterIds.map(textOf).filter(Boolean))] : [];
+    return [{ id, title, date, ...(note ? { note } : {}), meterIds }];
+  }).sort((a, b) => b.date.localeCompare(a.date) || a.title.localeCompare(b.title));
 }
 
 const FOLLOW_UP_STATUSES: ReadonlySet<string> = new Set<ReportFollowUpStatus>(["open", "done", "dropped"]);

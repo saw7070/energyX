@@ -89,6 +89,10 @@ export function buildEnergyProjectInformation(metadata: MetadataStore, projectId
   const ownerName = (owner: { kind: "project" } | { kind: "scope"; scope_id: string }) => owner.kind === "project" ? document.project.name : names.get(owner.scope_id) ?? "Location";
   // The grid emission factor the site's carbon figures use: the one set in Facility → Budget & carbon, else the country's.
   const carbonSetting = (() => { try { return metadata.energyIq.targets.getTargets(projectId).carbon ?? gridEmissionFactorFor(project.region); } catch { return gridEmissionFactorFor(project.region); } })();
+  // Changes made on site (Facility → Savings), newest first: the reports and Analysis show each one's before and after.
+  const changes = metadata.energyIq.targets.listSavingsChecks(projectId).map(check => ({
+    id: check.id, title: check.name, date: check.changeDate, ...(check.note ? { note: check.note } : {}), meterIds: check.meterIds,
+  }));
   return {
     projectId, name: document.project.name, timezone: document.project.timezone, basis: "published" as const,
     // `sortOrder`: the order someone saved among the groups beside it, so reports list groups the same way.
@@ -114,6 +118,7 @@ export function buildEnergyProjectInformation(metadata: MetadataStore, projectId
       exceptions: (entry.exceptions ?? []).map(item => ({ date: item.date, label: item.label ?? item.classification ?? "Exception", ...(item.classification ? { classification: item.classification } : {}), operating: item.operating.map(range => ({ from: range.from, to: range.to })) })),
     })) } : null,
     carbon: { kgCo2ePerKwh: carbonSetting.kgCo2ePerKwh, year: carbonSetting.year, source: carbonSetting.source },
+    changes,
     tariff: tariff ? { version: tariff.version_id, entries: tariff.entries.map(entry => ({
       location: ownerName(entry.owner), from: entry.effective_from, toExclusive: entry.effective_to ?? null,
       currency: entry.currency, ratePerKwh: entry.rate_per_kwh, taxBasis: entry.rate_basis ?? null,
