@@ -129,7 +129,7 @@ export const readLiveSiteReadings = (input: {
   const names = new Map(rows.map((row) => [row.id, row.presentation?.short_name?.trim() || row.presentation?.device_name?.trim() || row.presentation?.circuit_name?.trim() || row.display_name]));
   const notInUse = new Set(rows.filter((row) => row.presentation?.not_in_use).map((row) => row.id));
   // Used now and then (presentation.occasional_use): quiet, even offline, between uses is normal, so never an alert.
-  const occasional = new Set(rows.filter((row) => (row.presentation as Record<string, unknown> | undefined)?.occasional_use === "true").map((row) => row.id));
+  const occasional = new Set(rows.filter((row) => row.presentation?.occasional_use === "true").map((row) => row.id));
   const offWithLights = new Set(rows.filter((row) => row.presentation?.off_with_lights).map((row) => row.id));
   const official = officialProjectMeterIds(document);
   ensureTable(input.metadataStore.db);

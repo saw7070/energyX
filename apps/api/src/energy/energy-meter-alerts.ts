@@ -540,7 +540,7 @@ export async function readMeterAlertReadings(metadataStore: MetadataStore, proje
         ...(detail?.notInUse ? { notInUse: true } : {}),
         ...(detail?.alwaysOn ? { alwaysOn: true } : {}),
         ...(detail?.neverUsed ? { neverUsed: true } : {}),
-        ...(flags.occasional.has(point.meterPointId) ? { occasionalUse: true } : {}),
+        ...(detail?.occasionalUse ? { occasionalUse: true } : {}),
         ...(flags.official.has(point.meterPointId) ? { official: true } : {}),
         ...(idle.has(point.meterPointId) ? { idleWhenQuiet: true } : {}),
         ...(last && Number.isFinite(last) ? { lastReadingAt: iso(last) } : {}),
@@ -602,21 +602,19 @@ const activeHour = (entries: readonly CalendarEntry[], date: string, hour: numbe
 };
 
 /**
- * Meter flags the alert readings need from the published meter rows besides those energy-project-information.ts gives:
- * "used now and then" (presentation.occasional_use === "true"; absent means no) and the meters of the site's official
- * total (its project-level official electricity routes, as the live power sums them).
+ * What the alert readings need from the published meter rows besides what energy-project-information.ts gives: the
+ * meters of the site's official total (its project-level official electricity routes, as the live power sums them).
  */
-export const readPublishedMeterFlags = (metadataStore: MetadataStore, projectId: string): { occasional: Set<string>; official: Set<string> } => {
+export const readPublishedMeterFlags = (metadataStore: MetadataStore, projectId: string): { official: Set<string> } => {
   const project = metadataStore.energyIq.getProject(projectId);
   const published = metadataStore.energyIq.templates.getLatestProjectRevision(projectId);
   const hierarchyId = published?.hierarchy_revision_id ?? project.hierarchy_revision_id;
   const revision = metadataStore.energyIq.projectSetup.listHierarchyRevisions(projectId).find((item) => item.id === hierarchyId);
-  if (!revision) return { occasional: new Set(), official: new Set() };
+  if (!revision) return { official: new Set() };
   const mapping = (JSON.parse(revision.snapshot_json) as {
-    meter_mapping?: { rows?: Array<{ id: string; presentation?: Record<string, unknown> }>; official_aggregation_routes?: Array<{ scope_id: string; resource: string; meter_point_ids: string[] }> };
+    meter_mapping?: { official_aggregation_routes?: Array<{ scope_id: string; resource: string; meter_point_ids: string[] }> };
   }).meter_mapping;
   return {
-    occasional: new Set((mapping?.rows ?? []).filter((row) => row.presentation?.occasional_use === "true").map((row) => row.id)),
     official: new Set((mapping?.official_aggregation_routes ?? []).filter((route) => route.scope_id === "project" && route.resource === "electricity").flatMap((route) => route.meter_point_ids)),
   };
 };

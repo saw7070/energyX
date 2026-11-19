@@ -20,6 +20,7 @@ import type { HourCell, MeterAlertInputMeter } from "./energy-meter-alert-rules.
 import { MeterAlertStore, type MeterAlertRecord } from "./energy-meter-alert-store.js";
 import { evaluateMeterAlerts, meterAlertEmail, meterAlertEmails, readPublishedMeterFlags, type MeterAlertReadings } from "./energy-meter-alerts.js";
 import { recordDeviceStatus } from "./energy-live-status.js";
+import { buildEnergyProjectInformation } from "./energy-project-information.js";
 import { readSiteAlerts } from "./energy-site-alerts.js";
 import type { EnergyTuyaProjectConnector } from "./energy-tuya-connector.js";
 import { TUYA_OFFICE_PROJECT_ID as PROJECT, TUYA_OFFICE_WORKSPACE_ID as WORKSPACE } from "./tuya-office-project.js";
@@ -566,7 +567,8 @@ describe("Meters used now and then (occasional use)", () => {
 
   it("are read from the published meter settings, absent meaning no, and left out of the live offline list", async () => {
     await withMetadata((metadata) => {
-      expect(readPublishedMeterFlags(metadata, PROJECT).occasional.size).toBe(0);
+      const flagged = () => buildEnergyProjectInformation(metadata, PROJECT).meters.filter((meter) => meter.occasionalUse).map((meter) => meter.id);
+      expect(flagged()).toEqual([]);
       // Tick "used now and then" on the first panel's total (as the Facility form will save it).
       const revisions = metadata.db.prepare("SELECT id, snapshot_json FROM energyiq_hierarchy_revisions WHERE project_id = ?").all(PROJECT) as Array<{ id: string; snapshot_json: string }>;
       for (const revision of revisions) {
@@ -574,9 +576,10 @@ describe("Meters used now and then (occasional use)", () => {
         for (const row of document.meter_mapping?.rows ?? []) if (row.id === "panel-a-total") row.presentation = { ...row.presentation, occasional_use: "true" };
         metadata.db.prepare("UPDATE energyiq_hierarchy_revisions SET snapshot_json = ? WHERE id = ?").run(JSON.stringify(document), revision.id);
       }
-      const flags = readPublishedMeterFlags(metadata, PROJECT);
-      expect([...flags.occasional]).toEqual(["panel-a-total"]);
-      expect(flags.official.has("panel-a-total") && flags.official.has("panel-b-total")).toBe(true);
+      // The alert readings take it from the project information, with the other meter flags.
+      expect(flagged()).toEqual(["panel-a-total"]);
+      const { official } = readPublishedMeterFlags(metadata, PROJECT);
+      expect(official.has("panel-a-total") && official.has("panel-b-total")).toBe(true);
       // Tuya has both panels' totals offline for over half an hour: only the one not used now and then is listed.
       const T0 = sg("2026-11-18T10:00");
       for (const at of [T0, T0 + 31 * MIN]) {
