@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { createMetadataStore } from "@datafoundry/metadata";
 import { describe, expect, it } from "vitest";
 import { ensureEnergyIqBootstrap } from "./energy-bootstrap.js";
-import { idleThroughPeriodEnd, idleWhenQuietMeters, lightsOnHoursOn, quietMeters, readIdleWhenQuietMeters } from "./energy-idle-meters.js";
+import { idleThroughPeriodEnd, idleWhenQuietMeters, lightsOnHoursOn, occasionalUseMeters, quietMeters, readIdleWhenQuietMeters } from "./energy-idle-meters.js";
 import { recordDeviceStatus } from "./energy-live-status.js";
 import { TUYA_OFFICE_PROJECT_ID } from "./tuya-office-project.js";
 
@@ -25,6 +25,11 @@ describe("which quiet meters are idle rather than stopped", () => {
 
   it("never lets lighting be idle on a site with lights-on hours: its lights should come on every night", () => {
     expect(idleWhenQuietMeters(online, rows, true)).toEqual(new Set(["fan"]));
+  });
+
+  it("counts a meter marked used now and then as idle when quiet, online or not", () => {
+    const marked = [...rows, { id: "pump", category: "load", presentation: { occasional_use: "true" } }, { id: "spare", category: "load", presentation: { occasional_use: "false" } }];
+    expect(occasionalUseMeters(marked)).toEqual(new Set(["pump"]));
   });
 
   it("reads lights-on hours only from a calendar entry in effect that day", () => {
@@ -52,6 +57,13 @@ describe("which quiet meters are idle rather than stopped", () => {
       recordDeviceStatus({ db: metadata.db, projectId: TUYA_OFFICE_PROJECT_ID, checkedAt: now - 10 * 60_000, statuses: [{ meterPointId: light, online: true }, { meterPointId: load, online: true }] });
       // An office with opening hours: its lights can rightly be off for a long weekend.
       expect(readIdleWhenQuietMeters({ metadataStore: metadata, projectId: TUYA_OFFICE_PROJECT_ID, now })).toEqual(new Set([light, load]));
+      // A meter marked "used now and then" is idle when quiet even with no recent live check.
+      const marked = JSON.parse(revision.snapshot_json) as { meter_mapping: { rows: Array<{ id: string; presentation?: Record<string, string> }> } };
+      const row = marked.meter_mapping.rows.find((candidate) => candidate.id === load)!;
+      row.presentation = { ...(row.presentation ?? {}), occasional_use: "true" };
+      metadata.db.prepare("UPDATE energyiq_hierarchy_revisions SET snapshot_json = ? WHERE id = ?").run(JSON.stringify(marked), revision.id);
+      const later = now + 3 * 60 * 60_000;
+      expect(readIdleWhenQuietMeters({ metadataStore: metadata, projectId: TUYA_OFFICE_PROJECT_ID, now: later })).toEqual(new Set([load]));
     } finally { metadata.close(); rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
   });
 });
