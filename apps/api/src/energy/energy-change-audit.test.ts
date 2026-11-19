@@ -10,6 +10,10 @@ describe("recording who changed project settings", () => {
     expect(changeEventFor(["projects", "kl", "setup", "apply"], "POST")).toBe("energyiq.changes_made_live");
     expect(changeEventFor(["projects", "kl", "imports"], "POST")).toBe("energyiq.data_import_changed");
     expect(changeEventFor(["projects", "kl", "live-connection"], "DELETE")).toBe("energyiq.live_connection_changed");
+    expect(changeEventFor(["projects", "kl", "savings-checks"], "POST")).toBe("energyiq.site_change_recorded");
+    expect(changeEventFor(["projects", "kl", "savings-checks", "c1"], "PUT")).toBe("energyiq.site_change_edited");
+    expect(changeEventFor(["projects", "kl", "savings-checks", "c1"], "DELETE")).toBe("energyiq.site_change_removed");
+    expect(changeEventFor(["projects", "kl", "savings-checks"], "GET")).toBeNull();
     expect(changeEventFor(["projects", "kl", "operational-policies"], "GET")).toBeNull();
     expect(changeEventFor(["projects", "kl", "alerts", "read"], "POST")).toBeNull();
     expect(changeEventFor(["admin", "users"], "POST")).toBeNull();

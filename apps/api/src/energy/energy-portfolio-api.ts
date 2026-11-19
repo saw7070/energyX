@@ -27,9 +27,12 @@ import { isDeliverableEmail, siteAlertRecipients, workspaceTeam } from "./energy
  *   GET  projects/:id/targets[?status=1]   a site's budget, carbon factor, overnight and peak demand checks and alert
  *                                         recipients (+ where it stands now)
  *   PUT  projects/:id/targets              change them (people allowed to change hours and rates)
- *   GET  projects/:id/savings-checks       changes recorded on site for proof of savings
- *   POST projects/:id/savings-checks       record one (people allowed to change hours and rates)
- *   DELETE projects/:id/savings-checks/:checkId
+ *   GET  projects/:id/savings-checks       changes recorded on site for proof of savings (Analysis shows each
+ *                                         one's before and after)
+ *   POST projects/:id/savings-checks       record one (anyone who may change the Facility page: its structure,
+ *                                         hours and rate, or notes; super admins too)
+ *   PUT|DELETE projects/:id/savings-checks/:checkId
+ *                                          change or remove one (the same people)
  *   GET|POST report-schedules, PUT|DELETE report-schedules/:id, POST report-schedules/:id/send
  *                                          scheduled report emails (people allowed to manage the client's people)
  * Returns undefined for any other path.
@@ -75,14 +78,19 @@ export const handlePortfolioApi = async (
     if (project.workspace_id !== context.workspaceId) throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
     const capabilities = resolveEnergyProjectCapabilities({ metadataStore, userId: user.id, workspaceId: context.workspaceId, projectId });
     if (!capabilities.readProjectInformation) throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
-    const canEdit = can(resolveEnergyPermissions(metadataStore, user, context.workspaceId), "hours_rate", "write");
+    // A change belongs with the site's own information: whoever may change any part of the Facility page may record one.
+    const canEdit = capabilities.editConfiguration;
     const store = metadataStore.energyIq.targets;
     if (segments.length === 4) {
-      if (method !== "DELETE") return undefined;
+      if (method !== "DELETE" && method !== "PUT") return undefined;
       if (!canEdit) throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
       const check = store.getSavingsCheck(decodeURIComponent(segments[3] ?? ""));
       if (!check || check.projectId !== projectId) throw new Error("ENERGYIQ_SAVINGS_CHECK_NOT_FOUND");
-      store.deleteSavingsCheck(check.id);
+      if (method === "DELETE") store.deleteSavingsCheck(check.id);
+      else {
+        const body = asRecord(await helpers.readJsonBody(request));
+        store.updateSavingsCheck(check.id, { name: body.name, changeDate: body.changeDate, meterIds: body.meterIds, note: body.note });
+      }
     } else if (method === "POST") {
       if (!canEdit) throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
       const body = asRecord(await helpers.readJsonBody(request));

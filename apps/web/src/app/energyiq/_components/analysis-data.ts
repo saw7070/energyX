@@ -61,6 +61,8 @@ type ProjectInformation = {
   followUps?: Array<{ text: string; status: "open" | "done" | "dropped"; createdAt: string; lastCheck?: { at: string; verdict: "resolved" | "ongoing" | "unclear"; evidence: string } }>;
   /** Points to check the reports no longer show, by the check's stable key. */
   dismissedChecks?: Array<{ key: string; title: string; reason: string }>;
+  /** Changes made on site (Facility → Savings) whose before and after Analysis shows; `meterIds` empty: the whole site. */
+  changes?: Array<{ id: string; title: string; date: string; note?: string; meterIds: string[] }>;
 };
 
 // "all-available" means the server picks the window, so it must not be sent with a period or explicit dates.

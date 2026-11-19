@@ -392,6 +392,9 @@ export const configApi = {
   createEnergySavingsCheck(projectId: string, body: { name: string; changeDate: string; meterIds: string[]; note?: string }): Promise<EnergySavingsChecksDto> {
     return requestEnvelope<EnergySavingsChecksDto>(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/savings-checks`, { method: "POST", body: JSON.stringify(body) });
   },
+  updateEnergySavingsCheck(projectId: string, checkId: string, body: { name: string; changeDate: string; meterIds: string[]; note?: string }): Promise<EnergySavingsChecksDto> {
+    return requestEnvelope<EnergySavingsChecksDto>(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/savings-checks/${encodeURIComponent(checkId)}`, { method: "PUT", body: JSON.stringify(body) });
+  },
   deleteEnergySavingsCheck(projectId: string, checkId: string): Promise<EnergySavingsChecksDto> {
     return requestEnvelope<EnergySavingsChecksDto>(`/api/v1/energy/projects/${encodeURIComponent(projectId)}/savings-checks/${encodeURIComponent(checkId)}`, { method: "DELETE" });
   },
