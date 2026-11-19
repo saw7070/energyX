@@ -7,6 +7,8 @@ import { ReportFeedbackStore } from "../report-agent/report-feedback-store.js";
 const alwaysOn = (presentation: EnergyIqMeterPresentation | undefined) => presentation?.always_on === "true";
 /** presentation.never_used === "true": "Should never use power (alert me if it does)"; any use raises an alert. */
 const neverUsed = (presentation: EnergyIqMeterPresentation | undefined) => presentation?.never_used === "true";
+/** presentation.occasional_use === "true": "Used now and then"; its quiet spells are normal, never an outage. */
+const occasionalUse = (presentation: EnergyIqMeterPresentation | undefined) => presentation?.occasional_use === "true";
 /** presentation.light_count: how many light points the meter feeds, a positive whole number kept as text. Anything else: not recorded. */
 const lightCount = (presentation: EnergyIqMeterPresentation | undefined): number | null => {
   const value: unknown = presentation?.light_count;
@@ -104,6 +106,8 @@ export function buildEnergyProjectInformation(metadata: MetadataStore, projectId
       ...(alwaysOn(meter.presentation) ? { alwaysOn: true as const } : {}),
       // Should never use power: any use is someone using it without leave, and raises an alert.
       ...(neverUsed(meter.presentation) ? { neverUsed: true as const } : {}),
+      // Used only now and then: it reports only when it uses power, so its quiet spells are normal, never an outage.
+      ...(occasionalUse(meter.presentation) ? { occasionalUse: true as const } : {}),
       // How many light points it feeds, when someone recorded it: reports show energy per light for these meters only.
       ...(lightCount(meter.presentation) ? { lightCount: lightCount(meter.presentation)! } : {}),
       locationId: locationId(meter.navigation_scope_id ?? meter.scope_id), location: names.get(locationId(meter.navigation_scope_id ?? meter.scope_id)) ?? "Project", officialAggregation: meter.aggregation_usage === "official" })),

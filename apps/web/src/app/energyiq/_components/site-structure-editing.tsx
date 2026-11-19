@@ -52,7 +52,8 @@ export function applyMeterEdit(document: EnergyProjectSetupDocumentDto, meter: E
   const name = draft.name.trim().replace(/\s+/g, " ");
   if (!name) return { error: t("error.meterName") };
   if (!document.nodes.some(node => node.id === draft.scopeId)) return { error: t("error.meterLocation") };
-  const { off_with_lights: wasOffWithLights, short_name: wasShortName, panel: wasPanel, always_on: wasAlwaysOn, light_count: wasLightCount, ...presentation } = meter.presentation ?? {};
+  const { off_with_lights: wasOffWithLights, short_name: wasShortName, panel: wasPanel, always_on: wasAlwaysOn, light_count: wasLightCount, occasional_use: wasOccasional, ...presentation } = meter.presentation ?? {};
+  const occasional = draft.occasionalUse === undefined ? wasOccasional : draft.occasionalUse ? "true" : undefined;
   const offWithLights = draft.offWithLights === undefined ? wasOffWithLights : draft.offWithLights ? "yes" : undefined;
   const alwaysOn = draft.alwaysOn === undefined ? wasAlwaysOn : draft.alwaysOn ? "true" : undefined;
   // Left out: unchanged. Emptied: removed, so the full name shows again.
@@ -60,7 +61,7 @@ export function applyMeterEdit(document: EnergyProjectSetupDocumentDto, meter: E
   const panel = draft.panel === undefined ? wasPanel : draft.panel.trim().replace(/\s+/g, " ") || undefined;
   const lightCount = draft.lightCount === undefined ? wasLightCount : parseLightCount(draft.lightCount);
   if (lightCount === null) return { error: t("error.lightCount", { max: MAX_LIGHT_COUNT }) };
-  const renamed = { ...meter, presentation: { ...presentation, device_name: name, ...(shortName ? { short_name: shortName } : {}), ...(panel ? { panel } : {}), ...(offWithLights ? { off_with_lights: offWithLights } : {}), ...(alwaysOn ? { always_on: alwaysOn } : {}), ...(lightCount ? { light_count: lightCount } : {}) } };
+  const renamed = { ...meter, presentation: { ...presentation, device_name: name, ...(shortName ? { short_name: shortName } : {}), ...(panel ? { panel } : {}), ...(offWithLights ? { off_with_lights: offWithLights } : {}), ...(alwaysOn ? { always_on: alwaysOn } : {}), ...(lightCount ? { light_count: lightCount } : {}), ...(occasional ? { occasional_use: occasional } : {}) } };
   const aggregation = draft.counted ? "official" as const : "excluded" as const;
   const changesTotals = draft.scopeId !== meter.scope_id || draft.category !== meter.category || aggregation !== meter.aggregation_usage;
   return { ...document, meter_mapping: changesTotals
@@ -126,12 +127,12 @@ export function LocationForm({ initial, title, busy, error, onSave, onCancel }: 
 }
 
 /** `shortName`, `panel` and `lightCount` left out keep what the meter has; an empty one clears it. */
-export type MeterDraft = { name: string; scopeId: string; category: EnergyMeterCategoryDto; counted: boolean; offWithLights?: boolean; alwaysOn?: boolean; shortName?: string; panel?: string; lightCount?: string };
+export type MeterDraft = { name: string; scopeId: string; category: EnergyMeterCategoryDto; counted: boolean; offWithLights?: boolean; alwaysOn?: boolean; shortName?: string; panel?: string; lightCount?: string; occasionalUse?: boolean };
 
 export function MeterForm({ meter, document, busy, error, onSave, onCancel }: { meter: EnergyMeterMappingRowDto; document: EnergyProjectSetupDocumentDto; busy: boolean; error: string; onSave: (draft: MeterDraft) => void; onCancel: () => void }) {
   const t = useMessages(structureMessages);
   const { locale } = useEnergyIqLocale();
-  const [draft, setDraft] = useState({ name: meter.presentation?.device_name?.trim() || meter.presentation?.circuit_name?.trim() || meter.display_name, shortName: meter.presentation?.short_name ?? "", panel: meter.presentation?.panel ?? "", scopeId: meter.scope_id, category: meter.category, counted: meter.aggregation_usage === "official", offWithLights: Boolean(meter.presentation?.off_with_lights), alwaysOn: meter.presentation?.always_on === "true", lightCount: meter.presentation?.light_count ?? "" });
+  const [draft, setDraft] = useState({ name: meter.presentation?.device_name?.trim() || meter.presentation?.circuit_name?.trim() || meter.display_name, shortName: meter.presentation?.short_name ?? "", panel: meter.presentation?.panel ?? "", scopeId: meter.scope_id, category: meter.category, counted: meter.aggregation_usage === "official", offWithLights: Boolean(meter.presentation?.off_with_lights), alwaysOn: meter.presentation?.always_on === "true", lightCount: meter.presentation?.light_count ?? "", occasionalUse: meter.presentation?.occasional_use === "true" });
   const locations = document.nodes.map(node => ({ id: node.id, label: nodePathLabel(document, node.id) })).sort((a, b) => a.label.localeCompare(b.label));
   return <form className={styles.inlineForm} aria-label={draft.name ? t("meter.editNamed", { name: draft.name }) : t("meter.edit")} onSubmit={event => { event.preventDefault(); onSave(draft); }}>
     <div className={styles.formGrid}>
@@ -153,6 +154,8 @@ export function MeterForm({ meter, document, busy, error, onSave, onCancel }: { 
     <p className={styles.formHint}>{t("meter.offWithLightsHint")}</p>
     <label className={styles.checkboxField}><input type="checkbox" checked={draft.alwaysOn} onChange={event => setDraft({ ...draft, alwaysOn: event.target.checked })} />{t("meter.alwaysOn")}</label>
     <p className={styles.formHint}>{t("meter.alwaysOnHint")}</p>
+    <label className={styles.checkboxField}><input type="checkbox" checked={draft.occasionalUse} onChange={event => setDraft({ ...draft, occasionalUse: event.target.checked })} />{t("meter.occasionalUse")}</label>
+    <p className={styles.formHint}>{t("meter.occasionalUseHint")}</p>
     {meter.source_label && <p className={styles.formHint}>{t("meter.sourceHint", { source: meter.source_label })}</p>}
     <FormActions busy={busy} error={error} onCancel={onCancel} />
   </form>;

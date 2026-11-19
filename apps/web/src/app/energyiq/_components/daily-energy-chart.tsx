@@ -40,7 +40,10 @@ function lateNames(days: SiteReport["benchmark"]["days"], locale: EnergyIqLocale
   return names.length > 3 ? [...names.slice(0, 3), more(names.length - 3)] : names;
 }
 
-export function DailyEnergyChart({ report }: { report: SiteReport }) {
+/** Facility → Locations & meters with the device's settings open, where "Used now and then" can be ticked. */
+export const deviceSettingsHref = (projectId: string, meterId: string) => `/energyiq/project-configuration?${new URLSearchParams({ projectId, tab: "structure", meter: meterId })}`;
+
+export function DailyEnergyChart({ report, projectId }: { report: SiteReport; projectId?: string | undefined }) {
   const t = useMessages(keyPointsMessages);
   const { locale } = useEnergyIqLocale();
   // Reports saved before the daily figures were kept, and partial reports in tests, may have none.
@@ -151,17 +154,19 @@ export function DailyEnergyChart({ report }: { report: SiteReport }) {
       {/* Every device, with what it sent late and when: the hover box is gone once the pointer leaves, this stays. */}
       {devices.length > 1 && <details className={styles.dailyDevices}>
         <summary>{t("dailyOutageShow", { count: devices.length })}</summary>
-        <ul>{devices.map(item => <li key={item.name}><span>{item.name}</span><small>{item.dates.map(date => shortDay(date, locale)).join(", ")}</small><b>{num(item.kwh)} kWh</b></li>)}</ul>
+        <ul>{devices.map(item => <li key={item.name}>{projectId && item.id ? <a href={deviceSettingsHref(projectId, item.id)} title={t("dailyDeviceOpen", { name: item.name })}>{item.name}</a> : <span>{item.name}</span>}<small>{item.dates.map(date => shortDay(date, locale)).join(", ")}</small><b>{num(item.kwh)} kWh</b></li>)}</ul>
+        {/* A device used only now and then is quiet most of the time: that is not an outage, once someone says so. */}
+        {projectId && devices.some(item => item.id) && <p className={styles.dailyDevicesHint}>{t("dailyDevicesHint")}</p>}
       </details>}
     </div></div>}
   </figure>;
 }
 
 /** Every device that sent energy late, largest first, with its total and the days it came back on. */
-function lateDevices(days: SiteReport["benchmark"]["days"]): Array<{ name: string; kwh: number; dates: string[] }> {
-  const byName = new Map<string, { name: string; kwh: number; dates: string[] }>();
+function lateDevices(days: SiteReport["benchmark"]["days"]): Array<{ name: string; kwh: number; dates: string[]; id?: string | undefined }> {
+  const byName = new Map<string, { name: string; kwh: number; dates: string[]; id?: string | undefined }>();
   for (const day of days) for (const meter of day.recoveredFrom ?? []) {
-    const entry = byName.get(meter.name) ?? { name: meter.name, kwh: 0, dates: [] };
+    const entry = byName.get(meter.name) ?? { name: meter.name, kwh: 0, dates: [], ...(meter.id ? { id: meter.id } : {}) };
     entry.kwh += meter.kwh;
     entry.dates.push(day.date);
     byName.set(meter.name, entry);

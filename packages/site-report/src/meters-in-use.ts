@@ -20,11 +20,12 @@ export const notInUseIds = (data: { notInUse?: NotInUseMeter[] | undefined }): S
 export const idleIds = (data: { idleWhenQuiet?: string[] | undefined }): Set<string> => new Set(data.idleWhenQuiet ?? []);
 
 /**
- * Meters whose silence is expected, so it never makes a day incomplete: the ones marked not in use, and the ones idle
- * when the readings were loaded (a rarely used fan whose total has not moved sends nothing; it used nothing).
+ * Meters whose silence is expected, so it never makes a day incomplete: the ones marked not in use, the ones idle
+ * when the readings were loaded (a rarely used fan whose total has not moved sends nothing; it used nothing), and the
+ * ones someone marked as used only now and then.
  */
-export const silentByDesignIds = (data: { notInUse?: NotInUseMeter[] | undefined; idleWhenQuiet?: string[] | undefined }): Set<string> =>
-  new Set([...notInUseIds(data), ...idleIds(data)]);
+export const silentByDesignIds = (data: { notInUse?: NotInUseMeter[] | undefined; idleWhenQuiet?: string[] | undefined; occasionalUse?: string[] | undefined }): Set<string> =>
+  new Set([...notInUseIds(data), ...idleIds(data), ...(data.occasionalUse ?? [])]);
 
 /**
  * The scope's total with completeness judged only on the meters in use. A not-in-use meter that is part of the total

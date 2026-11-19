@@ -5444,12 +5444,12 @@ const MAX_METER_LIGHT_COUNT = 9999;
 
 const parseMeterPresentation = (value: unknown) => {
   const presentation = requireRecord(value, "ENERGYIQ_METER_PRESENTATION_INVALID");
-  return Object.fromEntries(["device_name", "circuit_name", "group", "not_in_use", "off_with_lights", "short_name", "panel", "always_on", "light_count", "never_used"].flatMap(key => {
+  return Object.fromEntries(["device_name", "circuit_name", "group", "not_in_use", "off_with_lights", "short_name", "panel", "always_on", "light_count", "never_used", "occasional_use"].flatMap(key => {
     if (presentation[key] === undefined) return [];
     if (typeof presentation[key] !== "string") throw new Error(`ENERGYIQ_METER_PRESENTATION_INVALID:${key}`);
     const label = presentation[key].trim().slice(0, 160);
     // Always on and should never use power are yes/no: "true" keeps them, anything else (an unticked box) leaves them out.
-    if (key === "always_on" || key === "never_used") return label === "true" ? [[key, label]] : [];
+    if (key === "always_on" || key === "never_used" || key === "occasional_use") return label === "true" ? [[key, label]] : [];
     if (key === "light_count" && label) {
       const count = /^\d+$/u.test(label) ? Number(label) : Number.NaN;
       if (!(count >= 1 && count <= MAX_METER_LIGHT_COUNT)) throw new Error(`ENERGYIQ_METER_PRESENTATION_INVALID:${key}`);

@@ -108,8 +108,8 @@ export type SpatialExtras = ProjectSpatialReference & {
  * reports saved before it was kept.
  */
 export type ReportDay = { date: string; dow: string; kwh: number; dayType: AnalysisDay["dayType"]; holidayName?: string | undefined; complete: boolean; recoveredKwh: number; recoveredFrom?: ReportLateMeter[] | undefined };
-/** A meter that was offline and sent `kwh` late, when it came back, for one day. */
-export type ReportLateMeter = { name: string; kwh: number };
+/** A meter that was offline and sent `kwh` late, when it came back, for one day. `id` links to the meter. */
+export type ReportLateMeter = { name: string; kwh: number; id?: string | undefined };
 /**
  * `area` is the plain place name ("Office Area") when the zone matches a space. `points` is the zone's outline when the
  * layout draws it as a free shape (an L-shaped block) and the saved points are usable; `rect` is then its bounding box.
@@ -260,7 +260,7 @@ function sumCells(parts: Cells[]): Cells {
  * out: they are rounding, not an outage worth naming. Pass the site and its spaces: the whole-site readings carry a
  * meter's own hours only for meters placed on the site itself, so a meter in a block has them in that block's readings.
  */
-export function lateMetersByDay(scopes: ScopeData | readonly ScopeData[]): Map<string, ReportLateMeter[]> {
+export function lateMetersByDay(scopes: ScopeData | readonly ScopeData[], usedNowAndThen: ReadonlySet<string> = new Set()): Map<string, ReportLateMeter[]> {
   const seen = new Set<string>();
   const read = (Array.isArray(scopes) ? scopes : [scopes] as readonly ScopeData[]).flatMap(scope => scope.meters)
     .filter(meter => meter.series && !seen.has(meter.id) && !!seen.add(meter.id));
@@ -269,7 +269,9 @@ export function lateMetersByDay(scopes: ScopeData | readonly ScopeData[]): Map<s
   for (const meter of meters) {
     const late = new Map<string, number>();
     for (const cell of meter.series!.cells) if (cell[5]) late.set(cell[0], (late.get(cell[0]) ?? 0) + cell[5]);
-    for (const [date, kwh] of late) if (kwh >= 0.05) byDay.set(date, [...byDay.get(date) ?? [], { name: meter.name, kwh }]);
+    // A meter used only now and then sends its use when it next reports: that is ordinary use, not an outage.
+    if (usedNowAndThen.has(meter.id)) continue;
+    for (const [date, kwh] of late) if (kwh >= 0.05) byDay.set(date, [...byDay.get(date) ?? [], { name: meter.name, kwh, id: meter.id }]);
   }
   for (const list of byDay.values()) list.sort((a, b) => b.kwh - a.kwh || a.name.localeCompare(b.name));
   return byDay;
@@ -391,10 +393,16 @@ export function buildSiteReport(data: AnalysisData, referenceInput: ProjectSpati
   const partDay = oneDay && received && !days[0]?.complete;
 
   // Days, averages and base load. Public holidays count with weekends as closed days.
-  const lateFrom = lateMetersByDay([project, ...data.current.spaces]);
+  const usedNowAndThen = new Set(data.occasionalUse ?? []);
+  const lateFrom = lateMetersByDay([project, ...data.current.spaces], usedNowAndThen);
+  // What meters used only now and then sent after a quiet spell is ordinary use: it stays in the day's total, but it
+  // is not energy sent late after an outage.
+  const ordinaryLate = usedNowAndThen.size ? lateMetersByDay([project, ...data.current.spaces].map(scope => ({ ...scope, meters: scope.meters.filter(meter => usedNowAndThen.has(meter.id)).map(meter => ({ ...meter, official: true })) }))) : new Map<string, ReportLateMeter[]>();
   const reportDays: ReportDay[] = days.map(day => {
-    const from = day.recoveredKwh > 0 ? lateFrom.get(day.date) ?? [] : [];
-    return { date: day.date, dow: weekdayOf(day.date, locale), kwh: day.totalKwh, dayType: day.dayType, holidayName: day.holidayName, complete: day.complete, recoveredKwh: day.recoveredKwh, ...(from.length ? { recoveredFrom: from } : {}) };
+    const ordinary = (ordinaryLate.get(day.date) ?? []).reduce((sum, meter) => sum + meter.kwh, 0);
+    const recoveredKwh = Math.max(0, day.recoveredKwh - ordinary);
+    const from = recoveredKwh > 0 ? lateFrom.get(day.date) ?? [] : [];
+    return { date: day.date, dow: weekdayOf(day.date, locale), kwh: day.totalKwh, dayType: day.dayType, holidayName: day.holidayName, complete: day.complete, recoveredKwh, ...(from.length ? { recoveredFrom: from } : {}) };
   });
   const weekdayAvg = mean(days.filter(day => day.complete && day.dayType === "weekday").map(day => day.totalKwh));
   const weekendAvg = mean(days.filter(day => day.complete && day.dayType !== "weekday").map(day => day.totalKwh));
