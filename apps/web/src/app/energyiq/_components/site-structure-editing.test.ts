@@ -86,6 +86,21 @@ describe("in-page site structure edits", () => {
     expect(cleared.meter_mapping!.rows[0]!.presentation).toEqual({ device_name: "Lobby lights" });
   });
 
+  it("marks a meter as used now and then, keeps it through a rename and drops it when unticked", () => {
+    const meter = document.meter_mapping!.rows[0]!;
+    const draft = { name: "Lift lobby 1", scopeId: meter.scope_id, category: meter.category, counted: true };
+    const marked = applyMeterEdit(document, meter, { ...draft, occasionalUse: true });
+    if ("error" in marked) throw new Error(marked.error);
+    expect(marked.meter_mapping!.confirmed).toBe(true);
+    expect(marked.meter_mapping!.rows[0]!.presentation).toEqual({ device_name: "Lift lobby 1", occasional_use: "true" });
+    const renamed = applyMeterEdit(marked, marked.meter_mapping!.rows[0]!, { ...draft, name: "Lift lobby (Block 264F)" });
+    if ("error" in renamed) throw new Error(renamed.error);
+    expect(renamed.meter_mapping!.rows[0]!.presentation).toEqual({ device_name: "Lift lobby (Block 264F)", occasional_use: "true" });
+    const cleared = applyMeterEdit(marked, marked.meter_mapping!.rows[0]!, { ...draft, occasionalUse: false });
+    if ("error" in cleared) throw new Error(cleared.error);
+    expect(cleared.meter_mapping!.rows[0]!.presentation).toEqual({ device_name: "Lift lobby 1" });
+  });
+
   it("only takes a whole number of lights from 1 to 9999", () => {
     const meter = document.meter_mapping!.rows[0]!;
     const draft = { name: "Lobby lights", scopeId: meter.scope_id, category: meter.category, counted: true };

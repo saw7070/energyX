@@ -52,6 +52,11 @@ export type EnergyIqMeterPresentation = {
   light_count?: string;
   /** "true": the meter should never use power (any use is someone using it without leave), so any use raises an alert. */
   never_used?: string;
+  /**
+   * "true": the meter is used only now and then (a lift lobby, a decorative light). It reports only when it uses power,
+   * so its quiet spells are normal and the energy it sends after one is ordinary use, not energy sent late after an outage.
+   */
+  occasional_use?: string;
 };
 
 export type EnergyIqMeterMappingRow = {
