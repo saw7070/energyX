@@ -50,7 +50,7 @@ export type LiveSiteReadings = {
   /** Official meters with a current (not stale) power value. */
   reportingMeterCount: number;
   meters: LiveMeterReading[];
-  /** Meters Tuya has reported offline for half an hour or more, longest first; meters marked not in use are left out. */
+  /** Meters Tuya has reported offline for half an hour or more, longest first; meters not in use or used now and then are left out. */
   offline: Array<{ meterPointId: string; name: string; since: string }>;
   intervalMinutes: number;
 };
@@ -128,6 +128,8 @@ export const readLiveSiteReadings = (input: {
   // The name people gave the meter, as everywhere else in the app; the panel label is the fallback.
   const names = new Map(rows.map((row) => [row.id, row.presentation?.short_name?.trim() || row.presentation?.device_name?.trim() || row.presentation?.circuit_name?.trim() || row.display_name]));
   const notInUse = new Set(rows.filter((row) => row.presentation?.not_in_use).map((row) => row.id));
+  // Used now and then (presentation.occasional_use): quiet, even offline, between uses is normal, so never an alert.
+  const occasional = new Set(rows.filter((row) => (row.presentation as Record<string, unknown> | undefined)?.occasional_use === "true").map((row) => row.id));
   const offWithLights = new Set(rows.filter((row) => row.presentation?.off_with_lights).map((row) => row.id));
   const official = officialProjectMeterIds(document);
   ensureTable(input.metadataStore.db);
@@ -167,7 +169,7 @@ export const readLiveSiteReadings = (input: {
     reportingMeterCount: reporting.length,
     meters,
     offline: readOfflineMeters({ db: input.metadataStore.db, projectId: input.projectId, now, offWithLights })
-      .filter((meter) => names.has(meter.meterPointId) && !notInUse.has(meter.meterPointId))
+      .filter((meter) => names.has(meter.meterPointId) && !notInUse.has(meter.meterPointId) && !occasional.has(meter.meterPointId))
       .map((meter) => ({ meterPointId: meter.meterPointId, name: names.get(meter.meterPointId)!, since: meter.offlineSince })),
     intervalMinutes: LIVE_READING_INTERVAL_MS / 60_000,
   };

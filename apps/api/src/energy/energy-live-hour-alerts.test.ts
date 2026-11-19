@@ -14,11 +14,12 @@ import {
   runLiveHourAlerts,
   type LiveHourCell,
 } from "./energy-live-hour-alerts.js";
-import { createEnergyLiveReadingsPoller, pollLiveReadings } from "./energy-live-readings.js";
+import { createEnergyLiveReadingsPoller, pollLiveReadings, readLiveSiteReadings } from "./energy-live-readings.js";
 import { readLiveSamples, type LiveSample } from "./energy-live-samples.js";
 import type { HourCell, MeterAlertInputMeter } from "./energy-meter-alert-rules.js";
-import { MeterAlertStore } from "./energy-meter-alert-store.js";
-import { evaluateMeterAlerts, meterAlertEmail, meterAlertEmails, type MeterAlertReadings } from "./energy-meter-alerts.js";
+import { MeterAlertStore, type MeterAlertRecord } from "./energy-meter-alert-store.js";
+import { evaluateMeterAlerts, meterAlertEmail, meterAlertEmails, readPublishedMeterFlags, type MeterAlertReadings } from "./energy-meter-alerts.js";
+import { recordDeviceStatus } from "./energy-live-status.js";
 import { readSiteAlerts } from "./energy-site-alerts.js";
 import type { EnergyTuyaProjectConnector } from "./energy-tuya-connector.js";
 import { TUYA_OFFICE_PROJECT_ID as PROJECT, TUYA_OFFICE_WORKSPACE_ID as WORKSPACE } from "./tuya-office-project.js";
@@ -40,21 +41,25 @@ function hours(from: string, to: string, make: (date: string, hour: number) => H
   return cells;
 }
 
-type FixtureMeter = { id: string; name: string; usual: number; neverUsed?: boolean; alwaysOn?: boolean };
+type FixtureMeter = { id: string; name: string; usual: number; neverUsed?: boolean; alwaysOn?: boolean; occasionalUse?: boolean; official?: boolean; lastReadingAt?: string };
 /**
  * A lights-on site's daily readings up to `through` (local hour, exclusive): each meter uses `usual` kWh every hour
  * since 20 Oct, except the hours `override` gives.
  */
-const daily = (input: { through: string; meters: FixtureMeter[]; override?: (meterId: string, date: string, hour: number) => HourCell | undefined }): MeterAlertReadings => ({
+const daily = (input: { through: string; meters: FixtureMeter[]; override?: (meterId: string, date: string, hour: number) => HourCell | null | undefined; activeHour?: (date: string, hour: number) => boolean }): MeterAlertReadings => ({
   timezone: TZ,
   referenceMs: sg(`${input.through}:00`),
   hoursMeaning: "lights_on",
   meters: input.meters.map((meter): MeterAlertInputMeter => ({
-    id: meter.id, name: meter.name, lastReadingAt: isoAt(`${input.through}:00`),
+    id: meter.id, name: meter.name, lastReadingAt: meter.lastReadingAt ?? isoAt(`${input.through}:00`),
     ...(meter.neverUsed ? { neverUsed: true } : {}), ...(meter.alwaysOn ? { alwaysOn: true } : {}),
+    ...(meter.occasionalUse ? { occasionalUse: true } : {}), ...(meter.official ? { official: true } : {}),
   })),
-  cells: new Map(input.meters.map((meter) => [meter.id, hours("2026-10-20T00", input.through, (date, hour) =>
-    input.override?.(meter.id, date, hour) ?? [date, hour, meter.neverUsed ? 0 : meter.usual, 60, 0, 0])])),
+  cells: new Map(input.meters.map((meter) => [meter.id, hours("2026-10-20T00", input.through, (date, hour) => {
+    const given = input.override?.(meter.id, date, hour);
+    return given === undefined ? [date, hour, meter.neverUsed ? 0 : meter.usual, 60, 0, 0] : given;
+  })])),
+  ...(input.activeHour ? { activeHour: input.activeHour } : {}),
 });
 
 /** Hours measured from live readings: [local hour "YYYY-MM-DDTHH", kWh, inferred from an online quiet meter]. */
@@ -490,6 +495,161 @@ describe("Live hourly use: the 15-minute live check", () => {
       // What was read is kept although the judging after it failed; one Tuya read per site per check, nothing more.
       expect(readLiveSamples(metadata.db, PROJECT, 0).size).toBeGreaterThan(0);
       expect(readLatestEnergy).toHaveBeenCalledTimes(2);
+    });
+  });
+});
+
+// ---------------------------------------------------------------- meters used now and then
+
+describe("Meters used now and then (occasional use)", () => {
+  const nextMorning = new Date(sg("2026-11-19T03:00"));
+  /** A meeting-room meter quiet since 16 Nov noon: the daily readings stop there. */
+  const quietSince = (occasionalUse: boolean) => daily({
+    through: "2026-11-19T02",
+    meters: [{ id: "room", name: "Meeting room", usual: 0.4, occasionalUse, lastReadingAt: isoAt("2026-11-16T12:00") }, { id: "corridor", name: "Corridor lights", usual: 0.4 }],
+    override: (meterId, date, hour) => (meterId === "room" && sg(`${date}T${String(hour).padStart(2, "0")}:00`) >= sg("2026-11-16T12:00") ? null : undefined),
+  });
+
+  it("are never called stopped, and a stopped-sending alert already open for one closes quietly", async () => {
+    await withMetadata((metadata, store) => {
+      // As before for any other meter: quiet for more than 12 hours is a stop.
+      const before = evaluateMeterAlerts({ store, projectId: PROJECT, readings: quietSince(false), patternAlerts: true, now: nextMorning });
+      expect(before.opened.map((alert) => [alert.kind, alert.subject])).toEqual([["meter_offline", "room"]]);
+      // Marked "used now and then": its quiet spell is normal. The open alert closes with no "sending again" news.
+      const after = evaluateMeterAlerts({ store, projectId: PROJECT, readings: quietSince(true), patternAlerts: true, now: new Date(sg("2026-11-19T04:00")) });
+      expect(after.opened).toEqual([]);
+      expect(after.resolved.map((alert) => [alert.kind, alert.payload.cleared, alert.payload.back])).toEqual([["meter_offline", true, undefined]]);
+      expect(meterAlertEmails({ changes: after, site: "SKTC", timezone: TZ, projectId: PROJECT })).toEqual([]);
+      expect(readSiteAlerts({ metadataStore: metadata, projectId: PROJECT, userId: "tech", includeReports: true, includeSync: false, includeHardware: true, now: sg("2026-11-19T04:00") }).meterAlerts).toEqual([]);
+    });
+    await withMetadata((metadata, store) => {
+      expect(evaluateMeterAlerts({ store, projectId: PROJECT, readings: quietSince(true), patternAlerts: true, now: nextMorning })).toEqual({ opened: [], resolved: [] });
+    });
+  });
+
+  it("only alert when they use more than usual, in the daily and the live check, and never-use is unchanged", async () => {
+    await withMetadata((metadata, store) => {
+      const room: FixtureMeter = { id: "room", name: "Meeting room", usual: 0.4, occasionalUse: true };
+      // The daily readings: nothing 2–4 pm (lower than usual) and 1.2 kWh 8–10 pm (higher).
+      const changes = evaluateMeterAlerts({
+        store, projectId: PROJECT, patternAlerts: true, now: nextMorning,
+        readings: daily({ through: "2026-11-19T02", meters: [room], override: (meterId, date, hour) => (date !== "2026-11-18" ? undefined : hour === 14 || hour === 15 ? [date, hour, 0, 60, 0, 0] : hour === 20 || hour === 21 ? [date, hour, 1.2, 60, 0, 0] : undefined) }),
+      });
+      expect(changes.opened.map((alert) => [alert.subject, alert.payload.direction, alert.payload.start])).toEqual([["room", "high", isoAt("2026-11-18T20:00")]]);
+      // Live: nothing at 2 pm is normal for it; 1.2 kWh at 3 pm is a spike.
+      const live19 = evaluateLiveHourAlerts({
+        store, projectId: PROJECT, patternAlerts: true, now: new Date(sg("2026-11-19T16:10")),
+        readings: daily({ through: "2026-11-19T02", meters: [room] }), live: live({ room: [["2026-11-19T14", 0, true], ["2026-11-19T15", 1.2]] }),
+      });
+      expect(live19.opened.map((alert) => [alert.subject, alert.payload.direction, alert.payload.start])).toEqual([["room", "high", isoAt("2026-11-19T15:00")]]);
+    });
+  });
+
+  it("are read from the published meter settings, absent meaning no, and left out of the live offline list", async () => {
+    await withMetadata((metadata) => {
+      expect(readPublishedMeterFlags(metadata, PROJECT).occasional.size).toBe(0);
+      // Tick "used now and then" on the first panel's total (as the Facility form will save it).
+      const revisions = metadata.db.prepare("SELECT id, snapshot_json FROM energyiq_hierarchy_revisions WHERE project_id = ?").all(PROJECT) as Array<{ id: string; snapshot_json: string }>;
+      for (const revision of revisions) {
+        const document = JSON.parse(revision.snapshot_json) as { meter_mapping?: { rows?: Array<{ id: string; presentation?: Record<string, unknown> }> } };
+        for (const row of document.meter_mapping?.rows ?? []) if (row.id === "panel-a-total") row.presentation = { ...row.presentation, occasional_use: "true" };
+        metadata.db.prepare("UPDATE energyiq_hierarchy_revisions SET snapshot_json = ? WHERE id = ?").run(JSON.stringify(document), revision.id);
+      }
+      const flags = readPublishedMeterFlags(metadata, PROJECT);
+      expect([...flags.occasional]).toEqual(["panel-a-total"]);
+      expect(flags.official.has("panel-a-total") && flags.official.has("panel-b-total")).toBe(true);
+      // Tuya has both panels' totals offline for over half an hour: only the one not used now and then is listed.
+      const T0 = sg("2026-11-18T10:00");
+      for (const at of [T0, T0 + 31 * MIN]) {
+        recordDeviceStatus({ db: metadata.db, projectId: PROJECT, checkedAt: at, statuses: [{ meterPointId: "panel-a-total", online: false }, { meterPointId: "panel-b-total", online: false }] });
+      }
+      expect(readLiveSiteReadings({ metadataStore: metadata, projectId: PROJECT, now: T0 + 32 * MIN }).offline.map((meter) => meter.meterPointId)).toEqual(["panel-b-total"]);
+    });
+  });
+});
+
+// ---------------------------------------------------------------- the whole site
+
+describe("Live hourly use: the whole site", () => {
+  /** Two blocks on the site's official total, 2 kWh an hour each: the site uses 4 kW every hour. */
+  const blocks = (usual = 2): FixtureMeter[] => [
+    { id: "block-a", name: "Block A", usual, official: true },
+    { id: "block-b", name: "Block B", usual, official: true },
+    { id: "sub-a", name: "Block A lift", usual: 0.5 },
+  ];
+  const lightsOn = (date: string, hour: number) => hour >= 19 || hour < 7;
+  /** `activeHour` null: a site without a calendar. */
+  const site = (each: number, local = "2026-11-18T22", usual = 2, activeHour: ((date: string, hour: number) => boolean) | null = lightsOn) => ({
+    readings: daily({ through: "2026-11-18T02", meters: blocks(usual), ...(activeHour ? { activeHour } : {}) }),
+    live: live({ "block-a": [[local, each]], "block-b": [[local, each]], "sub-a": [[local, 0.5]] }),
+  });
+  const now = new Date(sg("2026-11-18T23:15"));
+
+  it("alerts when the site goes from its usual 4 kW to 6 kW at 10–11 pm, though no single meter stands out, and not at 4.8 kW", async () => {
+    await withMetadata((metadata, store) => {
+      const spike = evaluateLiveHourAlerts({ store, projectId: PROJECT, patternAlerts: true, now, siteName: "SKTC", ...site(3) });
+      expect(spike.opened.map((alert) => [alert.key, alert.subject, alert.payload.direction, alert.payload.kwh, alert.payload.usualKwh, alert.payload.scope, alert.payload.meterName]))
+        .toEqual([["usage-pattern:site:20261118T2200", "site", "high", 6, 4, "site", "SKTC"]]);
+      const email = meterAlertEmail({ site: "SKTC", timezone: TZ, alert: spike.opened[0]!, link: "" })!;
+      expect(email.subject).toBe("SKTC: unusual use for the whole site, 10–11 pm");
+      expect(email.text).toContain("SKTC used 6.0 kW at 10–11 pm on Wed, 18 Nov (usually 4.0 kW).");
+      // Checked again: nothing new.
+      expect(evaluateLiveHourAlerts({ store, projectId: PROJECT, patternAlerts: true, now, siteName: "SKTC", ...site(3) })).toEqual({ opened: [], resolved: [] });
+    });
+    await withMetadata((metadata, store) => {
+      // 4.8 kW is 20% above usual: not enough.
+      expect(evaluateLiveHourAlerts({ store, projectId: PROJECT, patternAlerts: true, now, siteName: "SKTC", ...site(2.4) }).opened).toEqual([]);
+    });
+  });
+
+  it("never alerts on small loads, and below usual only in the site's hours", async () => {
+    await withMetadata((metadata, store) => {
+      const siteOpened = (changes: { opened: Array<{ subject: string }> }) => changes.opened.filter((alert) => alert.subject === "site");
+      // Usual 0.6 kW; 1.0 kW is 67% more but only 0.4 kW: a small load, not news for the site (each meter's own rule
+      // still looks at each meter).
+      expect(siteOpened(evaluateLiveHourAlerts({ store, projectId: PROJECT, patternAlerts: true, now, ...site(0.5, "2026-11-18T22", 0.3) }))).toEqual([]);
+      // Half the usual 4 kW at 2 pm, outside the lights-on hours (or with no calendar to say): not news.
+      expect(siteOpened(evaluateLiveHourAlerts({ store, projectId: PROJECT, patternAlerts: true, now, ...site(1, "2026-11-18T14") }))).toEqual([]);
+      expect(siteOpened(evaluateLiveHourAlerts({ store, projectId: PROJECT, patternAlerts: true, now, ...site(1, "2026-11-18T22", 2, null) }))).toEqual([]);
+      // Half the usual at 10 pm, when the lights should be on: news.
+      const drop = siteOpened(evaluateLiveHourAlerts({ store, projectId: PROJECT, patternAlerts: true, now, siteName: "SKTC", ...site(1) })) as MeterAlertRecord[];
+      expect(drop.map((alert) => [alert.subject, alert.payload.direction, alert.payload.kwh])).toEqual([["site", "low", 2]]);
+      expect(meterAlertEmail({ site: "SKTC", timezone: TZ, alert: drop[0]!, link: "" })!.text).toContain("SKTC used only 2.0 kW at 10–11 pm on Wed, 18 Nov (usually 4.0 kW).");
+    });
+  });
+
+  it("is judged only when every official meter was measured, and counts toward the day's five", async () => {
+    await withMetadata((metadata, store) => {
+      const { readings } = site(3);
+      // Block B not measured that hour: no site total (Block A's own rule still raises Block A).
+      expect(evaluateLiveHourAlerts({ store, projectId: PROJECT, patternAlerts: true, now, readings, live: live({ "block-a": [["2026-11-18T22", 4]] }) }).opened.map((alert) => alert.subject)).toEqual(["block-a"]);
+      for (let index = 0; index < 5; index += 1) {
+        store.open({ projectId: PROJECT, key: `usage-pattern:m${index}:20261118T1400`, kind: "usage_pattern", audience: "operators", subject: `m${index}`, payload: { meterName: `Meter ${index + 1}` }, now: new Date(sg("2026-11-18T15:00")) });
+      }
+      const sixth = evaluateLiveHourAlerts({ store, projectId: PROJECT, patternAlerts: true, now, siteName: "SKTC", ...site(3) });
+      expect(store.get(PROJECT, "usage-pattern:site:20261118T2200")!.payload.suppressed).toBe(true);
+      expect(sixth.opened.map((alert) => [alert.kind, alert.payload.names])).toEqual([["usage_pattern_more", ["SKTC"]]]);
+    });
+    await withMetadata((metadata, store) => {
+      // Switched off with the site's other unusual-use alerts.
+      expect(evaluateLiveHourAlerts({ store, projectId: PROJECT, patternAlerts: false, now, ...site(3) }).opened).toEqual([]);
+    });
+  });
+
+  it("is kept when the daily readings agree and withdrawn quietly when they show a usual hour", async () => {
+    const nextMorning = new Date(sg("2026-11-19T03:00"));
+    const dailyAt22 = (each: number) => daily({ through: "2026-11-19T02", meters: blocks(), activeHour: lightsOn, override: (meterId, date, hour) => (date === "2026-11-18" && hour === 22 && meterId.startsWith("block") ? [date, hour, each, 60, 0, 0] : undefined) });
+    await withMetadata((metadata, store) => {
+      evaluateLiveHourAlerts({ store, projectId: PROJECT, patternAlerts: true, now, siteName: "SKTC", ...site(3) });
+      const changes = evaluateMeterAlerts({ store, projectId: PROJECT, patternAlerts: true, now: nextMorning, readings: dailyAt22(3) });
+      expect(changes.opened).toEqual([]);
+      expect(store.get(PROJECT, "usage-pattern:site:20261118T2200")).toMatchObject({ status: "resolved", payload: { confirmed: true, ongoing: false } });
+    });
+    await withMetadata((metadata, store) => {
+      evaluateLiveHourAlerts({ store, projectId: PROJECT, patternAlerts: true, now, siteName: "SKTC", ...site(3) });
+      evaluateMeterAlerts({ store, projectId: PROJECT, patternAlerts: true, now: nextMorning, readings: dailyAt22(2) });
+      expect(store.get(PROJECT, "usage-pattern:site:20261118T2200")!.payload.withdrawn).toBe(true);
+      expect(bell(metadata, nextMorning)).toEqual([]);
     });
   });
 });

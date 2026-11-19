@@ -104,6 +104,20 @@ describe("Meter alerts in the bell", () => {
     expect(ms[2]!.detail).toMatch(/Dikesan dalam masa sejam daripada bacaan langsung\.$/);
   });
 
+  it("names the whole site in an alert about the site's total, in every language", () => {
+    const whole: MeterAlertDto = {
+      key: "usage-pattern:site:20261118T2200", readKey: "usage-pattern:site:20261118T2200", kind: "usage_pattern", status: "open", openedAt: "2026-11-18T15:15:00.000Z",
+      details: { meterId: "site", meterName: "SKTC", scope: "site", direction: "high", at: "2026-11-18T14:00:00.000Z", start: "2026-11-18T14:00:00.000Z", end: "2026-11-18T15:00:00.000Z", hours: 1, kwh: 6, usualKwh: 4, ongoing: true, live: true },
+    };
+    const low: MeterAlertDto = { ...whole, details: { ...whole.details, direction: "low", kwh: 2 } };
+    const show = (locale: EnergyIqLocale) => meterAlertEntries([whole, low], { t: translatorFor(notificationMessages, locale), locale, projectId: "sktc" });
+    const [high, drop] = show("en");
+    expect(high).toMatchObject({ tone: "warning", kind: "pattern", title: "SKTC used 6.0 kW at 10–11 pm (usually 4.0 kW)", detail: "Seen within the hour from live readings, Wed, 18 Nov. Usual is that hour's typical use over the last three weeks." });
+    expect(drop!.title).toBe("SKTC used only 2.0 kW at 10–11 pm (usually 4.0 kW)");
+    expect(show("zh-Hans").map((entry) => entry.title)).toEqual([expect.stringMatching(/^SKTC 在 .+ 用电 6\.0 kW（平常 4\.0 kW）$/), expect.stringMatching(/^SKTC 在 .+ 只用电 2\.0 kW（平常 4\.0 kW）$/)]);
+    expect(show("ms").map((entry) => entry.title)).toEqual(["SKTC menggunakan 6.0 kW pada 10–11 PTG (biasanya 4.0 kW)", "SKTC hanya menggunakan 2.0 kW pada 10–11 PTG (biasanya 4.0 kW)"]);
+  });
+
   it("lists an open stopped-sending alert's meters so they are not shown again as stopped, and skips what it cannot read", () => {
     const open: MeterAlertDto = { ...gateway, readKey: gateway.key, status: "open", details: { ...gateway.details, back: undefined } };
     const [entry] = meterAlertEntries([open, { ...fan, details: {} as Record<string, unknown>, kind: "meter_offline" }], { t: translatorFor(notificationMessages, "en"), locale: "en", projectId: "sktc" });

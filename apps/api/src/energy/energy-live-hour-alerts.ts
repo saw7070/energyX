@@ -20,7 +20,8 @@
  * What it raises. One hour beyond the usual range is enough here (the daily check needs two in a row): seeing it within
  * the hour is the point. The alert has the daily check's key, kind and payload, plus `live: true`, and the same limits:
  * the per-site switch for unusual use, five a day then one summary, the same meters left out (not in use, idle, must
- * never use power, stopped sending). Meters that must never use power are judged on the same live hours. Once the daily
+ * never use power, stopped sending; a meter used now and then only above its usual level). Meters that must never use
+ * power are judged on the same live hours, and so is the whole site's total (see evaluateLiveHourAlerts). Once the daily
  * readings cover those hours the daily check takes the alert over: it keeps it if the full readings agree, and withdraws
  * it quietly if they show the live view was wrong (a meter that was offline and sent its use late, or an hour that was
  * in fact usual).
@@ -49,6 +50,10 @@ import { MeterAlertStore, type MeterAlertRecord } from "./energy-meter-alert-sto
 import {
   compactLocal,
   drainMeterAlertEmails,
+  SITE_SUBJECT,
+  siteHourCells,
+  siteMeters,
+  siteThreshold,
   meterAlertEmails,
   overlapsOrTouches,
   PATTERN_ALERTS_PER_DAY,
@@ -188,9 +193,16 @@ type Direction = "high" | "low" | "zero";
  * Brings the stored alerts in line with the hours measured from live readings, like evaluateMeterAlerts does for the
  * daily readings: opens what is new (one hour is enough), extends what goes on, resolves what an hour back to usual has
  * ended. Checking the same hours again changes nothing.
+ *
+ * Besides each meter, the whole site is judged on the same hours: the sum of its official meters against the site's
+ * usual total for that hour (same day kinds). It stands out at 30% and at least 0.5 kWh off usual (kW over the hour);
+ * below usual counts only in the site's hours (lights-on or opening hours), so near-zero daytime or night-time loads
+ * never alert. It is an unusual-use alert on subject "site" (`scope: "site"`), within the same five a day.
  */
 export function evaluateLiveHourAlerts(input: {
   store: MeterAlertStore; projectId: string; readings: MeterAlertReadings; live: ReadonlyMap<string, readonly LiveHourCell[]>; patternAlerts: boolean; now: Date;
+  /** The site's name, for the whole-site alert. */
+  siteName?: string;
 }): MeterAlertChanges {
   const { store, projectId, readings, now } = input;
   const { timezone } = readings;
@@ -214,6 +226,81 @@ export function evaluateLiveHourAlerts(input: {
   let summaryNeeded = false;
   const patternAlerts = store.list(projectId, { kind: "usage_pattern" });
   const neverAlerts = store.list(projectId, { kind: "never_used" });
+
+  type Judged = { cell: LiveHourCell; flag?: { direction: Direction; usual: number; gap: number } };
+  /**
+   * Turns one subject's judged hours (a meter, or the whole site) into alerts: runs of consecutive unusual hours on one
+   * side, one hour being enough, each opening, carrying on or ending an episode; and an open episode whose next hour was
+   * judged back to usual (or unusual the other way) is over.
+   */
+  const raiseEpisodes = (input: { subject: string; keyId: string; name: string; judged: readonly Judged[]; extra?: Record<string, unknown> }) => {
+    const { subject, judged } = input;
+    const runs: Judged[][] = [];
+    let current: Judged[] | null = null;
+    for (const item of judged) {
+      const previous: Judged | undefined = current?.at(-1);
+      if (!item.flag) {
+        current = null;
+      } else if (current && previous?.flag && previous.cell.startMs + HOUR_MS === item.cell.startMs && sameSide(previous.flag.direction, item.flag.direction)) {
+        current.push(item);
+      } else {
+        current = [item];
+        runs.push(current);
+      }
+    }
+    const touched = new Set<string>();
+    for (const run of runs) {
+      const startMs = run[0]!.cell.startMs, endMs = run.at(-1)!.cell.startMs + HOUR_MS;
+      const peak = run.reduce((best, item) => (item.flag!.gap > best.flag!.gap ? item : best), run[0]!);
+      const direction: Direction = run.some((item) => item.flag!.direction === "high") ? "high" : run.every((item) => item.flag!.direction === "zero") ? "zero" : "low";
+      const fresh = {
+        meterId: subject, meterName: input.name, direction, start: iso(startMs), end: iso(endMs), hours: run.length,
+        at: iso(peak.cell.startMs), kwh: round3(peak.cell.kwh), usualKwh: round3(peak.flag!.usual),
+        ongoing: run.at(-1) === judged.at(-1), live: true, ...(run.some((item) => item.cell.inferred) ? { inferred: true } : {}), ...input.extra,
+      };
+      const key = `usage-pattern:${input.keyId}:${compactLocal(startMs, timezone)}`;
+      const own = store.get(projectId, key);
+      // The same episode seen again, or one it carries on (raised earlier from live readings, or by the daily check).
+      const continuing = (own && own.payload.withdrawn !== true ? own : undefined)
+        ?? patternAlerts.find((alert) => carries(alert, subject) && overlapsOrTouches(alert, startMs, endMs) && sameSide(alert.payload.direction, direction));
+      if (continuing) {
+        const before = continuing.payload;
+        const keepPeak = typeof before.kwh === "number" && typeof before.usualKwh === "number" && Math.abs(before.kwh - before.usualKwh) > Math.abs(fresh.kwh - fresh.usualKwh);
+        const start = typeof before.start === "string" && before.start < fresh.start ? before.start : fresh.start;
+        const end = typeof before.end === "string" && before.end > fresh.end ? before.end : fresh.end;
+        const payload = {
+          ...fresh, start, end, hours: Math.max(1, Math.round((Date.parse(end) - Date.parse(start)) / HOUR_MS)),
+          ongoing: end === fresh.end ? fresh.ongoing : before.ongoing === true,
+          ...(keepPeak ? { at: before.at, kwh: before.kwh, usualKwh: before.usualKwh, direction: before.direction } : {}),
+          ...(before.inferred === true ? { inferred: true } : {}),
+          ...(before.confirmed === true ? { confirmed: true } : {}),
+          ...(before.suppressed === true ? { suppressed: true } : {}),
+          ...(before.seeded === true ? { seeded: true } : {}),
+        };
+        touched.add(continuing.key);
+        store.update(projectId, continuing.key, payload, now);
+        if (!payload.ongoing) resolve(continuing.key, payload);
+        continue;
+      }
+      const suppressed = shown >= PATTERN_ALERTS_PER_DAY;
+      const payload = { ...fresh, ...(suppressed ? { suppressed: true } : {}) };
+      touched.add(key);
+      if (suppressed) {
+        store.open({ projectId, key, kind: "usage_pattern", audience: "operators", subject, payload, now });
+        summaryNeeded = true;
+      } else {
+        open("usage_pattern", key, subject, payload);
+        shown += 1;
+      }
+      if (!fresh.ongoing) resolve(key, payload);
+    }
+    const judgedAt = new Map(judged.map((item) => [item.cell.startMs, item]));
+    for (const alert of patternAlerts) {
+      if (alert.subject !== subject || alert.status !== "open" || touched.has(alert.key)) continue;
+      const next = judgedAt.get(Date.parse(String(alert.payload.end ?? "")));
+      if (next && !(next.flag && sameSide(next.flag.direction, alert.payload.direction))) resolve(alert.key, { ...alert.payload, ongoing: false });
+    }
+  };
 
   for (const meter of readings.meters) {
     const hours = input.live.get(meter.id) ?? [];
@@ -278,85 +365,43 @@ export function evaluateLiveHourAlerts(input: {
     if (!input.patternAlerts || meter.idleWhenQuiet) continue;
     const baseline = hourlyBaseline(readings.cells.get(meter.id) ?? [], learned, dayTypeOf);
     if (!baseline.size) continue;
-    type Judged = { cell: LiveHourCell; flag?: { direction: Direction; usual: number; gap: number } };
     const judged: Judged[] = [];
     for (const cell of hours) {
       const usual = baseline.get(`${dayTypeOf(cell.date)}|${cell.hour}`);
       if (!usual) continue;
       const gap = cell.kwh - usual.median;
-      if (Math.abs(gap) <= patternThreshold(usual)) {
+      // Used now and then: less than usual, or nothing, is normal; only more than usual is unusual.
+      if (Math.abs(gap) <= patternThreshold(usual) || (meter.occasionalUse && gap < 0)) {
         judged.push({ cell });
         continue;
       }
       const direction: Direction = gap > 0 ? "high" : cell.kwh <= Math.max(NEAR_ZERO_KWH, 0.05 * usual.median) ? "zero" : "low";
       judged.push({ cell, flag: { direction, usual: usual.median, gap: Math.abs(gap) } });
     }
-    // Runs of consecutive unusual hours on one side; one hour is a run.
-    const runs: Judged[][] = [];
-    let current: Judged[] | null = null;
-    for (const item of judged) {
-      const previous: Judged | undefined = current?.at(-1);
-      if (!item.flag) {
-        current = null;
-      } else if (current && previous?.flag && previous.cell.startMs + HOUR_MS === item.cell.startMs && sameSide(previous.flag.direction, item.flag.direction)) {
-        current.push(item);
-      } else {
-        current = [item];
-        runs.push(current);
+    raiseEpisodes({ subject: meter.id, keyId: shortId(meter.id), name: meter.name, judged });
+  }
+
+  // ---------- the whole site: its official total against its usual level for the hour
+  if (input.patternAlerts) {
+    const members = siteMeters(readings.meters);
+    const siteBaseline = members.some((meter) => !meter.occasionalUse) ? hourlyBaseline(siteHourCells(readings), learned, dayTypeOf) : new Map();
+    if (siteBaseline.size) {
+      const judged: Judged[] = [];
+      const starts = [...new Set(members.flatMap((meter) => (input.live.get(meter.id) ?? []).map((cell) => cell.startMs)))].sort((left, right) => left - right);
+      for (const startMs of starts) {
+        // Every official meter measured that hour (one used now and then counts as using nothing when it sent nothing).
+        const parts = members.map((meter) => ({ meter, cell: input.live.get(meter.id)?.find((cell) => cell.startMs === startMs) }));
+        if (parts.some((part) => !part.cell && !part.meter.occasionalUse)) continue;
+        const { date, hour } = localHourOf(startMs, timezone);
+        const usual = siteBaseline.get(`${dayTypeOf(date)}|${hour}`);
+        if (!usual) continue;
+        const cell: LiveHourCell = { startMs, date, hour, kwh: round3(parts.reduce((sum, part) => sum + (part.cell?.kwh ?? 0), 0)), inferred: parts.some((part) => part.cell?.inferred === true) };
+        const gap = cell.kwh - usual.median;
+        // Below usual counts only in the site's hours (lights that did not come on); outside them it is noise.
+        const counts = Math.abs(gap) >= siteThreshold(usual.median) && (gap > 0 || readings.activeHour?.(date, hour) === true);
+        judged.push(counts ? { cell, flag: { direction: gap > 0 ? "high" : "low", usual: usual.median, gap: Math.abs(gap) } } : { cell });
       }
-    }
-    const touched = new Set<string>();
-    for (const run of runs) {
-      const startMs = run[0]!.cell.startMs, endMs = run.at(-1)!.cell.startMs + HOUR_MS;
-      const peak = run.reduce((best, item) => (item.flag!.gap > best.flag!.gap ? item : best), run[0]!);
-      const direction: Direction = run.some((item) => item.flag!.direction === "high") ? "high" : run.every((item) => item.flag!.direction === "zero") ? "zero" : "low";
-      const fresh = {
-        meterId: meter.id, meterName: meter.name, direction, start: iso(startMs), end: iso(endMs), hours: run.length,
-        at: iso(peak.cell.startMs), kwh: round3(peak.cell.kwh), usualKwh: round3(peak.flag!.usual),
-        ongoing: run.at(-1) === judged.at(-1), live: true, ...(run.some((item) => item.cell.inferred) ? { inferred: true } : {}),
-      };
-      const key = `usage-pattern:${shortId(meter.id)}:${compactLocal(startMs, timezone)}`;
-      const own = store.get(projectId, key);
-      // The same episode seen again, or one it carries on (raised earlier from live readings, or by the daily check).
-      const continuing = (own && own.payload.withdrawn !== true ? own : undefined)
-        ?? patternAlerts.find((alert) => carries(alert, meter.id) && overlapsOrTouches(alert, startMs, endMs) && sameSide(alert.payload.direction, direction));
-      if (continuing) {
-        const before = continuing.payload;
-        const keepPeak = typeof before.kwh === "number" && typeof before.usualKwh === "number" && Math.abs(before.kwh - before.usualKwh) > Math.abs(fresh.kwh - fresh.usualKwh);
-        const start = typeof before.start === "string" && before.start < fresh.start ? before.start : fresh.start;
-        const end = typeof before.end === "string" && before.end > fresh.end ? before.end : fresh.end;
-        const payload = {
-          ...fresh, start, end, hours: Math.max(1, Math.round((Date.parse(end) - Date.parse(start)) / HOUR_MS)),
-          ongoing: end === fresh.end ? fresh.ongoing : before.ongoing === true,
-          ...(keepPeak ? { at: before.at, kwh: before.kwh, usualKwh: before.usualKwh, direction: before.direction } : {}),
-          ...(before.inferred === true ? { inferred: true } : {}),
-          ...(before.confirmed === true ? { confirmed: true } : {}),
-          ...(before.suppressed === true ? { suppressed: true } : {}),
-          ...(before.seeded === true ? { seeded: true } : {}),
-        };
-        touched.add(continuing.key);
-        store.update(projectId, continuing.key, payload, now);
-        if (!payload.ongoing) resolve(continuing.key, payload);
-        continue;
-      }
-      const suppressed = shown >= PATTERN_ALERTS_PER_DAY;
-      const payload = { ...fresh, ...(suppressed ? { suppressed: true } : {}) };
-      touched.add(key);
-      if (suppressed) {
-        store.open({ projectId, key, kind: "usage_pattern", audience: "operators", subject: meter.id, payload, now });
-        summaryNeeded = true;
-      } else {
-        open("usage_pattern", key, meter.id, payload);
-        shown += 1;
-      }
-      if (!fresh.ongoing) resolve(key, payload);
-    }
-    // An open episode whose next hour was measured back to usual (or unusual the other way) is over.
-    const judgedAt = new Map(judged.map((item) => [item.cell.startMs, item]));
-    for (const alert of patternAlerts) {
-      if (alert.subject !== meter.id || alert.status !== "open" || touched.has(alert.key)) continue;
-      const next = judgedAt.get(Date.parse(String(alert.payload.end ?? "")));
-      if (next && !(next.flag && sameSide(next.flag.direction, alert.payload.direction))) resolve(alert.key, { ...alert.payload, ongoing: false });
+      raiseEpisodes({ subject: SITE_SUBJECT, keyId: SITE_SUBJECT, name: input.siteName ?? "The site", judged, extra: { scope: "site" } });
     }
   }
   if (input.patternAlerts) refreshPatternSummary({ store, projectId, day, summaryNeeded, seeded: {}, now, changes });
@@ -391,7 +436,7 @@ export async function runLiveHourAlerts(input: {
   const project = input.metadataStore.energyIq.getProject(input.projectId);
   let queued = false;
   const changes = store.transaction(() => {
-    const found = evaluateLiveHourAlerts({ store, projectId: input.projectId, readings, live, patternAlerts: store.getSettings(input.projectId).patternAlerts, now: input.now });
+    const found = evaluateLiveHourAlerts({ store, projectId: input.projectId, readings, live, patternAlerts: store.getSettings(input.projectId).patternAlerts, now: input.now, siteName: project.name });
     if (emailsOn) {
       for (const email of meterAlertEmails({ changes: found, site: project.name, timezone: readings.timezone, projectId: input.projectId, ...(input.publicBaseUrl ? { publicBaseUrl: input.publicBaseUrl } : {}) })) {
         queued = store.enqueueEmail({ projectId: input.projectId, key: email.key, audience: email.audience, subject: email.subject, text: email.text, now: input.now }) || queued;

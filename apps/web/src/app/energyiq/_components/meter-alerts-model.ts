@@ -133,7 +133,10 @@ export function meterAlertEntries(alerts: readonly MeterAlertDto[], input: { t: 
         const values = { name: text(details.meterName), kw: energy(number(details.kwh), "kW"), usual: energy(number(details.usualKwh), "kW"), window: span(from, to) };
         return [{
           ...base, tone: "warning", kind: "pattern", href: analysis, quietMeterIds: [],
-          title: direction === "zero" ? t("pattern.liveZero", values) : direction === "low" ? t("pattern.liveLow", values) : t("pattern.liveHigh", values),
+          // The whole site (its official total), named by the site.
+          title: details.scope === "site"
+            ? (direction === "high" ? t("pattern.siteHigh", values) : t("pattern.siteLow", values))
+            : direction === "zero" ? t("pattern.liveZero", values) : direction === "low" ? t("pattern.liveLow", values) : t("pattern.liveHigh", values),
           detail: alert.status === "resolved" && end && details.ongoing === false
             ? t("pattern.liveBack", { date: day(start), time: clock(end) })
             : hours > 1 ? t("pattern.liveMany", { date: day(start), hours }) : t("pattern.liveHour", { date: day(start) }),

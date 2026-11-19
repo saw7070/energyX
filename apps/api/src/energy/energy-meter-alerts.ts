@@ -9,6 +9,8 @@
  * - Never-use and unusual-use alerts go to the people who run the site (the same people as the budget and overnight
  *   alerts) and platform administrators. Unusual-use alerts can be turned off per site, and at most five a day open per
  *   site; the rest are counted in one summary alert.
+ * - A meter marked "used now and then" (presentation.occasional_use) is never called stopped, and only use above its
+ *   usual level is unusual for it: quiet spells are normal. Never-use alerts are unchanged.
  *
  * Checking the same readings again changes nothing, so the nightly update, its hourly retries and uploads can all
  * trigger a check. Emails go out only when ENERGYIQ_ALERT_EMAILS_ENABLED=true and mail is configured; the bell always
@@ -73,6 +75,11 @@ export type MeterAlertReadings = {
   hoursMeaning: "opening" | "lights_on";
   /** Whether the site opens on a date, from its calendar; absent without one. */
   opensOn?: (date: string) => boolean;
+  /**
+   * Whether a clock hour is in the site's hours (lights-on hours on a lights-on site, opening hours otherwise), from
+   * its calendar; absent without one. The whole-site check calls use below usual unusual only inside them.
+   */
+  activeHour?: (date: string, hour: number) => boolean;
   dataSnapshotId?: string | null;
 };
 
@@ -138,6 +145,56 @@ export const overlapsOrTouches = (alert: MeterAlertRecord, startMs: number, endM
   return Number.isFinite(start) && Number.isFinite(end) && start <= endMs && end >= startMs;
 };
 
+// ---------------------------------------------------------------- the whole site
+
+/** The subject (and key part) of the whole-site unusual-use alert, which only the live check raises. */
+export const SITE_SUBJECT = "site";
+/** The whole site stands out when its hour is at least this share off its usual level... */
+export const SITE_PATTERN_SHARE = 0.3;
+/** ...and at least this many kWh (kW over the hour) off it, so small night-time or daytime loads never count. */
+export const SITE_PATTERN_MIN_KWH = 0.5;
+export const siteThreshold = (usual: number): number => Math.max(SITE_PATTERN_SHARE * usual, SITE_PATTERN_MIN_KWH);
+export const siteStandsOut = (kwh: number, usual: HourBaseline): boolean => Math.abs(kwh - usual.median) >= siteThreshold(usual.median);
+
+/** The meters whose sum is the site's total: its official meters in use. */
+export const siteMeters = (meters: readonly MeterAlertInputMeter[]): MeterAlertInputMeter[] => meters.filter((meter) => meter.official && !meter.notInUse);
+
+/**
+ * The site's total for each hour of the daily readings, as hourly cells: the sum of its official meters' hours, for the
+ * hours every one of them has. A meter used now and then counts as using nothing in an hour it sent nothing for, and
+ * its use sent "late" as used (it sends only when it uses power). An hour another meter read late or not completely is
+ * marked so, as one meter's cell would be.
+ */
+export function siteHourCells(readings: Pick<MeterAlertReadings, "meters" | "cells">): HourCell[] {
+  const members = siteMeters(readings.meters);
+  const steady = members.filter((meter) => !meter.occasionalUse);
+  if (!steady.length) return [];
+  const byMeter = new Map(members.map((meter) => [meter.id, new Map((readings.cells.get(meter.id) ?? []).map((cell) => [`${cell[0]}|${cell[1]}`, cell]))]));
+  const site: HourCell[] = [];
+  for (const anchor of readings.cells.get(steady[0]!.id) ?? []) {
+    const slot = `${anchor[0]}|${anchor[1]}`;
+    const total: HourCell = [anchor[0], anchor[1], 0, 60, 0, 0];
+    let complete = true;
+    for (const meter of members) {
+      const cell = byMeter.get(meter.id)!.get(slot);
+      if (meter.occasionalUse) {
+        total[2]! += cell ? (cell[2] ?? 0) + cell[5] : 0;
+        continue;
+      }
+      if (!cell) {
+        complete = false;
+        break;
+      }
+      total[2]! += cell[2] ?? 0;
+      total[3] = Math.min(total[3], cell[3]);
+      total[4] += cell[4];
+      total[5] += cell[5];
+    }
+    if (complete) site.push(total);
+  }
+  return site;
+}
+
 /** Alerts raised from live readings (energy-live-hour-alerts.ts) that the daily readings have not withdrawn. */
 const isLive = (alert: MeterAlertRecord): boolean => alert.payload.live === true && alert.payload.withdrawn !== true;
 
@@ -152,7 +209,10 @@ const isLive = (alert: MeterAlertRecord): boolean => alert.payload.live === true
  */
 export function liveAlertVerdict(input: {
   alert: MeterAlertRecord; cells: readonly HourCell[]; baseline: ReadonlyMap<string, HourBaseline>; dayTypeOf: (date: string) => string; timezone: string;
+  /** When an hour's use stands out from its usual: the meter rule by default, the whole-site rule for the site. */
+  standsOut?: (kwh: number, usual: HourBaseline) => boolean;
 }): "confirmed" | "refuted" | "unknown" {
+  const standsOut = input.standsOut ?? ((kwh: number, usual: HourBaseline) => Math.abs(kwh - usual.median) > patternThreshold(usual));
   const { alert, timezone } = input;
   const start = Date.parse(String(alert.payload.start ?? "")), end = Date.parse(String(alert.payload.end ?? ""));
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return "unknown";
@@ -172,7 +232,7 @@ export function liveAlertVerdict(input: {
     } else {
       const usual = completeHour(cell) ? input.baseline.get(`${input.dayTypeOf(date)}|${hour}`) : undefined;
       if (!usual) unknown += 1;
-      else if (Math.abs(cell[2]! - usual.median) > patternThreshold(usual) && sameSide(cell[2]! > usual.median ? "high" : "low", alert.payload.direction)) confirmed += 1;
+      else if (standsOut(cell[2]!, usual) && sameSide(cell[2]! > usual.median ? "high" : "low", alert.payload.direction)) confirmed += 1;
       else against += 1;
     }
   }
@@ -251,8 +311,15 @@ export function evaluateMeterAlerts(input: { store: MeterAlertStore; projectId: 
     open("meter_offline", "hardware", key, subject, fresh);
     if (group.back) resolve(key, fresh);
   }
+  const occasional = new Set(readings.meters.filter((meter) => meter.occasionalUse).map((meter) => meter.id));
   for (const alert of stored) {
     if (alert.status !== "open" || claimed.has(alert.key)) continue;
+    // Marked "used now and then" since: its quiet spells are normal, so there is no stop to call over (nor "back").
+    const meterIds = payloadMeters(alert.payload).map((meter) => meter.id);
+    if (meterIds.length && meterIds.every((id) => occasional.has(id))) {
+      resolve(alert.key, { ...alert.payload, cleared: true });
+      continue;
+    }
     // No longer quiet and no spell found (it came back long ago, or is no longer watched): when it came back, if it did.
     // Readings that later filled the quiet time on time (a meter that sends only when its total moves, and used
     // nothing) mean it never stopped: resolved without a "back" message.
@@ -304,7 +371,12 @@ export function evaluateMeterAlerts(input: { store: MeterAlertStore; projectId: 
     if (!baselines.has(meterId)) baselines.set(meterId, hourlyBaseline(cells.get(meterId) ?? [], learned, dayTypeOf));
     return baselines.get(meterId)!;
   };
-  const verdictOf = (alert: MeterAlertRecord) => liveAlertVerdict({ alert, cells: cells.get(alert.subject) ?? [], baseline: baselineOf(alert.subject), dayTypeOf, timezone });
+  let siteCells: HourCell[] | undefined;
+  const verdictOf = (alert: MeterAlertRecord) => {
+    if (alert.subject !== SITE_SUBJECT) return liveAlertVerdict({ alert, cells: cells.get(alert.subject) ?? [], baseline: baselineOf(alert.subject), dayTypeOf, timezone });
+    siteCells ??= siteHourCells(readings);
+    return liveAlertVerdict({ alert, cells: siteCells, baseline: hourlyBaseline(siteCells, learned, dayTypeOf), dayTypeOf, timezone, standsOut: siteStandsOut });
+  };
 
   // ---------- 2. should never use power: the people who run the site
   const seen = new Set<string>();
@@ -361,6 +433,8 @@ export function evaluateMeterAlerts(input: { store: MeterAlertStore; projectId: 
       const baseline = baselineOf(meter.id);
       if (!baseline.size) continue;
       for (const episode of patternEpisodes({ cells: own, baseline, dates: judged, dayTypeOf, ...(meter.alwaysOn ? { alwaysOn: true } : {}) })) {
+        // Used now and then: using less than usual, or nothing, is normal; only more than usual is unusual.
+        if (meter.occasionalUse && episode.direction !== "high") continue;
         const startMs = localHourStartMs(episode.startDate, episode.startHour, timezone);
         const endMs = localHourStartMs(episode.endDate, episode.endHour, timezone);
         const peakAt = localHourStartMs(episode.peakDate, episode.peakHour, timezone);
@@ -446,6 +520,7 @@ export async function readMeterAlertReadings(metadataStore: MetadataStore, proje
     ]);
     const information = buildEnergyProjectInformation(metadataStore, projectId);
     const details = new Map(information.meters.map((meter) => [meter.id, meter]));
+    const flags = readPublishedMeterFlags(metadataStore, projectId);
     const idle = readIdleWhenQuietMeters({ metadataStore, projectId, now: nowMs });
     const lastOnTime = new Map<string, number>();
     for (const interval of intervals) {
@@ -465,6 +540,8 @@ export async function readMeterAlertReadings(metadataStore: MetadataStore, proje
         ...(detail?.notInUse ? { notInUse: true } : {}),
         ...(detail?.alwaysOn ? { alwaysOn: true } : {}),
         ...(detail?.neverUsed ? { neverUsed: true } : {}),
+        ...(flags.occasional.has(point.meterPointId) ? { occasionalUse: true } : {}),
+        ...(flags.official.has(point.meterPointId) ? { official: true } : {}),
         ...(idle.has(point.meterPointId) ? { idleWhenQuiet: true } : {}),
         ...(last && Number.isFinite(last) ? { lastReadingAt: iso(last) } : {}),
       };
@@ -479,7 +556,7 @@ export async function readMeterAlertReadings(metadataStore: MetadataStore, proje
     return {
       timezone, meters, cells: hourlyCellsFromIntervals(intervals, timezone), referenceMs,
       hoursMeaning: lightsOnHoursOn(own, referenceDate) ? "lights_on" : "opening",
-      ...(own.length ? { opensOn: (date: string) => opensOn(own, date) } : {}),
+      ...(own.length ? { opensOn: (date: string) => opensOn(own, date), activeHour: (date: string, hour: number) => activeHour(own, date, hour) } : {}),
       dataSnapshotId: snapshot.id,
     };
   });
@@ -494,6 +571,54 @@ const opensOn = (entries: readonly CalendarEntry[], date: string): boolean => {
   const exception = entry.exceptions?.find((item) => item.date === date);
   if (exception) return exception.operating.length > 0;
   return (entry.weekly[WEEKDAYS[new Date(`${date}T00:00:00Z`).getUTCDay()]!] ?? []).length > 0;
+};
+
+const rangesOn = (entries: readonly CalendarEntry[], date: string): Array<{ from: string; to: string }> => {
+  const entry = entries.find((item) => item.effective_from <= date && (!item.effective_to || date < item.effective_to));
+  if (!entry) return [];
+  const exception = entry.exceptions?.find((item) => item.date === date);
+  if (exception) return (exception.operating as Array<{ from?: unknown; to?: unknown }>).flatMap((range) => (typeof range.from === "string" && typeof range.to === "string" ? [{ from: range.from, to: range.to }] : []));
+  return entry.weekly[WEEKDAYS[new Date(`${date}T00:00:00Z`).getUTCDay()]!] ?? [];
+};
+const minutesOf = (clock: string): number => {
+  const [hours, minutes] = clock.split(":").map(Number);
+  return (hours ?? 0) * 60 + (minutes ?? 0);
+};
+/**
+ * Whether at least half of a clock hour falls in the site's hours that day: lights-on hours on a lights-on site, opening
+ * hours otherwise. A range that ends before it starts runs past midnight, so last night's hours count in the morning.
+ */
+const activeHour = (entries: readonly CalendarEntry[], date: string, hour: number): boolean => {
+  const start = hour * 60, end = start + 60;
+  let inside = 0;
+  for (const [day, offset] of [[shiftDate(date, -1), -1440], [date, 0]] as const) {
+    for (const range of rangesOn(entries, day)) {
+      const from = offset + minutesOf(range.from);
+      const to = offset + minutesOf(range.to) + (minutesOf(range.to) <= minutesOf(range.from) ? 1440 : 0);
+      inside += Math.max(0, Math.min(end, to) - Math.max(start, from));
+    }
+  }
+  return inside >= 30;
+};
+
+/**
+ * Meter flags the alert readings need from the published meter rows besides those energy-project-information.ts gives:
+ * "used now and then" (presentation.occasional_use === "true"; absent means no) and the meters of the site's official
+ * total (its project-level official electricity routes, as the live power sums them).
+ */
+export const readPublishedMeterFlags = (metadataStore: MetadataStore, projectId: string): { occasional: Set<string>; official: Set<string> } => {
+  const project = metadataStore.energyIq.getProject(projectId);
+  const published = metadataStore.energyIq.templates.getLatestProjectRevision(projectId);
+  const hierarchyId = published?.hierarchy_revision_id ?? project.hierarchy_revision_id;
+  const revision = metadataStore.energyIq.projectSetup.listHierarchyRevisions(projectId).find((item) => item.id === hierarchyId);
+  if (!revision) return { occasional: new Set(), official: new Set() };
+  const mapping = (JSON.parse(revision.snapshot_json) as {
+    meter_mapping?: { rows?: Array<{ id: string; presentation?: Record<string, unknown> }>; official_aggregation_routes?: Array<{ scope_id: string; resource: string; meter_point_ids: string[] }> };
+  }).meter_mapping;
+  return {
+    occasional: new Set((mapping?.rows ?? []).filter((row) => row.presentation?.occasional_use === "true").map((row) => row.id)),
+    official: new Set((mapping?.official_aggregation_routes ?? []).filter((route) => route.scope_id === "project" && route.resource === "electricity").flatMap((route) => route.meter_point_ids)),
+  };
 };
 
 /** The calendar the published site uses (as readIdleWhenQuietMeters reads it); null without one. */
@@ -597,6 +722,17 @@ export function meterAlertEmail(input: { site: string; timezone: string; alert: 
     const from = zero ? start : at;
     const to = zero && typeof payload.end === "string" ? payload.end : iso(Date.parse(from) + HOUR_MS);
     const when = `${formatWindow(from, to, timezone)} on ${formatDay(from, timezone)}`;
+    if (alert.subject === SITE_SUBJECT) {
+      return {
+        key: alert.key,
+        subject: `${site}: unusual use for the whole site, ${formatWindow(from, to, timezone)}`,
+        text: [
+          payload.direction === "high" ? `${name} used ${kw(value)} at ${when} (usually ${kw(usual)}).` : `${name} used only ${kw(value)} at ${when} (usually ${kw(usual)}).`,
+          "", LIVE_NOTE, "",
+          "Usual is the whole site's typical use in that hour over the last three weeks. Worth checking what was switched on together, or what did not come on.",
+        ].join("\n") + input.link,
+      };
+    }
     const line = zero
       ? `${name} used nothing ${when} (usually ${kw(usual)}).`
       : payload.direction === "low"
