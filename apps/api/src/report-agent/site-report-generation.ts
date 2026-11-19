@@ -9,8 +9,8 @@
  * English; the readings let the web app build the very same report again in the reader's own language.
  *
  * The page is written in the style the site chose: the full report (the default, as before), the management review (a
- * short plain report organised by group) or the energy review (answers to the questions the site asked at
- * installation). All come from the same readings and the same model. A one-day report in the energy review style is
+ * short plain report organised by group) or the energy review (key findings first, then each topic with its charts,
+ * costs and next steps). All come from the same readings and the same model. A one-day report in the energy review style is
  * written as the management review (writtenStyleOf).
  */
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";

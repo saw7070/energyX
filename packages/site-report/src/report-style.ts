@@ -2,7 +2,7 @@
  * Which kind of site report to write from the readings. All are built from the same readings and the same model:
  * - "full": the full report the Overview shows, with every chart, table and circuit check;
  * - "management": a short, plain management review organised by group, for people who decide rather than operate;
- * - "review": the energy review, the report written as answers to the questions the site asked at installation (the
+ * - "review": the energy review: key findings first, then each topic with its charts, costs, carbon and next steps (the
  *   style of the first SKTC review). A site set to it also sees it as the full report on its Overview.
  *
  * Anything saved before this choice existed, or any value we do not know, reads as the full report.
