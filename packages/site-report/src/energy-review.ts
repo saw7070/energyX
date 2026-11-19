@@ -560,16 +560,11 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
     .filter(item => isOn(item.hour) && item.from - item.to >= 0.1 * peakKw).sort((a, b) => (b.from - b.to) - (a.from - a.to));
   const dayHours = Array.from({ length: 24 }, (_, hour) => hour).filter(hour => lighting ? !inWindow(openRange, hour) : !isOn(hour));
   const dayKw = mean(dayHours.map(hour => stackedHours[hour]!)) ?? 0;
-  const dayLead = profileLayers.length > 1 && dayKw > 0 ? profileLayers.map(layer => ({ layer, kw: mean(dayHours.map(hour => layer.hours[hour] ?? 0)) ?? 0 })).sort((a, b) => b.kw - a.kw)[0] : undefined;
-  // Lights-on sites: the lights are off as planned in the day when what stays on is only what runs day and night by
-  // design (emergency lighting, ticked "always on" on the meter): no daytime use on the lighting worth a visit, and
-  // nothing else above a tenth of the daytime level. The meters in the stacked layers, when there are layers.
+  // The meters ticked "always on" (emergency lighting) that are in the stacked layers, when there are layers.
   const steadyIds = alwaysOnByDesignIds(data);
   const inLayers = layers.length >= 2 ? new Set(rawLayers.flatMap(layer => layer.meterIds)) : null;
   const designIds = [...steadyIds].filter(id => !inLayers || inLayers.has(id));
   const designHours = layerHours(designIds);
-  const designDayKw = mean(dayHours.map(hour => designHours[hour]!)) ?? 0;
-  const offAsPlanned = lighting && !daytimeWorthIt && designDayKw > 0.005 && dayKw - designDayKw <= Math.max(0.1 * dayKw, 0.005);
   // Those meters as readers know them: the groups that hold nothing else ("emergency lights"), else their own names.
   const designUsed = designIds.filter(id => meterHours(series.get(id), profileDates).some(value => value > 0));
   const designGroups = rawLayers.filter(layer => layer.meterIds.length > 0 && layer.meterIds.every(id => steadyIds.has(id)));
@@ -577,13 +572,6 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
   const designName = designGroups.length && designUsed.every(id => designGrouped.has(id)) ? list(designGroups.map(layer => inSentence(layer.name, locale)))
     : designUsed.length && designUsed.length <= 2 ? list(designUsed.map(id => (data.alwaysOnByDesign ?? []).find(meter => meter.id === id)?.name ?? id))
       : t("profile.byDesignAll");
-  const profileIntro = paragraph([
-    onAt !== undefined && offAt !== undefined ? t("profile.introOn", { on: clock(onAt, locale), off: clock(offAt, locale) }) : "",
-    t(lighting ? "profile.introPeak" : "profile.introPeakDay", { kw: kwText(peakKw, 1), time: clock(stackedHours.indexOf(peakKw), locale) }),
-    drops[0] ? t("profile.introStep", { time: clock(drops[0].hour, locale), kw: kwText(drops[0].to, 1) }) : "",
-    dayKw > 0.005 ? offAsPlanned ? t("profile.introDayPlanned", { kw: kwText(dayKw, 1), name: designName })
-      : dayLead && dayLead.kw >= 0.5 * dayKw ? t("profile.introDayMostly", { kw: kwText(dayKw, 1), name: inSentence(dayLead.layer.name, locale) }) : t("profile.introDay", { kw: kwText(dayKw, 1) }) : "",
-  ]);
   // ---------- 5b. the night, moment by moment ----------
   // Each lighting circuit's average hour says when it comes on, steps down and goes off. Readings are hourly, so an
   // hour a circuit was on for only part of reads as the minutes it was on: at half its usual level, half an hour.
@@ -599,6 +587,8 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
     return locale === "en" ? `${twelve}:${String(minute).padStart(2, "0")} ${hour < 12 ? "am" : "pm"}` : clock(hour, locale).replace(/\d+/, `${twelve}:${String(minute).padStart(2, "0")}`);
   };
   let daytime: EnergyReviewDaytime | undefined;
+  /** From the last light off to the first one on (minutes), when the night has both. */
+  let unlit: { from: number; to: number } | null = null;
   if (lighting && profileLayers.length && peakKw > 0) {
     const tenMinutes = (fraction: number) => Math.round(Math.min(1, Math.max(0, fraction)) * 6) * 10;
     type Moment = { at: number; kind: "on" | "step" | "off"; name: string };
@@ -690,20 +680,43 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
     offs.slice(-3).forEach(([at, items], index, shown) => add(at, t(index === shown.length - 1 && shown.length > 1 ? "time.lastOff" : "time.off", { names: names(items) }), "off"));
     entries.sort((a, b) => a.key - b.key);
     timeline.push(...entries.map(entry => entry.moment));
-    // The day last: from the last light off to the first one on, and what stays on. The chart shades the same span.
-    if (offs.length && ons.length) {
-      const from = offs.at(-1)![0], to = ons[0]![0];
-      const kw = kwText(dayKw, 1);
-      if (dayKw > 0.005) timeline.push({ time: t("time.daytime", { from: timeOf(from), to: timeOf(to) }), kind: "day",
-        text: offAsPlanned ? t("time.dayPlanned", { kw, name: designName })
-          : dayLead && dayLead.kw >= 0.5 * dayKw ? t("time.dayMostly", { kw, name: inSentence(dayLead.layer.name, locale) }) : t("time.day", { kw }) });
-      // Off as planned: only what runs by design stays on, or nothing does; never with daytime use worth a visit.
-      const planned = !daytimeWorthIt && (offAsPlanned || dayKw <= 0.005);
-      daytime = { from: minuteOfDay(from), to: minuteOfDay(to), kw: dayKw, planned,
-        title: t(planned ? "profile.dayPlanned" : "profile.dayUse"),
-        detail: dayKw <= 0.005 ? "" : offAsPlanned ? t("profile.dayPlannedDetail", { kw, name: designName }) : t("profile.dayUseDetail", { kw }) };
-    }
+    if (offs.length && ons.length) unlit = { from: minuteOfDay(offs.at(-1)![0]), to: minuteOfDay(ons[0]![0]) };
   }
+  // What stays on in the day, as the chart's band, the list and the intro say it: the midday level, over the whole
+  // hours between the last light off and the first one on, so the lights going off in the morning and coming on in
+  // the evening do not count (scheduled hours can hold both). Without such an hour, the scheduled daytime hours. The
+  // scheduled daytime figure (dayKw) stays what the savings use.
+  const unlitHours = unlit ? Array.from({ length: 24 }, (_, hour) => hour).filter(hour => {
+    const start = (hour * 60 - unlit!.from + 1440) % 1440;
+    return start + 60 <= (unlit!.to - unlit!.from + 1440) % 1440;
+  }) : [];
+  const middayHours = unlitHours.length ? unlitHours : dayHours;
+  const middayKw = mean(middayHours.map(hour => stackedHours[hour]!)) ?? 0;
+  const middayLead = profileLayers.length > 1 && middayKw > 0 ? profileLayers.map(layer => ({ layer, kw: mean(middayHours.map(hour => layer.hours[hour] ?? 0)) ?? 0 })).sort((a, b) => b.kw - a.kw)[0] : undefined;
+  // Lights-on sites: the lights are off as planned in the day when what stays on at midday is only what runs day and
+  // night by design (emergency lighting): the meters ticked "always on" are at least nine tenths of it, and there is no
+  // daytime use on the lighting worth a visit.
+  const designMiddayKw = mean(middayHours.map(hour => designHours[hour]!)) ?? 0;
+  const offAsPlanned = lighting && !daytimeWorthIt && designMiddayKw > 0.005 && designMiddayKw >= 0.9 * middayKw;
+  const middayText = kwText(middayKw, 1);
+  const mostly = middayLead && middayLead.kw >= 0.5 * middayKw ? inSentence(middayLead.layer.name, locale) : "";
+  // The day last in the list: from the last light off to the first one on, and what stays on. The chart shades it.
+  if (unlit) {
+    if (middayKw > 0.005) timeline.push({ time: t("time.daytime", { from: timeOf(unlit.from), to: timeOf(unlit.to) }), kind: "day",
+      text: offAsPlanned ? t("time.dayPlanned", { kw: middayText, name: designName }) : mostly ? t("time.dayMostly", { kw: middayText, name: mostly }) : t("time.day", { kw: middayText }) });
+    // Off as planned: only what runs by design stays on, or nothing does; never with daytime use worth a visit.
+    const planned = !daytimeWorthIt && (offAsPlanned || middayKw <= 0.005);
+    daytime = { ...unlit, kw: middayKw, planned,
+      title: t(planned ? "profile.dayPlanned" : "profile.dayUse"),
+      detail: middayKw <= 0.005 ? "" : offAsPlanned ? t("profile.dayPlannedDetail", { kw: middayText, name: designName }) : t("profile.dayUseDetail", { kw: middayText }) };
+  }
+  const profileIntro = paragraph([
+    onAt !== undefined && offAt !== undefined ? t("profile.introOn", { on: clock(onAt, locale), off: clock(offAt, locale) }) : "",
+    t(lighting ? "profile.introPeak" : "profile.introPeakDay", { kw: kwText(peakKw, 1), time: clock(stackedHours.indexOf(peakKw), locale) }),
+    drops[0] ? t("profile.introStep", { time: clock(drops[0].hour, locale), kw: kwText(drops[0].to, 1) }) : "",
+    middayKw > 0.005 ? offAsPlanned ? t("profile.introDayPlanned", { kw: middayText, name: designName })
+      : mostly ? t("profile.introDayMostly", { kw: middayText, name: mostly }) : t("profile.introDay", { kw: middayText }) : "",
+  ]);
   // The day's energy as the chart says it: the review's typical day, so it is the same figure as the summary's (the
   // average hours add up to it when every meter worked); the hours themselves without a typical day.
   const hoursKwh = stackedHours.reduce((total, value) => total + value, 0);

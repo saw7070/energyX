@@ -494,6 +494,26 @@ describe("the 24-hour chart marks when the lights switch", () => {
     expect(leftOn.profile!.intro).not.toContain("off as planned");
   });
 
+  it("says what stays on at midday, from the whole hours between the last light off and the first on, not the switching either side", () => {
+    // As at the first site: lights-on hours 18:30–07:10, so the scheduled daytime (7 am–7 pm) holds the block lighting
+    // going off until 7:20 and the 6 pm switching on, about 0.4 kW on average. At midday only the emergency lights
+    // (0.1 kW in each block, ticked always on by design) and the pavilion (0.02 kW) are on.
+    const SKTC_NIGHTS = Object.fromEntries(Object.keys(NIGHTS).map(day => [day, [{ from: "18:30", to: "07:10" }]]));
+    const meters: Record<string, Meter> = { ...BLOCKS, "a-emergency": { ...BLOCKS["a-emergency"]!, kwh: () => 0.1 }, "b-emergency": { ...BLOCKS["b-emergency"]!, kwh: () => 0.1 },
+      pavilion: { name: "Pavilion lights", group: "common", kwh: () => 0.02 } };
+    const site = buildEnergyReview(estate({}, { meters, nights: SKTC_NIGHTS }), null, GENERATED);
+    const profile = site.profile!;
+    const scheduled = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].reduce((sum, hour) => sum + profile.layers.reduce((total, layer) => total + layer.hours[hour]!, 0), 0) / 12;
+    expect(scheduled).toBeCloseTo(0.4, 1);
+    expect(profile.daytime).toEqual({ from: 440, to: 1100, kw: expect.closeTo(0.22, 6), planned: true, title: "Off as planned", detail: "only emergency lights, about 0.2 kW" });
+    expect(profile.intro).toMatch(/ During the day the lights are off as planned, apart from emergency lights \(on by design, about 0\.2 kW\)\.$/);
+    expect(profile.timeline.at(-1)).toEqual({ time: "7:20 am to 6:20 pm", kind: "day", text: "Daytime: off as planned, apart from emergency lights (on by design), about 0.2 kW." });
+    // The scheduled daytime figure stays where it was used before: the timer saving still counts from it.
+    const trim = site.savings!.rows.find(row => row.title === "Shorten the light timers a little")!;
+    const night = [19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6].reduce((sum, hour) => sum + profile.layers.reduce((total, layer) => total + layer.hours[hour]!, 0), 0) / 12;
+    expect(trim.kwhYear).toBeCloseTo((night - scheduled) * 0.5 * 365, 6);
+  });
+
   it("gives the day's total as the typical day, which the average hours add up to", () => {
     const typical = built.summary.figures[0]!.value;
     expect(built.profile!.dayTotal).toBe(`About ${typical} kWh a day`);
