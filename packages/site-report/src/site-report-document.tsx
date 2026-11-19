@@ -63,25 +63,26 @@ export function monotonePath(points: Array<[number, number]>) {
 
 /**
  * Chart width follows its container so text stays at its real size. Below the minimum (a phone) the chart keeps the
- * minimum width and scrolls sideways instead of squeezing its labels together.
+ * minimum width and scrolls sideways instead of squeezing its labels together. A chart that thins its own labels to
+ * fit can ask for a smaller minimum.
  */
 const CHART_MIN = 480;
-export function useWidth(fallback: number) {
+export function useWidth(fallback: number, min = CHART_MIN) {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(fallback);
   useEffect(() => {
     const node = ref.current;
     if (!node || typeof ResizeObserver === "undefined") return;
-    const update = () => { const value = Math.round(node.clientWidth); if (value > 0) setWidth(Math.max(CHART_MIN, value)); };
+    const update = () => { const value = Math.round(node.clientWidth); if (value > 0) setWidth(Math.max(min, value)); };
     update();
     const observer = new ResizeObserver(update);
     observer.observe(node);
     return () => observer.disconnect();
-  }, []);
+  }, [min]);
   return [ref, width] as const;
 }
 /** Rough label width for layout: Chinese characters are about a full em wide, Latin letters a little over half. */
-const textWidth = (text: string, size = 11) => { const wide = text.match(/[⺀-鿿＀-￯]/g)?.length ?? 0; return (text.length - wide) * size * 0.56 + wide * size; };
+export const textWidth = (text: string, size = 11) => { const wide = text.match(/[⺀-鿿＀-￯]/g)?.length ?? 0; return (text.length - wide) * size * 0.56 + wide * size; };
 const luminance = (hex: string) => {
   const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(c => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
   return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
