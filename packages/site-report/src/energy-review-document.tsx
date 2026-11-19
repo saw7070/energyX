@@ -10,9 +10,9 @@
  *
  * Nothing here reads the DOM while rendering, so the server renders the same document with renderEnergyReviewHtml().
  */
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ENERGY_REVIEW_PALETTE as P, worthSaying, type EnergyReview, type EnergyReviewFollowUp, type EnergyReviewMeter, type EnergyReviewQuestion, type EnergyReviewSlice } from "./energy-review.js";
+import { ENERGY_REVIEW_PALETTE as P, worthSaying, type EnergyReview, type EnergyReviewFollowUp, type EnergyReviewHeadline, type EnergyReviewMeter, type EnergyReviewQuestion, type EnergyReviewSlice } from "./energy-review.js";
 import { energyReviewMessages } from "./energy-review-messages.js";
 import { forHoursMeaning, translatorFor } from "./locale.js";
 import { Rich } from "./rich.js";
@@ -65,9 +65,7 @@ export const ENERGY_REVIEW_CSS = `
 .eiq-energy-review .er-nav ol::-webkit-scrollbar{display:none}
 .eiq-energy-review .er-nav a{display:flex;align-items:center;gap:7px;padding:6px 12px;border-radius:999px;font-size:13px;font-weight:500;color:var(--er-muted);white-space:nowrap;transition:background .15s,color .15s}
 .eiq-energy-review .er-nav a:hover{background:var(--er-soft);color:var(--er-ink)}
-.eiq-energy-review .er-nav a span{font-size:11px;font-weight:700;color:var(--er-faint);font-variant-numeric:tabular-nums}
 .eiq-energy-review .er-nav a[aria-current="true"]{background:var(--er-green);color:#fff}
-.eiq-energy-review .er-nav a[aria-current="true"] span{color:#CFE3D8}
 
 /* the title block of a saved copy */
 .eiq-energy-review .er-head{padding-bottom:28px}
@@ -78,22 +76,36 @@ export const ENERGY_REVIEW_CSS = `
 .eiq-energy-review .er-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;margin-top:24px;padding:16px 0;border-top:1px solid var(--er-line);border-bottom:1px solid var(--er-line);font-size:13.5px;color:var(--er-ink)}
 .eiq-energy-review .er-meta dt{font-size:10.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--er-muted);margin-bottom:4px}
 
-/* summary */
-.eiq-energy-review .er-figs{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-top:26px}
-.eiq-energy-review .er-fig-tile{display:flex;flex-direction:column;gap:6px;padding:18px 18px 16px;border:1px solid var(--er-line);border-radius:14px;background:linear-gradient(180deg,#fff,var(--er-soft));transition:border-color .15s,transform .15s,box-shadow .15s}
-.eiq-energy-review a.er-fig-tile:hover{border-color:#BBD3C6;transform:translateY(-1px);box-shadow:0 10px 24px -18px rgba(22,63,49,.45)}
-.eiq-energy-review .er-fig-tile b{font-family:'Source Serif 4','Iowan Old Style',Georgia,serif;font-size:31px;font-weight:600;line-height:1.1;color:var(--er-ink);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
-.eiq-energy-review .er-fig-tile b small{font-size:15px;color:var(--er-muted);font-weight:500;margin-left:5px;letter-spacing:0}
-.eiq-energy-review .er-fig-tile span{font-size:12.5px;line-height:1.4;color:var(--er-muted)}
-.eiq-energy-review .er-glance{list-style:none;margin-top:12px;border-top:1px solid var(--er-line)}
-.eiq-energy-review .er-glance a{display:grid;grid-template-columns:30px minmax(0,1fr) 20px;gap:14px;align-items:start;padding:14px 4px 14px 0;border-bottom:1px solid var(--er-line);transition:background .15s}
-.eiq-energy-review .er-glance a:hover{background:var(--er-soft)}
-.eiq-energy-review .er-glance .er-n{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--er-green-soft);color:var(--er-green);font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:1px}
-.eiq-energy-review .er-glance b{display:block;font-weight:650;color:var(--er-ink);font-size:14.5px}
-.eiq-energy-review .er-glance span.er-a{display:block;font-size:14px;color:var(--er-body);margin-top:3px}
-.eiq-energy-review .er-glance .er-go{color:var(--er-faint);font-size:16px;line-height:26px;transition:transform .15s,color .15s}
-.eiq-energy-review .er-glance a:hover .er-go{color:var(--er-green);transform:translateX(3px)}
+/* summary: the key figures as one band, then the key findings as cards */
+.eiq-energy-review .er-figs{display:grid;grid-template-columns:repeat(var(--er-figs,4),minmax(0,1fr));gap:1px;margin-top:28px;border:1px solid var(--er-line);border-top:3px solid var(--er-green);border-radius:14px;background:var(--er-line);overflow:hidden;box-shadow:0 1px 2px rgba(22,63,49,.04),0 16px 32px -26px rgba(22,63,49,.4)}
+.eiq-energy-review .er-fig-tile{display:flex;flex-direction:column;min-width:0;padding:18px 20px 17px;background:#fff;transition:background .15s}
+.eiq-energy-review a.er-fig-tile:hover{background:var(--er-soft)}
+.eiq-energy-review a.er-fig-tile:focus-visible{outline-offset:-4px}
+.eiq-energy-review .er-fig-label{margin-top:6px;font-size:13px;font-weight:600;line-height:1.35;color:var(--er-body)}
+.eiq-energy-review a.er-fig-tile:hover .er-fig-label{color:var(--er-green)}
+.eiq-energy-review .er-fig-tile b{order:-1;display:flex;flex-wrap:wrap;align-items:baseline;column-gap:6px;font-family:'Source Serif 4','Iowan Old Style',Georgia,serif;font-size:34px;font-weight:600;line-height:1.05;color:var(--er-ink);font-variant-numeric:tabular-nums lining-nums;letter-spacing:-.015em}
+.eiq-energy-review .er-fig-tile b small{font-family:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;font-size:14px;font-weight:500;color:var(--er-muted);letter-spacing:0}
+.eiq-energy-review .er-fig-detail{margin-top:auto;padding-top:12px;font-size:12.5px;font-weight:500;line-height:1.4;color:var(--er-green)}
+.eiq-energy-review .er-finds{list-style:none;display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px;margin-top:16px}
+.eiq-energy-review .er-finds>li{display:flex;min-width:0}
+.eiq-energy-review .er-find{--er-accent:var(--er-green);--er-accent-soft:var(--er-green-soft);position:relative;display:flex;flex-direction:column;width:100%;padding:16px 18px 18px;border:1px solid var(--er-line);border-radius:14px;background:#fff;box-shadow:0 1px 2px rgba(22,63,49,.04);transition:border-color .15s,box-shadow .15s}
+.eiq-energy-review .er-find.er-tone-watch{--er-accent:var(--er-bronze);--er-accent-soft:var(--er-bronze-soft)}
+.eiq-energy-review .er-find.er-tone-good::before,.eiq-energy-review .er-find.er-tone-watch::before{content:"";position:absolute;top:-1px;left:18px;width:40px;height:3px;border-radius:0 0 3px 3px;background:var(--er-accent)}
+.eiq-energy-review a.er-find:hover{border-color:#BBD3C6;box-shadow:0 14px 30px -22px rgba(22,63,49,.55)}
+.eiq-energy-review a.er-find:focus-visible{border-radius:14px}
+.eiq-energy-review .er-find-top{display:flex;align-items:center;gap:10px;min-height:30px}
+.eiq-energy-review .er-find-icon{display:grid;place-items:center;flex:none;width:30px;height:30px;border-radius:9px;background:var(--er-accent-soft);color:var(--er-accent)}
+.eiq-energy-review .er-find-icon svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;overflow:visible}
+.eiq-energy-review .er-find-topic{flex:1;min-width:0;font-size:11.5px;font-weight:700;line-height:1.3;letter-spacing:.12em;text-transform:uppercase;color:var(--er-green)}
+.eiq-energy-review .er-find-go{flex:none;color:var(--er-faint);font-size:16px;line-height:1;transition:transform .15s,color .15s}
+.eiq-energy-review a.er-find:hover .er-find-go{color:var(--er-green);transform:translateX(3px)}
+.eiq-energy-review .er-find-figure{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:7px;margin-top:14px;color:var(--er-ink)}
+.eiq-energy-review .er-find-figure b{font-family:'Source Serif 4','Iowan Old Style',Georgia,serif;font-size:27px;font-weight:600;line-height:1.12;letter-spacing:-.012em;font-variant-numeric:tabular-nums lining-nums;overflow-wrap:anywhere}
+.eiq-energy-review .er-find-figure small{font-size:13.5px;font-weight:500;line-height:1.35;color:var(--er-muted)}
+.eiq-energy-review .er-find-text{display:block;margin-top:8px;font-size:14px;line-height:1.55;color:var(--er-body)}
+.eiq-energy-review .er-find-foot{display:block;margin-top:auto;padding-top:12px}
 .eiq-energy-review .er-note{font-size:12.5px;line-height:1.5;color:var(--er-muted);margin-top:12px}
+.eiq-energy-review .er-sum-note{margin-top:18px}
 
 /* figures */
 .eiq-energy-review .er-fig{margin-top:22px;padding:18px 20px 16px;border:1px solid var(--er-line);border-radius:16px;background:#fff}
@@ -242,7 +254,13 @@ export const ENERGY_REVIEW_CSS = `
   .eiq-energy-review .er-fig{padding:14px 12px 12px;border-radius:12px}
   .eiq-energy-review .er-meta,.eiq-energy-review .er-two{grid-template-columns:1fr}
   .eiq-energy-review .er-figs{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .eiq-energy-review .er-fig-tile b{font-size:25px}
+  .eiq-energy-review .er-figs>:last-child:nth-child(odd){grid-column:1/-1}
+  .eiq-energy-review .er-fig-tile{padding:14px 14px 13px}
+  .eiq-energy-review .er-fig-tile b{font-size:26px}
+  .eiq-energy-review .er-fig-label{font-size:12.5px}
+  .eiq-energy-review .er-fig-tile b small{font-size:12.5px}
+  .eiq-energy-review .er-fig-detail{font-size:12px;padding-top:8px}
+  .eiq-energy-review .er-find-figure b{font-size:25px}
   .eiq-energy-review .er-ring{grid-template-columns:1fr;justify-items:center}
   .eiq-energy-review .er-ring .er-legend{width:100%}
   .eiq-energy-review .er-legend>*{grid-template-columns:12px minmax(0,1fr) auto 38px}
@@ -257,10 +275,12 @@ export const ENERGY_REVIEW_CSS = `
 @media (prefers-reduced-motion:reduce){.eiq-energy-review *{transition:none!important}}
 @media print{
   .eiq-energy-review .er-nav,.eiq-energy-review .er-switch,.eiq-energy-review .er-hint,.eiq-energy-review .er-tip,.eiq-energy-review .er-more,.eiq-energy-review .er-reset,.eiq-energy-review .er-ask,.eiq-energy-review .er-fb{display:none!important}
-  .eiq-energy-review .er-fig,.eiq-energy-review .er-checks li,.eiq-energy-review .er-steps li,.eiq-energy-review .er-follow li{break-inside:avoid}
+  .eiq-energy-review .er-fig,.eiq-energy-review .er-checks li,.eiq-energy-review .er-steps li,.eiq-energy-review .er-follow li,.eiq-energy-review .er-figs,.eiq-energy-review .er-finds>li{break-inside:avoid}
+  .eiq-energy-review .er-figs,.eiq-energy-review .er-find{box-shadow:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .eiq-energy-review .er-finds{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .eiq-energy-review .er-find-go{display:none}
   .eiq-energy-review svg{max-width:100%;height:auto}
   .eiq-energy-review .er-scroll{overflow:visible}
-  .eiq-energy-review a.er-fig-tile:hover{transform:none;box-shadow:none}
 }
 `;
 
@@ -293,21 +313,64 @@ const svgX = (event: PointerEvent<SVGElement>, width: number) => {
   return box.width ? (event.clientX - box.left) * (width / box.width) : 0;
 };
 
-const Question = ({ id, number, title, children, t, className }: { id: EnergyReviewQuestion; number: number; title: string; children: ReactNode; t: T; className?: string | undefined }) =>
+/** Each topic's eyebrow over its heading and on its key finding: what the section is about, never a number. */
+const EYEBROW: Record<EnergyReviewQuestion, Parameters<T>[0]> = {
+  total: "eyebrow.total", groups: "eyebrow.groups", largest: "eyebrow.largest", comparison: "eyebrow.comparison",
+  profile: "eyebrow.profile", littleUse: "eyebrow.littleUse", perLight: "eyebrow.perLight", savings: "eyebrow.savings",
+};
+
+const Question = ({ id, title, children, t, className }: { id: EnergyReviewQuestion; title: string; children: ReactNode; t: T; className?: string | undefined }) =>
   <section id={sectionId(`q-${id}`)} className={`er-sec${className ? ` ${className}` : ""}`}>
     <SectionTools id={`q-${id}`} />
-    <div className="er-kicker">{t("q.kicker", { n: number })}</div>
+    <div className="er-kicker">{t(EYEBROW[id])}</div>
     <h2>{title}</h2>
     <SectionSlot id={`q-${id}`} />
     {children}
   </section>;
+
+// ---------- key findings ----------
+
+/** A small line icon for each key finding, drawn in the card's accent colour on a 24-unit grid. */
+const FINDING_ICON: Record<EnergyReviewQuestion | "checks", ReactNode> = {
+  total: <path d="M13 3 5.5 13.5H11l-1 7.5 7.5-10.5H12z" />,
+  groups: <><path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5H12z" /><path d="M15 3.8A8.5 8.5 0 0 1 20.2 9H15z" /></>,
+  largest: <><path d="M4 6h15" /><path d="M4 12h10" /><path d="M4 18h5.5" /></>,
+  comparison: <><path d="M4 8h15l-3.5-3.5" /><path d="M20 16H5l3.5 3.5" /></>,
+  profile: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></>,
+  checks: <><path d="M12 4 3 19.5h18z" /><path d="M12 10v4.2" /><path d="M12 17.2h.01" /></>,
+  littleUse: <><path d="M12 3.5V11" /><path d="M7.4 6.6a7 7 0 1 0 9.2 0" /></>,
+  perLight: <><path d="M9.5 18h5" /><path d="M10.5 21h3" /><path d="M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.3 1.1 2.2h5c0-.9.4-1.6 1.1-2.2A6 6 0 0 0 12 3z" /></>,
+  savings: <><path d="M5 19c.6-8.4 5.6-13.4 14-14-.6 8.4-5.6 13.4-14 14z" /><path d="M5 19l7.5-7.5" /></>,
+};
+type Finding = { key: string; href: string; icon: ReactNode; topic: string; headline: EnergyReviewHeadline; text: string; chip: string };
+
+/**
+ * The key findings as cards, each taking the reader to its section: topic, headline figure, one-sentence takeaway. The
+ * link is named in one punctuated sentence ("Checks (Needs a check): 1 to check. Linkway lights has stopped reporting.").
+ */
+function KeyFindings({ findings, t }: { findings: Finding[]; t: T }) {
+  return <ul className="er-finds">{findings.map(item => <li key={item.key}>
+    <a className={`er-find er-tone-${item.headline.tone}`} href={item.href} aria-label={t("findings.aria", {
+      topic: item.chip ? t("findings.ariaChip", { topic: item.topic, chip: item.chip }) : item.topic,
+      headline: [item.headline.value, item.headline.unit].filter(Boolean).join(" "), text: item.text })}>
+      <span className="er-find-top">
+        <span className="er-find-icon" aria-hidden="true"><svg viewBox="0 0 24 24">{item.icon}</svg></span>
+        <span className="er-find-topic">{item.topic}</span>
+        <span className="er-find-go" aria-hidden="true">→</span>
+      </span>
+      <span className="er-find-figure"><b>{item.headline.value}</b>{item.headline.unit && <small>{item.headline.unit}</small>}</span>
+      <span className="er-find-text">{item.text}</span>
+      {item.chip && <span className="er-find-foot"><span className="er-chip">{item.chip}</span></span>}
+    </a>
+  </li>)}</ul>;
+}
 
 // ---------- feedback on a section ----------
 
 /**
  * On the live page, each section can take feedback: a "Give feedback" button at its top right, and a place under its
  * heading where the page shows its own feedback box. `id` is the section's id without "er-" ("summary", "q-total",
- * "checks"…), `title` how the section is named in the bar ("1 Total use"). The page supplies the wording.
+ * "checks"…), `title` how the section is named in the bar ("Total use"). The page supplies the wording.
  */
 export type ReviewSectionFeedback = {
   label: string;
@@ -335,7 +398,7 @@ function SectionSlot({ id }: { id: string }) {
 
 // ---------- the bar of sections ----------
 
-type NavItem = { id: string; label: string; number?: number | undefined };
+type NavItem = { id: string; label: string };
 
 /** The sections as a bar that stays at the top while the review scrolls, marking the one being read. */
 function SectionNav({ items, t, live }: { items: NavItem[]; t: T; live: boolean }) {
@@ -360,7 +423,7 @@ function SectionNav({ items, t, live }: { items: NavItem[]; t: T; live: boolean 
   }, [active]);
   return <nav className="er-nav" aria-label={t("nav.aria")}>
     <ol ref={list}>{items.map(item => <li key={item.id}>
-      <a href={`#${item.id}`} data-section={item.id} aria-current={live && active === item.id ? "true" : undefined}>{item.number != null && <span>{item.number}</span>}{item.label}</a>
+      <a href={`#${item.id}`} data-section={item.id} aria-current={live && active === item.id ? "true" : undefined}>{item.label}</a>
     </li>)}</ol>
   </nav>;
 }
@@ -686,14 +749,13 @@ export function EnergyReviewDocument({ review, standalone, onCheckFeedback, sect
   const followUps = review.followUps ?? [];
   const memory = review.memory ?? [];
   const setAside = method.setAside ?? [];
-  const numberOf = (id: EnergyReviewQuestion) => review.questions.indexOf(id) + 1;
   const has = (id: EnergyReviewQuestion) => review.questions.includes(id);
   const costHead = review.costBasis ? t("total.col.costBasis", { basis: review.costBasis }) : t("total.col.cost");
   const withCarbon = review.carbonFactor != null;
   const co2Cell = (kg: number | null) => kg == null ? "—" : kg >= 1000 ? `${(kg / 1000).toFixed(1)} t` : `${kg.toFixed(1)} kg`;
   const pair = has("littleUse") && has("perLight");
-  const littleSection = has("littleUse") && littleUse && <Question id="littleUse" number={numberOf("littleUse")} title={littleUse.heading} t={t}><p><Rich text={littleUse.text} /></p></Question>;
-  const lightSection = has("perLight") && perLight && <Question id="perLight" number={numberOf("perLight")} title={perLight.heading} t={t}><p><Rich text={perLight.text} /></p></Question>;
+  const littleSection = has("littleUse") && littleUse && <Question id="littleUse" title={littleUse.heading} t={t}><p><Rich text={littleUse.text} /></p></Question>;
+  const lightSection = has("perLight") && perLight && <Question id="perLight" title={perLight.heading} t={t}><p><Rich text={perLight.text} /></p></Question>;
   const navLabel: Record<EnergyReviewQuestion, Parameters<T>[0]> = { total: "nav.total", groups: "nav.groups", largest: "nav.largest", comparison: "nav.comparison", profile: "nav.profile", littleUse: "nav.littleUse", perLight: "nav.perLight", savings: "nav.savings" };
   // The points to check and the follow-ups come after the 24 hours (or before the method, without it).
   const afterProfile: NavItem[] = [
@@ -703,7 +765,7 @@ export function EnergyReviewDocument({ review, standalone, onCheckFeedback, sect
   const nav: NavItem[] = [
     { id: sectionId("summary"), label: t("nav.summary") },
     ...review.questions.flatMap(id => {
-      const item = { id: sectionId(`q-${id}`), label: t(navLabel[id]), number: numberOf(id) };
+      const item = { id: sectionId(`q-${id}`), label: t(navLabel[id]) };
       return id === "profile" ? [item, ...afterProfile] : [item];
     }),
     ...(!has("profile") ? afterProfile : []),
@@ -718,8 +780,22 @@ export function EnergyReviewDocument({ review, standalone, onCheckFeedback, sect
     event.preventDefault();
     target.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
   };
-  // Each section's name as the bar shows it ("1 Total use"), for the feedback it is given.
-  const titles = new Map(nav.map(item => [item.id.replace(/^er-/, ""), item.number ? `${item.number} ${item.label}` : item.label]));
+  // Each section's name as the bar shows it ("Total use"), for the feedback it is given.
+  const titles = new Map(nav.map(item => [item.id.replace(/^er-/, ""), item.label]));
+  // The key findings: one per topic, and the points to check as a finding of their own after the 24 hours (or last).
+  const checksFinding: Finding[] = checks.length ? [{
+    key: "checks", href: `#${sectionId("checks")}`, icon: FINDING_ICON.checks, topic: t("nav.checks"), chip: t("findings.chip.check"),
+    headline: { value: String(checks.length), unit: t("findings.checks.unit"), tone: "watch" },
+    text: [...checks.slice(0, 2).map(check => check.title), ...(checks.length > 2 ? [t("findings.checks.more", { count: checks.length - 2 })] : [])].join(review.locale === "zh-Hans" ? "" : " "),
+  }] : [];
+  const findings: Finding[] = [
+    ...summary.answers.flatMap(row => {
+      const item: Finding = { key: row.id, href: `#${sectionId(`q-${row.id}`)}`, icon: FINDING_ICON[row.id], topic: t(EYEBROW[row.id]), headline: row.headline, text: row.answer,
+        chip: row.headline.tone === "watch" ? t("findings.chip.look") : "" };
+      return row.id === "profile" ? [item, ...checksFinding] : [item];
+    }),
+    ...(!has("profile") ? checksFinding : []),
+  ];
   const feedbackContext = live && sectionFeedback ? { feedback: sectionFeedback, titleOf: (id: string) => titles.get(id) ?? id } : null;
   return <FeedbackContext.Provider value={feedbackContext}><article className="eiq-energy-review" aria-label={t("doc.aria", { name: review.projectName })} onClick={glide}>
     {standalone && <div className="er-page er-head">
@@ -742,21 +818,20 @@ export function EnergyReviewDocument({ review, standalone, onCheckFeedback, sect
         <h2>{t("sum.heading")}</h2>
         <SectionSlot id="summary" />
         <p className="er-lede">{summary.intro}</p>
-        {summary.figures.length > 0 && <div className="er-figs">{summary.figures.map(figure => has(figure.target)
-          ? <a key={figure.label} className="er-fig-tile" href={`#${sectionId(`q-${figure.target}`)}`}><b>{figure.value}{figure.unit && <small>{figure.unit}</small>}</b><span>{figure.label}</span></a>
-          : <div key={figure.label} className="er-fig-tile"><b>{figure.value}{figure.unit && <small>{figure.unit}</small>}</b><span>{figure.label}</span></div>)}</div>}
-        <h3>{t("glance.heading")}</h3>
-        <ol className="er-glance">{summary.answers.map((row, index) => <li key={row.id}>
-          <a href={`#${sectionId(`q-${row.id}`)}`} aria-label={`${t("glance.open", { n: index + 1 })}: ${row.question}`}>
-            <span className="er-n">{index + 1}</span>
-            <span><b>{row.question}</b><span className="er-a">{row.answer}</span></span>
-            <span className="er-go" aria-hidden="true">→</span>
-          </a>
-        </li>)}</ol>
-        <p className="er-note">{summary.note}</p>
+        {summary.figures.length > 0 && <div className="er-figs" style={{ "--er-figs": summary.figures.length } as CSSProperties}>{summary.figures.map(figure => {
+          const cells = <><span className="er-fig-label">{figure.label}</span><b>{figure.value}{figure.unit && <small>{figure.unit}</small>}</b>{figure.detail && <span className="er-fig-detail">{figure.detail}</span>}</>;
+          return has(figure.target)
+            ? <a key={figure.label} className="er-fig-tile" href={`#${sectionId(`q-${figure.target}`)}`}>{cells}</a>
+            : <div key={figure.label} className="er-fig-tile">{cells}</div>;
+        })}</div>}
+        {findings.length > 0 && <>
+          <h3>{t("findings.heading")}</h3>
+          <KeyFindings findings={findings} t={t} />
+        </>}
+        <p className="er-note er-sum-note">{summary.note}</p>
       </section>
 
-      {has("total") && total && <Question id="total" number={numberOf("total")} title={total.heading} t={t}>
+      {has("total") && total && <Question id="total" title={total.heading} t={t}>
         <p><Rich text={total.intro} /></p>
         {total.days.length > 0 && <DailyBars review={review} live={live} />}
         {total.projection.length > 0 && <div className="er-table"><table className="er-proj">
@@ -765,12 +840,12 @@ export function EnergyReviewDocument({ review, standalone, onCheckFeedback, sect
         </table></div>}
       </Question>}
 
-      {has("groups") && groups && <Question id="groups" number={numberOf("groups")} title={groups.heading} t={t}>
+      {has("groups") && groups && <Question id="groups" title={groups.heading} t={t}>
         <p><Rich text={groups.intro} /></p>
         <figure className="er-fig"><Ring slices={groups.slices} centre={groups.centre} unit={groups.unit} value={slice => `${whole(slice.value)} kWh`} live={live} t={t} /></figure>
       </Question>}
 
-      {has("largest") && largest && <Question id="largest" number={numberOf("largest")} title={largest.heading} t={t}>
+      {has("largest") && largest && <Question id="largest" title={largest.heading} t={t}>
         <p><Rich text={largest.intro} /></p>
         <div className="er-blocks">{largest.blocks.map(block => <figure key={block.key} className="er-fig">
           <h3>{block.name}</h3>
@@ -779,13 +854,13 @@ export function EnergyReviewDocument({ review, standalone, onCheckFeedback, sect
         <p className="er-note">{largest.note}</p>
       </Question>}
 
-      {has("comparison") && comparison && <Question id="comparison" number={numberOf("comparison")} title={comparison.heading} t={t}>
+      {has("comparison") && comparison && <Question id="comparison" title={comparison.heading} t={t}>
         <p><Rich text={comparison.intro} /></p>
         <Pairs review={review} t={t} />
         {comparison.callout && <div className="er-callout"><p style={{ margin: 0 }}><Rich text={comparison.callout} /></p></div>}
       </Question>}
 
-      {has("profile") && profile && <Question id="profile" number={numberOf("profile")} title={profile.heading} t={t}>
+      {has("profile") && profile && <Question id="profile" title={profile.heading} t={t}>
         <p><Rich text={profile.intro} /></p>
         <Layers review={review} live={live} t={t} />
       </Question>}
@@ -819,7 +894,7 @@ export function EnergyReviewDocument({ review, standalone, onCheckFeedback, sect
 
       {pair ? <div className="er-two">{littleSection}{lightSection}</div> : <>{littleSection}{lightSection}</>}
 
-      {has("savings") && savings && <Question id="savings" number={numberOf("savings")} title={savings.heading} t={t}>
+      {has("savings") && savings && <Question id="savings" title={savings.heading} t={t}>
         <p><Rich text={savings.intro} /></p>
         {savings.rows.length > 0 && <Savings review={review} live={live} t={t} />}
         {nextSteps.length > 0 && <>

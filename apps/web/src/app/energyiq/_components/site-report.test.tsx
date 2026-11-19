@@ -183,11 +183,12 @@ describe("the report the Overview shows", () => {
     try {
       const panel = page.host.querySelector('section[aria-label="Energy report"]')!;
       expect(panel.querySelector("h2")?.textContent).toBe("The full report");
-      expect(panel.textContent).toContain("3–16 Aug 2026 · The energy review: answers to the questions raised at installation");
+      expect(panel.textContent).toContain("3–16 Aug 2026 · The energy review: key findings, every chart and table, and recommended next steps.");
       // On the page the review opens on its summary under a bar of its sections; only a saved copy carries a title block.
       expect(panel.querySelector("article.eiq-energy-review h1")).toBeNull();
       expect(panel.querySelector('article.eiq-energy-review nav[aria-label="Sections of the review"]')?.textContent).toContain("Summary");
-      expect(panel.textContent).toContain("Answers at a glance");
+      expect(panel.textContent).toContain("Key findings");
+      expect(panel.textContent).not.toMatch(/Question \d|questions raised/);
       expect(panel.querySelector("article.eiq-report")).toBeNull();
     } finally { await page.unmount(); }
   });
