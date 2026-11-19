@@ -168,7 +168,7 @@ it("writes the energy review when the site chooses it, tells the Overview, and k
   expect(weekly.run.prompt).toContain("Weekly site energy review");
   const page = readFileSync(join(root, weekly.run.id, "accepted-output.txt"), "utf8").replace(/<[^>]+>/g, " ");
   expect(page).toContain("Harbour Estate energy review");
-  expect(page).toContain("Answers at a glance");
+  expect(page).toContain("Key findings");
   expect(page).toContain("Block 12A against Block 12B");
   expect(parseSiteReportSnapshot(JSON.parse(readFileSync(join(root, weekly.run.id, "outputs", "site-report-input.json"), "utf8"))).style).toBe("review");
   const listed = ((await library()).body as { data: { reports: Array<Record<string, unknown>> } }).data.reports.find(report => report.id === weekly.run.id)!;

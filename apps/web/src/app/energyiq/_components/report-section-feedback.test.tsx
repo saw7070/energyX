@@ -36,11 +36,11 @@ it("offers feedback on every section and sends it tied to that section", async (
   const { host, done } = await render(controller());
   try {
     const buttons = [...host.querySelectorAll<HTMLButtonElement>("button.er-fb")];
-    // Summary, each question, the method: every section has one, named as the bar names it.
+    // Summary, each topic, the method: every section has one, named as the bar names it (never by a number).
     expect(buttons.length).toBeGreaterThan(3);
     expect(buttons[0]!.getAttribute("aria-label")).toBe("Give feedback on Summary");
     const total = buttons.find(button => button.dataset.feedbackSection === "q-total")!;
-    expect(total.dataset.feedbackTitle).toMatch(/^1 /);
+    expect(total.dataset.feedbackTitle).toBe("Total use");
     await act(async () => total.click());
     expect(total.getAttribute("aria-expanded")).toBe("true");
     // The box opens inside that section, under its heading.

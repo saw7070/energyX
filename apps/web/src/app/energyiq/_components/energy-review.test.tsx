@@ -1,6 +1,7 @@
 /** @vitest-environment happy-dom */
 /**
- * The energy review: the site report written as answers to the questions the site asked at installation. An estate
+ * The energy review: the site report written around the questions the site asked at installation, each section named
+ * by its topic and never by a number. An estate
  * with two alike blocks and a common area, lights on 19:00–07:00, two weeks of readings. One common-area meter stops
  * reporting, one is powered with its lights, and the pavilion fan is used on a single evening. All names are made up.
  */
@@ -153,7 +154,8 @@ describe("the energy review answers the site's questions in order", () => {
     expect(profile.layers.map(layer => layer.name)).toEqual(expect.arrayContaining(["Block lighting", "Ground floor", "Common area"]));
     expect(profile.intro).toContain("Lights switch on at about 7 pm and off at about 7 am.");
     expect(profile.intro).toContain("mostly emergency lights");
-    expect(review.summary.answers[4]!.answer).toMatch(/^Lights on from about 7 pm to 7 am, peaking near \d\.\d kW\. One item needs checking \(section 5\)\.$/);
+    // The point to check is a key finding of its own, so the profile's finding says only when the lights run.
+    expect(review.summary.answers[4]!.answer).toMatch(/^Lights on from about 7 pm to 7 am, peaking near \d\.\d kW\.$/);
     // The night in words: when the lights come on, the step down, when they go off, and what stays on in the day.
     expect(profile.timeline.map(moment => moment.time)).toEqual(expect.arrayContaining(["7 pm", "7 am"]));
     expect(profile.timeline.find(moment => moment.time === "7 pm")!.text).toMatch(/^First lights on: /);
@@ -194,6 +196,38 @@ describe("the energy review answers the site's questions in order", () => {
     expect(review.nextSteps[1]!.who).toBe("Riverside");
   });
 
+  it("gives every key finding a headline figure and a tone, as data rather than read out of its sentence", () => {
+    expect(review.summary.answers.map(answer => [answer.id, answer.headline])).toEqual([
+      ["total", { value: review.summary.figures[0]!.value, unit: "kWh a day", tone: "info" }],
+      ["groups", { value: "50%", unit: "in Block A", tone: "info" }],
+      ["largest", { value: "53%", unit: "on block lighting", tone: "info" }],
+      // Block A uses more, and the gap is worth a look at the fittings.
+      ["comparison", { value: "+27%", unit: "Block A over Block B", tone: "watch" }],
+      ["profile", { value: "7 pm – 7 am", unit: "lights on", tone: "info" }],
+      ["littleUse", { value: "Pavilion fan", unit: "", tone: "info" }],
+      ["perLight", { value: "0.050", unit: "kWh per light a day", tone: "info" }],
+      ["savings", { value: expect.stringMatching(/^S\$[\d,]+$/), unit: "a year", tone: "good" }],
+    ]);
+    // Each headline is a figure from its own sentence, except energy and cost, whose sentence goes on from the
+    // headline (the month ahead) rather than repeating it right under it.
+    for (const answer of review.summary.answers.filter(item => /\d/.test(item.headline.value) && item.id !== "comparison" && item.id !== "total")) expect(answer.answer).toContain(answer.headline.value.replace(/ – .*/, ""));
+    const total = review.summary.answers.find(answer => answer.id === "total")!;
+    expect(total.answer).not.toContain(total.headline.value);
+    expect(total.answer).toMatch(/projected for a 30-day month\.$/);
+    expect(review.summary.answers.find(answer => answer.id === "savings")!.answer).toContain(review.summary.answers.find(answer => answer.id === "savings")!.headline.value);
+    // Two blocks within 5% of each other are about the same, which is good news; every meter in use is too.
+    const even: Record<string, Meter> = { ...METERS, "a-gate": { ...METERS["a-gate"]!, group: "common" }, "b-lobby": { ...METERS["b-lobby"]!, kwh: lit(3.6) }, "b-high": { ...METERS["b-high"]!, kwh: lit(8) }, "b-low": { ...METERS["b-low"]!, kwh: lit(3.4, 0.01) } };
+    const same = buildEnergyReview(estate({}, { meters: even }), null, GENERATED);
+    expect(same.summary.answers.find(answer => answer.id === "comparison")!.headline).toEqual({ value: "About the same", unit: "", tone: "good" });
+    // The key figures carry a line of context each.
+    expect(review.summary.figures.map(figure => figure.detail)).toEqual(["From 14 days of readings", expect.stringMatching(/^About [\d,]+ kWh a year$/), expect.stringMatching(/^About S\$\d+ a day$/), "At 0.402 kg CO₂ per kWh"]);
+    for (const locale of ["zh-Hans", "ms"] as const) {
+      const built = buildEnergyReview(estate(), null, GENERATED, locale);
+      expect(built.summary.answers.map(answer => answer.headline.tone)).toEqual(review.summary.answers.map(answer => answer.headline.tone));
+      for (const answer of built.summary.answers) expect(`${answer.headline.value} ${answer.headline.unit}`).not.toMatch(/undefined|NaN|\{\w+\}/);
+    }
+  });
+
   it("lists every meter's typical day in the appendix, by group in the saved order", () => {
     const groups = review.method.meters.map(meter => meter.group);
     expect(groups.indexOf("Block B")).toBeGreaterThan(groups.lastIndexOf("Block A"));
@@ -214,18 +248,25 @@ describe("the energy review as a page", () => {
     }
     const page = plain(renderEnergyReviewHtml(review));
     expect(page).toContain("Riverside Energy Review · 2–15 Nov 2026");
-    expect(page).toContain("Question 8 Energy-saving projection");
+    expect(page).toContain("Findings and recommendations from 14 days of meter readings.");
+    // Each section is named by its topic, never numbered as a question.
+    expect(page).toContain("Energy and cost Total energy, by day, and the cost");
+    expect(page).toContain("Savings Energy-saving projection");
     expect(page).toContain("Recommended next steps");
+    for (const locale of ["en", "zh-Hans", "ms"] as const) {
+      const text = plain(renderEnergyReviewHtml(buildEnergyReview(estate(), null, GENERATED, locale)));
+      expect(text).not.toMatch(/Question \d|questions raised|问题 \d|安装时提出的问题|Soalan \d|soalan yang dibangkitkan|section \d\)/);
+    }
   });
 
   it("is what the server saves for the energy review style, except a one-day report, which stays the management review", () => {
-    expect(plain(renderStyledSiteReportHtml("review", estate(), null, GENERATED))).toContain("Answers at a glance");
+    expect(plain(renderStyledSiteReportHtml("review", estate(), null, GENERATED))).toContain("Key findings");
     const day = DATES[5]!;
     const oneDay = estate();
     oneDay.current.project.dates = [day];
     for (const item of [oneDay.current.project.total!, ...oneDay.current.project.meters.map(meter => meter.series!)]) item.cells = item.cells.filter(cell => cell[0] === day);
     const page = plain(renderStyledSiteReportHtml("review", oneDay, null, GENERATED));
-    expect(page).not.toContain("Answers at a glance");
+    expect(page).not.toContain("Key findings");
     expect(page).toContain("Riverside Energy Review");
   });
 
@@ -323,10 +364,23 @@ describe("the energy review as a working page", () => {
       // No cover on the page: the panel around it already names the site and the dates.
       expect(host.querySelector("h1")).toBeNull();
       const nav = [...host.querySelectorAll('nav[aria-label="Sections of the review"] a')].map(link => link.textContent);
-      expect(nav).toEqual(["Summary", "1Total use", "2By group", "3Inside each group", "4Like for like", "5" + "24 hours", "Checks", "6Little use", "7Per light", "8Savings", "Method"]);
+      expect(nav).toEqual(["Summary", "Total use", "By group", "Inside each group", "Like for like", "24 hours", "Checks", "Little use", "Per light", "Savings", "Method"]);
 
-      // A figure and an answer at a glance each take the reader to their section, without changing the address.
-      await click(host.querySelector('.er-glance a[href="#er-q-savings"]'));
+      // The key findings: one card per topic, with the point to check as its own card after the 24 hours.
+      const cards = [...host.querySelectorAll<HTMLAnchorElement>("#er-summary .er-finds a")];
+      expect(cards.map(card => card.getAttribute("href"))).toEqual(["#er-q-total", "#er-q-groups", "#er-q-largest", "#er-q-comparison", "#er-q-profile", "#er-checks", "#er-q-littleUse", "#er-q-perLight", "#er-q-savings"]);
+      expect(cards.map(card => card.querySelector(".er-find-topic")!.textContent)).toEqual(["Energy and cost", "Where it goes", "Biggest users", "Like for like", "Daily rhythm", "Checks", "Low use", "Lighting efficiency", "Savings"]);
+      const check = cards[5]!;
+      expect(check.className).toContain("er-tone-watch");
+      expect(check.querySelector(".er-find-figure")!.textContent).toBe("1to check");
+      expect(check.getAttribute("aria-label")).toBe("Checks (Needs a check): 1 to check. Linkway lights has stopped reporting.");
+      expect(cards[3]!.querySelector(".er-chip")!.textContent).toBe("Worth a look");
+      expect(cards[0]!.querySelector(".er-chip")).toBeNull();
+      expect(cards[0]!.getAttribute("aria-label")).toMatch(/^Energy and cost: \d+\.\d kWh a day\. [\d,]+ kWh .*projected for a 30-day month\.$/);
+      expect(host.querySelector("#er-q-total .er-kicker")!.textContent).toBe("Energy and cost");
+
+      // A figure and a key finding each take the reader to their section, without changing the address.
+      await click(host.querySelector('.er-finds a[href="#er-q-savings"]'));
       expect(scrolled).toHaveBeenCalledTimes(1);
       expect((scrolled.mock.contexts[0] as Element).id).toBe("er-q-savings");
       expect(host.querySelector('a.er-fig-tile[href="#er-q-total"]')).not.toBeNull();

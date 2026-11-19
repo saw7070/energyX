@@ -1,16 +1,17 @@
 /**
- * The energy review: the site report written as answers to the questions the site asked when its meters went in, the
- * way the first SKTC review was written by hand. It reads like a consultant's review rather than a dashboard:
+ * The energy review: the site report written around the questions the site asked when its meters went in, the way the
+ * first SKTC review was written by hand. It reads like a consultant's review rather than a dashboard, and its readers
+ * never see the questions as such: each section is named by its topic ("Energy and cost", "Where it goes"):
  *
- *   Cover · Summary (four figures and the answers at a glance) · one section per question — total energy by day and the
- *   cost; the top-level groups; which circuit uses the most in each group; group against group, circuit for circuit;
- *   the average 24 hours, with the points to check; meters with little use; energy per light point; the saving
- *   projection, with recommended next steps · Method and data.
+ *   Cover · Summary (four key figures and the key findings, each with a headline figure) · one section per topic —
+ *   total energy by day and the cost; the top-level groups; which circuit uses the most in each group; group against
+ *   group, circuit for circuit; the average 24 hours, with the points to check; meters with little use; energy per light
+ *   point; the saving projection, with recommended next steps · Method and data.
  *
  * It is built from exactly the same readings and the same models as the full report and the management review
  * (buildManagementReview, which itself builds on buildSiteReport), so every figure matches the Overview; nothing here
  * needs AI. Costs include the tax on the price (GST) when the tariff is published before tax, and carbon uses the
- * site's grid emission factor. A question with nothing to answer is left out and the rest are renumbered.
+ * site's grid emission factor. A topic with nothing to say is left out.
  */
 import type { ProjectSpatialReference } from "@datafoundry/contracts";
 import { listText } from "./analysis-messages.js";
@@ -58,7 +59,7 @@ export function energyReviewCheckTitle(key: string, meterName: string | null | u
   return title.replace(/[.。]\s*$/u, "");
 }
 
-/** The questions a review answers, in reading order; the document numbers the ones present as it goes. */
+/** The topics a review covers, in reading order (named "questions" after the ones asked at installation; ids stay stable for links and feedback). */
 export const ENERGY_REVIEW_QUESTIONS = ["total", "groups", "largest", "comparison", "profile", "littleUse", "perLight", "savings"] as const;
 export type EnergyReviewQuestion = typeof ENERGY_REVIEW_QUESTIONS[number];
 /** The review's colours: the deep green of the first SKTC review, then bronze, slate and softer greens. */
@@ -107,6 +108,17 @@ export type EnergyReviewMoment = { time: string; text: string };
 export type EnergyReviewSaving = { title: string; basis: string; kwhYear: number; costYear: number | null };
 export type EnergyReviewStep = { action: string; who: string; when: string };
 export type EnergyReviewMeter = { id: string; name: string; group: string; perDay: number | null; basis: string };
+/** How a finding reads at a glance: `good` (nothing to do), `watch` (worth a look on site), `info` (a plain fact). */
+export type EnergyReviewTone = "good" | "watch" | "info";
+/**
+ * A finding's headline, as data rather than read back out of its sentence: the figure ("46.9", "41%", "About the same",
+ * "7 pm – 7 am") and the few words that go with it ("kWh a day", "in Block A"; empty when the figure says it all).
+ */
+export type EnergyReviewHeadline = { value: string; unit: string; tone: EnergyReviewTone };
+/** One key finding of the summary: its section, the section's question, the one-sentence answer and its headline. */
+export type EnergyReviewFinding = { id: EnergyReviewQuestion; question: string; answer: string; headline: EnergyReviewHeadline };
+/** A key figure of the summary; `detail` is a short line of context ("From 12 complete days"), empty when there is none. */
+export type EnergyReviewFigure = { value: string; unit: string; label: string; detail: string; /** The section that explains the figure. */ target: EnergyReviewQuestion };
 
 export type EnergyReview = {
   style: "review";
@@ -120,10 +132,10 @@ export type EnergyReview = {
   costBasis: string;
   /** kg CO2e per kWh; null when the site has no factor, and then no carbon is shown. */
   carbonFactor: number | null;
-  /** The questions present, in order. */
+  /** The topics present, in order. */
   questions: EnergyReviewQuestion[];
   cover: { kicker: string; title: string; subtitle: string; preparedFor: string[]; period: string[]; issued: string[] };
-  summary: { intro: string; figures: Array<{ value: string; unit: string; label: string; /** The section that explains the figure. */ target: EnergyReviewQuestion }>; answers: Array<{ id: EnergyReviewQuestion; question: string; answer: string }>; note: string };
+  summary: { intro: string; figures: EnergyReviewFigure[]; answers: EnergyReviewFinding[]; note: string };
   total: { heading: string; intro: string; days: EnergyReviewDay[]; caption: string; /** What the line of costs under the bars is, for the printed chart; empty without a price. */ costCaption: string;
     /** Days when meters were offline and sent their energy late, said in a sentence; empty when there were none. */
     outage: string; projection: Array<{ label: string; kwh: number; cost: number | null; co2Kg: number | null }> } | null;
@@ -338,6 +350,15 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
   const alike = tree ? comparableGroups(tree) : null;
   let comparison: EnergyReview["comparison"] = null;
   let comparisonAnswer = "";
+  let comparisonHeadline: EnergyReviewHeadline = { value: "", unit: "", tone: "info" };
+  // Alike groups said in a figure: "About the same", or how much more the higher one uses ("+18%", "Block A over Block B").
+  const gapHeadline = (values: number[], names: string[], sameUnit = ""): EnergyReviewHeadline => {
+    const order = values.map((value, index) => ({ value, name: names[index]! })).sort((a, b) => b.value - a.value);
+    const hi = order[0]!, lo = order.at(-1)!;
+    const gap = lo.value > 0 ? hi.value / lo.value - 1 : null;
+    return gap != null && gap < CLOSE_SHARE ? { value: t("hl.same"), unit: sameUnit, tone: "good" }
+      : { value: gap != null ? `+${pctText(gap)}` : hi.name, unit: gap != null ? t("hl.cmp.more", { hi: hi.name, lo: lo.name }) : "", tone: "info" };
+  };
   // The groups inside alike groups matched by name (ground floor, block lighting, emergency lights): the comparison
   // reads at that level, with each group's whole day after them. Circuits are compared only when the groups have no
   // such parts in common.
@@ -394,6 +415,7 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
       intro = t("cmp.introMany", { count: alike.length, high: order[0]!.name, low: order.at(-1)!.name, highKwh: kwhText(order[0]!.value), lowKwh: kwhText(order.at(-1)!.value) });
       comparisonAnswer = t("cmp.answerMany", { high: order[0]!.name, low: order.at(-1)!.name, highKwh: num(order[0]!.value), lowKwh: num(order.at(-1)!.value) });
     }
+    comparisonHeadline = { ...gapHeadline(totals, names), ...(callout ? { tone: "watch" as const } : {}) };
     comparison = {
       heading: alike.length === 2 ? t("q.comparisonTwo", { a: names[0]!, b: names[1]! }) : t("q.comparisonMany"),
       intro, title: t("cmp.titleGroups"), groups: groupColours, rows: rows.map(({ name, perDay }) => ({ name, perDay })),
@@ -454,6 +476,8 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
         heading: alike.length === 2 ? t("q.comparisonTwo", { a: names[0]!, b: names[1]! }) : t("q.comparisonMany"),
         intro, title: t("cmp.title"), groups: groupColours, rows, callout,
       };
+      // Two groups are compared on their own circuits, the like-for-like figure; more groups on their whole day.
+      comparisonHeadline = alike.length === 2 ? gapHeadline(like, names, t("hl.cmp.like")) : gapHeadline(totals, names);
     }
   }
 
@@ -798,13 +822,15 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
     spread != null ? t(spread < 0.05 ? (lighting ? "sum.steadyLighting" : "sum.steady") : "sum.varies", { low: kwhText(Math.min(...complete)), high: kwhText(Math.max(...complete)) }) : "",
     biggestLayer && biggestShare != null && biggestShare >= 0.25 ? t("sum.biggest", { name: biggestLayer.name, pct: pctText(biggestShare) }) : "",
   ]);
-  const figures = [
-    typicalKwh != null ? { value: num(typicalKwh), unit: "kWh", label: t("fig.day"), target: "total" as const } : null,
-    typicalKwh != null ? { value: grouped(typicalKwh * REVIEW_MONTH_DAYS), unit: "kWh", label: t("fig.month", { days: REVIEW_MONTH_DAYS }), target: "total" as const } : null,
-    typicalKwh != null && rate != null ? { value: money(typicalKwh * REVIEW_MONTH_DAYS * rate), unit: "", label: costBasis ? t("fig.billBasis", { basis: costBasis }) : t("fig.bill"), target: "total" as const } : null,
-    typicalKwh != null && carbonFactor != null ? { value: tonnes(typicalKwh * 365 * carbonFactor), unit: t("fig.co2Unit"), label: t("fig.co2"), target: "total" as const } : null,
-    savingKwh > 0 && (carbonFactor == null || rate == null) ? { value: savingCost != null ? money(savingCost) : grouped(savingKwh), unit: savingCost != null ? "" : "kWh", label: t("fig.saving"), target: "savings" as const } : null,
-  ].filter((figure): figure is { value: string; unit: string; label: string; target: "total" | "savings" } => !!figure).slice(0, 4);
+  // Each figure with a line of context: what the typical day is drawn from, the year behind the month, the bill a day.
+  const typicalFrom = completeDates.length ? t("fig.detail.complete", { count: completeDates.length }) : t("fig.detail.days", { count: readDays.length || dates.length });
+  const figures = ([
+    typicalKwh != null ? { value: num(typicalKwh), unit: "kWh", label: t("fig.day"), detail: typicalFrom, target: "total" as const } : null,
+    typicalKwh != null ? { value: grouped(typicalKwh * REVIEW_MONTH_DAYS), unit: "kWh", label: t("fig.month", { days: REVIEW_MONTH_DAYS }), detail: t("fig.detail.year", { kwh: `${grouped(typicalKwh * 365)} kWh` }), target: "total" as const } : null,
+    typicalKwh != null && rate != null ? { value: money(typicalKwh * REVIEW_MONTH_DAYS * rate), unit: "", label: costBasis ? t("fig.billBasis", { basis: costBasis }) : t("fig.bill"), detail: t("fig.detail.perDay", { cost: money(typicalKwh * rate) }), target: "total" as const } : null,
+    typicalKwh != null && carbonFactor != null ? { value: tonnes(typicalKwh * 365 * carbonFactor), unit: t("fig.co2Unit"), label: t("fig.co2"), detail: t("fig.detail.factor", { value: carbonFactor.toFixed(3) }), target: "total" as const } : null,
+    savingKwh > 0 && (carbonFactor == null || rate == null) ? { value: savingCost != null ? money(savingCost) : grouped(savingKwh), unit: savingCost != null ? "" : "kWh", label: t("fig.saving"), detail: savingShare != null ? t("fig.detail.share", { pct: pctText(savingShare) }) : "", target: "savings" as const } : null,
+  ] satisfies Array<EnergyReviewFigure | null>).filter((figure): figure is NonNullable<typeof figure> => !!figure).slice(0, 4);
 
   const questions: EnergyReviewQuestion[] = ([
     total ? "total" : null, groups ? "groups" : null, largest ? "largest" : null, comparison ? "comparison" : null,
@@ -813,8 +839,25 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
 
   const profileAnswer = !profile ? "" : paragraph([
     onAt !== undefined && offAt !== undefined ? t("profile.answerOn", { on: clock(onAt, locale), off: clock(offAt, locale), kw: kwText(peakKw, 1) }) : t("profile.answerPeak", { kw: kwText(peakKw, 1) }),
-    shownChecks.length ? t(shownChecks.length === 1 ? "profile.answerChecks.one" : "profile.answerChecks.other", { count: shownChecks.length, section: questions.indexOf("profile") + 1 }) : t("profile.answerNoChecks"),
+    // Points to check have a finding of their own in the summary; with none, the profile says so.
+    shownChecks.length ? "" : t("profile.answerNoChecks"),
   ]);
+  // Each finding's headline figure, from the same numbers as its sentence.
+  const info = (value: string, unit = ""): EnergyReviewHeadline => ({ value, unit, tone: "info" });
+  const biggestBlock = [...blocks].sort((a, b) => b.perDay - a.perDay)[0];
+  const tied = sortedTop.length > 1 && sortedTop[0]!.pct - sortedTop[1]!.pct <= 1;
+  const headlineOf: Record<EnergyReviewQuestion, () => EnergyReviewHeadline> = {
+    total: () => typicalKwh == null ? info(t("hl.notYet")) : info(num(typicalKwh), t("hl.total.unit")),
+    groups: () => info(`${sortedTop[0]!.pct}%`, tied ? t("hl.groups.tie", { a: sortedTop[0]!.row.name, b: sortedTop[1]!.row.name }) : t("hl.groups.unit", { name: sortedTop[0]!.row.name })),
+    largest: () => info(pctText(biggestBlock!.slices[0]!.share), t("hl.largest.unit", { name: inSentence(biggestBlock!.slices[0]!.name, locale) })),
+    comparison: () => comparisonHeadline,
+    profile: () => onAt !== undefined && offAt !== undefined ? info(`${clock(onAt, locale)} – ${clock(offAt, locale)}`, t("hl.profile.on")) : info(num(peakKw), t("hl.profile.peak")),
+    // One meter is named; several are counted; none means every meter was in use.
+    littleUse: () => little.length === 1 ? info(little[0]!.meter.name) : little.length > 1 ? info(String(little.length), t("hl.little.many")) : { value: t("hl.little.all"), unit: "", tone: "good" },
+    perLight: () => lightRows.length ? info(perLightNum(lightRows[0]!.perLight!), t("hl.light.unit")) : info(t("hl.light.need")),
+    savings: () => !savingRows.length ? info(t("hl.sav.none"))
+      : savingCost != null ? { value: money(savingCost), unit: t("hl.sav.year"), tone: "good" } : { value: grouped(savingKwh), unit: t("hl.sav.kwhYear"), tone: "good" },
+  };
   const answerOf: Record<EnergyReviewQuestion, () => { question: string; answer: string }> = {
     total: () => ({ question: t("glance.total"), answer: typicalKwh == null ? t("glance.totalNone") : t(rate != null ? "glance.totalCost" : "glance.totalKwh", {
       day: kwhText(typicalKwh), month: kwhText(typicalKwh * REVIEW_MONTH_DAYS), cost: rate != null ? money(typicalKwh * REVIEW_MONTH_DAYS * rate) : "", basis: costBasis ? locale === "zh-Hans" ? `（${costBasis}）` : ` (${costBasis})` : "", days: REVIEW_MONTH_DAYS }) }),
@@ -826,7 +869,7 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
     perLight: () => ({ question: t("glance.perLight"), answer: perLightAnswer }),
     savings: () => ({ question: t("glance.savings"), answer: savingAnswer }),
   };
-  const answers = questions.map(id => ({ id, ...answerOf[id]() }));
+  const answers: EnergyReviewFinding[] = questions.map(id => ({ id, ...answerOf[id](), headline: headlineOf[id]() }));
 
   // ---------- feedback: follow-ups and what the AI remembers ----------
   // Written by people and the AI, and kept with saved reports: read defensively, and quoted at a readable length.
