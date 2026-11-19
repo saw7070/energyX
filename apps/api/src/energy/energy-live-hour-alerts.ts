@@ -20,7 +20,7 @@
  * What it raises. One hour beyond the usual range is enough here (the daily check needs two in a row): seeing it within
  * the hour is the point. The alert has the daily check's key, kind and payload, plus `live: true`, and the same limits:
  * the per-site switch for unusual use, five a day then one summary, the same meters left out (not in use, idle, must
- * never use power, stopped sending; a meter used now and then only above its usual level). Meters that must never use
+ * never use power, stopped sending, used now and then). Meters that must never use
  * power are judged on the same live hours, and so is the whole site's total (see evaluateLiveHourAlerts). Once the daily
  * readings cover those hours the daily check takes the alert over: it keeps it if the full readings agree, and withdraws
  * it quietly if they show the live view was wrong (a meter that was offline and sent its use late, or an hour that was
@@ -362,7 +362,8 @@ export function evaluateLiveHourAlerts(input: {
     }
 
     // ---------- unusual hourly use
-    if (!input.patternAlerts || meter.idleWhenQuiet) continue;
+    // Used now and then: its use is sporadic by design, so no hour of it is unusual (it still counts in the site's total).
+    if (!input.patternAlerts || meter.idleWhenQuiet || meter.occasionalUse) continue;
     const baseline = hourlyBaseline(readings.cells.get(meter.id) ?? [], learned, dayTypeOf);
     if (!baseline.size) continue;
     const judged: Judged[] = [];
@@ -370,8 +371,7 @@ export function evaluateLiveHourAlerts(input: {
       const usual = baseline.get(`${dayTypeOf(cell.date)}|${cell.hour}`);
       if (!usual) continue;
       const gap = cell.kwh - usual.median;
-      // Used now and then: less than usual, or nothing, is normal; only more than usual is unusual.
-      if (Math.abs(gap) <= patternThreshold(usual) || (meter.occasionalUse && gap < 0)) {
+      if (Math.abs(gap) <= patternThreshold(usual)) {
         judged.push({ cell });
         continue;
       }

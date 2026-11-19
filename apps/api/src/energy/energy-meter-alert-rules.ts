@@ -39,7 +39,7 @@ export type MeterAlertInputMeter = {
   /**
    * Used now and then, quiet spells are normal (presentation.occasional_use). A Tuya meter sends only when its total
    * moves, so such a meter looks stopped while idle and its next total looks sent late: it is never called stopped,
-   * and only use above its usual level (never below) is unusual.
+   * and, its use being sporadic by design, never judged for unusual hourly use.
    */
   occasionalUse?: boolean;
   /** Part of the site's official total (a project-level official aggregation route), for the whole-site check. */

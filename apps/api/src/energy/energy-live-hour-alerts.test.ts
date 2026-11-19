@@ -527,21 +527,40 @@ describe("Meters used now and then (occasional use)", () => {
     });
   });
 
-  it("only alert when they use more than usual, in the daily and the live check, and never-use is unchanged", async () => {
+  it("never get unusual-use alerts, spikes included, daily or live; never-use alerts and the site's total still count them", async () => {
     await withMetadata((metadata, store) => {
       const room: FixtureMeter = { id: "room", name: "Meeting room", usual: 0.4, occasionalUse: true };
-      // The daily readings: nothing 2–4 pm (lower than usual) and 1.2 kWh 8–10 pm (higher).
-      const changes = evaluateMeterAlerts({
+      // The daily readings: nothing 2–4 pm (lower than usual) and 1.2 kWh 8–10 pm (higher): neither is news for it.
+      const quietDaily = evaluateMeterAlerts({
         store, projectId: PROJECT, patternAlerts: true, now: nextMorning,
         readings: daily({ through: "2026-11-19T02", meters: [room], override: (meterId, date, hour) => (date !== "2026-11-18" ? undefined : hour === 14 || hour === 15 ? [date, hour, 0, 60, 0, 0] : hour === 20 || hour === 21 ? [date, hour, 1.2, 60, 0, 0] : undefined) }),
       });
-      expect(changes.opened.map((alert) => [alert.subject, alert.payload.direction, alert.payload.start])).toEqual([["room", "high", isoAt("2026-11-18T20:00")]]);
-      // Live: nothing at 2 pm is normal for it; 1.2 kWh at 3 pm is a spike.
-      const live19 = evaluateLiveHourAlerts({
+      expect(quietDaily).toEqual({ opened: [], resolved: [] });
+      // Live: nothing at 2 pm, 1.2 kWh at 3 pm: no alert either.
+      expect(evaluateLiveHourAlerts({
         store, projectId: PROJECT, patternAlerts: true, now: new Date(sg("2026-11-19T16:10")),
         readings: daily({ through: "2026-11-19T02", meters: [room] }), live: live({ room: [["2026-11-19T14", 0, true], ["2026-11-19T15", 1.2]] }),
+      })).toEqual({ opened: [], resolved: [] });
+      // A store room that should never use power and is used now and then: using power is still news.
+      const store_: FixtureMeter = { id: "store-room", name: "Store room", usual: 0, neverUsed: true, occasionalUse: true };
+      const used = evaluateLiveHourAlerts({ store, projectId: PROJECT, patternAlerts: true, now: new Date(sg("2026-11-19T16:10")), readings: daily({ through: "2026-11-19T02", meters: [store_] }), live: live({ "store-room": [["2026-11-19T15", 0.3]] }) });
+      expect(used.opened.map((alert) => [alert.kind, alert.subject])).toEqual([["never_used", "store-room"]]);
+    });
+    await withMetadata((metadata, store) => {
+      // On the site's official total: the hall is used now and then (usually nothing at 10 pm); the blocks 2 kW each.
+      const meters: FixtureMeter[] = [
+        { id: "block-a", name: "Block A", usual: 2, official: true }, { id: "block-b", name: "Block B", usual: 2, official: true },
+        { id: "hall", name: "Community hall", usual: 0, official: true, occasionalUse: true },
+      ];
+      const readings = daily({ through: "2026-11-18T02", meters, activeHour: (date, hour) => hour >= 19 || hour < 7 });
+      const at = (hall?: number) => evaluateLiveHourAlerts({
+        store, projectId: PROJECT, patternAlerts: true, now: new Date(sg("2026-11-18T23:15")), siteName: "SKTC", readings,
+        live: live({ "block-a": [["2026-11-18T22", 2]], "block-b": [["2026-11-18T22", 2]], ...(hall === undefined ? {} : { hall: [["2026-11-18T22", hall] as [string, number]] }) }),
       });
-      expect(live19.opened.map((alert) => [alert.subject, alert.payload.direction, alert.payload.start])).toEqual([["room", "high", isoAt("2026-11-19T15:00")]]);
+      // The hall sent nothing (quiet, normal for it): it counts as nothing and the site is at its usual 4 kW.
+      expect(at()).toEqual({ opened: [], resolved: [] });
+      // The hall drew 2 kW: no alert for the hall itself, but the site at 6 kW is news.
+      expect(at(2).opened.map((alert) => [alert.subject, alert.payload.direction, alert.payload.kwh])).toEqual([["site", "high", 6]]);
     });
   });
 

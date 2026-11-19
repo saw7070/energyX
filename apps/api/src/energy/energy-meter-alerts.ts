@@ -9,8 +9,9 @@
  * - Never-use and unusual-use alerts go to the people who run the site (the same people as the budget and overnight
  *   alerts) and platform administrators. Unusual-use alerts can be turned off per site, and at most five a day open per
  *   site; the rest are counted in one summary alert.
- * - A meter marked "used now and then" (presentation.occasional_use) is never called stopped, and only use above its
- *   usual level is unusual for it: quiet spells are normal. Never-use alerts are unchanged.
+ * - A meter marked "used now and then" (presentation.occasional_use) is never called stopped and never judged for
+ *   unusual hourly use: its quiet spells and its bursts are both normal. Never-use alerts are unchanged, and it still
+ *   counts in the whole site's total.
  *
  * Checking the same readings again changes nothing, so the nightly update, its hourly retries and uploads can all
  * trigger a check. Emails go out only when ENERGYIQ_ALERT_EMAILS_ENABLED=true and mail is configured; the bell always
@@ -428,13 +429,12 @@ export function evaluateMeterAlerts(input: { store: MeterAlertStore; projectId: 
     const touched = new Set<string>();
     let summaryNeeded = false;
     for (const meter of readings.meters) {
-      if (meter.notInUse || meter.idleWhenQuiet || meter.neverUsed || offlineIds.has(meter.id)) continue;
+      // Used now and then: its use is sporadic by design, so no hour of it is unusual (it still counts in the site's total).
+      if (meter.notInUse || meter.idleWhenQuiet || meter.neverUsed || meter.occasionalUse || offlineIds.has(meter.id)) continue;
       const own = cells.get(meter.id) ?? [];
       const baseline = baselineOf(meter.id);
       if (!baseline.size) continue;
       for (const episode of patternEpisodes({ cells: own, baseline, dates: judged, dayTypeOf, ...(meter.alwaysOn ? { alwaysOn: true } : {}) })) {
-        // Used now and then: using less than usual, or nothing, is normal; only more than usual is unusual.
-        if (meter.occasionalUse && episode.direction !== "high") continue;
         const startMs = localHourStartMs(episode.startDate, episode.startHour, timezone);
         const endMs = localHourStartMs(episode.endDate, episode.endHour, timezone);
         const peakAt = localHourStartMs(episode.peakDate, episode.peakHour, timezone);
