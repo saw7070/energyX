@@ -90,7 +90,6 @@ export const ENERGY_REVIEW_CSS = `
 .eiq-energy-review .er-finds>li{display:flex;min-width:0}
 .eiq-energy-review .er-find{--er-accent:var(--er-green);--er-accent-soft:var(--er-green-soft);position:relative;display:flex;flex-direction:column;width:100%;padding:16px 18px 18px;border:1px solid var(--er-line);border-radius:14px;background:#fff;box-shadow:0 1px 2px rgba(22,63,49,.04);transition:border-color .15s,box-shadow .15s}
 .eiq-energy-review .er-find.er-tone-watch{--er-accent:var(--er-bronze);--er-accent-soft:var(--er-bronze-soft)}
-.eiq-energy-review .er-find.er-tone-good::before,.eiq-energy-review .er-find.er-tone-watch::before{content:"";position:absolute;top:-1px;left:18px;width:40px;height:3px;border-radius:0 0 3px 3px;background:var(--er-accent)}
 .eiq-energy-review a.er-find:hover{border-color:#BBD3C6;box-shadow:0 14px 30px -22px rgba(22,63,49,.55)}
 .eiq-energy-review a.er-find:focus-visible{border-radius:14px}
 .eiq-energy-review .er-find-top{display:flex;align-items:center;gap:10px;min-height:30px}
