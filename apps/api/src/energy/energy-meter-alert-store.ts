@@ -115,7 +115,34 @@ export class MeterAlertStore {
         PRIMARY KEY (project_id, email_key)
       );
       CREATE INDEX IF NOT EXISTS idx_energyiq_meter_alert_outbox_pending ON energyiq_meter_alert_outbox(project_id, sent_at, created_at);
+      CREATE TABLE IF NOT EXISTS energyiq_meter_alert_repairs (
+        name TEXT PRIMARY KEY,
+        applied_at TEXT NOT NULL
+      );
     `);
+    this.restoreFirstCheckHistory();
+  }
+
+  /**
+   * Once per database. Before checks kept the `seeded` flag on a stopped-sending alert seen again, the check after a
+   * site's first one dropped it, so outages already over at that first check showed in the bell as news. Those alerts
+   * are known by what the first check left: opened and resolved at the same instant (found only once over), the earliest
+   * instant any of the site's alerts opened (only a site's latest check is kept, so its first is read from its alerts).
+   * They get the flag back; nothing is deleted. Done once, so it never touches alerts saved from now on.
+   */
+  private restoreFirstCheckHistory(): void {
+    const name = "meter-offline-first-check-seeded";
+    const done = () => Boolean(this.db.prepare("SELECT 1 FROM energyiq_meter_alert_repairs WHERE name = ?").get(name));
+    if (done()) return;
+    this.transaction(() => {
+      if (done()) return;
+      this.db.prepare(`
+        UPDATE energyiq_meter_alerts SET payload_json = json_set(payload_json, '$.seeded', json('true'))
+        WHERE kind = 'meter_offline' AND status = 'resolved' AND resolved_at = opened_at AND NOT ${flag("seeded")}
+          AND opened_at = (SELECT MIN(earliest.opened_at) FROM energyiq_meter_alerts AS earliest WHERE earliest.project_id = energyiq_meter_alerts.project_id)
+      `).run();
+      this.db.prepare("INSERT OR IGNORE INTO energyiq_meter_alert_repairs (name, applied_at) VALUES (?, ?)").run(name, new Date().toISOString());
+    });
   }
 
   /**

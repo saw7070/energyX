@@ -184,7 +184,7 @@ describe("Notification bell", () => {
     const rows = [...container.querySelectorAll("li")];
     const row = (text: string) => rows.find((item) => item.textContent?.includes(text))!;
     expect(row("4 meters in Block 264F stopped sending at 6:30 pm — likely their gateway").textContent).toContain("Meter 05, Meter 06, Meter 07, Meter 08. Check that their gateway still has power and is online.");
-    expect(row("Pavilion 1 has stopped sending readings since 1 Oct, 9:00 am").textContent).toContain("Back since 3 Oct, 7:00 am; readings sent late were filled in.");
+    expect(row("Pavilion 1 is sending readings again").textContent).toContain("Stopped 1 Oct, 9:00 am; back since 3 Oct, 7:00 am. Readings sent late were filled in.");
     expect(row("Pavilion DL & fan used 0.55 kWh at 11 pm — it should never use power").textContent).toContain("2 hours in a row from 1 Oct, 11:00 pm. Someone may be using it without leave.");
     expect(row("Block 264F L2–L17 used 6.1 kW at 10 pm, usually about 4.0 kW").textContent).toContain("2 hours in a row");
     expect(rows.map((item) => item.getAttribute("data-kind"))).toEqual(expect.arrayContaining(["meter-offline", "never-used", "pattern"]));
@@ -194,6 +194,42 @@ describe("Notification bell", () => {
     expect(rows.some((item) => item.textContent?.includes("meters stopped sending readings"))).toBe(false);
     await act(async () => { row("Pavilion 1").querySelector("button")!.click(); });
     expect(api.markEnergyProjectAlertRead).toHaveBeenCalledWith("p1", "meter-offline:b:20260920T0900:back");
+  });
+
+  it("tells the people who look after the hardware that meters are sending again, and never counts that news as open", async () => {
+    // SKTC's five outages as a later check left them: over, each with when it came back.
+    const back = (key: string, names: string[], since: string, backAt: string, location?: string) => ({
+      key, readKey: `${key}:back`, kind: "meter_offline", status: "resolved", openedAt: "2026-11-18T21:24:05.208Z", resolvedAt: "2026-11-18T21:24:05.208Z",
+      details: { meters: names.map((name) => ({ id: name, name, since })), since, ...(location ? { location } : {}), back: backAt, filledLateKwh: 0 },
+    });
+    const meterAlerts = [
+      back("meter-offline:l1:20261116T0745", ["264F L1–L6A"], "2026-11-15T23:45:00.000Z", "2026-11-16T23:00:00.000Z"),
+      back("meter-offline:gf:20261116T0730", ["GF 1", "GF 2", "GF 3"], "2026-11-15T23:30:00.000Z", "2026-11-16T23:45:00.000Z", "Ground floor"),
+      back("meter-offline:l7:20261116T0745", ["264F L7–L12"], "2026-11-15T23:45:00.000Z", "2026-11-16T23:00:00.000Z"),
+      back("meter-offline:l13:20261116T0745", ["264F L13–L17"], "2026-11-15T23:45:00.000Z", "2026-11-16T23:00:00.000Z"),
+      back("meter-offline:pump:20261116T0800", ["Pump room"], "2026-11-16T00:00:00.000Z", "2026-11-16T23:15:00.000Z"),
+    ];
+    api.getEnergyProjectAlerts.mockResolvedValue({ reports: [], readKeys: [], hardware: true, meterAlerts });
+    api.getEnergyProjectMeterHealth.mockResolvedValue({ meters: [], summary: { total: 0, usable: 0, insufficientHistory: 0, noReadings: 0 } });
+    api.reportActionRequest.mockResolvedValue({ items: [] });
+    await openBell();
+    const rows = [...container.querySelectorAll("li")];
+    expect(rows.map((row) => row.querySelector("strong")!.textContent)).toEqual(expect.arrayContaining([
+      "264F L1–L6A is sending readings again", "3 meters in Ground floor are sending readings again",
+    ]));
+    expect(container.textContent).not.toContain("stopped sending");
+    expect(rows.map((row) => row.getAttribute("data-tone"))).toEqual(["info", "info", "info", "info", "info"]);
+    // Five unread pieces of news: none of them is open.
+    expect(container.textContent).toContain("5 new");
+    expect(container.textContent).not.toMatch(/\d+ open/u);
+
+    // Kept from the site's first check (as the server now marks them): not in the bell at all.
+    api.getEnergyProjectAlerts.mockResolvedValue({ reports: [], readKeys: [], hardware: true, meterAlerts: meterAlerts.map((alert) => ({ ...alert, details: { ...alert.details, seeded: true } })) });
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await openBell();
+    expect(container.querySelectorAll("li")).toHaveLength(0);
+    expect(container.textContent).toContain("You're all caught up");
   });
 
   it("treats a site without the action pilot as having no action results, not as a failure", async () => {

@@ -414,6 +414,103 @@ describe("Meter alerts: emails that fail, first checks and housekeeping", () => 
     });
   });
 
+  it("keeps outages already over at a site's first check out of the bell when later checks find them again", async () => {
+    await withMetadata(async (metadata, store) => {
+      addTeam(metadata);
+      const send = vi.fn<(message: { to: string[]; subject: string; text: string }) => Promise<void>>(async () => undefined);
+      // SKTC, 19 Nov: the nightly update brought Block 264F's outage (16 Nov 07:30 – 17 Nov 08:00) and its return
+      // together; the site's first check ran at 05:24, just after PR #88 went live. Each later check reads the readings
+      // up to its own hour, as the scheduler does.
+      const localHour = (at: Date) => new Date(at.getTime() + 8 * 3_600_000).toISOString().slice(0, 13);
+      const read = vi.fn(async (_metadata: unknown, _projectId: string, at: Date) =>
+        sktc({ through: localHour(at), blockQuiet: "2026-11-16T07:30", blockBack: "2026-11-17T08:00" }));
+      const first = new Date(sg("2026-11-19T05:24") + 5_208);
+      const run = await runMeterAlerts({ metadataStore: metadata, projectId: PROJECT, now: first, env: ON, send, read });
+      const block = run.opened.find((alert) => alert.payload.location === "Block 264F")!;
+      expect(store.get(PROJECT, block.key)).toMatchObject({ status: "resolved", openedAt: first.toISOString(), resolvedAt: first.toISOString(), payload: { seeded: true } });
+      // The deploy restarts the API twice within two minutes, then the hourly check: no new readings, nothing read.
+      await runMeterAlerts({ metadataStore: metadata, projectId: PROJECT, now: new Date(sg("2026-11-19T05:25")), env: ON, send, read });
+      await runMeterAlerts({ metadataStore: metadata, projectId: PROJECT, now: new Date(sg("2026-11-19T05:26")), env: ON, send, read });
+      await runMeterAlerts({ metadataStore: metadata, projectId: PROJECT, now: new Date(sg("2026-11-19T06:24")), env: ON, send, read });
+      expect(read).toHaveBeenCalledTimes(1);
+      // Three hours on (or a new snapshot from the daily update's retry), the same outage is found again.
+      const later = new Date(sg("2026-11-19T08:30"));
+      expect(await runMeterAlerts({ metadataStore: metadata, projectId: PROJECT, now: later, env: ON, send, read })).toMatchObject({ checked: true, opened: [], resolved: [] });
+      await runMeterAlerts({ metadataStore: metadata, projectId: PROJECT, now: new Date(sg("2026-11-19T12:00")), env: ON, send, read, force: true });
+      expect(read).toHaveBeenCalledTimes(3);
+      // Still history: kept, never emailed, not in the bell. Only Pavilion 1, still quiet, is there.
+      expect(store.get(PROJECT, block.key)).toMatchObject({ status: "resolved", openedAt: first.toISOString(), payload: { seeded: true, back: isoAt("2026-11-17T08:00") } });
+      expect(send.mock.calls.map(([message]) => message.subject)).toEqual([`${metadata.energyIq.getProject(PROJECT).name}: Pavilion 1 has stopped sending readings`]);
+      expect(bell(metadata, { hardware: true, operators: true }, later).meterAlerts.map((alert) => [alert.status, alert.details.since])).toEqual([["open", isoAt("2026-11-05T21:00")]]);
+    });
+  });
+
+  it("keeps a first check's history out of the bell when two checks start together (the API restarting during a deploy)", async () => {
+    await withMetadata(async (metadata, store) => {
+      addTeam(metadata);
+      const send = vi.fn<(message: { to: string[]; subject: string; text: string }) => Promise<void>>(async () => undefined);
+      const read = async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return sktc({ through: "2026-11-19T05", blockQuiet: "2026-11-16T07:30", blockBack: "2026-11-17T08:00" });
+      };
+      const now = new Date(sg("2026-11-19T05:24"));
+      await Promise.all([
+        runMeterAlerts({ metadataStore: metadata, projectId: PROJECT, now, env: ON, send, read }),
+        runMeterAlerts({ metadataStore: metadata, projectId: PROJECT, now: new Date(now.getTime() + 90_000), env: ON, send, read }),
+      ]);
+      expect(store.list(PROJECT, { kind: "meter_offline", status: "resolved" }).map((alert) => alert.payload.seeded)).toEqual([true]);
+      expect(bell(metadata, { hardware: true, operators: true }, new Date(sg("2026-11-19T06:00"))).meterAlerts.map((alert) => alert.status)).toEqual(["open"]);
+    });
+  });
+
+  it("takes outages that lost their first-check flag before this fix out of the bell once, without deleting anything", async () => {
+    await withMetadata((metadata, store) => {
+      // What SKTC's database holds: the first check (05:24 on 19 Nov) found five outages already over, and a later check
+      // rewrote them without the flag. Pavilion 1 was still quiet; the next day another outage is found only once over.
+      const first = new Date("2026-11-18T21:24:05.208Z");
+      const offline = (key: string, meters: Array<[string, string]>, since: string, back: string, location?: string) => ({
+        projectId: PROJECT, key, kind: "meter_offline" as const, audience: "hardware" as const, subject: key,
+        payload: { meters: meters.map(([id, name]) => ({ id, name, since })), since, ...(location ? { location } : {}), back, filledLateKwh: 0.4 },
+      });
+      const history = [
+        offline("meter-offline:l1:20261116T0745", [["l1", "264F L1–L6A"]], "2026-11-15T23:45:00.000Z", "2026-11-16T23:00:00.000Z"),
+        offline("meter-offline:gf:20261116T0730", [["g1", "GF 1"], ["g2", "GF 2"], ["g3", "GF 3"]], "2026-11-15T23:30:00.000Z", "2026-11-16T23:45:00.000Z", "Ground floor"),
+        offline("meter-offline:l7:20261116T0745", [["l7", "264F L7–L12"]], "2026-11-15T23:45:00.000Z", "2026-11-16T23:00:00.000Z"),
+        offline("meter-offline:l13:20261116T0745", [["l13", "264F L13–L17"]], "2026-11-15T23:45:00.000Z", "2026-11-16T23:00:00.000Z"),
+        offline("meter-offline:pump:20261116T0800", [["pump", "Pump room"]], "2026-11-16T00:00:00.000Z", "2026-11-16T23:15:00.000Z"),
+      ];
+      for (const alert of history) {
+        store.open({ ...alert, now: first });
+        store.resolve(PROJECT, alert.key, alert.payload, first);
+      }
+      store.open({ projectId: PROJECT, key: "meter-offline:p1:20261106T0500", kind: "meter_offline", audience: "hardware", subject: "p1", payload: { meters: [{ id: "p1", name: "Pavilion 1", since: isoAt("2026-11-05T21:00") }], since: isoAt("2026-11-05T21:00") }, now: first });
+      const fan = { projectId: PROJECT, key: "never-used:fan:20261115T2300", kind: "never_used" as const, audience: "operators" as const, subject: "fan", payload: { meterName: "Pavilion DL & fan", start: isoAt("2026-11-15T23:00"), hours: 1, totalKwh: 0.3, ongoing: false } };
+      store.open({ ...fan, now: first });
+      store.resolve(PROJECT, fan.key, fan.payload, first);
+      const nextDay = new Date(sg("2026-11-20T05:24"));
+      const news = offline("meter-offline:l1:20261119T0745", [["l1", "264F L1–L6A"]], isoAt("2026-11-19T07:45"), isoAt("2026-11-20T03:00"));
+      store.open({ ...news, now: nextDay });
+      store.resolve(PROJECT, news.key, news.payload, nextDay);
+      const before = store.list(PROJECT);
+      const reading = new Date(sg("2026-11-20T09:00"));
+      expect(bell(metadata, { hardware: true, operators: true }, reading).meterAlerts).toHaveLength(8);
+
+      // The database as it was before this fix: no record of the repair. The deploy's first read repairs it.
+      metadata.db.exec("DROP TABLE energyiq_meter_alert_repairs");
+      const repaired = new MeterAlertStore(metadata.db);
+      expect(repaired.list(PROJECT)).toHaveLength(before.length);
+      expect(history.map((alert) => repaired.get(PROJECT, alert.key)!.payload.seeded)).toEqual([true, true, true, true, true]);
+      // Only those: what was still going, use alerts, and an outage found later are as they were.
+      for (const record of before.filter((alert) => !history.some((item) => item.key === alert.key))) expect(repaired.get(PROJECT, record.key)).toEqual(record);
+      expect(bell(metadata, { hardware: true, operators: true }, reading).meterAlerts.map((alert) => alert.key).sort()).toEqual([news.key, fan.key, "meter-offline:p1:20261106T0500"].sort());
+
+      // Done once: an alert saved from now on is never touched by it.
+      repaired.update(PROJECT, history[0]!.key, history[0]!.payload, new Date(sg("2026-11-20T10:00")));
+      new MeterAlertStore(metadata.db);
+      expect(store.get(PROJECT, history[0]!.key)!.payload.seeded).toBeUndefined();
+    });
+  });
+
   it("records the day's unusual hours at a site's first check without emailing them, and emails them from then on", async () => {
     await withMetadata(async (metadata, store) => {
       addTeam(metadata);

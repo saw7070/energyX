@@ -136,8 +136,11 @@ export function evaluateMeterAlerts(input: { store: MeterAlertStore; projectId: 
     const known = stored.find((alert) => !claimed.has(alert.key) && sameSpell(group, alert));
     if (known) {
       claimed.add(known.key);
-      if (known.status === "open" && group.back) resolve(known.key, payload);
-      else if (known.status === "open" || group.back) store.update(projectId, known.key, payload, now);
+      // History from a site's first check stays history each time the spell is seen again (the readings cover days,
+      // so every later check finds it); losing the flag would put it in the bell as news.
+      const kept = known.payload.seeded === true ? { ...payload, seeded: true } : payload;
+      if (known.status === "open" && group.back) resolve(known.key, kept);
+      else if (known.status === "open" || group.back) store.update(projectId, known.key, kept, now);
       // Quiet again from the same time: the readings that said it was back are gone.
       else open("meter_offline", "hardware", known.key, known.subject, payload);
       continue;
@@ -498,7 +501,10 @@ export async function runMeterAlerts(input: {
   if (!readings.meters.length || readings.referenceMs === null) return drain({ checked: false, opened: [], resolved: [] });
   const project = input.metadataStore.energyIq.getProject(input.projectId);
   const changes = store.transaction(() => {
-    const found = evaluateMeterAlerts({ store, projectId: input.projectId, readings, patternAlerts: store.getSettings(input.projectId).patternAlerts, now: input.now, firstCheck: !last });
+    // Asked again inside the transaction: a check that started at the same time (the API restarting during a deploy)
+    // may have recorded the site's first check while this one was reading.
+    const firstCheck = !store.lastCheck(input.projectId);
+    const found = evaluateMeterAlerts({ store, projectId: input.projectId, readings, patternAlerts: store.getSettings(input.projectId).patternAlerts, now: input.now, firstCheck });
     store.recordCheck(input.projectId, readings.dataSnapshotId ?? snapshotId, input.now);
     if (emailsOn) {
       for (const email of meterAlertEmails({ changes: found, site: project.name, timezone: readings.timezone, projectId: input.projectId, ...(input.publicBaseUrl ? { publicBaseUrl: input.publicBaseUrl } : {}) })) {

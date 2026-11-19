@@ -28,8 +28,8 @@ describe("Meter alerts in the bell", () => {
     const [back, used, drop, rest] = entries("en");
     expect(back).toMatchObject({
       key: gateway.readKey, readKey: gateway.readKey, tone: "info", kind: "meter-offline", at: gateway.resolvedAt, quietMeterIds: [],
-      title: "4 meters in Block 264F stopped sending at 6:30 pm — likely their gateway",
-      detail: "Back since 17 Nov, 7:00 am; readings sent late were filled in.",
+      title: "4 meters in Block 264F are sending readings again",
+      detail: "Stopped 16 Nov, 6:30 pm; back since 17 Nov, 7:00 am. Readings sent late were filled in.",
       href: "/energyiq/project-configuration?projectId=sktc&tab=availability",
     });
     expect(used).toMatchObject({ tone: "warning", kind: "never-used", title: "Pavilion DL & fan used 0.30 kWh at 11 pm — it should never use power", detail: "On Fri, 13 Nov. Someone may be using it without leave. Still using power at the latest reading." });
@@ -39,16 +39,40 @@ describe("Meter alerts in the bell", () => {
 
   it("says the same in Chinese and Malay", () => {
     const zh = entries("zh-Hans");
-    expect(zh[0]!.title).toBe("Block 264F 的 4 个电表于 下午6:30 停止发送读数，可能是网关的问题");
-    expect(zh[0]!.detail).toMatch(/^自 .+ 起已恢复；离线期间迟到的读数已补上。$/);
+    expect(zh[0]!.title).toBe("Block 264F 的 4 个电表已恢复发送读数");
+    expect(zh[0]!.detail).toMatch(/^.+ 停止，自 .+ 起已恢复；离线期间迟到的读数已补上。$/);
     expect(zh[1]!.title).toMatch(/^Pavilion DL & fan 于 .+ 用了 0\.30 kWh，它本应完全不用电$/);
     expect(zh[2]!.title).toMatch(/^Emergency lights 于 .+ 降到 0（平常 0\.10 kW）$/);
     expect(zh[3]!.title).toBe("今天另有 2 个电表用电异常");
     const ms = entries("ms");
-    expect(ms[0]!.title).toMatch(/^4 meter di Block 264F berhenti menghantar pada .+ — mungkin gateway mereka$/);
+    expect(ms[0]!.title).toBe("4 meter di Block 264F menghantar bacaan semula");
+    expect(ms[0]!.detail).toMatch(/^Berhenti .+; kembali sejak .+\. Bacaan yang dihantar lewat telah diisi\.$/);
     expect(ms[1]!.title).toMatch(/^Pavilion DL & fan menggunakan 0\.30 kWh pada .+ — ia sepatutnya tidak menggunakan kuasa langsung$/);
     expect(ms[2]!.title).toMatch(/^Emergency lights turun ke 0 pada .+ \(biasanya 0\.10 kW\)$/);
     expect(ms[3]!.title).toBe("Penggunaan luar biasa pada 2 meter lagi hari ini");
+  });
+
+  it("never words meters that came back as stopped, and leaves out history from a site's first check", () => {
+    // As SKTC's bell received them: resolved, with when they came back, and no longer quiet.
+    const sktc: MeterAlertDto[] = [
+      { key: "meter-offline:l1:20261116T0745", readKey: "meter-offline:l1:20261116T0745:back", kind: "meter_offline", status: "resolved", openedAt: "2026-11-18T21:24:05.208Z", resolvedAt: "2026-11-18T21:24:05.208Z",
+        details: { meters: [{ id: "l1", name: "264F L1–L6A", since: "2026-11-15T23:45:00.000Z" }], since: "2026-11-15T23:45:00.000Z", back: "2026-11-16T23:00:00.000Z", filledLateKwh: 0 } },
+      { key: "meter-offline:gf:20261116T0730", readKey: "meter-offline:gf:20261116T0730:back", kind: "meter_offline", status: "resolved", openedAt: "2026-11-18T21:24:05.208Z", resolvedAt: "2026-11-18T21:24:05.208Z",
+        details: { meters: ["GF 1", "GF 2", "GF 3"].map((name) => ({ id: name, name, since: "2026-11-15T23:30:00.000Z" })), since: "2026-11-15T23:30:00.000Z", location: "Ground floor", back: "2026-11-16T23:45:00.000Z", filledLateKwh: 1.5 } },
+    ];
+    const t = translatorFor(notificationMessages, "en");
+    const shown = meterAlertEntries(sktc, { t, locale: "en", projectId: "sktc" });
+    expect(shown.map((entry) => [entry.tone, entry.title, entry.detail, entry.quietMeterIds])).toEqual([
+      ["info", "264F L1–L6A is sending readings again", "Stopped 16 Nov, 7:45 am; back since 17 Nov, 7:00 am.", []],
+      ["info", "3 meters in Ground floor are sending readings again", "Stopped 16 Nov, 7:30 am; back since 17 Nov, 7:45 am. Readings sent late were filled in.", []],
+    ]);
+    expect(shown.some((entry) => /stopped sending/u.test(entry.title))).toBe(false);
+    const noArea = { ...sktc[1]!.details, location: undefined };
+    expect(meterAlertEntries([{ ...sktc[1]!, details: noArea }], { t, locale: "en", projectId: "sktc" })[0]!.title).toBe("3 meters are sending readings again");
+    // Over before the site's first check, or closed without coming back: nothing to tell.
+    const seeded = sktc.map((alert) => ({ ...alert, details: { ...alert.details, seeded: true } }));
+    const cleared = sktc.map((alert) => ({ ...alert, details: { ...alert.details, back: undefined, cleared: true } }));
+    expect(meterAlertEntries([...seeded, ...cleared], { t, locale: "en", projectId: "sktc" })).toEqual([]);
   });
 
   it("lists an open stopped-sending alert's meters so they are not shown again as stopped, and skips what it cannot read", () => {
