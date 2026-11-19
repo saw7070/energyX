@@ -3,16 +3,16 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import type { SiteReport } from "@datafoundry/site-report";
-import { DailyEnergyChart } from "./daily-energy-chart";
+import { DailyEnergyChart, deviceSettingsHref } from "./daily-energy-chart";
 
 const day = (date: string, dow: string, kwh: number, extra: Record<string, unknown> = {}) => ({ date, dow, kwh, dayType: "weekday", complete: true, recoveredKwh: 0, ...extra });
 const report = (days: unknown[]) => ({ benchmark: { days }, rate: 0.276, currency: "SGD", averageDay: { kwh: 47, cost: 13, text: "" } }) as unknown as SiteReport;
 
-async function render(days: unknown[]) {
+async function render(days: unknown[], projectId?: string) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host);
-  await act(async () => root.render(<DailyEnergyChart report={report(days)} />));
+  await act(async () => root.render(<DailyEnergyChart report={report(days)} projectId={projectId} />));
   return { host, done: async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); } };
 }
 
@@ -55,5 +55,19 @@ it("lists the devices that sent a day's energy late in the hover box, largest fi
     const list = host.querySelector('[role="note"] details')!;
     expect(list.querySelector("summary")!.textContent).toBe("Show all 7 devices");
     expect([...list.querySelectorAll("li")].map(item => item.textContent)[0]).toBe("264F L2–L1717 Nov3.0 kWh");
+  } finally { await done(); }
+});
+
+it("links each device in the full list to its settings, where it can be marked as used now and then", async () => {
+  const { host, done } = await render([day("2026-11-15", "Sun", 47), day("2026-11-16", "Mon", 44, { complete: false, recoveredKwh: 4, recoveredFrom: [{ name: "Lift lobby 1", kwh: 3, id: "m-lobby" }, { name: "Driveway", kwh: 1 }] })], "p1");
+  try {
+    const list = host.querySelector('[role="note"] details')!;
+    const link = list.querySelector("a")!;
+    expect(link.textContent).toBe("Lift lobby 1");
+    expect(link.getAttribute("href")).toBe(deviceSettingsHref("p1", "m-lobby"));
+    expect(deviceSettingsHref("p1", "m-lobby")).toBe("/energyiq/project-configuration?projectId=p1&tab=structure&meter=m-lobby");
+    // A device without an id stays plain text; the hint says what to tick.
+    expect(list.querySelectorAll("a")).toHaveLength(1);
+    expect(list.textContent).toContain("Used now and then");
   } finally { await done(); }
 });

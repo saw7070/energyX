@@ -47,7 +47,7 @@ type ProjectInformation = {
    * `alwaysOn`: meant to run day and night (emergency lighting), kept in totals but never a daytime finding.
    * `lightCount`: how many light points the meter feeds, when recorded; the report shows energy per light for these.
    */
-  name: string; meters?: Array<{ id: string; name?: string; location: string; locationId?: string; notInUse?: string; alwaysOn?: boolean; lightCount?: number }>;
+  name: string; meters?: Array<{ id: string; name?: string; location: string; locationId?: string; notInUse?: string; alwaysOn?: boolean; lightCount?: number; occasionalUse?: boolean }>;
   /** The Locations tree the groups come from; the project itself has no parent. `sortOrder`: the saved order among siblings. */
   locations?: Array<{ id: string; name: string; parentId: string | null; sortOrder?: number }>;
   calendar: null | { entries: Array<{ location: string; from: string; toExclusive: string | null; weekly: HoursByDay; hoursMeaning?: string; exceptions: Array<{ date: string; label: string; classification?: string }> }> };
