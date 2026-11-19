@@ -151,7 +151,7 @@ export function KeyPoints({projectId}:{projectId:string}) {
       :<>
       <section className={styles.hero}><p className={styles.heroEyebrow}>{metrics?.projectName ?? activeProject?.name ?? t("yourProject")}</p>
         {/* The first view: energy each day, then the site's average day and its month, then where it goes by group. */}
-        {report && <DailyEnergyChart report={report} />}
+        {report && <DailyEnergyChart report={report} projectId={projectId} />}
         {(() => {
           const headline = <h2>{averageDay ? figures(averageDay.text) : report ? <>{report.title.before}<span>{report.title.emphasis}</span></> : site.state && publication?.selection.summary ? plain(publication.selection.summary) : t("fallbackHeadline")}</h2>;
           const month = averageDay && <p className={styles.heroMonth}>{averageDay.cost != null ? t("monthEstimate", { kwh: kwhText(averageDay.kwh * 30), cost: moneyText(averageDay.cost * 30, report?.currency ?? "SGD") }) : t("monthEstimatePlain", { kwh: kwhText(averageDay.kwh * 30) })}</p>;

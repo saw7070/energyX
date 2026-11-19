@@ -37,7 +37,7 @@ export type ProjectInformationSource = {
    * `alwaysOn`: the meter is meant to run day and night (emergency lighting); see always-on-by-design.ts.
    * `lightCount`: how many light points the meter feeds, when someone recorded it.
    */
-  meters?: Array<{ id: string; name?: string | undefined; location: string; locationId?: string | undefined; panel?: string | undefined; notInUse?: string | undefined; alwaysOn?: boolean | undefined; lightCount?: number | undefined }> | undefined;
+  meters?: Array<{ id: string; name?: string | undefined; location: string; locationId?: string | undefined; panel?: string | undefined; notInUse?: string | undefined; alwaysOn?: boolean | undefined; lightCount?: number | undefined; occasionalUse?: boolean | undefined }> | undefined;
   /** The project's Locations tree; the project itself has no parent. `sortOrder`: the saved order among siblings. Older servers leave it out. */
   locations?: Array<{ id: string; name: string; parentId?: string | null | undefined; sortOrder?: number | undefined }> | undefined;
   calendar: null | { entries: Array<{ location: string; from: string; toExclusive: string | null; weekly: unknown; hoursMeaning?: string | undefined; exceptions: Array<{ date: string; label: string; classification?: string | undefined }> }> };
@@ -239,6 +239,8 @@ export function assembleAnalysisData(input: {
   // Meters meant to run day and night (emergency lighting): their daytime use is expected, never a finding.
   const alwaysOnByDesign = (information?.meters ?? []).filter(meter => meter.alwaysOn === true)
     .map(meter => ({ id: meter.id, name: meterNames.get(meter.id) ?? meter.name ?? meter.id }));
+  // Meters used only now and then: their quiet spells are normal, and what they send after one is ordinary use.
+  const occasionalUse = (information?.meters ?? []).filter(meter => meter.occasionalUse === true).map(meter => meter.id);
   // How many light points a meter feeds, when someone recorded it: the report's energy per light.
   const lightCounts = (information?.meters ?? []).filter(meter => typeof meter.lightCount === "number" && Number.isInteger(meter.lightCount) && meter.lightCount > 0)
     .map(meter => ({ id: meter.id, name: meterNames.get(meter.id) ?? meter.name ?? meter.id, count: meter.lightCount! }));
@@ -267,6 +269,7 @@ export function assembleAnalysisData(input: {
     ...(groups ? { groups } : {}),
     ...(notInUse.length ? { notInUse } : {}),
     ...(alwaysOnByDesign.length ? { alwaysOnByDesign } : {}),
+    ...(occasionalUse.length ? { occasionalUse } : {}),
     ...(lightCounts.length ? { lightCounts } : {}),
     ...(tariffTax ? { tariffTax } : {}),
     ...(carbon ? { carbon } : {}),

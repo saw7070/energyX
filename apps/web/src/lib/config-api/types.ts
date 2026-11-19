@@ -275,7 +275,9 @@ export type EnergyMeterMappingRowDto = {
    * `always_on` is "true" for a meter meant to run day and night (emergency lighting), absent otherwise.
    * `light_count` is how many light points the meter feeds, a whole number from 1 to 9999 kept as text.
    */
-  presentation?: { device_name?: string; circuit_name?: string; group?: string; not_in_use?: string; off_with_lights?: string; short_name?: string; panel?: string; always_on?: string; light_count?: string };
+  presentation?: { device_name?: string; circuit_name?: string; group?: string; not_in_use?: string; off_with_lights?: string; short_name?: string; panel?: string; always_on?: string; light_count?: string; never_used?: string;
+    /** "true": used only now and then, so quiet spells are normal (see EnergyIqMeterPresentation.occasional_use). */
+    occasional_use?: string };
   id: string;
   source_label: string;
   scope_id: string;

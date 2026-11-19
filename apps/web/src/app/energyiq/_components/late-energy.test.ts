@@ -4,7 +4,7 @@
  * type. Otherwise a day after an outage reads short on the Overview while the readings have the energy.
  */
 import { describe, expect, it } from "vitest";
-import { inUseTotal, lateMetersByDay, worthSaying } from "@datafoundry/site-report";
+import { inUseTotal, lateMetersByDay, silentByDesignIds, worthSaying } from "@datafoundry/site-report";
 import { scopeDays, type ScopeData, type TrendSeries } from "@datafoundry/site-report";
 
 const series = (id: string, expected: number, cells: TrendSeries["cells"]): TrendSeries => ({ id, expectedMinutesPerHour: expected, cells });
@@ -46,7 +46,7 @@ describe("energy sent late after an outage", () => {
     expect(late.get("2026-11-16")!.map(item => item.name)).toEqual(["Pavilion 2", "Driveway"]);
     expect(late.get("2026-11-16")![0]!.kwh).toBeCloseTo(3.9, 9);
     // 0.02 kWh is rounding, not an outage worth naming.
-    expect(late.get("2026-11-17")).toEqual([{ name: "Driveway", kwh: 1.2 }]);
+    expect(late.get("2026-11-17")).toEqual([{ name: "Driveway", kwh: 1.2, id: "drive" }]);
   });
 
   it("finds a meter placed in a block, whose hours come with the block's readings, not the site's", () => {
@@ -54,6 +54,14 @@ describe("energy sent late after an outage", () => {
     const site = scope(series("__scope__", 60, []), [meter(null)]);
     const block = { ...scope(series("__scope__", 60, []), [meter(series("pav", 60, [["2026-11-17", 2, 0, 0, 4, 10.2]]))]), id: "block", name: "Common area" };
     expect(lateMetersByDay(site).size).toBe(0);
-    expect(lateMetersByDay([site, block]).get("2026-11-17")).toEqual([{ name: "Pavilion linkway 2", kwh: 10.2 }]);
+    expect(lateMetersByDay([site, block]).get("2026-11-17")).toEqual([{ name: "Pavilion linkway 2", kwh: 10.2, id: "pav" }]);
+  });
+
+  it("leaves out meters used only now and then: what they send after a quiet spell is ordinary use", () => {
+    const meter = (id: string, name: string, cells: TrendSeries["cells"]) => ({ id, name, location: "", category: "light" as const, official: true, series: series(id, 60, cells) });
+    const site = scope(series("__scope__", 120, []), [meter("lobby", "Lift lobby 1", [["2026-11-16", 9, 0, 0, 4, 2.2]]), meter("l2", "264F L2–L17", [["2026-11-16", 9, 0, 0, 4, 3.9]])]);
+    expect(lateMetersByDay(site, new Set(["lobby"])).get("2026-11-16")).toEqual([{ name: "264F L2–L17", kwh: 3.9, id: "l2" }]);
+    // Its silence never makes a day incomplete, like a meter marked not in use.
+    expect([...silentByDesignIds({ occasionalUse: ["lobby"] })]).toEqual(["lobby"]);
   });
 });
