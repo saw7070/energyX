@@ -88,6 +88,11 @@ describe("where the energy goes, by group", () => {
     expect(markup).toMatch(/<button type="button"[^>]*aria-expanded="false" aria-controls="[^"]+"><span[^>]*aria-hidden="true"><\/span><span[^>]*>Common area<\/span>/);
     // Only one type of use (lighting): a split by type would say nothing beside it.
     expect(words).not.toContain("By type of use");
+    // The row's columns follow the order GroupSplit writes them in: arrow, name, bar, value. They once assumed the
+    // arrow came last, which centred the names and pushed the figures out of their rows.
+    const rowClass = /<button type="button" class="([^"]+)"[^>]*aria-controls/.exec(markup)?.[1] ?? "";
+    expect(rowClass).toContain("grid-cols-[14px_minmax(0,1fr)_auto]");
+    expect(rowClass).toContain("sm:grid-cols-[14px_minmax(0,1fr)_minmax(72px,28%)_auto]");
   });
 
   it("keeps the split by area for readings saved before groups existed", () => {
