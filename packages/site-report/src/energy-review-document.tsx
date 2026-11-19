@@ -10,7 +10,7 @@
  *
  * Nothing here reads the DOM while rendering, so the server renders the same document with renderEnergyReviewHtml().
  */
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ENERGY_REVIEW_PALETTE as P, worthSaying, type EnergyReview, type EnergyReviewFollowUp, type EnergyReviewMeter, type EnergyReviewQuestion, type EnergyReviewSlice } from "./energy-review.js";
 import { energyReviewMessages } from "./energy-review-messages.js";
@@ -48,6 +48,15 @@ export const ENERGY_REVIEW_CSS = `
 .eiq-energy-review .er-kicker{display:flex;align-items:center;gap:10px;font-size:11.5px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--er-green)}
 .eiq-energy-review .er-kicker::before{content:"";width:22px;height:2px;background:var(--er-green);border-radius:2px}
 .eiq-energy-review .er-sec{padding-top:52px;margin-top:52px;border-top:1px solid var(--er-line);scroll-margin-top:calc(var(--er-sticky-top) + 64px)}
+.eiq-energy-review .er-sec{position:relative}
+.eiq-energy-review .er-fb{position:absolute;top:44px;right:0;display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid var(--er-line);border-radius:999px;background:#fff;color:var(--er-green);font:inherit;font-size:13px;font-weight:600;cursor:pointer;opacity:.55;transition:opacity .15s,background .15s,border-color .15s}
+.eiq-energy-review .er-fb svg{width:15px;height:15px}
+.eiq-energy-review .er-sec:hover>.er-fb,.eiq-energy-review .er-fb:focus-visible,.eiq-energy-review .er-fb[aria-expanded="true"]{opacity:1}
+.eiq-energy-review .er-fb:hover{background:var(--er-soft);border-color:#BBD3C6}
+.eiq-energy-review .er-first>.er-fb{top:-8px}
+.eiq-energy-review .er-two>.er-sec>.er-fb{top:16px;right:16px}
+@media (hover:none){.eiq-energy-review .er-fb{opacity:1}}
+@media (max-width:700px){.eiq-energy-review .er-fb{position:static;margin:0 0 12px}}
 .eiq-energy-review .er-sec.er-first{border-top:0;margin-top:0;padding-top:34px}
 
 /* the bar of sections */
@@ -247,7 +256,7 @@ export const ENERGY_REVIEW_CSS = `
 }
 @media (prefers-reduced-motion:reduce){.eiq-energy-review *{transition:none!important}}
 @media print{
-  .eiq-energy-review .er-nav,.eiq-energy-review .er-switch,.eiq-energy-review .er-hint,.eiq-energy-review .er-tip,.eiq-energy-review .er-more,.eiq-energy-review .er-reset,.eiq-energy-review .er-ask{display:none!important}
+  .eiq-energy-review .er-nav,.eiq-energy-review .er-switch,.eiq-energy-review .er-hint,.eiq-energy-review .er-tip,.eiq-energy-review .er-more,.eiq-energy-review .er-reset,.eiq-energy-review .er-ask,.eiq-energy-review .er-fb{display:none!important}
   .eiq-energy-review .er-fig,.eiq-energy-review .er-checks li,.eiq-energy-review .er-steps li,.eiq-energy-review .er-follow li{break-inside:avoid}
   .eiq-energy-review svg{max-width:100%;height:auto}
   .eiq-energy-review .er-scroll{overflow:visible}
@@ -286,10 +295,43 @@ const svgX = (event: PointerEvent<SVGElement>, width: number) => {
 
 const Question = ({ id, number, title, children, t, className }: { id: EnergyReviewQuestion; number: number; title: string; children: ReactNode; t: T; className?: string | undefined }) =>
   <section id={sectionId(`q-${id}`)} className={`er-sec${className ? ` ${className}` : ""}`}>
+    <SectionTools id={`q-${id}`} />
     <div className="er-kicker">{t("q.kicker", { n: number })}</div>
     <h2>{title}</h2>
+    <SectionSlot id={`q-${id}`} />
     {children}
   </section>;
+
+// ---------- feedback on a section ----------
+
+/**
+ * On the live page, each section can take feedback: a "Give feedback" button at its top right, and a place under its
+ * heading where the page shows its own feedback box. `id` is the section's id without "er-" ("summary", "q-total",
+ * "checks"…), `title` how the section is named in the bar ("1 Total use"). The page supplies the wording.
+ */
+export type ReviewSectionFeedback = {
+  label: string;
+  ariaLabel: (title: string) => string;
+  open: (section: { id: string; title: string }) => void;
+  /** The section whose box is open, so its button says so. */
+  openId?: string | null | undefined;
+  /** What the page shows under the heading of section `id`: its feedback box when open, else nothing. */
+  slot?: ((id: string) => ReactNode) | undefined;
+};
+const FeedbackContext = createContext<{ feedback: ReviewSectionFeedback; titleOf: (id: string) => string } | null>(null);
+const COMMENT_ICON = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" /></svg>;
+/** The section's "Give feedback" button; the section's id and name ride on it, so a text selection can find them. */
+function SectionTools({ id }: { id: string }) {
+  const context = useContext(FeedbackContext);
+  if (!context) return null;
+  const title = context.titleOf(id);
+  return <button type="button" className="er-fb" data-feedback-section={id} data-feedback-title={title} aria-expanded={context.feedback.openId === id}
+    aria-label={context.feedback.ariaLabel(title)} onClick={() => context.feedback.open({ id, title })}>{COMMENT_ICON}{context.feedback.label}</button>;
+}
+function SectionSlot({ id }: { id: string }) {
+  const context = useContext(FeedbackContext);
+  return <>{context?.feedback.slot?.(id) ?? null}</>;
+}
 
 // ---------- the bar of sections ----------
 
@@ -636,7 +678,7 @@ const followUpChip = (item: EnergyReviewFollowUp): { kind: string; key: Paramete
  * block in place of the page's own heading, and no moving parts. `onCheckFeedback`: on the live page, each point to
  * check offers "Tell the AI about this", which hands the point's stable key and title to the page around the review.
  */
-export function EnergyReviewDocument({ review, standalone, onCheckFeedback }: { review: EnergyReview; standalone?: boolean | undefined; onCheckFeedback?: ((check: { key: string; title: string }) => void) | undefined }) {
+export function EnergyReviewDocument({ review, standalone, onCheckFeedback, sectionFeedback }: { review: EnergyReview; standalone?: boolean | undefined; onCheckFeedback?: ((check: { key: string; title: string }) => void) | undefined; sectionFeedback?: ReviewSectionFeedback | undefined }) {
   const t = reviewText(review);
   const live = !standalone;
   const { cover, summary, total, groups, largest, comparison, profile, checks, littleUse, perLight, savings, nextSteps, method } = review;
@@ -676,7 +718,10 @@ export function EnergyReviewDocument({ review, standalone, onCheckFeedback }: { 
     event.preventDefault();
     target.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
   };
-  return <article className="eiq-energy-review" aria-label={t("doc.aria", { name: review.projectName })} onClick={glide}>
+  // Each section's name as the bar shows it ("1 Total use"), for the feedback it is given.
+  const titles = new Map(nav.map(item => [item.id.replace(/^er-/, ""), item.number ? `${item.number} ${item.label}` : item.label]));
+  const feedbackContext = live && sectionFeedback ? { feedback: sectionFeedback, titleOf: (id: string) => titles.get(id) ?? id } : null;
+  return <FeedbackContext.Provider value={feedbackContext}><article className="eiq-energy-review" aria-label={t("doc.aria", { name: review.projectName })} onClick={glide}>
     {standalone && <div className="er-page er-head">
       <header className="er-mast">
         <div className="er-brand">{cover.kicker}</div>
@@ -692,8 +737,10 @@ export function EnergyReviewDocument({ review, standalone, onCheckFeedback }: { 
     <SectionNav items={nav} t={t} live={live} />
     <div className="er-page">
       <section id={sectionId("summary")} className="er-sec er-first">
+        <SectionTools id="summary" />
         <div className="er-kicker">{t("sum.kicker")}</div>
         <h2>{t("sum.heading")}</h2>
+        <SectionSlot id="summary" />
         <p className="er-lede">{summary.intro}</p>
         {summary.figures.length > 0 && <div className="er-figs">{summary.figures.map(figure => has(figure.target)
           ? <a key={figure.label} className="er-fig-tile" href={`#${sectionId(`q-${figure.target}`)}`}><b>{figure.value}{figure.unit && <small>{figure.unit}</small>}</b><span>{figure.label}</span></a>
@@ -744,8 +791,10 @@ export function EnergyReviewDocument({ review, standalone, onCheckFeedback }: { 
       </Question>}
 
       {checks.length > 0 && <section id={sectionId("checks")} className="er-sec">
+        <SectionTools id="checks" />
         <div className="er-kicker">{t("nav.checks")}</div>
         <h2>{t("checks.heading")}</h2>
+        <SectionSlot id="checks" />
         <ol className="er-checks">{checks.map((check, index) => <li key={check.key || check.title}>
           <b>{String(index + 1).padStart(2, "0")}</b><p><strong>{check.title}</strong>{check.text}</p>
           {live && onCheckFeedback && check.key && <button type="button" className="er-ask" aria-label={t("checks.askAria", { title: check.title })} onClick={() => onCheckFeedback({ key: check.key, title: check.title })}>{t("checks.ask")}</button>}
@@ -753,8 +802,10 @@ export function EnergyReviewDocument({ review, standalone, onCheckFeedback }: { 
       </section>}
 
       {followUps.length > 0 && <section id={sectionId("followups")} className="er-sec">
+        <SectionTools id="followups" />
         <div className="er-kicker">{t("nav.followUps")}</div>
         <h2>{t("followUps.heading")}</h2>
+        <SectionSlot id="followups" />
         <p>{t("followUps.intro")}</p>
         <ul className="er-follow">{followUps.map((item, index) => {
           const chip = followUpChip(item);
@@ -781,8 +832,10 @@ export function EnergyReviewDocument({ review, standalone, onCheckFeedback }: { 
       </Question>}
 
       <section id={sectionId("method")} className="er-sec">
+        <SectionTools id="method" />
         <div className="er-kicker">{t("met.kicker")}</div>
         <h2>{t("met.heading")}</h2>
+        <SectionSlot id="method" />
         <p>{method.intro}</p>
         <dl className="er-assume">{method.assumptions.map(row => <div key={row.label}><dt>{row.label}</dt><dd>{row.value}</dd></div>)}</dl>
         {memory.length > 0 && <>
@@ -803,7 +856,7 @@ export function EnergyReviewDocument({ review, standalone, onCheckFeedback }: { 
 
       <footer><span>{review.footer.left}</span><span>EnergyX</span></footer>
     </div>
-  </article>;
+  </article></FeedbackContext.Provider>;
 }
 
 const escapeHtml = (text: string) => text.replace(/[&<>"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]!);

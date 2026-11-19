@@ -8,6 +8,7 @@ import { formatPeriod, shiftDate } from "./report-period";
 import { EnergyIcon } from "./icons";
 import { plainNames, plainTimes, SiteReportPanel, useSiteReport, type ReportCheckRef } from "./site-report";
 import { ReportFeedbackPanel, type FeedbackFocusRequest } from "./report-feedback-panel";
+import { useSectionFeedback } from "./report-section-feedback";
 import { readingsFromFeedback, useReportFeedback } from "./report-feedback-model";
 import { ReportScheduleNote } from "./report-schedule-note";
 import { StoppedMetersNote } from "./meter-health-notice";
@@ -133,6 +134,8 @@ export function KeyPoints({projectId}:{projectId:string}) {
   // a report built here for the same dates as the priorities.
   const site=useSiteReport(projectId, source ? {from:source.period.from,to:shiftDate(source.period.toExclusive,-1)} : null, !!result && !error, readings);
   const report=site.state && "report" in site.state ? site.state.report : null;
+  // Feedback on one section of the review, from the section itself or from highlighted text in it.
+  const sectionFeedback=useSectionFeedback({projectId,controller:feedback,review:site.state && "report" in site.state ? site.state.review ?? null : null,report});
   const saved=site.saved;
   const shownPeriod=saved?.period ?? source?.period ?? null;
   const names=plainNames(report);
@@ -189,7 +192,7 @@ export function KeyPoints({projectId}:{projectId:string}) {
       <ReportScheduleNote projectId={projectId} overview className={styles.schedule} />
       </>}
       {/* The saved report itself. Until one exists it is built here, for the same dates as the priorities. */}
-      {result && !error && <SiteReportPanel state={site.state} onRetry={site.retry} projectId={projectId} saved={saved} onCheckFeedback={feedback.state?.canGive ? tellAbout : undefined} />}
+      {result && !error && <SiteReportPanel state={site.state} onRetry={site.retry} projectId={projectId} saved={saved} onCheckFeedback={feedback.state?.canGive ? tellAbout : undefined} sectionFeedback={sectionFeedback} />}
       {/* Feedback on the report right under it: the AI remembers it, suggests changes an admin applies, and follows up. */}
       {result && !error && <ReportFeedbackPanel projectId={projectId} feedback={feedback} review={site.state && "report" in site.state ? site.state.review ?? null : null} report={report} focusRequest={askAbout} onSiteChanged={site.retry} />}
   </main>;
