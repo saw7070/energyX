@@ -86,15 +86,23 @@ export function meterAlertEntries(alerts: readonly MeterAlertDto[], input: { t: 
       if (!list.length) return [];
       const since = text(details.since) || list[0]!.since;
       const area = text(details.location);
+      if (alert.status === "resolved") {
+        // Over: the only news is that the meters are sending again. History from a site's first check, and an alert
+        // that closed without the meters coming back (no longer watched, filled in on time), are not news at all.
+        const back = text(details.back);
+        if (!back || details.seeded === true) return [];
+        const title = list.length === 1
+          ? t("meterOffline.backOne", { name: list[0]!.name })
+          : area ? t("meterOffline.backGroup", { count: list.length, area }) : t("meterOffline.backMany", { count: list.length });
+        const detail = t(number(details.filledLateKwh) > 0 ? "meterOffline.back" : "meterOffline.backPlain", { since: when(since), when: when(back) });
+        return [{ ...base, tone: "info", kind: "meter-offline", title, detail, href: facility, quietMeterIds: [] }];
+      }
       const title = list.length === 1
         ? t("meterOffline.one", { name: list[0]!.name, when: when(since) })
         : area ? t("meterOffline.group", { count: list.length, area, time: clock(since) }) : t("meterOffline.many", { count: list.length, when: when(since) });
-      const back = text(details.back);
       const names = list.slice(0, 4).map((meter) => meter.name).join(", ") + (list.length > 4 ? "…" : "");
-      const detail = alert.status === "resolved" && back
-        ? t(number(details.filledLateKwh) > 0 ? "meterOffline.back" : "meterOffline.backPlain", { when: when(back) })
-        : list.length === 1 ? t("meterOffline.detail") : t("meterOffline.detailGroup", { names });
-      return [{ ...base, tone: alert.status === "open" ? "warning" : "info", kind: "meter-offline", title, detail, href: facility, quietMeterIds: alert.status === "open" ? list.map((meter) => meter.id) : [] }];
+      const detail = list.length === 1 ? t("meterOffline.detail") : t("meterOffline.detailGroup", { names });
+      return [{ ...base, tone: "warning", kind: "meter-offline", title, detail, href: facility, quietMeterIds: list.map((meter) => meter.id) }];
     }
     if (alert.kind === "never_used") {
       const start = text(details.start) || alert.openedAt;
