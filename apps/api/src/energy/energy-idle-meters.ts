@@ -13,7 +13,14 @@ import { readOnlineMeters } from "./energy-live-status.js";
  *   it takes to call a meter stopped nearly always reaches into lights-on hours, so a lighting circuit whose total stops
  *   moving most likely has lights that did not come on: the fault such a site most needs to hear about.
  */
-export type IdleMeterRow = { id: string; category?: string; presentation?: { always_on?: string } };
+export type IdleMeterRow = { id: string; category?: string; presentation?: { always_on?: string; occasional_use?: string } };
+
+/**
+ * Meters marked "used now and then" (presentation.occasional_use): they send only when used, so their quiet spells are
+ * normal, never an outage. They count as idle when quiet whether or not the live check has seen them online.
+ */
+export const occasionalUseMeters = (rows: readonly IdleMeterRow[]): Set<string> =>
+  new Set(rows.filter((row) => row.presentation?.occasional_use === "true").map((row) => row.id));
 
 /** Of the meters online now, the ones whose quiet spell means they are using nothing (see above). */
 export const idleWhenQuietMeters = (online: ReadonlySet<string>, rows: readonly IdleMeterRow[], lightsOnHours: boolean): Set<string> => {
@@ -82,15 +89,18 @@ const usesLightsOnHours = (metadataStore: MetadataStore, projectId: string, toda
 
 /**
  * The meters of a project whose quiet spell, right now, means they are using nothing rather than stopped: online at the
- * latest live check (readOnlineMeters) and able to rightly use nothing (idleWhenQuietMeters). Empty without a live
- * connection or a recent check, so every quiet meter is then treated as stopped, as before.
+ * latest live check (readOnlineMeters) and able to rightly use nothing (idleWhenQuietMeters), plus every meter marked
+ * "used now and then" (occasionalUseMeters). Without a live connection or a recent check only the latter, so every
+ * other quiet meter is then treated as stopped, as before.
  */
 export const readIdleWhenQuietMeters = (input: { metadataStore: MetadataStore; projectId: string; now?: number }): Set<string> => {
   const now = input.now ?? Date.now();
-  const online = readOnlineMeters({ db: input.metadataStore.db, projectId: input.projectId, now });
-  if (!online.size) return online;
   const project = input.metadataStore.energyIq.getProject(input.projectId);
   const revision = input.metadataStore.energyIq.projectSetup.listHierarchyRevisions(input.projectId).find((candidate) => candidate.id === project.hierarchy_revision_id);
   const rows = revision ? (JSON.parse(revision.snapshot_json) as { meter_mapping?: { rows?: IdleMeterRow[] } }).meter_mapping?.rows ?? [] : [];
-  return idleWhenQuietMeters(online, rows, usesLightsOnHours(input.metadataStore, input.projectId, localDate(now, project.timezone)));
+  const occasional = occasionalUseMeters(rows);
+  const online = readOnlineMeters({ db: input.metadataStore.db, projectId: input.projectId, now });
+  if (!online.size) return occasional;
+  const idle = idleWhenQuietMeters(online, rows, usesLightsOnHours(input.metadataStore, input.projectId, localDate(now, project.timezone)));
+  return new Set([...idle, ...occasional]);
 };
