@@ -1,0 +1,35 @@
+/* Feedback on one section of the energy review: a box under the section's heading, and a button by a highlight.
+   The box sits inside the review, whose own styles reset padding, margins and buttons, so each rule here is scoped
+   under it to win. */
+:global(.eiq-energy-review) .box{display:grid;gap:10px;margin:16px 0 22px;padding:16px 18px;border:1px solid #c9dccf;border-left:3px solid #185540;border-radius:12px;background:#f6faf7;color:#203d34;max-width:760px}
+:global(.eiq-energy-review) .head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0;max-width:none;font-size:14.5px;font-weight:650;color:#1c2c24}
+:global(.eiq-energy-review) .x{display:grid;place-items:center;flex:none;width:28px;height:28px;border-radius:50%;color:#245747;font-size:18px;line-height:1}
+:global(.eiq-energy-review) .x:hover{background:#e3eee7}
+:global(.eiq-energy-review) .quote{margin:0;padding:8px 12px;border-left:3px solid #c98a2e;border-radius:6px;background:#fff;color:#43554b;font-size:13.5px;line-height:1.5;font-style:italic;max-height:7.5em;overflow:auto}
+:global(.eiq-energy-review) .quote small{display:block;margin-bottom:2px;font-style:normal;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8a6a3c}
+:global(.eiq-energy-review) .box form{display:grid;gap:8px}
+:global(.eiq-energy-review) .box textarea{width:100%;min-height:84px;padding:10px 12px;border:1px solid #cbd9d0;border-radius:9px;background:#fff;color:#203d34;font:inherit;font-size:14.5px;line-height:1.5;resize:vertical}
+:global(.eiq-energy-review) .box textarea:focus{outline:2px solid #648a75;outline-offset:1px}
+:global(.eiq-energy-review) .row{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}
+:global(.eiq-energy-review) .count{margin-right:auto;font-size:12px;color:#7b8a82}
+:global(.eiq-energy-review) .send,:global(.eiq-energy-review) .cancel{display:inline-flex;align-items:center;justify-content:center;min-height:38px;padding:0 16px;border-radius:10px;font-size:14px;font-weight:600;white-space:nowrap}
+:global(.eiq-energy-review) .send{border:1px solid #185540;background:#185540;color:#fff}
+:global(.eiq-energy-review) .send:hover{background:#12422f}
+:global(.eiq-energy-review) .cancel{border:1px solid #cfdad2;background:#fff;color:#245747}
+:global(.eiq-energy-review) .cancel:hover{background:#eef4ef}
+:global(.eiq-energy-review) .send:disabled,:global(.eiq-energy-review) .cancel:disabled{opacity:.5;cursor:default}
+:global(.eiq-energy-review) .reply{display:grid;gap:6px;padding:12px 14px;border-radius:10px;background:#fff;border:1px solid #d7e5dc}
+:global(.eiq-energy-review) .reply p{margin:0;max-width:none;font-size:14px;line-height:1.55}
+:global(.eiq-energy-review) .reply strong{font-size:13px;color:#176b59}
+:global(.eiq-energy-review) .note{margin:0;max-width:none;font-size:13px;color:#617068}
+:global(.eiq-energy-review) .error{margin:0;max-width:none;font-size:13.5px;color:#9b2c1f}
+:global(.eiq-energy-review) .seeAll{font-size:13px;font-weight:600;color:#245747;text-decoration:underline;text-underline-offset:3px}
+/* The button that appears by highlighted text in the review. */
+.pick{position:fixed;z-index:60;display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border:0;border-radius:999px;background:#185540;color:#fff;font:inherit;font-size:13px;font-weight:650;box-shadow:0 8px 22px -8px #0a281b99;cursor:pointer;transform:translate(-50%,calc(-100% - 8px))}
+.pick:hover{background:#12422f}
+.pick svg{width:14px;height:14px}
+:global(html[data-energyiq-theme="dark"]) :global(.eiq-energy-review) .box{background:#1a1f1c;border-color:#2f3d35;border-left-color:#5fb38a;color:#c9ddd2}
+:global(html[data-energyiq-theme="dark"]) :global(.eiq-energy-review) .head{color:#e3eee8}
+:global(html[data-energyiq-theme="dark"]) :global(.eiq-energy-review) .quote,:global(html[data-energyiq-theme="dark"]) :global(.eiq-energy-review) .reply,:global(html[data-energyiq-theme="dark"]) :global(.eiq-energy-review) .box textarea{background:#141816;border-color:#2f3d35;color:#e3eee8}
+:global(html[data-energyiq-theme="dark"]) :global(.eiq-energy-review) .cancel{background:#141816;border-color:#2f3d35;color:#8fd1b2}
+:global(html[data-energyiq-theme="dark"]) :global(.eiq-energy-review) .seeAll,:global(html[data-energyiq-theme="dark"]) :global(.eiq-energy-review) .x{color:#8fd1b2}
