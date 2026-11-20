@@ -10,7 +10,7 @@
  *
  * Nothing here reads the DOM while rendering, so the server renders the same document with renderEnergyReviewHtml().
  */
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ENERGY_REVIEW_PALETTE as P, worthSaying, type EnergyReview, type EnergyReviewFollowUp, type EnergyReviewHeadline, type EnergyReviewMeter, type EnergyReviewQuestion, type EnergyReviewSlice } from "./energy-review.js";
 import { energyReviewMessages } from "./energy-review-messages.js";
@@ -18,6 +18,7 @@ import { forHoursMeaning, translatorFor } from "./locale.js";
 import { Rich } from "./rich.js";
 import { niceTicks, textWidth, useWidth } from "./site-report-document.js";
 import { clock, moneyText } from "./site-report-model.js";
+import { SectionFeedbackButton, SectionFeedbackContext, SectionFeedbackSlot, type ReportSectionFeedback } from "./section-feedback.js";
 
 type T = ReturnType<typeof reviewText>;
 const reviewText = (review: Pick<EnergyReview, "locale" | "hoursMeaning">) => forHoursMeaning(translatorFor(energyReviewMessages, review.locale), energyReviewMessages, review.hoursMeaning);
@@ -398,31 +399,13 @@ function KeyFindings({ findings, t }: { findings: Finding[]; t: T }) {
 /**
  * On the live page, each section can take feedback: a "Give feedback" button at its top right, and a place under its
  * heading where the page shows its own feedback box. `id` is the section's id without "er-" ("summary", "q-total",
- * "checks"…), `title` how the section is named in the bar ("Total use"). The page supplies the wording.
+ * "checks"…), `title` how the section is named in the bar ("Total use"). The page supplies the wording. The same
+ * feedback works on the other report styles (section-feedback.tsx).
  */
-export type ReviewSectionFeedback = {
-  label: string;
-  ariaLabel: (title: string) => string;
-  open: (section: { id: string; title: string }) => void;
-  /** The section whose box is open, so its button says so. */
-  openId?: string | null | undefined;
-  /** What the page shows under the heading of section `id`: its feedback box when open, else nothing. */
-  slot?: ((id: string) => ReactNode) | undefined;
-};
-const FeedbackContext = createContext<{ feedback: ReviewSectionFeedback; titleOf: (id: string) => string } | null>(null);
-const COMMENT_ICON = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" /></svg>;
+export type ReviewSectionFeedback = ReportSectionFeedback;
 /** The section's "Give feedback" button; the section's id and name ride on it, so a text selection can find them. */
-function SectionTools({ id }: { id: string }) {
-  const context = useContext(FeedbackContext);
-  if (!context) return null;
-  const title = context.titleOf(id);
-  return <button type="button" className="er-fb" data-feedback-section={id} data-feedback-title={title} aria-expanded={context.feedback.openId === id}
-    aria-label={context.feedback.ariaLabel(title)} onClick={() => context.feedback.open({ id, title })}>{COMMENT_ICON}{context.feedback.label}</button>;
-}
-function SectionSlot({ id }: { id: string }) {
-  const context = useContext(FeedbackContext);
-  return <>{context?.feedback.slot?.(id) ?? null}</>;
-}
+const SectionTools = ({ id }: { id: string }) => <SectionFeedbackButton id={id} className="er-fb" />;
+const SectionSlot = SectionFeedbackSlot;
 
 // ---------- the bar of sections ----------
 
@@ -957,7 +940,7 @@ export function EnergyReviewDocument({ review, standalone, onCheckFeedback, sect
     ...(!has("profile") ? checksFinding : []),
   ];
   const feedbackContext = live && sectionFeedback ? { feedback: sectionFeedback, titleOf: (id: string) => titles.get(id) ?? id } : null;
-  return <FeedbackContext.Provider value={feedbackContext}><article className="eiq-energy-review" aria-label={t("doc.aria", { name: review.projectName })} onClick={glide}>
+  return <SectionFeedbackContext.Provider value={feedbackContext}><article className="eiq-energy-review" aria-label={t("doc.aria", { name: review.projectName })} onClick={glide}>
     {standalone && <div className="er-page er-head">
       <header className="er-mast">
         <div className="er-brand">{cover.kicker}</div>
@@ -1091,7 +1074,7 @@ export function EnergyReviewDocument({ review, standalone, onCheckFeedback, sect
 
       <footer><span>{review.footer.left}</span><span>EnergyX</span></footer>
     </div>
-  </article></FeedbackContext.Provider>;
+  </article></SectionFeedbackContext.Provider>;
 }
 
 const escapeHtml = (text: string) => text.replace(/[&<>"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]!);

@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mock = vi.hoisted(() => ({ role: "user", projectId: "p1", search: "projectId=p1", admin: vi.fn(), library: vi.fn(), select: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({replace:vi.fn(),push:vi.fn()}), useSearchParams: () => new URLSearchParams(mock.search) }));
 vi.mock("./energyiq-access", () => ({ useEnergyIqAccess: () => ({ access: { role: mock.role, activeWorkspaceId: "w1", projects: [{ id: mock.projectId, workspaceId: "w1", status: "published" }] }, activeProject: { id: mock.projectId }, loading: false, error: null, selectProject: mock.select }) }));
-vi.mock("../../../lib/config-api", () => ({ configApi: { reportAgentRequest: mock.admin, reportLibraryRequest: mock.library } }));
+// A site report opened here also asks who may give feedback on it; this reader may not.
+vi.mock("../../../lib/config-api", async importOriginal => ({ ConfigApiError: (await importOriginal<typeof import("../../../lib/config-api")>()).ConfigApiError, configApi: { reportAgentRequest: mock.admin, reportLibraryRequest: mock.library, reportFeedbackRequest: async () => ({ canGive: false, canManage: false, aiAvailable: false, feedback: [], memory: [], followUps: [], dismissedChecks: [] }) } }));
 import { ReportProjectGate } from "./report-project-gate";
 import { ReportLibraryView } from "./report-library";
 import { ReportSessionNavigation, notifyReportSessionsChanged } from "./report-session-navigation";

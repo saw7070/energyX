@@ -20,6 +20,7 @@ import { rich, Rich } from "./rich.js";
 import { DaytimeBlock, niceTicks, NoUseBlock, PerLightTable, ProfileChart, renderSiteReportHtml, useWidth } from "./site-report-document.js";
 import { buildSiteReport, kwhText, moneyText, pctText, REPORT_COLOURS as C } from "./site-report-model.js";
 import { REPORT_CSS } from "./site-report-styles.js";
+import { SectionFeedbackButton, SectionFeedbackContext, SectionFeedbackSlot, type ReportSectionFeedback } from "./section-feedback.js";
 
 const reviewText = (review: Pick<ManagementReview, "locale" | "hoursMeaning"> & { dayCount?: number | undefined }) =>
   forHoursMeaning(forOneDay(translatorFor(managementReviewMessages, review.locale), managementReviewMessages, review.dayCount === 1), managementReviewMessages, review.hoursMeaning);
@@ -51,8 +52,10 @@ export const MANAGEMENT_REVIEW_CSS = `
 @media print{.eiq-review .group-block{break-inside:avoid}}
 `;
 
+/** A numbered section; on the live page its heading line ends with "Give feedback", and its box opens under it. */
 const Section = ({ id, number, title, children }: { id: string; number: number; title: string; children: ReactNode }) => <section id={id}>
-  <div className="sec-head"><span className="num">{number}</span><h2>{title}</h2></div>
+  <div className="sec-head"><span className="num">{number}</span><h2>{title}</h2><SectionFeedbackButton id={id} className="rp-fb" /></div>
+  <SectionFeedbackSlot id={id} />
   {children}
 </section>;
 
@@ -160,15 +163,24 @@ function SideBySide({ review }: { review: ManagementReview }) {
 
 /**
  * The review itself, from one `ManagementReview` and nothing else. `standalone` is for a saved copy: it leaves out
- * the hover readout of the average-day chart.
+ * the hover readout of the average-day chart. `sectionFeedback`: on the live page, each section (and the headline with
+ * its key figures) offers "Give feedback" (section-feedback.tsx); never on a saved copy.
  */
-export function ManagementReviewDocument({ review, standalone }: { review: ManagementReview; standalone?: boolean | undefined }) {
+export function ManagementReviewDocument({ review, standalone, sectionFeedback }: { review: ManagementReview; standalone?: boolean | undefined; sectionFeedback?: ReportSectionFeedback | undefined }) {
   const t = reviewText(review);
   const { summary, total, savings, method } = review;
   const money = (value: number | null) => value == null ? "—" : moneyText(value, review.currency);
   const numberOf = (id: ReviewSectionId) => review.sections.indexOf(id) + 1;
   const has = (id: ReviewSectionId) => review.sections.includes(id);
-  return <article className="eiq-report eiq-review" aria-label={t("doc.aria", { name: review.projectName })}>
+  // Each section's name as the review numbers it ("2 Total use"), for the feedback it is given.
+  const headings: Record<ReviewSectionId, string | undefined> = {
+    summary: t("sec.summary"), total: t("sec.total"), groups: review.groups?.heading, comparison: review.comparison?.heading,
+    profile: t("sec.profile"), savings: t("sec.savings"), method: t("sec.method"),
+  };
+  const titleOf = (id: string) => id === "headline" ? t("doc.feedback.headline")
+    : has(id as ReviewSectionId) && headings[id as ReviewSectionId] ? `${numberOf(id as ReviewSectionId)} ${headings[id as ReviewSectionId]}` : id;
+  const feedbackContext = !standalone && sectionFeedback ? { feedback: sectionFeedback, titleOf } : null;
+  return <SectionFeedbackContext.Provider value={feedbackContext}><article className="eiq-report eiq-review" aria-label={t("doc.aria", { name: review.projectName })}>
     <div className="page">
       <header className="masthead">
         <div className="doc-line">
@@ -179,6 +191,8 @@ export function ManagementReviewDocument({ review, standalone }: { review: Manag
         <h1>{review.title}</h1>
         <p className="lede">{review.lede}</p>
         {review.keyFigures.length > 0 && <div className="keyfigs">{review.keyFigures.map(figure => <div key={figure.label}><b>{figure.value}</b><small>{figure.label}</small></div>)}</div>}
+        <SectionFeedbackButton id="headline" className="rp-fb" />
+        <SectionFeedbackSlot id="headline" />
       </header>
 
       <Section id="summary" number={numberOf("summary")} title={t("sec.summary")}>
@@ -264,7 +278,7 @@ export function ManagementReviewDocument({ review, standalone }: { review: Manag
 
       <footer><span>{review.footer.left}</span><span>{review.footer.right}</span></footer>
     </div>
-  </article>;
+  </article></SectionFeedbackContext.Provider>;
 }
 
 const escapeHtml = (text: string) => text.replace(/[&<>"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]!);

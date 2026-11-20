@@ -1,15 +1,15 @@
 "use client";
 /**
- * "Tell the AI about this report": under the report on the Overview, anyone who can read the reports tells the AI
- * what the report missed or got wrong. The AI answers, keeps what it learns as project memory, suggests setting
- * changes and writes follow-ups the next report checks.
+ * "Tell the AI about this report": under the report on the Overview and under every site report opened in Reports,
+ * anyone who can read the reports tells the AI what the report missed or got wrong. The AI answers, keeps what it
+ * learns as project memory, suggests setting changes and writes follow-ups the next report checks.
  *
  * Nothing on the site changes from here without an admin: an admin applies or dismisses each suggested change,
  * approves memory and follow-ups written by others, and closes follow-ups. Everyone else sees what is waiting for an
  * admin. What went wrong is said in the reader's language, from the codes the server gives.
  */
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
-import type { EnergyReview } from "@datafoundry/site-report";
+import type { EnergyReview, ManagementReview } from "@datafoundry/site-report";
 import { ConfigApiError } from "../../../lib/config-api";
 import { useEnergyIqAccess } from "./energyiq-access";
 import { useEnergyIqLocale, useMessages } from "./energyiq-locale";
@@ -52,6 +52,8 @@ type Props = {
   /** The report on screen: its checks and headline figures go with the feedback. */
   review?: EnergyReview | null | undefined;
   report?: SiteReport | null | undefined;
+  /** The management review, when that is the report on screen (a saved report in Reports). */
+  management?: ManagementReview | null | undefined;
   focusRequest?: FeedbackFocusRequest | null | undefined;
   /** Called after an admin applied a change, so the page reloads the report. */
   onSiteChanged?: (() => void) | undefined;
@@ -69,7 +71,7 @@ const dateText = (value: string | undefined, locale: EnergyIqLocale) => {
   return new Date(time).toLocaleDateString(locale === "en" ? "en-GB" : intlLocale(locale), { timeZone: "Asia/Singapore", day: "numeric", month: "short", year: "numeric" }).replace("Sept", "Sep");
 };
 
-export function ReportFeedbackPanel({ projectId, feedback, review, report, focusRequest, onSiteChanged }: Props) {
+export function ReportFeedbackPanel({ projectId, feedback, review, report, management, focusRequest, onSiteChanged }: Props) {
   const t = useMessages(reportFeedbackMessages);
   const { locale } = useEnergyIqLocale();
   const friendly = useFriendlyError();
@@ -124,7 +126,7 @@ export function ReportFeedbackPanel({ projectId, feedback, review, report, focus
     setAttempt({ text: value, about: aboutKey, id: requestId });
     setSending(true); setSendError(null); setSent(null); setNotice(null);
     try {
-      const reportContext = reportContextOf(review, report);
+      const reportContext = reportContextOf(review, report, management);
       const result = await reportFeedbackApi.send(projectId, { requestId, text: value, ...(about ? { about } : {}), ...(reportContext ? { reportContext } : {}) });
       controller.setState(result.state);
       setSent(result.feedback);
