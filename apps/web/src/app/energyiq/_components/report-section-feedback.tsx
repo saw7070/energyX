@@ -1,15 +1,16 @@
 "use client";
 /**
- * Feedback on one section of the energy review, given where the reader is: each section has a "Give feedback"
- * button, and highlighting text in the review offers "Give feedback on this". Either opens a box under that section's
- * heading. What is sent is the same feedback the panel under the report sends, tied to the section
+ * Feedback on one section of a site report, given where the reader is: each section has a "Give feedback" button, and
+ * highlighting text in the report offers "Give feedback on this". Either opens a box under that section's heading.
+ * It works the same in every style (the energy review, the full report, the management review), on the Overview and
+ * in Reports. What is sent is the same feedback the panel under the report sends, tied to the section
  * (about = { kind: "section", id, title }) with any highlighted words quoted at the start, so the AI reads it, remembers
  * it and suggests changes in the same way; its reply shows in the box and in the panel below.
  */
 // React itself, not only its hooks: tests compile JSX with the classic runtime, so the module needs it in scope.
 import React from "react";
-import type { EnergyReview } from "@datafoundry/site-report";
-import type { ReviewSectionFeedback } from "@datafoundry/site-report/energy-review-document";
+import type { EnergyReview, ManagementReview } from "@datafoundry/site-report";
+import type { ReportSectionFeedback } from "@datafoundry/site-report/section-feedback";
 import { ConfigApiError } from "../../../lib/config-api";
 import { useMessages } from "./energyiq-locale";
 import { useFriendlyError } from "./friendly-error";
@@ -25,6 +26,20 @@ type Open = { id: string; title: string; quote?: string | undefined };
 const QUOTE_MAX = 400;
 const ICON = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" /></svg>;
 
+/**
+ * The section a node of the report is in, and its "Give feedback" button: the nearest section (or the masthead) that
+ * has a button of its own. Null outside a report.
+ */
+export function feedbackSectionOf(node: Node | null): { host: Element; tools: HTMLElement } | null {
+  let host = (node instanceof Element ? node : node?.parentElement ?? null)?.closest("section, header") ?? null;
+  while (host) {
+    const own = [...host.querySelectorAll<HTMLElement>("[data-feedback-section]")].find(button => button.closest("section, header") === host);
+    if (own) return { host, tools: own };
+    host = host.parentElement?.closest("section, header") ?? null;
+  }
+  return null;
+}
+
 /** The words sent: the highlighted part quoted first, then what the reader wrote. */
 export const feedbackText = (text: string, quote?: string) => {
   const words = text.trim();
@@ -34,11 +49,12 @@ export const feedbackText = (text: string, quote?: string) => {
 };
 
 /**
- * Wires section feedback into the review: `sectionFeedback` goes to the review document, `onPointerUp`/`onKeyUp` on
- * the element around it (to offer feedback on highlighted text), and `overlay` anywhere on the page. Nothing is
- * offered when the reader may not give feedback.
+ * Wires section feedback into the report: `sectionFeedback` goes to the report document, `onPointerUp`/`onKeyUp` on
+ * the element around it (to offer feedback on highlighted text), and `overlay` beside it. Pass the report on screen:
+ * the energy review, the full report or the management review (the first given is the one shown); its checks and
+ * figures go with the feedback. Nothing is offered when the reader may not give feedback.
  */
-export function useSectionFeedback({ projectId, controller, review, report }: { projectId: string; controller: ReportFeedbackController; review: EnergyReview | null; report: SiteReport | null }) {
+export function useSectionFeedback({ projectId, controller, review, report, management = null }: { projectId: string; controller: ReportFeedbackController; review: EnergyReview | null; report: SiteReport | null; management?: ManagementReview | null | undefined }) {
   const t = useMessages(sectionFeedbackMessages);
   const [open, setOpen] = React.useState<Open | null>(null);
   const [pick, setPick] = React.useState<(Open & { x: number; y: number }) | null>(null);
@@ -46,23 +62,28 @@ export function useSectionFeedback({ projectId, controller, review, report }: { 
   // Another project starts with nothing open.
   const [shownFor, setShownFor] = React.useState(projectId);
   if (shownFor !== projectId) { setShownFor(projectId); setOpen(null); setPick(null); }
-  // The highlight button goes away once the page scrolls or the highlight is gone.
+  // The highlight button goes away once the highlight moves up or down (the page, or the pane the report is in,
+  // scrolled) or is gone. A chart or the section bar scrolling sideways leaves it.
   React.useEffect(() => {
     if (!pick) return;
-    const away = () => setPick(null);
+    const away = () => {
+      const selection = window.getSelection();
+      const top = selection && selection.rangeCount ? selection.getRangeAt(0).getBoundingClientRect().top : null;
+      if (top == null || Math.abs(top - pick.y) > 2) setPick(null);
+    };
     const check = () => { if (!window.getSelection()?.toString().trim()) setPick(null); };
-    // The page scrolling, not a chart or the section bar inside it scrolling sideways.
-    window.addEventListener("scroll", away);
+    document.addEventListener("scroll", away, { capture: true, passive: true });
     document.addEventListener("selectionchange", check);
-    return () => { window.removeEventListener("scroll", away); document.removeEventListener("selectionchange", check); };
+    return () => { document.removeEventListener("scroll", away, { capture: true }); document.removeEventListener("selectionchange", check); };
   }, [pick]);
 
-  const sectionFeedback: ReviewSectionFeedback | undefined = canGive && review ? {
+  const shown = review ?? report ?? management;
+  const sectionFeedback: ReportSectionFeedback | undefined = canGive && shown ? {
     label: t("button"),
     ariaLabel: title => t("buttonAria", { title }),
     open: section => setOpen(current => current?.id === section.id && !current.quote ? null : section),
     openId: open?.id ?? null,
-    slot: id => open?.id === id ? <SectionFeedbackBox key={`${open.id}|${open.quote ?? ""}`} projectId={projectId} controller={controller} review={review} report={report} about={open} onClose={() => setOpen(null)} /> : null,
+    slot: id => open?.id === id ? <SectionFeedbackBox key={`${open.id}|${open.quote ?? ""}`} projectId={projectId} controller={controller} review={review} report={report} management={management} about={open} onClose={() => setOpen(null)} /> : null,
   } : undefined;
 
   /** After a highlight inside a section: offer feedback on it, by the highlight. */
@@ -72,10 +93,10 @@ export function useSectionFeedback({ projectId, controller, review, report }: { 
     const quote = selection?.toString().replace(/\s+/g, " ").trim() ?? "";
     if (!selection || !quote || selection.rangeCount === 0) { setPick(null); return; }
     const node = selection.getRangeAt(0).commonAncestorContainer;
-    const section = (node instanceof Element ? node : node.parentElement)?.closest("section.er-sec");
-    const tools = section?.querySelector<HTMLElement>(":scope > [data-feedback-section]");
-    // Not inside the review, or inside the feedback box itself.
-    if (!section || !tools || (node instanceof Element ? node : node.parentElement)?.closest(`.${styles.box}`)) { setPick(null); return; }
+    const found = feedbackSectionOf(node);
+    // Not inside the report, or inside the feedback box itself.
+    if (!found || (node instanceof Element ? node : node.parentElement)?.closest(`.${styles.box}`)) { setPick(null); return; }
+    const { tools } = found;
     const box = selection.getRangeAt(0).getBoundingClientRect();
     setPick({ id: tools.dataset.feedbackSection!, title: tools.dataset.feedbackTitle ?? "", quote, x: box.left + box.width / 2, y: box.top });
   };
@@ -87,7 +108,7 @@ export function useSectionFeedback({ projectId, controller, review, report }: { 
 }
 
 /** The box under a section's heading: what the reader highlighted, their words, and the AI's answer once sent. */
-function SectionFeedbackBox({ projectId, controller, review, report, about, onClose }: { projectId: string; controller: ReportFeedbackController; review: EnergyReview | null; report: SiteReport | null; about: Open; onClose: () => void }) {
+function SectionFeedbackBox({ projectId, controller, review, report, management, about, onClose }: { projectId: string; controller: ReportFeedbackController; review: EnergyReview | null; report: SiteReport | null; management: ManagementReview | null; about: Open; onClose: () => void }) {
   const t = useMessages(sectionFeedbackMessages);
   const tp = useMessages(reportFeedbackMessages);
   const friendly = useFriendlyError();
@@ -115,7 +136,7 @@ function SectionFeedbackBox({ projectId, controller, review, report, about, onCl
     setAttempt({ text: value, id: requestId });
     setSending(true); setError(null);
     try {
-      const reportContext = reportContextOf(review, report);
+      const reportContext = reportContextOf(review, report, management);
       const result = await reportFeedbackApi.send(projectId, { requestId, text: value, about: { kind: "section", id: about.id, title: about.title }, ...(reportContext ? { reportContext } : {}) });
       controller.setState(result.state);
       setSent(result.feedback);

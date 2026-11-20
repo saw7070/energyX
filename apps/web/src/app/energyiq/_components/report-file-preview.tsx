@@ -11,6 +11,7 @@ import { EnergyIcon } from "./icons";
 export { ReportMarkdown } from "./report-markdown";
 import { ReportMarkdown } from "./report-markdown";
 import { reportPreviewHtml } from "./report-preview";
+import { SavedSiteReport } from "./site-report-saved";
 import { useMessages } from "./energyiq-locale";
 import { previewMessages } from "./report-library-messages";
 import styles from "./report-workbench.module.css";
@@ -25,6 +26,11 @@ export type PreviewFile = {
   filename?: string;
   mimeType: string;
   load: (signal: AbortSignal) => Promise<FileContent>;
+  /**
+   * A site report (written from the meter readings): previewed on the page from its saved readings, so the reader can
+   * give feedback on it (site-report-saved). Download and Source keep the saved page.
+   */
+  siteReport?: { projectId: string; reportId: string };
 };
 export function ReportFilePreview({
   file,
@@ -273,12 +279,26 @@ export function ReportFilePreview({
             ) : source ? (
               <pre>{data.content}</pre>
             ) : mime === "text/html" ? (
-              <iframe
-                title={t("htmlPreview")}
-                sandbox="allow-scripts"
-                referrerPolicy="no-referrer"
-                srcDoc={reportPreviewHtml(data.content)}
-              />
+              (() => {
+                const page = (
+                  <iframe
+                    title={t("htmlPreview")}
+                    sandbox="allow-scripts"
+                    referrerPolicy="no-referrer"
+                    srcDoc={reportPreviewHtml(data.content)}
+                  />
+                );
+                return file.siteReport ? (
+                  <SavedSiteReport
+                    key={file.siteReport.reportId}
+                    projectId={file.siteReport.projectId}
+                    reportId={file.siteReport.reportId}
+                    fallback={page}
+                  />
+                ) : (
+                  page
+                );
+              })()
             ) : image ? (
               <img
                 alt={file.title}

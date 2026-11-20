@@ -26,6 +26,7 @@ export const managementReviewMessages = defineMessages({
   "sec.profile": "The average 24 hours",
   "sec.savings": "Saving energy: what it could be worth",
   "sec.method": "Method and data",
+  "doc.feedback.headline": "Headline and key figures",
 
   "kf.typicalDay": "a typical day",
   "kf.month": "a 30-day month",
@@ -243,6 +244,7 @@ export const managementReviewMessages = defineMessages({
     "sec.profile": "平均的 24 小时",
     "sec.savings": "节能：可能值多少",
     "sec.method": "方法与数据",
+    "doc.feedback.headline": "标题与关键数字",
 
     "kf.typicalDay": "典型的一天",
     "kf.month": "30 天的一个月",
@@ -457,6 +459,7 @@ export const managementReviewMessages = defineMessages({
     "sec.profile": "Purata 24 jam",
     "sec.savings": "Menjimatkan tenaga: berapa nilainya",
     "sec.method": "Kaedah dan data",
+    "doc.feedback.headline": "Tajuk utama dan angka utama",
 
     "kf.typicalDay": "hari biasa",
     "kf.month": "sebulan 30 hari",

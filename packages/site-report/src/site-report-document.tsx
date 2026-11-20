@@ -15,6 +15,7 @@ import { clock, hourRange, kwhText, moneyText, pctText, REPORT_COLOURS as C, typ
 import { siteReportMessages } from "./site-report-messages.js";
 import { REPORT_CSS } from "./site-report-styles.js";
 import { wrapLabel } from "./wrap-label.js";
+import { SectionFeedbackButton, SectionFeedbackContext, SectionFeedbackSlot, type ReportSectionFeedback } from "./section-feedback.js";
 import { innerBox, pointsAttribute, polygonOf, spatialShapes } from "@datafoundry/contracts";
 
 export { Rich };
@@ -551,11 +552,16 @@ function circuitsByGroup(report: SiteReport, noGroup: string) {
 }
 
 // ---------- the document ----------
+/** A section's heading line, with its "Give feedback" button at the right on the live page (none on a saved copy). */
+const SectionHead = ({ id, number, title }: { id: string; number: number; title: string }) =>
+  <div className="sec-head"><span className="num">{number}</span><h2>{title}</h2><SectionFeedbackButton id={id} className="rp-fb" /></div>;
+
 /**
  * The report itself, from one `SiteReport` and nothing else. `standalone` is for a saved copy: it leaves out the
- * hover readouts, which a file nobody is pointing at would never show anyway.
+ * hover readouts, which a file nobody is pointing at would never show anyway. `sectionFeedback`: on the live page, each
+ * section (and the headline with its key figures) offers "Give feedback" (section-feedback.tsx); never on a saved copy.
  */
-export function SiteReportDocument({ report, standalone }: { report: SiteReport; standalone?: boolean | undefined }) {
+export function SiteReportDocument({ report, standalone, sectionFeedback }: { report: SiteReport; standalone?: boolean | undefined; sectionFeedback?: ReportSectionFeedback | undefined }) {
   const { estimate, benchmark, pattern, screening, locale } = report;
   const t = reportHoursText(report);
   const rate = report.rate;
@@ -571,7 +577,13 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
     <td className="r">{whole(circuit.periodKwh)}</td>
     <td className={`r${hot ? " hot" : ""}`}>{circuit.fullDays === 0 ? "—" : whole(circuit.monthKwh)}</td>{rate != null && <td className={`r${hot ? " hot" : ""}`}>{circuit.monthCost == null || circuit.fullDays === 0 ? "—" : moneyText(circuit.monthCost, report.currency)}</td>}
   </tr>;
-  return <article className="eiq-report" aria-label={t("doc.aria", { name: report.projectName })}>
+  // Each section's name as the report numbers it ("2 A 30-day month: estimated use and bill"), for the feedback it is given.
+  const titles: Record<string, string> = {
+    headline: t("doc.feedback.headline"), "site-profile": `1 ${t("doc.section.profile")}`, estimate: `2 ${t("doc.section.estimate")}`,
+    benchmark: `3 ${t("doc.section.benchmark")}`, "weekday-pattern": `4 ${t("doc.section.pattern")}`, screening: `5 ${t("doc.section.screening")}`,
+  };
+  const feedbackContext = !standalone && sectionFeedback ? { feedback: sectionFeedback, titleOf: (id: string) => titles[id] ?? id } : null;
+  return <SectionFeedbackContext.Provider value={feedbackContext}><article className="eiq-report" aria-label={t("doc.aria", { name: report.projectName })}>
     <div className="page">
       <header className="masthead">
         <div className="doc-line">
@@ -581,11 +593,14 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
         <h1>{report.title.before}<span>{report.title.emphasis}</span></h1>
         <p className="lede"><Rich text={report.lede} /></p>
         {!empty && <div className="keyfigs">{report.keyFigures.map(figure => <div key={figure.label}><b>{figure.value}</b><small>{figure.label}</small></div>)}</div>}
+        <SectionFeedbackButton id="headline" className="rp-fb" />
+        <SectionFeedbackSlot id="headline" />
       </header>
 
       {!empty && <>
       <section id="site-profile">
-        <div className="sec-head"><span className="num">1</span><h2>{t("doc.section.profile")}</h2></div>
+        <SectionHead id="site-profile" number={1} title={t("doc.section.profile")} />
+        <SectionFeedbackSlot id="site-profile" />
         <p><Rich text={report.profile.intro} /></p>
         <div className="zones">{report.profile.zones.map(zone => <p key={zone.heading}><strong>{zone.heading}</strong>{t("doc.zoneSeparator")}<Rich text={zone.text} /></p>)}</div>
         {report.groups && <GroupTable report={report} />}
@@ -595,7 +610,8 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
       </section>
 
       <section id="estimate">
-        <div className="sec-head"><span className="num">2</span><h2>{t("doc.section.estimate")}</h2></div>
+        <SectionHead id="estimate" number={2} title={t("doc.section.estimate")} />
+        <SectionFeedbackSlot id="estimate" />
         <p><Rich text={estimate.intro} /></p>
         <div className="table-wrap"><table>
           <thead><tr><th>{t("doc.col.feeds")}</th><th className="r">{t("doc.col.weekday")}</th><th className="r">{t("doc.col.weekend")}</th><th className="r">{t("doc.col.recorded", { days: report.dayCount })}</th><th className="r">{t("doc.col.month")}</th>{rate != null && <th className="r">{t("doc.col.cost")}</th>}</tr></thead>
@@ -637,7 +653,8 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
       </section>
 
       <section id="benchmark">
-        <div className="sec-head"><span className="num">3</span><h2>{t("doc.section.benchmark")}</h2></div>
+        <SectionHead id="benchmark" number={3} title={t("doc.section.benchmark")} />
+        <SectionFeedbackSlot id="benchmark" />
         <p><Rich text={benchmark.intro} /></p>
         {benchmark.days.length > 0 && <BenchChart benchmark={benchmark} locale={locale} standalone={standalone} />}
         {/* Days stand out against other days; a one-day report has none to compare with. */}
@@ -650,7 +667,8 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
       </section>
 
       <section id="weekday-pattern">
-        <div className="sec-head"><span className="num">4</span><h2>{t("doc.section.pattern")}</h2></div>
+        <SectionHead id="weekday-pattern" number={4} title={t("doc.section.pattern")} />
+        <SectionFeedbackSlot id="weekday-pattern" />
         {pattern ? <>
           <p><Rich text={pattern.intro} /></p>
           {pattern.cause && <p><strong>{t("doc.lunchCause")}</strong> <Rich text={pattern.cause} /></p>}
@@ -660,7 +678,8 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
       </section>
 
       <section id="screening">
-        <div className="sec-head"><span className="num">5</span><h2>{t("doc.section.screening")}</h2></div>
+        <SectionHead id="screening" number={5} title={t("doc.section.screening")} />
+        <SectionFeedbackSlot id="screening" />
         <p><Rich text={screening.intro} /></p>
         <div className="table-wrap"><table>
           <thead><tr><th>{t("doc.col.feeds")}</th><th className="r">{t("doc.col.openBase")}</th><th className="r">{t("doc.col.closedBase")}</th><th>{t("doc.col.result")}</th></tr></thead>
@@ -673,7 +692,7 @@ export function SiteReportDocument({ report, standalone }: { report: SiteReport;
 
       <footer><span>{report.footer.left}</span><span>{report.footer.right}</span></footer>
     </div>
-  </article>;
+  </article></SectionFeedbackContext.Provider>;
 }
 
 const escapeHtml = (text: string) => text.replace(/[&<>"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]!);

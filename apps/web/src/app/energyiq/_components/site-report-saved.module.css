@@ -1,0 +1,6 @@
+/* A site report opened in Reports, drawn on the page: the white report, then "Tell the AI about this report". */
+.saved{min-height:100%;background:#fff}
+.after{padding:4px 20px 28px;background:#f7f8f5;border-top:1px solid #e3e6e1}
+.message{margin:0;padding:24px;font-size:14px;color:#5b6d63}
+:global(html[data-energyiq-theme="dark"]) .after{background:#1d1d1e;border-top-color:#373737}
+:global(html[data-energyiq-theme="dark"]) .message{color:#9cb0a5}

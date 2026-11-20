@@ -17,7 +17,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { readProjectSpatialReference, type ProjectSpatialReference } from "@datafoundry/contracts";
 import { buildEnergyReview, parseSiteReportSnapshot, writtenStyleOf, type EnergyReview, type EnergyReviewCheck, type SiteReportCadence } from "@datafoundry/site-report";
-import { ENERGY_REVIEW_CSS, EnergyReviewDocument, energyReviewFileName, renderEnergyReviewHtml, type ReviewSectionFeedback } from "@datafoundry/site-report/energy-review-document";
+import { ENERGY_REVIEW_CSS, EnergyReviewDocument, energyReviewFileName, renderEnergyReviewHtml } from "@datafoundry/site-report/energy-review-document";
+import { REPORT_SECTION_FEEDBACK_CSS, type ReportSectionFeedback } from "@datafoundry/site-report/section-feedback";
 import { renderSiteReportHtml, siteReportFileName, SiteReportDocument } from "@datafoundry/site-report/site-report-document";
 import { configApi } from "../../../lib/config-api";
 import { loadAnalysis, type AnalysisData } from "./analysis-data";
@@ -192,11 +193,12 @@ export function useSiteReport(projectId: string, period: Period, enabled = true,
 
 /**
  * The report as shown on the Overview, with a download of the same page as one HTML file. `onCheckFeedback` puts a
- * "Tell the AI about this" button on each point to check of the energy review.
+ * "Tell the AI about this" button on each point to check of the energy review; `sectionFeedback` a "Give feedback"
+ * button on each section of the report on screen (the energy review or the full report) and on highlighted text.
  */
 export function SiteReportPanel({ state, onRetry, projectId, saved, onCheckFeedback, sectionFeedback }: { state: SiteReportState; onRetry: () => void; projectId?: string; saved?: SavedSiteReport | null; onCheckFeedback?: ((check: ReportCheckRef) => void) | undefined;
-  /** Feedback on each section of the energy review, and on highlighted text in it (see report-section-feedback). */
-  sectionFeedback?: { sectionFeedback: ReviewSectionFeedback | undefined; overlay: ReactNode; onPointerUp: (event: PointerEvent) => void; onKeyUp: (event: KeyboardEvent) => void } | undefined }) {
+  /** Feedback on each section of the report, and on highlighted text in it (see report-section-feedback). */
+  sectionFeedback?: { sectionFeedback: ReportSectionFeedback | undefined; overlay: ReactNode; onPointerUp: (event: PointerEvent) => void; onKeyUp: (event: KeyboardEvent) => void } | undefined }) {
   const t = useMessages(siteReportMessages);
   const { locale } = useEnergyIqLocale();
   const report = state && "report" in state ? state.report : null;
@@ -212,7 +214,7 @@ export function SiteReportPanel({ state, onRetry, projectId, saved, onCheckFeedb
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   };
   return <section className={styles.fullReport} aria-label={t("panel.aria")}>
-    <style>{review ? ENERGY_REVIEW_CSS : REPORT_CSS}</style>
+    <style>{review ? ENERGY_REVIEW_CSS : `${REPORT_CSS}${REPORT_SECTION_FEEDBACK_CSS}`}</style>
     <header>
       <div><h2>{t("panel.title")}</h2><p>{report ? t(review ? "panel.summaryReview" : "panel.summaryPeriod", { period: report.masthead.period }) : t("panel.summary")}</p>
         {/* Which report this is: the saved one everybody can open again, or one built here because none exists yet. */}
@@ -227,9 +229,9 @@ export function SiteReportPanel({ state, onRetry, projectId, saved, onCheckFeedb
         <p>{state.error.fixTab && projectId ? <Link href={`/energyiq/project-configuration?${new URLSearchParams({ projectId, tab: state.error.fixTab })}`}>{t("problem.openFacility")}</Link> : null}<button type="button" onClick={onRetry}>{t("panel.retry")}</button></p>
       </div>
       : !report ? <p role="status" className={styles.reportMessage}>{t("panel.loading")}</p>
-      : <div onPointerUp={review ? sectionFeedback?.onPointerUp : undefined} onKeyUp={review ? sectionFeedback?.onKeyUp : undefined}>
-        {review ? <EnergyReviewDocument review={review} onCheckFeedback={onCheckFeedback} sectionFeedback={sectionFeedback?.sectionFeedback} /> : <SiteReportDocument report={report} />}
-        {review && sectionFeedback?.overlay}
+      : <div onPointerUp={sectionFeedback?.onPointerUp} onKeyUp={sectionFeedback?.onKeyUp}>
+        {review ? <EnergyReviewDocument review={review} onCheckFeedback={onCheckFeedback} sectionFeedback={sectionFeedback?.sectionFeedback} /> : <SiteReportDocument report={report} sectionFeedback={sectionFeedback?.sectionFeedback} />}
+        {sectionFeedback?.overlay}
       </div>}
   </section>;
 }

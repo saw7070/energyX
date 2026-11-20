@@ -9,7 +9,7 @@
  * the panel, rather than with the shared API types.
  */
 import { useCallback, useEffect, useState } from "react";
-import { energyReviewCheckTitle, type EnergyReview } from "@datafoundry/site-report";
+import { energyReviewCheckTitle, type EnergyReview, type ManagementReview } from "@datafoundry/site-report";
 import { configApi, ConfigApiError } from "../../../lib/config-api";
 import { intlLocale, type EnergyIqLocale, type Translate } from "./energyiq-messages";
 import type { reportFeedbackMessages } from "./report-feedback-messages";
@@ -155,11 +155,15 @@ export const reportFeedbackApi = {
 
 const clip = (text: string) => text.length > CONTEXT_MAX_TEXT ? text.slice(0, CONTEXT_MAX_TEXT) : text;
 
+/** A sentence as the reader sees it: the report marks bold words with **…**. */
+const plainText = (text: string) => text.replace(/\*\*(.+?)\*\*/g, "$1");
+
 /**
  * The checks and headline figures of the report on screen, within the API's limits (40 checks, 20 figures, 300
- * characters each). The energy review gives both; the full report gives its key figures. Null when there is nothing.
+ * characters each). The energy review gives both; the full report gives its key figures; the management review its
+ * headline, key figures and findings. The first report given is the one on screen. Null when there is nothing.
  */
-export function reportContextOf(review: EnergyReview | null | undefined, report: SiteReport | null | undefined): ReportContext | null {
+export function reportContextOf(review: EnergyReview | null | undefined, report: SiteReport | null | undefined, management?: ManagementReview | null | undefined): ReportContext | null {
   const checks = review?.checks ?? [];
   const figures = review
     ? [
@@ -168,7 +172,9 @@ export function reportContextOf(review: EnergyReview | null | undefined, report:
     ]
     : report
       ? [...(report.headline ? [report.headline] : []), ...report.keyFigures.map(figure => `${figure.label}: ${figure.value}`)]
-      : [];
+      : management
+        ? [management.title, ...management.keyFigures.map(figure => `${figure.label}: ${figure.value}`), ...management.summary.findings.map(plainText)]
+        : [];
   const context: ReportContext = {
     // Each check is named back to the report by its stable key ("stopped:<meterId>", "daytime"…).
     checks: checks.filter(check => check.key).map(check => ({ key: clip(check.key), title: clip(check.title) })).slice(0, CONTEXT_MAX_CHECKS),
