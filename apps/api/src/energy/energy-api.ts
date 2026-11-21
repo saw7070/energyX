@@ -71,6 +71,7 @@ import {
   executeEnergyScopeAnalysisWithLatestAvailable,
   resolveEnergyCurrentOverviewPeriodBasis,
   selectEnergyCurrentOverviewPeriod,
+  laterCutoff,
   selectEnergyFirstReadingDay,
   selectEnergyLatestAvailableDay,
   selectEnergyLatestCompleteDay,
@@ -343,39 +344,29 @@ const resolveExplorerAnchoredWindow = async (
   },
 ): Promise<{ localFrom: string; localTo: string }> => {
   if (input.analysisWindow === "current-overview-28d" || input.analysisWindow === "current-month-to-date") {
-    try {
-      const selected = await selectEnergyCurrentOverviewPeriod({
-        ...input,
-        periodBasis: resolveEnergyCurrentOverviewPeriodBasis(input.analysisWindow),
-      });
-      return await startExplorerWindowOnFirstReading(input, {
-        localFrom: selected.period.localFrom,
-        localTo: selected.cutoffLocalDate,
-      });
-    } catch (error) {
-      if (!(error instanceof Error) || (
-        error.message !== "ENERGYIQ_CURRENT_OVERVIEW_COVERAGE_NOT_FOUND"
-        && error.message !== "ENERGYIQ_CURRENT_OVERVIEW_PERIOD_NOT_FOUND"
-      )) {
+    const periodBasis = resolveEnergyCurrentOverviewPeriodBasis(input.analysisWindow);
+    const select = async (minimumValidShare?: number) => {
+      try {
+        return await selectEnergyCurrentOverviewPeriod({ ...input, periodBasis, ...(minimumValidShare === undefined ? {} : { minimumValidShare }) });
+      } catch (error) {
+        if (error instanceof Error && error.message === "ENERGYIQ_CURRENT_OVERVIEW_PERIOD_NOT_FOUND") return null;
         throw error;
       }
-      // No day where every meter reported in full (one meter offline is enough). These pages show each meter's own
-      // gaps, so end the window on the latest day with at least half its readings rather than on a single day.
-      if (error.message === "ENERGYIQ_CURRENT_OVERVIEW_PERIOD_NOT_FOUND") {
-        try {
-          const mostly = await selectEnergyCurrentOverviewPeriod({
-            ...input,
-            periodBasis: resolveEnergyCurrentOverviewPeriodBasis(input.analysisWindow),
-            minimumValidShare: EXPLORER_MINIMUM_VALID_SHARE,
-          });
-          return await startExplorerWindowOnFirstReading(input, {
-            localFrom: mostly.period.localFrom,
-            localTo: mostly.cutoffLocalDate,
-          });
-        } catch (relaxed) {
-          if (!(relaxed instanceof Error) || relaxed.message !== "ENERGYIQ_CURRENT_OVERVIEW_PERIOD_NOT_FOUND") throw relaxed;
-        }
+    };
+    try {
+      // The latest day every meter reported in full, or a later day with at least half its readings. These pages show
+      // each meter's own gaps, so one meter offline (for days, or since the site started) must not hold the window on
+      // the last day everything worked, nor shrink it to a single day.
+      const [full, mostly] = await Promise.all([select(), select(EXPLORER_MINIMUM_VALID_SHARE)]);
+      const chosen = laterCutoff(full, mostly);
+      if (chosen) {
+        return await startExplorerWindowOnFirstReading(input, {
+          localFrom: chosen.period.localFrom,
+          localTo: chosen.cutoffLocalDate,
+        });
       }
+    } catch (error) {
+      if (!(error instanceof Error) || error.message !== "ENERGYIQ_CURRENT_OVERVIEW_COVERAGE_NOT_FOUND") throw error;
     }
   } else {
     try {
