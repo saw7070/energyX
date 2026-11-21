@@ -247,3 +247,32 @@ describe("site reports in the list", () => {
     expect([...container.querySelectorAll("button")].some(button => /advisor|Discuss/i.test(button.textContent ?? ""))).toBe(false);
   });
 });
+
+describe("deleting a report", () => {
+  it("offers Delete only where allowed, asks first, then removes the report and closes its preview", async () => {
+    const reports = [{ ...library.reports[0], canDelete: true }, { ...library.reports[1], canDelete: false }];
+    let current = { ...library, canChat: true, reports };
+    mock.library.mockImplementation(async (_id, path = "", init?: RequestInit) => {
+      if (init?.method === "DELETE") { current = { ...current, reports: current.reports.filter(report => report.id !== reports[0]!.id) }; return { deleted: [reports[0]!.id] }; }
+      return path.startsWith("output/") ? { content: "<html><body>Project report</body></html>" } : current;
+    });
+    await act(async () => root.render(<ReportLibraryView projectId="p1" view="reports" />));
+    expect(container.querySelector(`[aria-label="Delete ${reports[1]!.title}"]`)).toBeNull();
+    await act(async () => container.querySelector<HTMLButtonElement>(`[aria-label="Open ${reports[0]!.title}"]`)!.click());
+    expect(container.querySelector("aside iframe")).not.toBeNull();
+
+    await act(async () => container.querySelector<HTMLButtonElement>(`[aria-label="Delete ${reports[0]!.title}"]`)!.click());
+    const dialog = container.querySelector("dialog")!;
+    expect(dialog.getAttribute("aria-label")).toBe("Delete this report?");
+    expect(dialog.textContent).toContain(`“${reports[0]!.title}” will be removed from Reports for everyone`);
+    expect(mock.library).not.toHaveBeenCalledWith("p1", expect.stringMatching(/^report\//), expect.anything());
+
+    const confirm = [...dialog.querySelectorAll("button")].find(button => button.textContent === "Delete report")!;
+    await act(async () => confirm.click());
+    expect(mock.library).toHaveBeenCalledWith("p1", `report/${reports[0]!.id}`, { method: "DELETE" });
+    expect(container.querySelector("dialog")).toBeNull();
+    expect(container.querySelector("aside iframe")).toBeNull();
+    expect(container.querySelector('[role="status"]')?.textContent).toBe("Report deleted.");
+    expect(container.querySelector(`[aria-label="Open ${reports[0]!.title}"]`)).toBeNull();
+  });
+});

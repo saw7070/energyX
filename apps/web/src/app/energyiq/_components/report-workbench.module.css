@@ -992,6 +992,11 @@
 .reportTags > .tagAutomatic { background: #17563f; color: #f2f8f4; }
 .versions { margin: 8px 4px 0; color: #5b665f; font-size: 12.5px; }
 .versions summary { cursor: pointer; }
+.reportDelete { display: inline-flex; align-self: flex-end; align-items: center; gap: 5px; margin: 6px 4px 0; padding: 4px 8px; border: 0; border-radius: 8px; background: transparent; color: #8a4a3f; font-size: 12.5px; font-weight: 500; cursor: pointer; }
+.reportDelete svg { width: 14px; height: 14px; }
+.reportDelete:hover { background: #fbeeec; color: #9b2c1f; }
+.reportDelete:focus-visible { outline: 2px solid #9b2c1f; outline-offset: 2px; }
+.reportNotice { margin: 0 0 12px; color: #2f5d43; font-size: 13.5px; }
 .libraryScroll .featuredReport { grid-column: 1 / -1; }
 .featuredReport .document { display: grid; grid-template-columns: minmax(280px, 380px) minmax(0, 1fr); }
 .featuredReport .paper { padding: 22px 26px 0; border-right: 1px solid #e1e6e2; border-bottom: 0; }
@@ -1678,6 +1683,10 @@
 :global(:where(html[data-energyiq-theme="dark"])) .reportTags > span { border-radius:999px; background:#1d201d; color:#acb9b1; }
 :global(:where(html[data-energyiq-theme="dark"])) .reportTags > .tagAutomatic { background:#17563f; color:#f2f8f4; }
 :global(:where(html[data-energyiq-theme="dark"])) .versions { color:#a4b0a8; }
+:global(:where(html[data-energyiq-theme="dark"])) .reportDelete { border:0; border-radius:8px; background:transparent; color:#e19a8c; }
+:global(:where(html[data-energyiq-theme="dark"])) .reportDelete:hover { background:#251c1b; color:#f49383; }
+:global(:where(html[data-energyiq-theme="dark"])) .reportDelete:focus-visible { outline:2px solid #9b2c1f; }
+:global(:where(html[data-energyiq-theme="dark"])) .reportNotice { color:#92c3a4; }
 :global(:where(html[data-energyiq-theme="dark"])) .featuredReport .paper { border-right:1px solid #323633; border-bottom:0; }
 :global(:where(html[data-energyiq-theme="dark"])) .eyebrow { color:#6abe97; }
 :global(:where(html[data-energyiq-theme="dark"])) .featuredReport .coverage { border-radius:9px; }
