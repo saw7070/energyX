@@ -1073,9 +1073,17 @@ export const resolveEnergyLatestAvailablePeriod = async (
 };
 
 /**
+ * Of two window selections, the one that ends later: the latest day every meter reported in full, unless a later
+ * finished day has at least half its readings. One meter offline for days otherwise holds the window on the last day
+ * everything worked. On the same day the full-readings selection is kept.
+ */
+export const laterCutoff = <T extends { cutoffLocalDate: string }>(full: T | null, mostly: T | null): T | null =>
+  !full ? mostly : !mostly ? full : mostly.cutoffLocalDate > full.cutoffLocalDate ? mostly : full;
+
+/**
  * The current overview window ends on the latest day every official meter reported in full. `minimumValidShare`
- * (0–1) relaxes that to the latest day with at least that share of its readings, for pages that show each meter's
- * own gaps and would otherwise fall back to a single day when one meter is offline.
+ * (0–1) relaxes that to the latest finished day with at least that share of its readings, for pages that show each
+ * meter's own gaps and would otherwise stop at the last day before one meter went offline.
  */
 export const selectEnergyCurrentOverviewPeriod = async (
   input: EnergyPeriodSelectionInput & { periodBasis: EnergyCurrentOverviewPeriodBasis; minimumValidShare?: number },
@@ -5901,9 +5909,11 @@ const currentOverviewPeriodSelectionSql = (
 ): string => {
   const rollingDays = periodBasis === "rolling_7_days" ? 7 : CURRENT_OVERVIEW_PERIOD_DAYS;
   const share = minimumValidShare === undefined ? undefined : Math.min(1, Math.max(0, minimumValidShare));
+  // A day that is still going (today, after a sync during the day) can have half its readings without being over.
   const dayPredicate = share === undefined
     ? "valid_interval_count = expected_interval_count AND quality_event_count = 0"
-    : `valid_interval_count >= CEIL(${share} * expected_interval_count)`;
+    : `valid_interval_count >= CEIL(${share} * expected_interval_count)
+    AND local_date < CAST(TIMEZONE(${sqlLiteral(timezone)}, CURRENT_TIMESTAMP) AS DATE)`;
   const localFromExpression = periodBasis === "rolling_7_days" || periodBasis === "rolling_28_days"
     ? `local_date - INTERVAL ${rollingDays - 1} DAY`
     : "DATE_TRUNC('month', local_date)";
