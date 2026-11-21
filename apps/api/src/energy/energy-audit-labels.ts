@@ -56,6 +56,7 @@ export const AUDIT_EVENT_LABELS: Readonly<Record<string, string>> = {
   "energyiq.report_schedule_changed": "Changed a scheduled report email",
   "energyiq.report_email_sent": "Sent a scheduled report email",
   "energyiq.report_feedback_applied": "Applied a change the AI suggested from report feedback",
+  "energyiq.report_deleted": "Deleted a report",
   "energyiq.ai_used": "Used AI",
   "energyiq.ai_blocked": "AI request refused",
   "energyiq.ai_settings_changed": "Changed AI settings",

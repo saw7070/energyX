@@ -22,9 +22,10 @@ import styles from "./report-workbench.module.css";
 import layout from "./report-library-layout.module.css";
 import { ReportScheduleNote } from "./report-schedule-note";
 import { SiteReportCreateDialog } from "./site-report-create";
+import { ConfirmDialog } from "./confirm-dialog";
 // `source` says who wrote a report: "site" reports are the ones the server writes for the whole site on the schedule
 // and the Overview shows; "advisor" reports are the ones somebody asked for.
-type Report = { canDiscuss?: boolean; previousReportId?: string; id: string; kind: "report"; period: { from: string; toExclusive: string }; createdAt: string; finishedAt?: string; parentRunId?: string; category: "scheduled" | "custom"; version: number; title: string; source?: "site" | "advisor"; cadence?: "daily" | "weekly" | "monthly"; style?: "management" | "review" };
+type Report = { canDiscuss?: boolean; canDelete?: boolean; previousReportId?: string; id: string; kind: "report"; period: { from: string; toExclusive: string }; createdAt: string; finishedAt?: string; parentRunId?: string; category: "scheduled" | "custom"; version: number; title: string; source?: "site" | "advisor"; cadence?: "daily" | "weekly" | "monthly"; style?: "management" | "review" };
 type Skill = { id?: string; revision?: number; isDefault?: boolean; required?: boolean; readOnly?: boolean; scope?: "general" | "project" | "personal"; category?: "analysis" | "presentation" | "other"; name: string; version: string; content: string; sourceRunId?: string; sourceSessionId?: string; projectId: string };
 export type Artifact = { runId: string; filename: string; mimeType: string; bytes: number; encoding: "utf8" | "base64"; createdAt: string };
 export type ReportLibrary = { reports: Report[]; skills: Skill[]; tools: Array<{ name: string; description: string }>; canChat: boolean; canManageProject?: boolean; canUseActions?: boolean; artifacts?: Artifact[]; overviewCadence?: "weekly" | "monthly" };
@@ -52,6 +53,8 @@ function ProjectLibrary({ projectId, view }: { projectId: string; view: "reports
   const [saving, setSaving] = useState(false); const [notice, setNotice] = useState("");
   const [library, setLibrary] = useState<ReportLibrary | null>(null); const [error, setError] = useState(""); const [revision, setRevision] = useState(0);
   const [creating, setCreating] = useState(false);
+  // The report somebody asked to delete, while the confirm step is open.
+  const [deleting, setDeleting] = useState<Report | null>(null); const [deleteBusy, setDeleteBusy] = useState(false);
   const [file, setFile] = useState<PreviewFile | null>(null); const [search, setSearch] = useState(""); const [page, setPage] = useState(0); const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null); const [skillSourceView,setSkillSourceView] = useState(false); const [skillsTab, setSkillsTab] = useState<"skills" | "tools">("skills");
   useEffect(() => { const controller = new AbortController(); setError(""); configApi.reportLibraryRequest<ReportLibrary>(projectId, requestedReport ? `?reportId=${encodeURIComponent(requestedReport)}` : "", { signal: controller.signal }).then(data => { if (!controller.signal.aborted) setLibrary(data); }).catch(reason => { if (!controller.signal.aborted) { setLibrary(null); setFile(null); setError(friendly(reason, t("libraryUnavailable"))); } }); return () => controller.abort(); }, [projectId, revision, requestedReport]);
   useEffect(()=>{if(view!=="reports" || knowledgeTab==="reports")return;const controller=new AbortController();configApi.reportAgentRequest<{settings:{fileRefIds:string[];contextNotes:string};files:Array<{id:string;filename:string;bytes:number}>}>(projectId,"",{signal:controller.signal}).then(data=>{if(!controller.signal.aborted)setMaterials(data);}).catch(()=>{if(!controller.signal.aborted)setError(t("materialsLoadFailed"));});return()=>controller.abort();},[projectId,knowledgeTab,view,revision]);
@@ -67,6 +70,15 @@ function ProjectLibrary({ projectId, view }: { projectId: string; view: "reports
       await configApi.reportAgentRequest(projectId, "skills/default", { method: "POST", body: JSON.stringify({ id: skill.id, version: skill.version, revision: data.settings.revision }) });
       setRevision(value => value + 1); setNotice(skill.category === "presentation" ? t("styleUpdated") : t("methodUpdated")); setSelectedSkill(null);
     } catch (reason) { setError(friendly(reason, t("defaultUpdateFailed"))); } finally { setSaving(false); }
+  }
+  async function deleteReport(report: Report) {
+    setDeleteBusy(true); setError(""); setNotice("");
+    try {
+      const result = await configApi.reportLibraryRequest<{ deleted: string[] }>(projectId, `report/${encodeURIComponent(report.id)}`, { method: "DELETE" });
+      // Earlier versions go with the report; close the preview if it shows any of them.
+      if (file && new Set([report.id, ...result.deleted]).has(file.id)) closeReport();
+      setDeleting(null); setNotice(t("reportDeleted")); setRevision(value => value + 1);
+    } catch (reason) { setDeleting(null); setError(friendly(reason, t("deleteFailed"))); } finally { setDeleteBusy(false); }
   }
   // Category is saved as an English word; only its label is translated.
   const categoryLabel = (category?: string) => category === "analysis" ? t("categoryAnalysis") : category === "presentation" ? t("categoryPresentation") : !category || category === "other" ? t("categoryOther") : category;
@@ -131,6 +143,7 @@ function ProjectLibrary({ projectId, view }: { projectId: string; view: "reports
         <label className={styles.switch}><input type="checkbox" role="switch" checked={showVersions} onChange={e=>{setShowVersions(e.target.checked);setPage(0);}} /><span aria-hidden="true" />{t("showEarlierVersions")}</label>
         <span className={styles.reportCount}>{t(shown.length === 1 ? "reportCountOne" : "reportCountOther", { count: shown.length })}</span>
       </div>
+      {notice && <p role="status" className={styles.reportNotice}>{notice}</p>}
       {!shown.length ? <div className={styles.reportsEmpty}><EnergyIcon name="document" /><strong>{search ? t("noSearchMatch") : kind === "scheduled" ? t("filterAutomatic") : t("noReports")}</strong>{!search && <p>{kind === "scheduled" ? t("noneOfKind") : t("askForFirstReport")}</p>}</div> : [...groups].map(([day,items],groupIndex)=><section key={day} aria-label={t("reportsGenerated", { day })} className={styles.reportDay}><h2>{t("groupCreated", { day: new Date(`${day}T12:00:00Z`).toLocaleDateString(dateLocale(locale, "en-GB"),{timeZone:"Asia/Singapore",day:"numeric",month:"long",year:"numeric"}) })}</h2><div className={styles.grid}>{items.map((report,index)=>{
         const previewFile=reportFile(projectId,report,locale);const previous=previousVersions(report);
         // The newest report on the first page is shown wide, in place of its normal card.
@@ -148,6 +161,7 @@ function ProjectLibrary({ projectId, view }: { projectId: string; view: "reports
             </span>
           </button>
           {!showVersions && previous.length>0 && <details className={styles.versions}><summary>{t("earlierVersions", { count: previous.length })}</summary>{previous.map(item=><button key={item.id} className={styles.activityLink} onClick={()=>openReport(item)}>v{item.version} · {formatPeriod(item.period.from, shiftDate(item.period.toExclusive,-1), locale)} · {t("generatedAt", { time: dayKey(item) })}</button>)}</details>}
+          {report.canDelete && <button type="button" className={styles.reportDelete} aria-label={t("deleteNamed", { title: report.title })} onClick={()=>setDeleting(report)}><EnergyIcon name="trash" />{t("deleteReport")}</button>}
         </article>;})}</div></section>)}{shown.length>12 && <nav aria-label={t("reportPages")} className={styles.pagination}><button disabled={!currentPage} onClick={()=>setPage(currentPage-1)}>{t("previous")}</button><span>{t("pageOf", { page: currentPage+1, total: maxPage+1 })}</span><button disabled={currentPage===maxPage} onClick={()=>setPage(currentPage+1)}>{t("next")}</button></nav>}</section>}
     {library && view === "skills" && <>
       <section className={styles.skillGuide} aria-label={t("howToUseSkills")}><div className={layout.guideBody}><h2>{t("reuseHeading")}</h2><p>{t("reuseIntro")}</p><ol><li><strong>{t("stepReadTitle")}</strong>{t("stepReadBody")}</li><li><strong>{t("stepUseTitle")}</strong>{t("stepUseBody")}</li><li><strong>{t("stepKeepTitle")}</strong>{t("stepKeepBody")}</li></ol><p className={styles.muted}>{t("activationNote")}</p></div>{library.canChat && <button onClick={()=>router.push(`/energyiq/reports?${new URLSearchParams({projectId,sessionId:"new"})}`)}>{t("openAdvisor")}</button>}</section>
@@ -162,7 +176,8 @@ function ProjectLibrary({ projectId, view }: { projectId: string; view: "reports
       {editing && <ReportSkillVersionDialog canManageProject={library.canManageProject === true} projectId={projectId} skills={library.skills.filter((skill): skill is Skill & ReportSkillOption => !!skill.id && skill.revision !== undefined)} initial={editing as ReportSkillOption} content={editing.content} onClose={()=>setEditing(null)} onSaved={()=>{setRevision(value=>value+1);setNotice(t("skillVersionSaved"));}} />}
       {skillsTab === "tools" && <section aria-label={t("availableTools")} className={layout.toolsCard}><h2>{t("availableTools")}</h2>{!library.tools.length ? <p className={styles.muted}>{t("noTools")}</p> : <ul>{library.tools.map(tool => <li key={tool.name}><code>{tool.name}</code><p>{tool.description}</p></li>)}</ul>}</section>}
     </>}
-    </div></div>{creating && <SiteReportCreateDialog projectId={projectId} canAskAdvisor={!!library?.canChat} onClose={()=>setCreating(false)}
+    </div></div>{deleting && <ConfirmDialog title={t("deleteTitle")} body={t(deleting.id === overviewReportId ? "deleteBodyOverview" : "deleteBody", { title: deleting.title })} confirmLabel={t("deleteConfirm")} cancelLabel={t("deleteCancel")} destructive busy={deleteBusy}
+      onCancel={()=>setDeleting(null)} onConfirm={()=>void deleteReport(deleting)} />}{creating && <SiteReportCreateDialog projectId={projectId} canAskAdvisor={!!library?.canChat} onClose={()=>setCreating(false)}
       onAskAdvisor={()=>{setCreating(false);router.push(`/energyiq/reports?${new URLSearchParams({projectId,sessionId:"new"})}`);}}
       onCreated={id=>{setCreating(false);setRevision(value=>value+1);router.replace(`/energyiq/library?${new URLSearchParams({projectId,reportId:id})}`,{scroll:false});}} />}{file && <ReportFilePreview actions={library?.canUseActions === true && library.reports.some(item=>item.id===file.id) ? <ReportActionPanel key={`${projectId}:${file.id}`} projectId={projectId} reportId={file.id} /> : undefined} aiNote={library?.reports.some(item=>item.id===file.id && item.source !== "site") ? <AiAnswerNote compact targetKind="report" targetId={file.id} projectId={projectId} /> : undefined} notice={library?.reports.find(item=>item.id===file.id)?.source === "site" ? t("siteReportNotice") : library?.reports.find(item=>item.id===file.id)?.canDiscuss === false ? t("sharedReportNotice") : undefined} onDiscuss={library?.canChat && library.reports.some(item=>item.id===file.id && item.canDiscuss !== false) ? ()=>{router.push(`/energyiq/reports?${new URLSearchParams({projectId,sessionId:"new",reportId:file.id})}`);} : undefined} file={file} onClose={closeReport} />}</div>;
 }

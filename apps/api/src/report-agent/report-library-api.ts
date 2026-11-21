@@ -1,11 +1,12 @@
 import { reportSkillCatalog } from "./report-skill-catalog.js";
 import { createErrorResult, createSuccessResult } from "@datafoundry/contracts";
+import { randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type { MetadataStore } from "@datafoundry/metadata";
 import type { ConfigApiContext, ConfigApiResponse } from "../routes/types.js";
 import { authorizeReportConversation } from "./report-access.js";
 import { listReportArtifacts, readReportArtifact } from "./report-artifacts.js";
-import { hasReportArtifact, type ReportRun } from "./report-store.js";
+import { hasReportArtifact, type ReportRun, type ReportStore } from "./report-store.js";
 import { findReportService } from "./report-service.js";
 import { canUseActions } from "./action-access.js";
 
@@ -31,9 +32,22 @@ export async function handleReportLibraryApi(request: IncomingMessage, segments:
   try {
     const projectId = segments[0] ? decodeURIComponent(segments[0]) : "";
     const { canChat, canManageProject } = authorizeReportLibraryProject(context.metadataStore, context.userId, context.workspaceId, projectId);
-    if (request.method !== "GET") return { status: 405, headers: { ...headers, Allow: "GET" }, body: createErrorResult("BAD_REQUEST", "REPORT_LIBRARY_READ_ONLY") };
+    const deleting = request.method === "DELETE" && segments.length === 3 && segments[1] === "report";
+    if (request.method !== "GET" && !deleting) return { status: 405, headers: { ...headers, Allow: segments[1] === "report" ? "DELETE" : "GET" }, body: createErrorResult("BAD_REQUEST", "REPORT_LIBRARY_READ_ONLY") };
     const service = findReportService(context.metadataStore);
     if (!service) return { status: 503, headers, body: createErrorResult("NOT_ENABLED", "REPORT_AGENT_NOT_ENABLED") };
+    // Project administrators may delete any report; anyone else who can write reports, only the ones they made.
+    const canDelete = (run: ReportRun) => canManageProject || (canChat && run.actorUserId === context.userId);
+    if (deleting) {
+      const run = service.store.get(projectId, decodeURIComponent(segments[2]!));
+      if (run.actionFeedback || run.workspaceId !== context.workspaceId || run.status !== "succeeded" || !hasReportArtifact(run)) return missing();
+      if (!canDelete(run)) throw new Error("REPORT_DELETE_FORBIDDEN");
+      // The report goes with its earlier versions, so an older one does not take its place in the list.
+      const ids = [run.id, ...earlierVersions(service.store, projectId, run).map(item => item.id)];
+      const deleted = service.store.markDeleted(projectId, ids, context.userId);
+      recordDeleted(context, projectId, run, deleted);
+      return { status: 200, headers, body: createSuccessResult({ deleted }) };
+    }
     if (segments.length === 4 && segments[1] === "artifact") {
       if (!canChat) throw new Error("REPORT_ARTIFACT_FORBIDDEN");
       const run = service.store.get(projectId, segments[2]!);
@@ -83,7 +97,7 @@ export async function handleReportLibraryApi(request: IncomingMessage, segments:
       let previousReportId: string | undefined;
       while(previous && !seen.has(previous) && seen.size < 1000){seen.add(previous);const parent=byId.get(previous);if(!parent || parent.actorUserId !== run.actorUserId || parent.kind === "skill")break;if(parent.status === "succeeded" && hasReportArtifact(parent)){previousReportId=parent.id;break;}previous=parent.retryOfRunId ?? parent.parentRunId;}
       const period = run.reportingPeriod ?? { from: run.period.from, toExclusive: run.period.toExclusive };
-      return { ...lineage, canDiscuss: canChat && run.actorUserId === context.userId && !run.siteReport, ...(previousReportId ? {previousReportId} : {}),
+      return { ...lineage, canDiscuss: canChat && run.actorUserId === context.userId && !run.siteReport, canDelete: canDelete(run), ...(previousReportId ? {previousReportId} : {}),
         title: reportTitle(lineage.category, period, run.siteReport), id: run.id, kind: "report" as const, period, createdAt: run.createdAt,
         // Site reports are written by the server from the site's own meter readings; advisor reports are written for it.
         source: run.siteReport ? "site" as const : "advisor" as const,
@@ -109,6 +123,39 @@ export async function handleReportLibraryApi(request: IncomingMessage, segments:
     const message = error instanceof Error ? error.message : "";
     if (message.includes("FORBIDDEN")) return { status: 403, headers, body: createErrorResult("FORBIDDEN", "REPORT_PROJECT_FORBIDDEN") };
     return missing();
+  }
+}
+
+/** Every earlier version of a report: the finished reports up its chain of parents and retries, by the same person. */
+function earlierVersions(store: ReportStore, projectId: string, run: ReportRun): ReportRun[] {
+  const found: ReportRun[] = [];
+  const seen = new Set([run.id]);
+  let previous = run.retryOfRunId ?? run.parentRunId;
+  while (previous && !seen.has(previous) && seen.size < 1000) {
+    seen.add(previous);
+    let parent: ReportRun;
+    try { parent = store.get(projectId, previous); } catch { break; }
+    if (parent.actorUserId !== run.actorUserId || parent.workspaceId !== run.workspaceId || parent.kind === "skill") break;
+    if (parent.status === "succeeded" && hasReportArtifact(parent) && !parent.actionFeedback) found.push(parent);
+    previous = parent.retryOfRunId ?? parent.parentRunId;
+  }
+  return found;
+}
+
+/** Who deleted which report, in the same audit history as other project changes. Never fails the delete itself. */
+function recordDeleted(context: Required<ConfigApiContext>, projectId: string, run: ReportRun, deleted: string[]): void {
+  try {
+    const user = context.metadataStore.users.getById({ user_id: context.userId });
+    const period = run.reportingPeriod ?? run.period;
+    context.metadataStore.authAuditEvents.append({
+      id: randomUUID(),
+      event_type: "energyiq.report_deleted",
+      user_id: user.id,
+      ...(user.email ? { email: user.email } : {}),
+      metadata: { workspaceId: context.workspaceId, projectId, reportId: run.id, title: reportTitle(run.scheduleKey ? "scheduled" : "custom", period, run.siteReport), versionsDeleted: deleted.length },
+    });
+  } catch (error) {
+    console.warn(`[audit] could not record energyiq.report_deleted: ${error instanceof Error ? error.message : "unknown"}`);
   }
 }
 
