@@ -7,7 +7,7 @@ import { shiftDate } from "../_components/report-period";
 type Task = { id:string; projectName:string; title:string; actor:string; origin:string; status:string; createdAt:string; startedAt:string|null; finishedAt:string|null; conversationHref:string|null; reportHref:string|null };
 type List = {items:Task[];total:number;page:number;pageSize:number;projects:{id:string;name:string}[];observedAt:string};
 type Detail = Task & {period:{from:string;toExclusive:string};timezone:string;model:string|null;skills:{name:string;version:string|null;source:string}[];data:{snapshot:string|null;hierarchy:string|null;mapping:string|null};failureReason:string|null;events:{time:string;label:string;isError:boolean}[];sessionId:string|null};
-const labels:Record<string,string>={queued:"Queued",running:"Running",succeeded:"Completed",failed:"Failed",interrupted:"Interrupted",cancelled:"Stopped"};
+const labels:Record<string,string>={queued:"Queued",running:"Running",succeeded:"Completed",failed:"Failed",interrupted:"Interrupted",cancelled:"Stopped",deleted:"Deleted"};
 const control="rounded-lg border border-border bg-surface px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50";
 const time=(value:string|null)=>value?new Date(value).toLocaleString("en-SG",{timeZone:"Asia/Singapore",dateStyle:"medium",timeStyle:"short"}):"Not recorded";
 export function taskDuration(task:Task,observedAt:string) {

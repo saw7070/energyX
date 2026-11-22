@@ -49,7 +49,10 @@ export type ReportRun = {
   projectId: string;
   workspaceId: string;
   actorUserId: string;
-  status: "queued" | "running" | "succeeded" | "failed" | "interrupted" | "cancelled";
+  /** "deleted": a finished report somebody took out of Reports (markDeleted); it is never listed or compared again. */
+  status: "queued" | "running" | "succeeded" | "failed" | "interrupted" | "cancelled" | "deleted";
+  deletedAt?: string;
+  deletedBy?: string;
   kind: "report" | "skill" | "chat";
   hasReport?: boolean;
   hasSkillDraft?: boolean;
@@ -389,6 +392,33 @@ export class ReportStore {
     this.db.prepare("UPDATE energyiq_report_runs SET status = ?, document = ? WHERE id = ? AND status IN ('queued', 'running')").run(cancelled.status, JSON.stringify(cancelled), id);
     this.event(id, { type: "cancelled" });
     return cancelled;
+  }
+
+  /**
+   * Takes finished reports out of Reports, the Overview and every later comparison by marking them deleted. The row and
+   * its files stay, so an automatic report is not written again for the same period (its schedule key is kept) and an
+   * administrator can still restore one on the server. Returns the reports it deleted; one already gone is skipped.
+   */
+  markDeleted(projectId: string, ids: readonly string[], deletedBy: string): string[] {
+    const deletedAt = new Date().toISOString();
+    const deleted: string[] = [];
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const id of ids) {
+        const run = this.get(projectId, id);
+        if (run.status !== "succeeded") continue;
+        const marked: ReportRun = { ...run, status: "deleted", deletedAt, deletedBy };
+        const result = this.db.prepare("UPDATE energyiq_report_runs SET status = ?, document = ? WHERE id = ? AND project_id = ? AND status = 'succeeded'")
+          .run(marked.status, JSON.stringify(marked), id, projectId);
+        if (Number(result.changes) === 1) deleted.push(id);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    for (const id of deleted) this.event(id, { type: "deleted" });
+    return deleted;
   }
 
   resume(projectId: string, id: string, actorUserId: string): ReportRun {

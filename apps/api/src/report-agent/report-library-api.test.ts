@@ -47,7 +47,7 @@ it("lets a real Workspace member read accepted report metadata and ask the advis
   expect(data.canChat).toBe(true); expect(data.canManageProject).toBe(false);
   expect(data.reports).toHaveLength(1);
   expect(data.reports[0].id).toBe(report.id);
-  expect(Object.keys(data.reports[0]).sort()).toEqual(["canDiscuss", "category", "createdAt", "finishedAt", "id", "kind", "period", "source", "title", "version"]);
+  expect(Object.keys(data.reports[0]).sort()).toEqual(["canDelete", "canDiscuss", "category", "createdAt", "finishedAt", "id", "kind", "period", "source", "title", "version"]);
   // Reports the advisor wrote are told apart from the ones the server writes from the site's own meter readings.
   expect(data.reports[0].source).toBe("advisor");
   expect(data.reports[0].cadence).toBeUndefined();
@@ -296,4 +296,54 @@ it("lets anyone who may read notes see them on the light context action, and onl
   const full = ((await send(["project"], "GET")).body as any).data.settings;
   expect(full.contextNotes).toBe("New notes");
   expect(full.skill).toBe("");
+});
+
+it("lets an administrator delete any report with its earlier versions, and records who did", async () => {
+  const { metadata, service, settings, report, call } = setup();
+  const revision = service.store.enqueue({ settings, actorUserId: "admin", period: report.period, prompt: "Revise", kind: "report", parentRunId: report.id });
+  service.store.claim(); service.store.finish({ ...revision, status: "succeeded" });
+  const listed = async (userId = "admin") => (((await call(["project"], "GET", userId)).body as any).data.reports as any[]).map(item => [item.id, item.canDelete]);
+  // A member who did not make the report may read it but not delete it.
+  expect(await listed("reader")).toEqual(expect.arrayContaining([[revision.id, false], [report.id, false]]));
+  expect((await call(["project", "report", revision.id], "DELETE", "reader")).status).toBe(403);
+  expect(await listed("admin")).toEqual(expect.arrayContaining([[revision.id, true], [report.id, true]]));
+
+  const deleted = await call(["project", "report", revision.id], "DELETE", "admin");
+  expect(deleted.status).toBe(200);
+  expect((deleted.body as any).data.deleted).toEqual([revision.id, report.id]);
+  // Gone from the list and its pages for everyone; the record stays, marked deleted, so it can be restored on the server.
+  expect(await listed("admin")).toEqual([]);
+  for (const id of [revision.id, report.id]) expect((await call(["project", "output", id])).status).toBe(404);
+  expect(service.store.get("project", report.id)).toMatchObject({ status: "deleted", deletedBy: "admin" });
+  expect((await call(["project", "report", revision.id], "DELETE", "admin")).status).toBe(404);
+  const audit = metadata.db.prepare("SELECT metadata_json FROM auth_audit_events WHERE event_type = 'energyiq.report_deleted'").all() as Array<{ metadata_json: string }>;
+  expect(audit).toHaveLength(1);
+  expect(JSON.parse(audit[0]!.metadata_json)).toMatchObject({ projectId: "project", reportId: revision.id, versionsDeleted: 2 });
+});
+
+it("lets a member delete a report they made, never another project's", async () => {
+  const { service, settings, root, call, foreign } = setup();
+  const own = service.store.enqueue({ settings, actorUserId: "reader", period: { from: "2026-09-01", toExclusive: "2026-09-08" }, prompt: "Mine", kind: "report" });
+  service.store.claim(); service.store.finish({ ...own, status: "succeeded" });
+  mkdirSync(join(root, own.id)); writeFileSync(join(root, own.id, "accepted-output.txt"), "<html><body>Mine</body></html>");
+  const mine = (((await call()).body as any).data.reports as any[]).find(item => item.id === own.id);
+  expect(mine).toMatchObject({ canDelete: true });
+  expect((await call(["project", "report", own.id], "DELETE")).status).toBe(200);
+  expect((((await call()).body as any).data.reports as any[]).some(item => item.id === own.id)).toBe(false);
+  // A report ID from another project or workspace is never found through this one.
+  expect((await call(["project", "report", foreign.id], "DELETE", "admin")).status).toBe(404);
+  expect(service.store.get("foreign-project", foreign.id).status).toBe("succeeded");
+});
+
+it("keeps a deleted automatic site report from coming back or being shown on the Overview", async () => {
+  const { service, settings, call } = setup();
+  const period = { from: "2026-10-01", toExclusive: "2026-11-01" };
+  const { run } = service.store.insertCompleted({ settings, period, reportingPeriod: period, prompt: "Monthly site report", actorUserId: "admin", scheduleKey: "project:site:monthly:2026-10", siteReport: { cadence: "monthly" } });
+  expect(service.store.latestSiteReport("project", "monthly")?.id).toBe(run.id);
+  expect((await call(["project", "report", run.id], "DELETE", "admin")).status).toBe(200);
+  expect(service.store.latestSiteReport("project", "monthly")).toBeUndefined();
+  expect((((await call(["project"], "GET", "admin")).body as any).data.reports as any[]).some(item => item.id === run.id)).toBe(false);
+  // The schedule key is kept, so the scheduler sees the period as done and does not write it again.
+  expect(service.store.findByScheduleKey("project:site:monthly:2026-10")?.status).toBe("deleted");
+  expect(service.store.insertCompleted({ settings, period, reportingPeriod: period, prompt: "Monthly site report", actorUserId: "admin", scheduleKey: "project:site:monthly:2026-10", siteReport: { cadence: "monthly" } }).created).toBe(false);
 });

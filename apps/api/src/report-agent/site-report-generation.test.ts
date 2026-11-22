@@ -159,7 +159,7 @@ it("publishes the due site report and lets any workspace member read the page an
   const library = (await call()).body as { data: { reports: Array<Record<string, unknown>> } };
   const report = library.data.reports.find(item => item.source === "site");
   expect(report).toBeDefined();
-  expect(Object.keys(report!).sort()).toEqual(["cadence", "canDiscuss", "category", "createdAt", "finishedAt", "id", "kind", "period", "source", "title", "version"]);
+  expect(Object.keys(report!).sort()).toEqual(["cadence", "canDelete", "canDiscuss", "category", "createdAt", "finishedAt", "id", "kind", "period", "source", "title", "version"]);
   expect(report!.cadence).toBe("weekly");
   expect(report!.category).toBe("scheduled");
   expect(report!.period).toEqual({ from: "2026-08-10", toExclusive: "2026-08-17" });

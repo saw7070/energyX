@@ -6,8 +6,8 @@ import { authorizeReportLibraryProject } from "./report-library-api.js";
 import { findReportService } from "./report-service.js";
 import { hasReportArtifact, type ReportRun } from "./report-store.js";
 
-const statuses = ["queued", "running", "succeeded", "failed", "interrupted", "cancelled"];
-const phases: Record<string,string> = {queued:"Waiting to start",started:"Started",skill_inputs_prepared:"Instructions prepared",review_started:"Reviewing report",revision_started:"Revising report",review_passed:"Review passed",review_blocked:"Review needs attention",succeeded:"Completed",failed:"Failed",cancelled:"Stopped",interrupted:"Interrupted",tool_execution_start:"Working",tool_execution_end:"Activity completed"};
+const statuses = ["queued", "running", "succeeded", "failed", "interrupted", "cancelled", "deleted"];
+const phases: Record<string,string> = {queued:"Waiting to start",started:"Started",skill_inputs_prepared:"Instructions prepared",review_started:"Reviewing report",revision_started:"Revising report",review_passed:"Review passed",review_blocked:"Review needs attention",succeeded:"Completed",failed:"Failed",cancelled:"Stopped",interrupted:"Interrupted",deleted:"Deleted from Reports",tool_execution_start:"Working",tool_execution_end:"Activity completed"};
 const failures: Record<string,string> = {REPORT_REVIEW_BLOCKED:"The report did not pass review.",REPORT_TIMEOUT:"The task exceeded its time limit.",REPORT_MODEL_NOT_CONFIGURED:"No model was configured for this task.",REPORT_CANCELLED:"The task was stopped."};
 export async function handleReportTaskHistoryApi(request: IncomingMessage, segments: string[], context: Required<ConfigApiContext>): Promise<ConfigApiResponse> {
   const headers = {"Cache-Control":"private, no-store"};

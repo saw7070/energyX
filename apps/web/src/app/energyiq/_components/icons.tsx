@@ -43,7 +43,8 @@ export type EnergyIconName =
   | "leaf"
   | "wallet"
   | "thumb-up"
-  | "thumb-down";
+  | "thumb-down"
+  | "trash";
 
 export function EnergyIcon({
   name,
@@ -73,6 +74,8 @@ export function EnergyIcon({
       return <svg {...common}><path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5" /></svg>;
     case "close":
       return <svg {...common}><path d="m6 6 12 12M6 18 18 6" /></svg>;
+    case "trash":
+      return <svg {...common}><path d="M4 7h16M9 7V4.5h6V7M6.5 7l.9 12.5h9.2L17.5 7M10 11v5M14 11v5" /></svg>;
     case "bell":
       return <svg {...common}><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20.5a2.2 2.2 0 0 0 4 0" /></svg>;
     case "code":
