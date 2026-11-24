@@ -176,7 +176,9 @@ button.splitRow[aria-expanded="true"] .splitChevron{transform:rotate(45deg)}
 @media(max-width:600px){.splitOpen{grid-template-columns:1fr;justify-items:center}.splitOpen>ul{width:100%}}
 
 /* The Overview's first picture: energy used each day, as a card of its own inside the headline card. */
-.daily{margin:16px 0 4px;padding:20px 22px 16px;border:1px solid #e3ebe6;border-radius:18px;background:linear-gradient(180deg,#fbfdfc 0%,#fff 100%);box-shadow:0 1px 2px #0a281b08;max-width:none}
+/* min-width:0: the hero is a flex row, and a flex item will not shrink below its content. Without it the chart, drawn
+   720px wide before it has measured its box, holds the card open and runs past the hero on a narrow window. */
+.daily{margin:16px 0 4px;padding:20px 22px 16px;border:1px solid #e3ebe6;border-radius:18px;background:linear-gradient(180deg,#fbfdfc 0%,#fff 100%);box-shadow:0 1px 2px #0a281b08;max-width:none;min-width:0}
 .dailyHead{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:10px 16px;margin-bottom:10px}
 .dailyHead b{display:block;font-size:15px;font-weight:700;letter-spacing:-.01em;color:var(--hero-ink)}
 .dailyTypical{display:inline-flex;align-items:center;gap:8px;margin-top:4px;font-size:13px;color:var(--hero-quiet)}
