@@ -287,6 +287,14 @@ button.splitRow[aria-expanded="true"] .splitChevron{transform:rotate(45deg)}
 .split .splitLit{background:#e6f0ea !important}
 .hero .split .splitHint{margin-top:12px;font-size:13px}
 @media(max-width:600px){.split .splitRow{grid-template-columns:14px minmax(0,1fr) auto}.split .splitBar{grid-column:2 / -1;grid-row:2}.split .splitValue{grid-template-columns:auto 3em}}
+/* The breakdown fits its own width, not the window's. On mid-size windows (about 1100–1500 px with the menu open) it
+   sits in the right-hand column, where an open group's ring and the fixed columns for the bar and the figures left the
+   names inside no room, one letter to a line. As it narrows, the ring moves above its list, then each bar drops under
+   its name, then the figures join the bar so the name has the whole line. */
+.split{container-type:inline-size}
+@container (max-width:640px){.split .splitOpen{grid-template-columns:minmax(0,1fr);justify-items:center}.split .splitOpen>ul{width:100%}}
+@container (max-width:540px){.split .splitRow,.split .splitOpen .splitRow{grid-template-columns:14px minmax(0,1fr) auto;row-gap:6px}.split .splitBar{grid-column:2 / -1;grid-row:2}.split .splitValue{grid-template-columns:auto 3.4em}}
+@container (max-width:400px){.split .splitOpen{padding:14px 10px 10px}.split .splitName{grid-column:2 / -1}.split .splitBar{grid-column:2;grid-row:2}.split .splitValue{grid-column:3;grid-row:2}}
 
 /* Dark theme: what the generator cannot know (SVG gradient stops, stripes) and softer panels. */
 :global(html[data-energyiq-theme="dark"]) .dailyStopTop{stop-color:#5fc79b}
