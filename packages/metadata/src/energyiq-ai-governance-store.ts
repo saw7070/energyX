@@ -34,10 +34,17 @@ export type EnergyIqAiUsageRecord = {
   feature: EnergyIqAiFeature;
   model?: string;
   status: "allowed" | "blocked-disabled" | "blocked-limit";
+  /** Input billed at the full price: for Anthropic models, the part not read from or written to the prompt cache. */
   inputTokens?: number;
   outputTokens?: number;
+  /** Input read from the provider's prompt cache (billed at about a tenth of the input price). */
+  cacheReadTokens?: number;
+  /** Input written to the prompt cache (Anthropic bills it at about 1.25 times the input price). */
+  cacheWriteTokens?: number;
   createdAt: string;
 };
+
+export type EnergyIqAiTokenCounts = { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number };
 
 export type EnergyIqAiFeedbackRecord = {
   id: string;
@@ -99,6 +106,14 @@ export const initializeEnergyIqAiGovernanceSchema = (db: DatabaseSync): void => 
     CREATE INDEX IF NOT EXISTS idx_energyiq_ai_feedback_workspace_time
       ON energyiq_ai_feedback(workspace_id, created_at DESC);
   `);
+};
+
+/** Cached input, counted apart from full-price input (migration 0060). Rows recorded before it have no cache counts. */
+export const addEnergyIqAiUsageCacheColumns = (db: DatabaseSync): void => {
+  const columns = new Set((db.prepare("PRAGMA table_info(energyiq_ai_usage)").all() as Array<{ name: string }>).map((column) => column.name));
+  for (const column of ["cache_read_tokens", "cache_write_tokens"]) {
+    if (!columns.has(column)) db.exec(`ALTER TABLE energyiq_ai_usage ADD COLUMN ${column} INTEGER`);
+  }
 };
 
 /** The first instant of the calendar month (UTC) that `now` falls in. */
@@ -185,15 +200,18 @@ export class EnergyIqAiGovernanceStore {
     return this.getUsage(id)!;
   }
 
-  /** Adds the model and token counts once a request has finished. */
-  completeUsage(id: string, input: { model?: string; inputTokens?: number; outputTokens?: number }): void {
+  /** Adds the model and one model call's token counts to a request; a request that makes several calls adds each. */
+  completeUsage(id: string, input: { model?: string } & EnergyIqAiTokenCounts): void {
+    const count = (value: number | undefined) => Math.max(0, Math.round(Number.isFinite(value) ? value! : 0));
     this.db.prepare(`
       UPDATE energyiq_ai_usage SET
         model = COALESCE(?, model),
         input_tokens = COALESCE(input_tokens, 0) + ?,
-        output_tokens = COALESCE(output_tokens, 0) + ?
+        output_tokens = COALESCE(output_tokens, 0) + ?,
+        cache_read_tokens = COALESCE(cache_read_tokens, 0) + ?,
+        cache_write_tokens = COALESCE(cache_write_tokens, 0) + ?
       WHERE id = ?
-    `).run(input.model?.slice(0, 200) ?? null, Math.max(0, Math.round(input.inputTokens ?? 0)), Math.max(0, Math.round(input.outputTokens ?? 0)), id);
+    `).run(input.model?.slice(0, 200) ?? null, count(input.inputTokens), count(input.outputTokens), count(input.cacheReadTokens), count(input.cacheWriteTokens), id);
   }
 
   getUsage(id: string): EnergyIqAiUsageRecord | undefined {
@@ -207,12 +225,13 @@ export class EnergyIqAiGovernanceStore {
     `).all(workspaceId, sinceIso, Math.min(Math.max(1, limit), 1000)) as Array<Record<string, unknown>>).map(mapUsage);
   }
 
-  usageSummary(workspaceId: string, sinceIso: string): { requests: number; blocked: number; inputTokens: number; outputTokens: number; byFeature: Record<string, number> } {
+  usageSummary(workspaceId: string, sinceIso: string): { requests: number; blocked: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; byFeature: Record<string, number> } {
     const rows = this.db.prepare(`
-      SELECT feature, status, COUNT(*) AS count, COALESCE(SUM(input_tokens), 0) AS input_tokens, COALESCE(SUM(output_tokens), 0) AS output_tokens
+      SELECT feature, status, COUNT(*) AS count, COALESCE(SUM(input_tokens), 0) AS input_tokens, COALESCE(SUM(output_tokens), 0) AS output_tokens,
+        COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens, COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens
       FROM energyiq_ai_usage WHERE workspace_id = ? AND created_at >= ? GROUP BY feature, status
-    `).all(workspaceId, sinceIso) as Array<{ feature: string; status: string; count: number; input_tokens: number; output_tokens: number }>;
-    const summary = { requests: 0, blocked: 0, inputTokens: 0, outputTokens: 0, byFeature: {} as Record<string, number> };
+    `).all(workspaceId, sinceIso) as Array<{ feature: string; status: string; count: number; input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_write_tokens: number }>;
+    const summary = { requests: 0, blocked: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, byFeature: {} as Record<string, number> };
     for (const row of rows) {
       if (row.status === "allowed") {
         summary.requests += Number(row.count);
@@ -220,6 +239,8 @@ export class EnergyIqAiGovernanceStore {
       } else summary.blocked += Number(row.count);
       summary.inputTokens += Number(row.input_tokens);
       summary.outputTokens += Number(row.output_tokens);
+      summary.cacheReadTokens += Number(row.cache_read_tokens);
+      summary.cacheWriteTokens += Number(row.cache_write_tokens);
     }
     return summary;
   }
@@ -263,6 +284,8 @@ const mapUsage = (row: Record<string, unknown>): EnergyIqAiUsageRecord => ({
   status: String(row.status) as EnergyIqAiUsageRecord["status"],
   ...(row.input_tokens !== null && row.input_tokens !== undefined ? { inputTokens: Number(row.input_tokens) } : {}),
   ...(row.output_tokens !== null && row.output_tokens !== undefined ? { outputTokens: Number(row.output_tokens) } : {}),
+  ...(row.cache_read_tokens !== null && row.cache_read_tokens !== undefined ? { cacheReadTokens: Number(row.cache_read_tokens) } : {}),
+  ...(row.cache_write_tokens !== null && row.cache_write_tokens !== undefined ? { cacheWriteTokens: Number(row.cache_write_tokens) } : {}),
   createdAt: String(row.created_at),
 });
 

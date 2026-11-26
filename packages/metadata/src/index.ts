@@ -56,7 +56,7 @@ import { initializeEnergyIqLiveConnectorSchema } from "./energyiq-live-connector
 import { initializeEnergyIqReadingRetentionSchema } from "./energyiq-reading-retention-store.js";
 import { ENERGYIQ_ORGANISATION_ADMIN_ROLE_ID, initializeEnergyIqAccessRoleSchema, upgradeSeededOrganisationAdminRole } from "./energyiq-access-role-store.js";
 import { initializeEnergyIqSavingsChecksSchema, initializeEnergyIqTargetsSchema, migrateEnergyIqTargetsPeakDemand } from "./energyiq-targets-store.js";
-import { initializeEnergyIqAiGovernanceSchema } from "./energyiq-ai-governance-store.js";
+import { addEnergyIqAiUsageCacheColumns, initializeEnergyIqAiGovernanceSchema } from "./energyiq-ai-governance-store.js";
 import { initializeOrganisationIdentitySchema, OrganisationIdentityStore } from "./organisation-identity-store.js";
 import { AuthTwoStepStore, initializeAuthTwoStepSchema } from "./auth-two-step-store.js";
 import { recordSchemaMigration, runSchemaMigration } from "./schema-migration.js";
@@ -4901,6 +4901,15 @@ const runMigrations = (db: DatabaseSync): void => {
     "Add the per-client limit on how long meter readings are kept (none means for as long as the client is subscribed)",
     () => {
       initializeEnergyIqReadingRetentionSchema(db);
+    },
+    { atomic: true },
+  );
+  runSchemaMigration(
+    db,
+    "0060_energyiq_ai_usage_cache_tokens",
+    "Count AI input read from and written to the prompt cache apart from full-price input",
+    () => {
+      addEnergyIqAiUsageCacheColumns(db);
     },
     { atomic: true },
   );
