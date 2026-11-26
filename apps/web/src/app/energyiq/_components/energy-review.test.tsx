@@ -8,7 +8,7 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it, vi } from "vitest";
-import { assembleAnalysisData, buildEnergyReview, type AnalysisData, type AnalysisSource, type ProjectInformationSource, type ScopeMeter, type TrendSeries } from "@datafoundry/site-report";
+import { assembleAnalysisData, buildEnergyReview, sampleSiteAnalysisData, type AnalysisData, type AnalysisSource, type ProjectInformationSource, type ScopeMeter, type TrendSeries } from "@datafoundry/site-report";
 import { EnergyReviewDocument, renderEnergyReviewHtml, renderEnergyReviewMarkup } from "@datafoundry/site-report/energy-review-document";
 import { renderStyledSiteReportHtml } from "@datafoundry/site-report/management-review-document";
 
@@ -771,3 +771,110 @@ describe("feedback on the report reaches the energy review", () => {
     expect("feedbackMemory" in older || "followUps" in older || "dismissedChecks" in older).toBe(false);
   });
 });
+
+// "Show the readings": the chart behind each point to check that names a meter or a day.
+describe("the readings behind each point to check", () => {
+  const stoppedCheck = () => review.checks.find(check => check.key === "stopped:linkway")!;
+
+  it("carries the named meter's readings day by day and hour by hour, with no readings once it stopped", () => {
+    const readings = stoppedCheck().readings!;
+    expect(readings.name).toBe("Linkway lights");
+    expect(readings.focus).toBeNull();
+    expect(readings.band).toEqual({ from: 19, to: 7 });
+    expect(readings.days.map(day => day.date)).toEqual(DATES);
+    expect(readings.days[0]).toMatchObject({ date: "2026-11-02", label: "Mon 2 Nov" });
+    expect(readings.days[0]!.kwh).toBeCloseTo(1.8, 6);
+    // It stopped on the evening of 4 Nov: nothing at all from the 5th.
+    expect(readings.days.filter(day => day.date >= "2026-11-05").every(day => day.kwh === null)).toBe(true);
+    expect(readings.hours["2026-11-03"]).toHaveLength(24);
+    expect(readings.hours["2026-11-03"]![20]).toBeCloseTo(0.15, 6);
+    expect(readings.hours["2026-11-05"]!.every(value => value === null)).toBe(true);
+    expect(readings.usualKwh).toBeCloseTo(1.8, 6);
+  });
+
+  it("charts a day that stood out from the meter behind it, with that day picked out", () => {
+    const now = new Date("2026-11-26T04:00:00Z");
+    const sample = buildEnergyReview(sampleSiteAnalysisData(now), null, now.toISOString());
+    const standout = sample.checks.find(check => check.key === "standout:2026-11-16")!;
+    expect(standout.readings).toMatchObject({ name: "Block 102 L7–L12 corridors", focus: "2026-11-16" });
+    const day = standout.readings!.days.find(item => item.date === "2026-11-16")!;
+    expect(day.kwh!).toBeGreaterThan(standout.readings!.usualKwh! * 1.3);
+    // The chart's usual day is the one the sentence gives.
+    expect(standout.text).toContain(`usually use ${standout.readings!.usualKwh!.toFixed(2)} kWh`);
+    // Points that name no meter carry none.
+    for (const check of [...sample.checks, ...review.checks]) if (check.key === "daytime") expect(check.readings).toBeUndefined();
+  });
+
+  it("opens in the card on the live page: figures, a readout on pointing, and a click opens the day hour by hour", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); vi.stubGlobal("React", React);
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => root.render(<EnergyReviewDocument review={review} />));
+      const card = () => host.querySelectorAll("#er-checks .er-checks > li")[review.checks.indexOf(stoppedCheck())] as HTMLElement;
+      expect(card().querySelector(".er-rd")).toBeNull();
+      const toggle = card().querySelector<HTMLButtonElement>("button.er-rd-toggle")!;
+      expect(toggle.textContent).toBe("Show the readings");
+      expect(toggle.getAttribute("aria-expanded")).toBe("false");
+      await act(async () => toggle.click());
+      expect(card().classList.contains("er-open")).toBe(true);
+      expect(toggle.textContent).toBe("Hide the readings");
+      const chart = card().querySelector(".er-rd")!;
+      expect(chart.querySelector(".er-fig-title")!.textContent).toBe("Linkway lights");
+      expect([...chart.querySelectorAll(".er-rd-figs small")].map(item => item.textContent)).toEqual(["Total", "Cost (incl. GST)", "Usual day", "Days in use"]);
+      expect(chart.querySelector('svg[aria-label="Energy each day for Linkway lights"]')).not.toBeNull();
+      // The days after it stopped show as having no readings.
+      expect(chart.querySelectorAll("svg circle").length).toBe(DATES.filter(date => date >= "2026-11-05").length);
+
+      const bars = () => [...chart.querySelectorAll<SVGRectElement>("svg rect.er-hit")];
+      expect(bars()).toHaveLength(DATES.length);
+      await act(async () => { bars()[1]!.dispatchEvent(new PointerEvent("pointerover", { bubbles: true })); });
+      const tip = chart.querySelector(".er-tip")!;
+      expect(tip.querySelector("b")!.textContent).toBe("Tue 3 Nov");
+      expect(tip.textContent).toContain("1.80 kWh");
+      expect(tip.textContent).toContain("In use7 pm – 7 am");
+      expect(tip.textContent).toContain("Click for the day hour by hour");
+      await act(async () => { bars()[5]!.dispatchEvent(new PointerEvent("pointerover", { bubbles: true })); });
+      expect(chart.querySelector(".er-tip")!.textContent).toContain("No readings");
+
+      await act(async () => bars()[1]!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+      expect(chart.querySelector('svg[aria-label="Energy each hour for Linkway lights on Tue 3 Nov"]')).not.toBeNull();
+      expect(bars()).toHaveLength(24);
+      expect(chart.querySelectorAll("svg rect.er-rd-band")).toHaveLength(12);
+      expect([...chart.querySelectorAll(".er-rd-figs small")].map(item => item.textContent)).toEqual(["Total", "Cost (incl. GST)", "Busiest hour", "In use"]);
+      expect(chart.textContent).toContain("Lights-on hours (7 pm – 7 am)");
+      await act(async () => { bars()[21]!.dispatchEvent(new PointerEvent("pointerover", { bubbles: true })); });
+      expect(chart.querySelector(".er-tip")!.textContent).toContain("Lights-on hoursYes");
+      await act(async () => [...chart.querySelectorAll<HTMLButtonElement>("button.er-rd-back")][0]!.click());
+      expect(chart.querySelector('svg[aria-label="Energy each day for Linkway lights"]')).not.toBeNull();
+
+      await act(async () => toggle.click());
+      expect(card().querySelector(".er-rd")).toBeNull();
+      expect(card().classList.contains("er-open")).toBe(false);
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("prints open in a saved copy, month view, with each bar's figures and no moving parts", () => {
+    const html = renderEnergyReviewMarkup(review);
+    expect(html).toContain('class="er-rd"');
+    expect(html).toContain('aria-label="Energy each day for Linkway lights"');
+    expect(html).toContain("<title>Tue 3 Nov · 1.80 kWh</title>");
+    expect(html).not.toContain("Show the readings");
+    expect(html).not.toContain("er-hit");
+    expect(plain(html)).not.toMatch(/undefined|NaN|\{\w+\}/);
+  });
+
+  it("reads in Chinese and Malay, lights-on wording included", async () => {
+    for (const locale of ["zh-Hans", "ms"] as const) {
+      const html = renderEnergyReviewMarkup(buildEnergyReview(estate(), null, GENERATED, locale));
+      expect(html).toContain('class="er-rd"');
+      expect(plain(html)).not.toMatch(/undefined|NaN|\{\w+\}|readings\./);
+    }
+  });
+});
+
