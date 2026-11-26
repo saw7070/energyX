@@ -43,6 +43,7 @@ const signedIn = (result: AuthSignedIn | AuthTwoStepPending): AuthSignedIn => {
 };
 const advance = (ms: number) => vi.setSystemTime(Date.now() + ms);
 const MINUTE = 60_000;
+const DAY = 24 * 60 * MINUTE;
 
 afterEach(() => {
   vi.useRealTimers();
@@ -143,7 +144,7 @@ describe("Session idle timeout", () => {
   it("ends a session unused for longer than the idle limit and records why", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     await withAuth(async ({ auth, metadata, userId }) => {
-      const session = signedIn(await auth.login({ email: "member@example.test", password: PASSWORD, rememberMe: true }));
+      const session = signedIn(await auth.login({ email: "member@example.test", password: PASSWORD }));
       advance(119 * MINUTE);
       const sessionId = auth.authenticateSession(session.sessionToken, { accessMode: "read-only" }).session!.id;
       // That read counted as use, so the clock starts again from it.
@@ -152,11 +153,39 @@ describe("Session idle timeout", () => {
 
       advance(121 * MINUTE);
       expect(() => auth.authenticateSession(session.sessionToken)).toThrow("Authentication required");
-      // Revoked, not only refused, although its 30-day "Remember me" cookie had long to run.
+      // Revoked, not only refused, although its 12-hour limit had hours to run.
       expect(metadata.authSessions.get({ id: sessionId }).revoked_at).toBeDefined();
       const [timedOut] = metadata.authAuditEvents.list({ eventTypes: ["auth.session_idle_timeout"] }).events;
       expect(timedOut).toMatchObject({ user_id: userId });
       expect(timedOut?.metadata_json).toContain(sessionId);
+    });
+  });
+
+  it("keeps a \"Remember me\" session signed in however long it sits unused, until its 30 days are up", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    await withAuth(async ({ auth, metadata, userId }) => {
+      const session = signedIn(await auth.login({ email: "member@example.test", password: PASSWORD, rememberMe: true }));
+      expect(session).toMatchObject({ persistent: true, maxAgeSeconds: 30 * 24 * 60 * 60 });
+      // A weekend away, then a week: still signed in each time.
+      advance(3 * DAY);
+      expect(auth.authenticateSession(session.sessionToken, { accessMode: "read-only" }).user.id).toBe(userId);
+      advance(7 * DAY);
+      expect(auth.authenticateSession(session.sessionToken).user.id).toBe(userId);
+      expect(metadata.authAuditEvents.list({ eventTypes: ["auth.session_idle_timeout"] }).events).toHaveLength(0);
+
+      // Its 30 days still end it.
+      advance(20 * DAY + MINUTE);
+      expect(() => auth.authenticateSession(session.sessionToken)).toThrow("Authentication required");
+    });
+  });
+
+  it("still ends a \"Remember me\" session on signing out", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    await withAuth(async ({ auth }) => {
+      const session = signedIn(await auth.login({ email: "member@example.test", password: PASSWORD, rememberMe: true }));
+      advance(5 * 60 * MINUTE);
+      auth.logout(auth.authenticateSession(session.sessionToken));
+      expect(() => auth.authenticateSession(session.sessionToken)).toThrow("Authentication required");
     });
   });
 

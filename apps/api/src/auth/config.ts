@@ -1,6 +1,6 @@
 export type AuthMode = "dev" | "password";
 
-/** A session unused for this long ends (ENERGYX_SESSION_IDLE_MINUTES). */
+/** A session without "Remember me" unused for this long ends (ENERGYX_SESSION_IDLE_MINUTES). */
 export const DEFAULT_SESSION_IDLE_MINUTES = 120;
 
 export type PasswordAuthConfig = {
@@ -8,7 +8,7 @@ export type PasswordAuthConfig = {
   publicBaseUrl: string;
   sessionSecret: string;
   emailDelivery: "smtp" | "test";
-  /** Minutes without any request after which a session ends. Defaults to DEFAULT_SESSION_IDLE_MINUTES. */
+  /** Minutes without any request after which a session without "Remember me" ends. Defaults to DEFAULT_SESSION_IDLE_MINUTES. */
   sessionIdleMinutes?: number;
   /** Whether platform super admins must use two-step verification to sign in with a password. Defaults to true. */
   requireTwoStepForPlatformAdmins?: boolean;
