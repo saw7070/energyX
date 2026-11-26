@@ -37,7 +37,7 @@ Keep key metrics comparable by naming scope, units, window and changed definitio
 
 ## HTML and evidence
 
-Deliver complete offline English HTML with inline styles, SVG/charts and supplied assets. Every chart needs units, readable labels and a meaningful caption. Use project visual preferences when supplied. Maps use source-supported layout, label schematic/not-to-scale where appropriate, and show room energy only when a verified room-to-meter relationship supports it.
+Deliver complete offline English HTML with inline styles, SVG/charts and supplied assets. Every chart needs units, readable labels and a meaningful caption. Text inside a chart must never touch a line, bar or other text: put a reference line's label clearly above or beside the line, and a note for a missing or shaded period in the open space of that period, away from any line. Use project visual preferences when supplied. Maps use source-supported layout, label schematic/not-to-scale where appropriate, and show room energy only when a verified room-to-meter relationship supports it.
 
 Use readable body text and restrained emphasis. Keep charts and tables useful in expanded reading and narrow preview: wrap text, give wide tables their own scroll container, and avoid whole-page horizontal overflow. Prefer simplified labels or a separate large diagram over shrinking important map text into illegibility. Include print styling.
 

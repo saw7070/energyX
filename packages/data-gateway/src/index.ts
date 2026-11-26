@@ -106,6 +106,7 @@ export {
   type EnergyScopedDataSourceContext,
   type EnergyScopedScopeDimension
 } from "./energy-scoped-datasource.js";
+export { clearSnapshotReadCache } from "./energy-snapshot-read-cache.js";
 export {
   ENERGY_FACT_WRITER_CONTRACT_VERSION,
   ENERGY_FACT_WRITER_HISTORICAL_CONTRACT_VERSIONS,
