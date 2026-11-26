@@ -11,5 +11,5 @@ export type ReportHarness = (input: {
   /** The organisation the run is for: its AI settings choose the model. */
   workspaceId?: string;
   /** Called after each model response with the tokens it used, when the provider reports them. */
-  onUsage?: (usage: { model: string; inputTokens: number; outputTokens: number }) => void;
+  onUsage?: (usage: { model: string; inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number }) => void;
 }) => Promise<{ answer: string; sessionId?: string }>;

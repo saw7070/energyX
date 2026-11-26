@@ -11,6 +11,15 @@ type Organisation = EnergyAdminAiDto["organisations"][number];
 
 const FEATURES: Record<string, string> = { advisor: "Advisor", report: "Reports", overview: "Overview AI", insights: "AI insights", actions: "Action suggestions", other: "Other" };
 const number = (value: number) => new Intl.NumberFormat("en-SG").format(value);
+/** Every token a request used, cached input included, and how it splits up: providers bill each part differently. */
+type TokenCounts = { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number };
+const tokenTotal = (counts: TokenCounts) => (counts.inputTokens ?? 0) + (counts.outputTokens ?? 0) + (counts.cacheReadTokens ?? 0) + (counts.cacheWriteTokens ?? 0);
+const tokenBreakdown = (counts: TokenCounts) => [
+  `Input ${number(counts.inputTokens ?? 0)}`,
+  counts.cacheReadTokens ? `read from cache ${number(counts.cacheReadTokens)}` : "",
+  counts.cacheWriteTokens ? `written to cache ${number(counts.cacheWriteTokens)}` : "",
+  `output ${number(counts.outputTokens ?? 0)}`,
+].filter(Boolean).join(" · ");
 const when = (iso: string) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
 
 /**
@@ -142,7 +151,7 @@ function OrganisationRow({ organisation, models, busy, expanded, onToggleExpande
           <div className={styles.usage}>
             <span><strong>{number(usage.requests)}</strong>{settings.monthlyRequestLimit !== undefined ? ` / ${number(settings.monthlyRequestLimit)}` : ""} requests</span>
             {settings.monthlyRequestLimit !== undefined && <span className={`${styles.meter} ${tone}`}><i style={{ width: `${share * 100}%` }} /></span>}
-            <small>{number(usage.inputTokens + usage.outputTokens)} tokens{usage.blocked ? ` · ${number(usage.blocked)} refused` : ""}</small>
+            <small title={tokenBreakdown(usage)}>{number(tokenTotal(usage))} tokens{usage.blocked ? ` · ${number(usage.blocked)} refused` : ""}</small>
           </div>
         </td>
         <td className={styles.feedback}>
@@ -175,8 +184,8 @@ function Activity({ workspaceId }: { workspaceId: string }) {
                 <span className={styles.time}>{when(entry.createdAt)}</span>
                 <span>{FEATURES[entry.feature] ?? entry.feature}{entry.project ? ` · ${entry.project}` : ""}</span>
                 <span className={styles.muted}>{entry.user ?? "System"}</span>
-                <span className={entry.status === "allowed" ? styles.muted : styles.warnText}>
-                  {entry.status === "allowed" ? [entry.model, entry.inputTokens !== undefined || entry.outputTokens !== undefined ? `${number((entry.inputTokens ?? 0) + (entry.outputTokens ?? 0))} tokens` : ""].filter(Boolean).join(" · ") || "—"
+                <span className={entry.status === "allowed" ? styles.muted : styles.warnText} title={entry.status === "allowed" && entry.inputTokens !== undefined ? tokenBreakdown(entry) : undefined}>
+                  {entry.status === "allowed" ? [entry.model, entry.inputTokens !== undefined || entry.outputTokens !== undefined ? `${number(tokenTotal(entry))} tokens` : ""].filter(Boolean).join(" · ") || "—"
                     : entry.status === "blocked-limit" ? "Refused: monthly limit" : "Refused: AI off"}
                 </span>
               </li>

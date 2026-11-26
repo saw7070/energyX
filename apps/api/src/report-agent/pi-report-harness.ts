@@ -171,7 +171,7 @@ export function createPiReportHarness(options: { image: string; model: (workspac
               if (!response.ok) { await response.body?.cancel(); send({ type: "response", id: message.id, status: 502, contentType: "application/json", body: '{"error":"REPORT_MODEL_REQUEST_FAILED"}' }); }
               else {
                 let size = 0; const chunks: Uint8Array[] = [];
-                const usage = { inputTokens: 0, outputTokens: 0 };
+                const usage = emptyUsage();
                 const parser = new ReportModelStream(reportModelProtocol(model.apiProtocol), (data) => addUsage(usage, data));
                 const streaming = message.body.stream === true;
                 if (streaming) send({ type: "response_start", id: message.id, contentType: response.headers.get("content-type") ?? "text/event-stream" });
@@ -186,7 +186,7 @@ export function createPiReportHarness(options: { image: string; model: (workspac
                 const body = Buffer.concat(chunks).toString("utf8");
                 if (streaming) parser.finish();
                 else { try { addUsage(usage, JSON.parse(body)); } catch { /* A body that is not JSON carries no usage. */ } }
-                if (usage.inputTokens || usage.outputTokens) onUsage?.({ model: model.model, ...usage });
+                if (usage.inputTokens || usage.outputTokens || usage.cacheReadTokens || usage.cacheWriteTokens) onUsage?.({ model: model.model, ...usage });
                 if (streaming) send({ type: "response_end", id: message.id });
                 else send({ type: "response", id: message.id, status: 200, contentType: response.headers.get("content-type") ?? "text/event-stream", body });
               }
@@ -237,12 +237,32 @@ function packFiles(root: string, area: string): Array<{ area: string; path: stri
   walk(""); return files;
 }
 
-/** Token counts as OpenAI-style (usage.prompt_tokens / completion_tokens) or Anthropic (input_tokens / output_tokens) report them. */
-function addUsage(total: { inputTokens: number; outputTokens: number }, data: any): void {
+type ModelCallUsage = { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number };
+const emptyUsage = (): ModelCallUsage => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
+
+/**
+ * One model call's token counts, split the way providers bill them. `inputTokens` is input at the full price;
+ * cached input is kept apart because it is billed differently. Anthropic reports `input_tokens` without the cache,
+ * plus `cache_read_input_tokens` and `cache_creation_input_tokens`. OpenAI-style `prompt_tokens` include cached input
+ * (`prompt_tokens_details.cached_tokens`, or DeepSeek's `prompt_cache_hit_tokens`). A streamed Anthropic reply repeats
+ * its counts as running totals (message_start, then message_delta), so each count keeps its largest value instead of
+ * being added up.
+ */
+export function addUsage(total: ModelCallUsage, data: any): void {
   const usage = data?.usage ?? data?.message?.usage;
   if (!usage || typeof usage !== "object") return;
-  const input = Number(usage.prompt_tokens ?? usage.input_tokens ?? 0);
-  const output = Number(usage.completion_tokens ?? usage.output_tokens ?? 0);
-  if (Number.isFinite(input)) total.inputTokens += input;
-  if (Number.isFinite(output)) total.outputTokens += output;
+  const count = (value: unknown) => { const number = Number(value); return Number.isFinite(number) && number > 0 ? number : 0; };
+  let input: number; let cacheRead: number; let cacheWrite = 0;
+  if (usage.prompt_tokens !== undefined) {
+    cacheRead = count(usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens);
+    input = Math.max(0, count(usage.prompt_tokens) - cacheRead);
+  } else {
+    input = count(usage.input_tokens);
+    cacheRead = count(usage.cache_read_input_tokens);
+    cacheWrite = count(usage.cache_creation_input_tokens);
+  }
+  total.inputTokens = Math.max(total.inputTokens, input);
+  total.outputTokens = Math.max(total.outputTokens, count(usage.completion_tokens ?? usage.output_tokens));
+  total.cacheReadTokens = Math.max(total.cacheReadTokens, cacheRead);
+  total.cacheWriteTokens = Math.max(total.cacheWriteTokens, cacheWrite);
 }

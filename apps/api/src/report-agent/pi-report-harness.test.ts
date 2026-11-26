@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMetadataStore } from "@datafoundry/metadata";
-import { createPiReportHarness, workerArguments, resolvePiReportModel } from "./pi-report-harness.js";
+import { addUsage, createPiReportHarness, workerArguments, resolvePiReportModel } from "./pi-report-harness.js";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -137,3 +137,32 @@ it.skipIf(process.env.S1_DOCKER_TEST !== "1")("runs five isolated Pi containers 
   expect(reached).toBe(5);
   results.forEach((result, i) => expect(result.answer).toBe(`Reply to parallel-user-${i}`));
 }, 120_000);
+
+describe("model call token counts", () => {
+  const counted = (...events: unknown[]) => {
+    const total = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+    for (const event of events) addUsage(total, event);
+    return total;
+  };
+
+  it("keeps Anthropic's cached input and does not add up a stream's running totals", () => {
+    expect(counted(
+      { type: "message_start", message: { usage: { input_tokens: 24, cache_creation_input_tokens: 2_500, cache_read_input_tokens: 18_000, output_tokens: 1 } } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hi" } },
+      { type: "message_delta", usage: { input_tokens: 24, cache_creation_input_tokens: 2_500, cache_read_input_tokens: 18_000, output_tokens: 1_150 } },
+    )).toEqual({ inputTokens: 24, outputTokens: 1_150, cacheReadTokens: 18_000, cacheWriteTokens: 2_500 });
+    expect(counted(
+      { type: "message_start", message: { usage: { input_tokens: 30, cache_read_input_tokens: 9_000, output_tokens: 2 } } },
+      { type: "message_delta", usage: { output_tokens: 400 } },
+    )).toEqual({ inputTokens: 30, outputTokens: 400, cacheReadTokens: 9_000, cacheWriteTokens: 0 });
+  });
+
+  it("takes cached input out of OpenAI-style prompt counts", () => {
+    expect(counted({ usage: { prompt_tokens: 12_000, completion_tokens: 800, prompt_tokens_details: { cached_tokens: 10_000 } } }))
+      .toEqual({ inputTokens: 2_000, outputTokens: 800, cacheReadTokens: 10_000, cacheWriteTokens: 0 });
+    expect(counted({ usage: { prompt_tokens: 5_000, completion_tokens: 300, prompt_cache_hit_tokens: 4_096, prompt_cache_miss_tokens: 904 } }))
+      .toEqual({ inputTokens: 904, outputTokens: 300, cacheReadTokens: 4_096, cacheWriteTokens: 0 });
+    expect(counted({ choices: [] }, { usage: null }, { usage: { prompt_tokens: 700, completion_tokens: 50 } }))
+      .toEqual({ inputTokens: 700, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 });
+  });
+});

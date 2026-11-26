@@ -72,13 +72,17 @@ export const beginAiRequest = (input: AiRequestInput): AiRequestTicket | undefin
   return recordAiRequest(input);
 };
 
-export const finishAiRequest = (metadataStore: MetadataStore, ticket: AiRequestTicket | undefined, result: { model?: string | undefined; inputTokens?: number | undefined; outputTokens?: number | undefined }): void => {
+export const finishAiRequest = (metadataStore: MetadataStore, ticket: AiRequestTicket | undefined, result: {
+  model?: string | undefined; inputTokens?: number | undefined; outputTokens?: number | undefined; cacheReadTokens?: number | undefined; cacheWriteTokens?: number | undefined;
+}): void => {
   if (!ticket) return;
   try {
     metadataStore.energyIq?.ai.completeUsage(ticket.usageId, {
       ...(result.model ? { model: result.model } : {}),
       ...(result.inputTokens !== undefined ? { inputTokens: result.inputTokens } : {}),
       ...(result.outputTokens !== undefined ? { outputTokens: result.outputTokens } : {}),
+      ...(result.cacheReadTokens !== undefined ? { cacheReadTokens: result.cacheReadTokens } : {}),
+      ...(result.cacheWriteTokens !== undefined ? { cacheWriteTokens: result.cacheWriteTokens } : {}),
     });
   } catch {
     // Usage bookkeeping must never fail the answer the person is waiting for.

@@ -4690,12 +4690,12 @@ export type EnergyAdminAiDto = {
     name: string;
     disabled: boolean;
     settings: { workspaceId: string; enabled: boolean; modelProfileId?: string; monthlyRequestLimit?: number; updatedAt?: string; updatedBy?: string };
-    usage: { requests: number; blocked: number; inputTokens: number; outputTokens: number; byFeature: Record<string, number>; helpful: number; notHelpful: number };
+    usage: { requests: number; blocked: number; inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number; byFeature: Record<string, number>; helpful: number; notHelpful: number };
   }>;
 };
 
 export type EnergyAdminAiActivityDto = {
-  usage: Array<{ id: string; feature: string; status: "allowed" | "blocked-disabled" | "blocked-limit"; model?: string; inputTokens?: number; outputTokens?: number; createdAt: string; project?: string; user?: string }>;
+  usage: Array<{ id: string; feature: string; status: "allowed" | "blocked-disabled" | "blocked-limit"; model?: string; inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number; createdAt: string; project?: string; user?: string }>;
   feedback: Array<{ id: string; targetKind: string; targetId: string; rating: "up" | "down"; comment?: string; createdAt: string; project?: string; user?: string }>;
 };
 

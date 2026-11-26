@@ -24,7 +24,7 @@ const data = (enabled: boolean, limit?: number): EnergyAdminAiDto => ({
   organisations: [{
     id: "client-a", name: "Acme Holdings", disabled: false,
     settings: { workspaceId: "client-a", enabled, ...(limit !== undefined ? { monthlyRequestLimit: limit } : {}) },
-    usage: { requests: 45, blocked: 2, inputTokens: 90_000, outputTokens: 12_000, byFeature: { advisor: 40, overview: 5 }, helpful: 7, notHelpful: 1 },
+    usage: { requests: 45, blocked: 2, inputTokens: 90_000, outputTokens: 12_000, cacheReadTokens: 400_000, cacheWriteTokens: 30_000, byFeature: { advisor: 40, overview: 5 }, helpful: 7, notHelpful: 1 },
   }],
 });
 
@@ -34,7 +34,8 @@ it("lets a super admin switch a client's AI, choose its model and set a monthly 
   const { host, root } = await render(<AdminAiGovernance />);
   expect(host.textContent).toContain("Acme Holdings");
   expect(host.textContent).toContain("45 / 50 requests");
-  expect(host.textContent).toContain("102,000 tokens · 2 refused");
+  expect(host.textContent).toContain("532,000 tokens · 2 refused");
+  expect(host.querySelector("small[title]")?.getAttribute("title")).toBe("Input 90,000 · read from cache 400,000 · written to cache 30,000 · output 12,000");
   expect(host.textContent).toContain("DeepSeek (deepseek-chat)");
 
   await act(async () => (host.querySelector('button[role="switch"]') as HTMLButtonElement).click());
