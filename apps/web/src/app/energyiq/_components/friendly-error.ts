@@ -82,7 +82,7 @@ const RULES: Array<[RegExp, FriendlyErrorKey]> = [
   [/ENERGYIQ_AI_MODEL_UNAVAILABLE/, "aiModelUnavailable"],
   [/FILE_TYPE_INVALID|UNSUPPORTED_FILE_TYPE/, "fileTypeUnsupported"],
   [/TOO_LARGE\b/, "fileTooLarge"],
-  [/DATA_NOT_READY/, "dataNotReady"],
+  [/DATA_NOT_READY|SITE_REPORT_NO_READINGS/, "dataNotReady"],
   [/\bENERGYIQ_(?:PROJECT_)?SETUP_INVALID\b|\b(?:TIER|NODE)_[A-Z_]+|\bLOCATION_WITHOUT_METER\b|\bSIBLING_NAME_DUPLICATE\b|\bMETER_[A-Z_]+|\bOFFICIAL_ROUTE[A-Z_]*|\bVIRTUAL_METER_[A-Z_]+|\bSOURCE_LABEL_DUPLICATE\b|\bDUPLICATE_ROUTE\b/, "setupIncomplete"],
   [/Failed to fetch|NetworkError|Network request failed|^Load failed$|Invalid JSON response|Empty response body|Unexpected (?:token|end of JSON)|JSON at position|\b(?:ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN)\b|\bNETWORK|\bOFFLINE\b|\bREQUEST_TIMEOUT\b|^TIMEOUT$|Internal Server Error|Bad Gateway|Service Unavailable|Gateway Timeout/i, "network"],
   [/STALE|CONFLICT|_CHANGED\b|_CHANGED_RETRY\b/, "conflict"],

@@ -124,6 +124,9 @@ async function withFollowUpChecks(input: Omit<PublishSiteReportInput, "cadence">
 
 export type PublishedSiteReport = { run: ReportRun; created: boolean; scheduleKey: string };
 
+/** Thrown when the dates hold no readings at all. A scheduled report then waits for a period that has some. */
+export const SITE_REPORT_NO_READINGS = "SITE_REPORT_NO_READINGS";
+
 /**
  * Build one site report and save it, in the style the site's settings choose. Returns the report already published
  * for this period unchanged when there is one, so a repeated schedule tick costs nothing and never produces a second
@@ -167,6 +170,8 @@ async function writeSiteReport(input: Omit<PublishSiteReportInput, "cadence"> & 
     period: input.period,
     includeHistory: false,
   });
+  // Nothing was read on these dates (a new site whose meters are not sending yet): there is no report to write.
+  if (!loaded.current.project.dates.length || !loaded.current.project.total) throw new Error(SITE_REPORT_NO_READINGS);
   const reference = readProjectSpatialReference(input.settings.contextNotes ?? "", input.settings.projectId)?.reference ?? null;
   const data = await withFollowUpChecks(input, loaded, reference, generatedAt);
   // English for now. The readings saved beside the page let the web app word the same report in any language.
