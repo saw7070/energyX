@@ -111,6 +111,7 @@ import type {
   WorkspaceConfigDto,
 } from "./types";
 import { ConfigApiError as ConfigApiErrorClass } from "./types";
+import { leaveForSignIn } from "./session-ended";
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:8787";
 const DEFAULT_WORKSPACE_ID = "default";
@@ -236,6 +237,18 @@ async function parseJsonResponse<T>(response: Response): Promise<T> {
 const workspaceHeader = (workspaceId: string | undefined): { headers?: Record<string, string> } =>
   workspaceId ? { headers: { "X-Workspace-Id": workspaceId } } : {};
 
+/**
+ * A request refused because the reader is no longer signed in sends them to the sign-in page (see session-ended.ts).
+ * Sign-in steps answer 401 for a wrong password or code, and the account check a page makes on loading (GET /me)
+ * decides for itself in data-task-identity.tsx, so neither leaves the page.
+ */
+function noticeSessionEnded(path: string, method: string | undefined, status: number): void {
+  if (status !== 401 || !isPasswordAuthMode()) return;
+  if (path.startsWith("/api/v1/auth/")) return;
+  if (path === "/api/v1/me" && (method ?? "GET").toUpperCase() === "GET") return;
+  leaveForSignIn();
+}
+
 async function requestEnvelope<T>(
   path: string,
   init?: RequestInit,
@@ -253,6 +266,7 @@ async function requestEnvelope<T>(
       ...init?.headers,
     },
   });
+  noticeSessionEnded(path, init?.method, response.status);
 
   const envelope = await parseJsonResponse<ApiResult<T>>(response);
   if (!envelope.success) {
@@ -276,6 +290,7 @@ async function requestRaw(path: string, init?: RequestInit): Promise<Response> {
       ...init?.headers,
     },
   });
+  noticeSessionEnded(path, init?.method, response.status);
   if (!response.ok) {
     const text = await response.text();
     throw new ConfigApiErrorClass(

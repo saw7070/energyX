@@ -60,3 +60,50 @@ describe("local administrator login", () => {
     expect(isLocalDevAdminAvailable("127.0.0.1")).toBe(false);
   });
 });
+
+describe("signing in again after the session ended", () => {
+  let container: HTMLDivElement;
+  let root: Root | null;
+
+  beforeEach(() => {
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+    vi.stubGlobal("React", React);
+    process.env.NEXT_PUBLIC_DATAFOUNDRY_AUTH_MODE = "password";
+    window.history.replaceState({}, "", "/login");
+    navigation.replace.mockReset();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ success: false, error: { code: "UNAUTHORIZED", message: "Authentication required." } }),
+      { status: 401, headers: { "Content-Type": "application/json" } },
+    )));
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    if (root) await act(async () => root?.unmount());
+    container.remove();
+    delete process.env.NEXT_PUBLIC_DATAFOUNDRY_AUTH_MODE;
+    vi.unstubAllGlobals();
+  });
+
+  const renderLogin = async (query: string) => {
+    navigation.searchParams = new URLSearchParams(query);
+    await act(async () => root?.render(<LoginClient />));
+    await act(async () => undefined);
+  };
+
+  it("says the session ended above the sign-in form", async () => {
+    await renderLogin("session=ended&returnTo=%2Fenergyiq%2Fportfolio");
+    const notice = container.querySelector("[role=status]");
+    expect(notice?.textContent).toBe("Your session has ended. Please sign in again.");
+    expect(container.querySelector("#auth-email")).not.toBeNull();
+  });
+
+  it("shows no notice on an ordinary visit", async () => {
+    await renderLogin("");
+    expect(container.textContent).not.toContain("Your session has ended");
+    expect(container.querySelector("#auth-email")).not.toBeNull();
+  });
+});
+

@@ -21,6 +21,7 @@ import {
   type ConfigApiIdentity,
 } from "../../lib/config-api/client";
 import type { DevIdentityUser } from "../../lib/config-api";
+import { hasSessionCookie, signInPath } from "../../lib/config-api/session-ended";
 import { AUTH_BUTTON_CLASS, AuthLoadingScreen, PasswordAuthShell } from "../../components/auth/auth-flow";
 
 const IDENTITY_STORAGE_KEY = "data-tasks:identity:v1";
@@ -416,10 +417,11 @@ function PasswordIdentityProvider({ children }: { children: ReactNode }) {
   }, [changePassword, createUser, currentUser, error, loading, signOut, signOutAll, updateProfile]);
 
   // Only a real "not signed in" answer sends someone to the sign-in page. If the server could not be reached,
-  // their session may be perfectly good, so ask them to try again instead of signing them out.
+  // their session may be perfectly good, so ask them to try again instead of signing them out. The sign-in page
+  // brings them back here, and says their session ended when this browser was signed in until now.
   useEffect(() => {
     if (!loading && !error && (!currentUser || !value)) {
-      router.replace("/login");
+      router.replace(signInPath(window.location, { sessionEnded: hasSessionCookie() }));
     }
   }, [loading, error, currentUser, value, router]);
 

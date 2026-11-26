@@ -74,6 +74,7 @@ export function AuthFlow({
   onAuthenticated,
   onTwoStep,
   error = null,
+  notice = null,
   alternativeSignIn = null,
 }: {
   initialMode: AuthMode;
@@ -82,6 +83,8 @@ export function AuthFlow({
   /** The password was right and two-step verification comes next; no session exists yet. */
   onTwoStep: (prompt: TwoStepPromptDto) => void;
   error?: string | null;
+  /** Why the reader is here, such as "Your session has ended". Shown above the form until they try to sign in. */
+  notice?: string | null;
   /** Shown under the sign-in form, such as "Sign in with your organisation's account (SSO)". */
   alternativeSignIn?: ReactNode;
 }) {
@@ -96,11 +99,13 @@ export function AuthFlow({
   const [message, setMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [shownNotice, setShownNotice] = useState<string | null>(notice);
 
   const goToSubMode = useCallback((next: AuthMode) => {
     setMode(next);
     setLocalError(null);
     setMessage(null);
+    setShownNotice(null);
   }, []);
 
   // Recovery and invitation states live on /login. Reset the local mode as
@@ -121,6 +126,7 @@ export function AuthFlow({
     setSubmitting(true);
     setLocalError(null);
     setMessage(null);
+    setShownNotice(null);
     try {
       if ((mode === "invite" || mode === "reset") && password.length < MIN_PASSWORD_LENGTH) {
         setLocalError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
@@ -170,6 +176,11 @@ export function AuthFlow({
   return (
     <PasswordAuthShell title={meta.title} subtitle={meta.subtitle}>
       <form className="flex flex-col gap-5" onSubmit={submit} noValidate>
+        {shownNotice ? (
+          <p role="status" className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-relaxed text-amber-900">
+            {shownNotice}
+          </p>
+        ) : null}
         {mode === "invite" ? (
           <AuthField
             id="auth-display-name"
