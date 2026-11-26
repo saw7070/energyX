@@ -19,6 +19,13 @@ export { AuthError } from "./errors.js";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 /** Sign-ins without "Remember me" end when the browser closes, or after this at the latest. */
 const SHORT_SESSION_TTL_SECONDS = 60 * 60 * 12;
+/**
+ * A "Remember me" session: one issued for longer than a browser-length sign-in. Only those get the 30 days, so the
+ * length tells them apart (the session row does not record the choice itself), and it holds for sessions issued
+ * before this rule too. The idle limit does not end them; signing out, a password change, or their 30 days do.
+ */
+const isRememberedSession = (session: { created_at: string; expires_at: string }): boolean =>
+  Date.parse(session.expires_at) - Date.parse(session.created_at) > SHORT_SESSION_TTL_SECONDS * 1000;
 const ACCOUNT_INVITATION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const PASSWORD_RESET_TTL_MS = 1000 * 60 * 30;
 /** Wrong passwords for one account within the window below that pause its password sign-in. */
@@ -413,7 +420,8 @@ export class AuthService {
     }
     const now = Date.now();
     const lastSeenMs = Date.parse(session.last_seen_at);
-    if (now - lastSeenMs > this.sessionIdleMs) {
+    // "Remember me for 30 days" means that: a remembered session is not ended for sitting unused.
+    if (!isRememberedSession(session) && now - lastSeenMs > this.sessionIdleMs) {
       // Unused for too long: the session ends here, however long its cookie would otherwise last.
       this.metadataStore.authSessions.revoke({ id: session.id });
       this.audit("auth.session_idle_timeout", {
