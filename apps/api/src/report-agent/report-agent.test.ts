@@ -43,9 +43,10 @@ describe("report calendar and persistence", () => {
     expect(restarted.get(settings.projectId, job.id).status).toBe("interrupted");
     expect(() => restarted.get("other-project", job.id)).toThrow("NOT_FOUND");
   });
-  it("requires an accepted Skill before enabling schedules and a completed same-project parent", () => {
+  it("enables a schedule without a Skill (site reports only) and requires a completed same-project parent", () => {
     const { store } = fixture();
-    expect(() => store.saveSettings({ ...settings, skill: "", frequency: "monthly" })).toThrow("SKILL_REQUIRED");
+    // Without a saved method the schedule writes only the site's own reports; the advisor waits for a method.
+    expect(store.saveSettings({ ...settings, skill: "", frequency: "monthly" })).toMatchObject({ frequency: "monthly", skill: "" });
     const parent = store.enqueue({ settings, period, prompt: "Initial", actorUserId: "admin" });
     expect(() => store.enqueue({ settings, period, prompt: "Revise", actorUserId: "admin", parentRunId: parent.id })).toThrow("PARENT_NOT_READY");
   });

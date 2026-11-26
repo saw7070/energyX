@@ -373,3 +373,59 @@ it("still publishes the report when checking follow-ups fails", async () => {
   expect(thrown.created).toBe(true);
   expect(thrown.run.status).toBe("succeeded");
 });
+
+// A site created with automatic reports chosen has no report method (the advisor's instructions) yet, and no readings
+// until its meters are connected.
+it("writes the site's own report on schedule without a saved report method, and no advisor report", async () => {
+  const { service, settings } = setup();
+  // Saving a schedule without a method used to be refused (REPORT_SKILL_REQUIRED_FOR_SCHEDULE).
+  service.store.saveSettings({ ...settings, skill: "", siteReportStyle: "review" });
+  service.start();
+  await service.tick();
+  await service.tick(new Date("2026-08-17T01:00:00Z"));
+  await service.settleSiteReports();
+  await service.stop();
+  const runs = service.store.list("project");
+  expect(runs.filter(run => !run.siteReport)).toHaveLength(0);
+  expect(runs.map(run => [run.siteReport?.cadence, run.siteReport?.style, run.reportingPeriod])).toEqual([["weekly", "review", { from: "2026-08-10", toExclusive: "2026-08-17" }]]);
+  expect(service.store.settings("project")?.frequency).toBe("weekly");
+});
+
+it("waits quietly for readings: a period with none writes nothing, logs no failure and is not read again that day", async () => {
+  let loads = 0;
+  const empty = (): AnalysisData => { const data = analysisData(); return { ...data, current: { project: { ...data.current.project, dates: [], total: null }, spaces: [] } }; };
+  const { service, settings } = setup({ loadSiteReportData: async () => { loads += 1; return { data: empty(), dataSnapshotId: null }; } });
+  const failed = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  service.store.saveSettings({ ...settings, skill: "" });
+  service.start();
+  await service.tick();
+  await service.tick(new Date("2026-08-17T01:00:00Z"));
+  await service.settleSiteReports();
+  await service.tick(new Date("2026-08-17T02:00:00Z"));
+  await service.settleSiteReports();
+  await service.stop();
+  expect(service.store.list("project")).toHaveLength(0);
+  expect(loads).toBe(1);
+  expect(failed).not.toHaveBeenCalled();
+});
+
+it("skips a site still being set up, whose schedule was chosen when it was created", async () => {
+  let loads = 0;
+  const { service, settings, metadata } = setup({ loadSiteReportData: async () => { loads += 1; return { data: analysisData(), dataSnapshotId: "snapshot-1" }; } });
+  metadata.energyIq.upsertProject({ id: "project", workspace_id: "workspace", name: "project", status: "draft" });
+  service.store.saveSettings({ ...settings, skill: "" });
+  service.start();
+  await service.tick();
+  await service.tick(new Date("2026-08-17T01:00:00Z"));
+  await service.settleSiteReports();
+  await service.stop();
+  expect(loads).toBe(0);
+  expect(service.store.list("project")).toHaveLength(0);
+});
+
+it("refuses to write a report for dates with no readings, with a code the page words for people", async () => {
+  const { publish } = setup();
+  const data = analysisData();
+  await expect(publish({ loadData: async () => ({ data: { ...data, current: { project: { ...data.current.project, dates: [], total: null }, spaces: [] } }, dataSnapshotId: null }) })).rejects.toThrow("SITE_REPORT_NO_READINGS");
+});
+

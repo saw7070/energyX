@@ -36,13 +36,13 @@ import { canUseActions } from "./action-access.js";
 import { dueReportPeriods } from "./report-calendar.js";
 import type { LocalDataGateway } from "@datafoundry/data-gateway";
 import { SITE_REPORT_SNAPSHOT_FILE, type SiteReportStyle } from "@datafoundry/site-report";
-import { publishCustomSiteReport, publishSiteReport, siteReportScheduleKey } from "./site-report-generation.js";
+import { publishCustomSiteReport, publishSiteReport, SITE_REPORT_NO_READINGS, siteReportScheduleKey } from "./site-report-generation.js";
 import type { loadSiteReportData } from "./site-report-data.js";
 import { availableReportPeriod } from "./report-periods.js";
 import { scheduledAnalysisPrompt, withCadenceSkill } from "./report-schedule-policy.js";
 import type { ReportHarness } from "./report-harness.js";
 import { authorizeReportProject, copyReportParent, prepareReportInputs } from "./report-inputs.js";
-import { hasReportArtifact, hasSkillArtifact, ReportStore, type ReportRun, type ReportSettings } from "./report-store.js";
+import { hasReportArtifact, hasReportMethod, hasSkillArtifact, ReportStore, type ReportRun, type ReportSettings } from "./report-store.js";
 import { defineBackgroundJob } from "../observability/background-jobs.js";
 import { logger } from "../observability/logger.js";
 
@@ -84,6 +84,8 @@ export class ReportService {
   private actionWakeRequested = false;
   /** Site reports currently being written, keyed by their schedule key, so a tick never starts the same one twice. */
   private siteReports = new Map<string, Promise<void>>();
+  /** Due site reports whose dates held no readings: not tried again on every tick of the same day. */
+  private emptySiteReports = new Set<string>();
   /** Scheduling, site reports and action checks, reported per project for /ready, /metrics and operator alerts. */
   private readonly job = defineBackgroundJob("report-agent", { staleAfterMs: STALE_AFTER_MS });
 
@@ -227,6 +229,12 @@ export class ReportService {
           this.startDueSiteReports(now, settings.projectId);
           continue;
         }
+        // No saved report method yet (a site set up with automatic reports when it was created): the site's own reports
+        // come out from the readings, and the advisor's reports start once someone saves a method.
+        if (!hasReportMethod(settings)) {
+          this.startDueSiteReports(now, settings.projectId);
+          continue;
+        }
         const runSettings = this.options.resolveScheduledSkills?.(settings) ?? resolveReportSkillSelection(settings, [...requiredReportSkills(settings.projectId), ...defaultReportSkills(settings)]);
         const available = await (this.options.availablePeriod ?? availableReportPeriod)(this.options.metadata, this.options.files, settings, settings.actorUserId);
         if (this.stopped) return;
@@ -273,10 +281,13 @@ export class ReportService {
       // Re-read: the advisor pass above may just have paused this project's schedule.
       const settings = this.store.settings(projectId);
       if (!settings || this.stopped) return;
+      // A site still being set up (never published) has no readings to report on. Its schedule may already be on,
+      // chosen when the site was created; the first report comes with the first period after it goes live.
+      if (this.projectStatus(projectId) === "draft") return;
       // Daily, weekly and monthly alike: a daily site report covers the day before, in the site's time zone.
       for (const { cadence, period } of dueReportPeriods(now, settings.timezone, settings.frequency, settings.localHour)) {
         const key = siteReportScheduleKey(projectId, cadence, period);
-        if (this.siteReports.has(key) || this.store.findByScheduleKey(key)) continue;
+        if (this.siteReports.has(key) || this.emptySiteReports.has(key) || this.store.findByScheduleKey(key)) continue;
         const task = publishSiteReport({
           metadata: this.options.metadata, dataGateway: this.options.dataGateway!, store: this.store,
           root: this.options.root, settings, cadence, period,
@@ -284,6 +295,12 @@ export class ReportService {
         })
           .then(() => { this.job.succeeded(`site-report:${projectId}`); })
           .catch((error) => {
+            // No readings on those dates is not a failure: there is simply nothing to report yet.
+            if (error instanceof Error && error.message === SITE_REPORT_NO_READINGS) {
+              this.emptySiteReports.add(key);
+              log.info("site_report_skipped", { project_id: projectId, cadence, reason: "no_readings" });
+              return;
+            }
             log.error("site_report_failed", { project_id: projectId, cadence });
             this.job.failed(error, `site-report:${projectId}`);
           })
@@ -294,6 +311,10 @@ export class ReportService {
       log.error("site_report_schedule_failed", { project_id: projectId });
       this.job.failed(error, `site-report:${projectId}`);
     }
+  }
+
+  private projectStatus(projectId: string): string | undefined {
+    try { return this.options.metadata.energyIq?.getProject(projectId).status; } catch { return undefined; }
   }
 
   /** Wait for any site reports still being written. Used when shutting down, and by tests. */

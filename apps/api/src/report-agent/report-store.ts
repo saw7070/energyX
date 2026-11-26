@@ -131,7 +131,8 @@ export class ReportStore {
         if (source.status !== "succeeded" || source.actorUserId !== input.actorUserId || source.sessionId !== ref.sourceSessionId) throw new Error("REPORT_SKILL_SOURCE_INVALID");
       }
     }
-    if (!input.skill.trim() && !input.skillRefs?.length && input.frequency !== "off") throw new Error("REPORT_SKILL_REQUIRED_FOR_SCHEDULE");
+    // A schedule no longer needs a saved report method: without one, only the site's own reports (written from the
+    // readings, no AI) come out; the advisor's reports start once a method is saved (see hasReportMethod).
     if (input.skillSourceRunId) {
       const source = this.get(input.projectId, input.skillSourceRunId);
       if (source.status !== "succeeded" || !hasSkillArtifact(source) || source.actorUserId !== input.actorUserId) throw new Error("REPORT_SKILL_SOURCE_INVALID");
@@ -442,4 +443,12 @@ export class ReportStore {
       this.finish({ ...run, status: "interrupted", errorCode: "REPORT_WORKER_RESTARTED" });
     }
   }
+}
+
+/**
+ * Whether the site has a saved report method (the advisor's own instructions) for its automatic reports. Without one,
+ * a schedule writes only the site's own reports from the readings, and the advisor's AI reports wait until one is saved.
+ */
+export function hasReportMethod(settings: Pick<ReportSettings, "skill" | "skillRefs">): boolean {
+  return settings.skill.trim() !== "" || (settings.skillRefs?.length ?? 0) > 0;
 }
