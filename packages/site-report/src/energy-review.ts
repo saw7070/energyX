@@ -26,6 +26,7 @@ import { forHoursMeaning, translatorFor, type EnergyIqLocale, type Translate } f
 import { buildManagementReview, REVIEW_STOPPED_HOURS, type ManagementReview } from "./management-review.js";
 import { analysisGroupTree, inSavedOrder, type MeterGroupNode, type MeterGroupTree } from "./meter-groups.js";
 import { formatPeriod } from "./report-period.js";
+import { standoutBehind } from "./standout-report.js";
 import { clock, inWindow, kwhText as baseKwhText, kwText, moneyText, openingWindow, pctText, weekdayOf } from "./site-report-model.js";
 
 type T = Translate<EnergyReviewKey>;
@@ -100,7 +101,26 @@ export type EnergyReviewLayer = { key: string; name: string; colour: string; hou
  * set it aside: "stopped:<meterId>", "offline:<meterId>", "notInUse:<meterId>", "standout:<YYYY-MM-DD>", "daytime",
  * "noUse:<meterId>".
  */
-export type EnergyReviewCheck = { key: string; title: string; text: string };
+export type EnergyReviewCheck = { key: string; title: string; text: string; readings?: EnergyReviewReadings | undefined };
+/**
+ * The readings behind a point to check, for its chart: the meter it names (or, for a day that stood out, the meter or
+ * group behind that day; the whole site when nothing in particular is), day by day and hour by hour over the review's
+ * dates. Absent on points that name no meter, and on reviews built before the chart existed.
+ */
+export type EnergyReviewReadings = {
+  /** Whose readings these are: a meter, a group or the site. */
+  name: string;
+  /** Each day of the review: its label ("Thu 19 Nov") and kWh; null when nothing at all was received that day. */
+  days: Array<{ date: string; label: string; kwh: number | null }>;
+  /** Each day's 24 hours of kWh, by date; null for an hour with no reading. */
+  hours: Record<string, Array<number | null>>;
+  /** The day the point is about (a day that stood out), shown picked out; null when the point is about a meter. */
+  focus: string | null;
+  /** A usual day for these readings: the middle value of the other days with readings; null with none. */
+  usualKwh: number | null;
+  /** The site's hours (opening, or lights-on), whole hours of the day; the day chart shades them. */
+  band: { from: number; to: number };
+};
 /** A follow-up from feedback on an earlier report, with the AI's latest look at it (`verdict` null when it has not looked). */
 export type EnergyReviewFollowUp = { text: string; status: ReportFollowUpStatus; verdict: ReportFollowUpVerdict | null; evidence: string | null };
 /** What a moment of the average night is: lights switching on, a step down, lights going off, or the daytime. */
@@ -736,6 +756,51 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
     ]),
   } : null;
 
+  // ---------- the readings behind a point to check ----------
+  const seriesOf = new Map(allMeters.map(meter => [meter.id, meter.series!] as const));
+  const meterName = new Map(allMeters.map(meter => [meter.id, meter.name] as const));
+  const groupList = data.groups?.list ?? [];
+  const membersOf = (groupId: string): string[] => {
+    const inside = new Set([groupId]);
+    for (let grew = true; grew;) { grew = false; for (const group of groupList) if (group.parentId && inside.has(group.parentId) && !inside.has(group.id)) { inside.add(group.id); grew = true; } }
+    return (data.groups?.meters ?? []).filter(entry => entry.groupId && inside.has(entry.groupId)).map(entry => entry.id);
+  };
+  let behindByDate: ReturnType<typeof standoutBehind> | null = null;
+  /** The readings of these meters added together, day by day and hour by hour; null when none of them has readings. */
+  const readingsFor = (name: string, ids: string[], focus: string | null, usual: number | null = null): EnergyReviewReadings | null => {
+    const own = ids.flatMap(id => seriesOf.get(id) ?? []);
+    if (!own.length || !dates.length) return null;
+    const byHour = new Map<string, number>();
+    for (const series of own) for (const cell of series.cells) {
+      if (cell[3] <= 0) continue;
+      const key = `${cell[0]}|${cell[1]}`;
+      byHour.set(key, (byHour.get(key) ?? 0) + (cell[2] ?? 0));
+    }
+    const hours: Record<string, Array<number | null>> = {};
+    const days = dates.map(date => {
+      const row = Array.from({ length: 24 }, (_, hour) => { const value = byHour.get(`${date}|${hour}`); return value == null ? null : Math.round(value * 1000) / 1000; });
+      hours[date] = row;
+      const read = row.filter((value): value is number => value != null);
+      return { date, label: `${weekdayOf(date, locale)} ${shortDate(date, locale)}`, kwh: read.length ? Math.round(read.reduce((sum, value) => sum + value, 0) * 1000) / 1000 : null };
+    });
+    const others = days.filter(day => day.kwh != null && day.date !== focus).map(day => day.kwh!).sort((a, b) => a - b);
+    // A day that stood out keeps the usual figure its sentence gives; otherwise the middle of the other days.
+    const usualKwh = usual ?? (others.length ? others.length % 2 ? others[(others.length - 1) / 2]! : (others[others.length / 2 - 1]! + others[others.length / 2]!) / 2 : null);
+    return { name, days, hours, focus, usualKwh, band: { from: Math.round(openRange.from) % 24, to: Math.round(openRange.to) % 24 } };
+  };
+  /** A point to check's readings: the meter it names, or the meter, group or site behind the day that stood out. */
+  const checkReadings = (key: string): EnergyReviewReadings | null => {
+    const match = ENERGY_REVIEW_CHECK_KEY.exec(key);
+    if (!match) return null;
+    if (match[2]) return meterName.has(match[2]) ? readingsFor(meterName.get(match[2])!, [match[2]], null) : null;
+    if (!match[3]) return null;
+    behindByDate ??= standoutBehind(data);
+    const behind = behindByDate.get(match[3])?.[0];
+    if (behind?.kind === "meter" && seriesOf.has(behind.id)) return readingsFor(behind.name, [behind.id], match[3], behind.usualKwh);
+    if (behind?.kind === "group") return readingsFor(behind.name, membersOf(behind.id), match[3], behind.usualKwh);
+    return readingsFor(data.projectName, [...seriesOf.keys()], match[3]);
+  };
+
   // ---------- points to check ----------
   const checks: EnergyReviewCheck[] = [];
   // Points an admin set aside as known (from feedback on an earlier report) are left out, and so are the steps for them.
@@ -783,7 +848,10 @@ export function buildEnergyReview(data: AnalysisData, reference: ProjectSpatialR
   const quietMustRun = allMeters.filter(meter => mustRun.has(meter.id) && !stoppedIds.has(meter.id) && !notInUseIds.has(meter.id) && meter.series!.cells.every(cell => (cell[2] ?? 0) < USED_DAY_KWH / 24) && meter.series!.cells.some(cell => cell[3] > 0));
   for (const meter of quietMustRun) checks.push({ key: `noUse:${meter.id}`, title: t("check.noUse.title", { name: meter.name }), text: t("check.noUse.do") });
   const keptChecks = checks.filter(check => kept(check.key));
-  const shownChecks = keptChecks.slice(0, MAX_CHECKS);
+  const shownChecks = keptChecks.slice(0, MAX_CHECKS).map(check => {
+    const readings = checkReadings(check.key);
+    return readings ? { ...check, readings } : check;
+  });
 
   // ---------- 6. meters with little use ----------
   const readDates = new Set(readDays.map(day => day.date));

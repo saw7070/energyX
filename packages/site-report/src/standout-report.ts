@@ -126,6 +126,17 @@ export type StandoutReport = {
   rule: string;
 };
 
+/**
+ * Who is behind each day that stood out, by date: the meters or the group its sentence names (behindTheDay), found the
+ * same way standoutReport finds them. Empty for a day only the whole site explains.
+ */
+export function standoutBehind(data: AnalysisData): Map<string, DayBehind[]> {
+  const lighting = data.hoursMeaning === "lights_on";
+  const meters = standoutMeters([data.current.project, ...data.current.spaces]);
+  const explained = explainDays({ days: scopeDays(data.current.project, data.holidays), meters, lighting, places: meterGroupPlaces(data.groups) });
+  return new Map(standoutDays(explained).map(item => [item.date, behindTheDay(item, data.groups)]));
+}
+
 export function standoutReport(data: AnalysisData, locale: EnergyIqLocale = "en"): StandoutReport {
   const t = standoutText(locale);
   const lighting = data.hoursMeaning === "lights_on";

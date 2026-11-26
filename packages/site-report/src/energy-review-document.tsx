@@ -12,7 +12,7 @@
  */
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ENERGY_REVIEW_PALETTE as P, worthSaying, type EnergyReview, type EnergyReviewFollowUp, type EnergyReviewHeadline, type EnergyReviewMeter, type EnergyReviewQuestion, type EnergyReviewSlice } from "./energy-review.js";
+import { ENERGY_REVIEW_PALETTE as P, worthSaying, type EnergyReview, type EnergyReviewCheck, type EnergyReviewFollowUp, type EnergyReviewHeadline, type EnergyReviewMeter, type EnergyReviewQuestion, type EnergyReviewSlice } from "./energy-review.js";
 import { energyReviewMessages } from "./energy-review-messages.js";
 import { forHoursMeaning, translatorFor } from "./locale.js";
 import { Rich } from "./rich.js";
@@ -224,6 +224,33 @@ export const ENERGY_REVIEW_CSS = `
 .eiq-energy-review .er-checks strong{display:block;margin-bottom:2px}
 .eiq-energy-review .er-checks .er-ask{grid-column:2;justify-self:start;margin-top:4px;padding:6px 0;font-size:13px;font-weight:600;color:var(--er-green);text-decoration:underline;text-decoration-color:#BBD3C6;text-underline-offset:3px;transition:color .15s,text-decoration-color .15s}
 .eiq-energy-review .er-checks .er-ask:hover{color:var(--er-green-deep);text-decoration-color:currentColor}
+.eiq-energy-review .er-checks li.er-open{grid-column:1/-1}
+.eiq-energy-review .er-check-links{grid-column:2;display:flex;flex-wrap:wrap;align-items:center;gap:2px 22px;margin-top:4px}
+.eiq-energy-review .er-checks .er-check-links .er-ask{margin-top:0}
+.eiq-energy-review .er-checks .er-link{display:inline-flex;align-items:center;gap:6px;padding:6px 0;font-size:13px;font-weight:600;color:var(--er-green);text-decoration:underline;text-decoration-color:#BBD3C6;text-underline-offset:3px;transition:color .15s,text-decoration-color .15s}
+.eiq-energy-review .er-checks .er-link:hover{color:var(--er-green-deep);text-decoration-color:currentColor}
+.eiq-energy-review .er-rd-toggle svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round}
+.eiq-energy-review .er-rd{grid-column:1/-1;margin-top:14px;padding:16px 18px 14px;border:1px solid var(--er-line);border-radius:14px;background:var(--er-soft)}
+.eiq-energy-review .er-rd-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px}
+.eiq-energy-review .er-rd-figs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(112px,100%),1fr));gap:8px;margin:12px 0 4px}
+.eiq-energy-review .er-rd-figs>div{padding:9px 12px;border:1px solid var(--er-line);border-radius:10px;background:#fff}
+.eiq-energy-review .er-rd-figs small{display:block;font-size:11.5px;color:var(--er-muted)}
+.eiq-energy-review .er-rd-figs b{display:block;margin-top:1px;font-size:17px;font-weight:650;color:var(--er-ink);font-variant-numeric:tabular-nums}
+.eiq-energy-review .er-rd-figs span{font-size:11.5px;color:var(--er-faint)}
+.eiq-energy-review svg .er-rd-band{fill:#E6EFEA}
+.eiq-energy-review svg text.er-rd-bandtext{font-size:10.5px;font-weight:650;fill:var(--er-green)}
+.eiq-energy-review svg .er-rd-bar{transform-box:fill-box;transform-origin:50% 100%;animation:er-grow .5s cubic-bezier(.2,.8,.2,1) both}
+@keyframes er-grow{from{transform:scaleY(0)}}
+@media (prefers-reduced-motion:reduce){.eiq-energy-review svg .er-rd-bar{animation:none}}
+.eiq-energy-review .er-rd-foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px;margin-top:6px}
+.eiq-energy-review .er-rd-key{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:var(--er-muted)}
+.eiq-energy-review .er-rd-key span{display:inline-flex;align-items:center;gap:6px}
+.eiq-energy-review .er-rd-key i{display:block;width:10px;height:10px;border-radius:3px}
+.eiq-energy-review .er-rd-key i.er-rd-swatch{width:14px;background:#E6EFEA;border:1px solid #BBD3C6}
+.eiq-energy-review .er-rd-key i.er-rd-usual{width:18px;height:0;border-radius:0;border-top:2px dashed var(--er-bronze)}
+.eiq-energy-review .er-rd-key i.er-rd-none{width:9px;height:9px;border-radius:50%;border:1.5px dashed #A9B8B1;background:#fff}
+.eiq-energy-review .er-tip .er-tip-go{display:block;margin-top:4px;font-size:11.5px;color:#9FD3BC}
+@media (max-width:560px){.eiq-energy-review .er-rd{padding:12px 12px 10px}.eiq-energy-review .er-rd-figs b{font-size:15.5px}}
 .eiq-energy-review .er-follow{list-style:none;margin-top:16px;display:grid;gap:10px}
 .eiq-energy-review .er-follow li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 14px;align-items:start;padding:14px 18px;border:1px solid var(--er-line);border-radius:14px;background:#fff}
 .eiq-energy-review .er-follow li.er-closed{background:var(--er-soft)}
@@ -303,7 +330,9 @@ export const ENERGY_REVIEW_CSS = `
 }
 @media (prefers-reduced-motion:reduce){.eiq-energy-review *{transition:none!important}}
 @media print{
-  .eiq-energy-review .er-nav,.eiq-energy-review .er-switch,.eiq-energy-review .er-hint,.eiq-energy-review .er-tip,.eiq-energy-review .er-more,.eiq-energy-review .er-reset,.eiq-energy-review .er-ask,.eiq-energy-review .er-fb{display:none!important}
+  .eiq-energy-review svg .er-rd-bar{animation:none}
+  .eiq-energy-review .er-rd{break-inside:avoid}
+  .eiq-energy-review .er-nav,.eiq-energy-review .er-switch,.eiq-energy-review .er-hint,.eiq-energy-review .er-tip,.eiq-energy-review .er-more,.eiq-energy-review .er-reset,.eiq-energy-review .er-ask,.eiq-energy-review .er-link,.eiq-energy-review .er-fb{display:none!important}
   .eiq-energy-review .er-fig,.eiq-energy-review .er-checks li,.eiq-energy-review .er-steps li,.eiq-energy-review .er-follow li,.eiq-energy-review .er-figs,.eiq-energy-review .er-finds>li{break-inside:avoid}
   .eiq-energy-review .er-figs,.eiq-energy-review .er-find{box-shadow:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   .eiq-energy-review .er-finds{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -879,6 +908,183 @@ const followUpChip = (item: EnergyReviewFollowUp): { kind: string; key: Paramete
 
 // ---------- the document ----------
 
+// ---------- the readings behind a point to check ----------
+
+type Readings = NonNullable<EnergyReviewCheck["readings"]>;
+/** kWh as the readings chart shows it: two decimals below 10 ("2.64 kWh"), one above. */
+const kwhFine = (value: number) => `${num(value, value < 10 ? 2 : 1)} kWh`;
+const tickText = (value: number) => String(Number(value.toFixed(3)));
+const usedHours = (row: ReadonlyArray<number | null>) => row.flatMap((value, hour) => value != null && value > 0.005 ? [hour] : []);
+/**
+ * When something was in use on a day: "9 am – 4 pm", or "7 pm – 7 am" for lights that run through the night (the
+ * longest quiet spell, across midnight too, is taken as the time it was off); "All day" when it never stopped, and null
+ * when it was not used at all.
+ */
+const inUseSpan = (row: ReadonlyArray<number | null> | undefined, locale: EnergyReview["locale"], t: T) => {
+  const used = new Set(row ? usedHours(row) : []);
+  if (!used.size) return null;
+  if (used.size === 24) return t("readings.allDay");
+  let quiet = { start: 0, length: 0 };
+  for (let start = 0; start < 24; start += 1) {
+    if (used.has(start) || !used.has((start + 23) % 24)) continue;
+    let length = 0;
+    while (length < 24 && !used.has((start + length) % 24)) length += 1;
+    if (length > quiet.length) quiet = { start, length };
+  }
+  return `${clock((quiet.start + quiet.length) % 24, locale)} – ${clock(quiet.start, locale)}`;
+};
+
+/**
+ * A point to check, with the readings of the meter it names behind "Show the readings". On the live page the chart opens
+ * in the card (which then takes the whole row); a saved or downloaded copy shows it open, month view, without moving parts.
+ */
+function CheckCard({ check, index, review, live, onCheckFeedback, t }: { check: EnergyReviewCheck; index: number; review: EnergyReview; live: boolean; onCheckFeedback?: ((check: { key: string; title: string }) => void) | undefined; t: T }) {
+  const [open, setOpen] = useState(false);
+  const readings = check.readings;
+  const shown = !!readings && (!live || open);
+  const ask = live && onCheckFeedback && check.key;
+  return <li className={shown ? "er-open" : undefined}>
+    <b>{String(index + 1).padStart(2, "0")}</b><p><strong>{check.title}</strong>{check.text}</p>
+    {live && (readings || ask) && <div className="er-check-links">
+      {readings && <button type="button" className="er-link er-rd-toggle" aria-expanded={open} aria-label={t(open ? "readings.hideAria" : "readings.showAria", { name: readings.name })} onClick={() => setOpen(value => !value)}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V11" /><path d="M10 20V5" /><path d="M15 20v-6" /><path d="M20 20V9" /></svg>{t(open ? "readings.hide" : "readings.show")}
+      </button>}
+      {ask && <button type="button" className="er-ask" aria-label={t("checks.askAria", { title: check.title })} onClick={() => onCheckFeedback({ key: check.key, title: check.title })}>{t("checks.ask")}</button>}
+    </div>}
+    {shown && <CheckReadings readings={readings} review={review} live={live} t={t} />}
+  </li>;
+}
+
+/**
+ * The readings chart: the review's days as bars (the day the point is about picked out), and any day hour by hour
+ * against the site's hours. Pointing at a bar shows its figures; clicking a day opens its hours.
+ */
+function CheckReadings({ readings, review, live, t }: { readings: Readings; review: EnergyReview; live: boolean; t: T }) {
+  const { days, hours, focus, usualKwh, band } = readings;
+  const locale = review.locale;
+  const lastRead = [...days].reverse().find(day => day.kwh != null)?.date ?? days.at(-1)?.date ?? "";
+  const [view, setView] = useState<"month" | "day">("month");
+  const [date, setDate] = useState(focus ?? lastRead);
+  const [hover, setHover] = useState<number | null>(null);
+  // Down to phone width: the readings chart fits its box rather than scrolling.
+  const [ref, measured] = useWidth(680, 240);
+  const [scrollLeft, onScroll] = useScrollLeft();
+  const monthly = !live || view === "month";
+  const values: Array<number | null> = monthly ? days.map(day => day.kwh) : hours[date] ?? Array.from({ length: 24 }, () => null);
+  const count = values.length;
+  // Fits the card down to phone width (thin bars rather than a chart to scroll sideways).
+  const width = Math.max(measured, count * (monthly ? 7 : 9) + 58);
+  const height = 212;
+  const m = { l: 46, r: 12, t: 30, b: 38 };
+  const pw = width - m.l - m.r, ph = height - m.t - m.b;
+  const peak = Math.max(0, ...values.map(value => value ?? 0));
+  const ticks = niceTicks(Math.max(peak, monthly ? usualKwh ?? 0 : 0, 0.001) * 1.2);
+  const top = ticks.at(-1)!;
+  const y = (value: number) => m.t + ph - value / top * ph;
+  const slot = pw / Math.max(count, 1);
+  const barW = Math.min(monthly ? 22 : 18, Math.max(3, slot * 0.62));
+  const inBand = (hour: number) => band.to >= band.from ? hour >= band.from && hour < band.to : hour >= band.from || hour < band.to;
+  const cost = (kwh: number) => review.rate == null ? null : kwh * review.rate;
+  const costLabel = review.costBasis ? `${t("chart.cost")} (${review.costBasis})` : t("chart.cost");
+  const labelOf = (when: string) => days.find(day => day.date === when)?.label ?? when;
+  const total = values.reduce<number>((sum, value) => sum + (value ?? 0), 0);
+  const totalCost = cost(total);
+  const read = days.filter(day => day.kwh != null);
+  const used = read.filter(day => day.kwh! > 0.01);
+  const row = hours[date] ?? [];
+  const peakHour = row.reduce<number | null>((best, value, hour) => value != null && value > 0.005 && (best == null || value > row[best]!) ? hour : best, null);
+  const span = inUseSpan(row, locale, t);
+  const every = slot >= 40 ? 1 : slot >= 22 ? 2 : monthly ? 7 : slot >= 14 ? 3 : 6;
+  // The picked-out day always has its date under it; the regular dates nearest it give way so the labels never touch.
+  const focusIndex = monthly && focus ? days.findIndex(day => day.date === focus) : -1;
+  const figures: Array<[string, string, string]> = monthly
+    ? [[t("readings.total"), kwhFine(total), ""], ...(totalCost != null ? [[costLabel, moneyText(totalCost, review.currency, 2), ""] as [string, string, string]] : []),
+      ...(usualKwh != null ? [[t("readings.usual"), kwhFine(usualKwh), ""] as [string, string, string]] : []), [t("readings.daysUsed"), String(used.length), t("readings.daysUsedOf", { count: read.length })]]
+    : [[t("readings.total"), kwhFine(total), ""], ...(totalCost != null ? [[costLabel, moneyText(totalCost, review.currency, 2), ""] as [string, string, string]] : []),
+      [t("readings.peak"), peakHour == null ? "—" : clock(peakHour, locale), ""], [t("readings.inUse"), span ?? t("readings.notUsed"), ""]];
+  const openDay = (when: string) => { setDate(when); setView("day"); setHover(null); };
+  const hovered = hover == null ? null : values[hover];
+  return <div className="er-rd">
+    <div className="er-rd-head">
+      <span style={{ display: "grid", gap: 2 }}>
+        <span className="er-fig-title">{readings.name}</span>
+        <span className="er-hint">{monthly ? t("readings.monthSub", { period: review.cover.period[0] ?? "" }) : t("readings.daySub", { day: labelOf(date) })}</span>
+      </span>
+      {live && <span className="er-switch" role="group" aria-label={t("readings.view")}>
+        <button type="button" aria-pressed={view === "day"} onClick={() => { setView("day"); setHover(null); }}>{t("readings.day")}</button>
+        <button type="button" aria-pressed={view === "month"} onClick={() => { setView("month"); setHover(null); }}>{t("readings.month")}</button>
+      </span>}
+    </div>
+    <div className="er-rd-figs">{figures.map(([label, value, detail]) => <div key={label}><small>{label}</small><b>{value}</b>{detail && <span>{detail}</span>}</div>)}</div>
+    <div className="er-plot">
+      <div className="er-scroll" ref={ref} onScroll={onScroll}><svg key={monthly ? "month" : `day-${date}`} width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img"
+        aria-label={monthly ? t("readings.chartAria", { name: readings.name }) : t("readings.dayAria", { name: readings.name, day: labelOf(date) })} onPointerLeave={event => { if (event.pointerType === "mouse") setHover(null); }}>
+        {!monthly && values.map((_, hour) => inBand(hour) && <rect key={`b${hour}`} className="er-rd-band" x={m.l + slot * hour} y={m.t - 14} width={slot + 0.5} height={ph + 14} />)}
+        {!monthly && (() => { const first = Array.from({ length: 24 }, (_, hour) => hour).find(hour => inBand(hour) && !inBand((hour + 23) % 24)); return first == null ? null : <text className="er-rd-bandtext" x={m.l + slot * first + 4} y={m.t - 4}>{t("readings.bandShort")}</text>; })()}
+        {ticks.map(tick => <g key={tick}><line x1={m.l} x2={width - m.r} y1={y(tick)} y2={y(tick)} stroke={LINE} strokeDasharray={tick === 0 ? undefined : "2 4"} /><text x={m.l - 10} y={y(tick) + 4} textAnchor="end">{tickText(tick)}</text></g>)}
+        {monthly && usualKwh != null && usualKwh > 0 && <line x1={m.l} x2={width - m.r} y1={y(usualKwh)} y2={y(usualKwh)} stroke={BRONZE} strokeWidth={1.5} strokeDasharray="6 4" pointerEvents="none" />}
+        {values.map((value, index) => {
+          const x = m.l + slot * index + (slot - barW) / 2;
+          const when = monthly ? days[index]!.date : date;
+          const picked = monthly && focus === when;
+          const colour = monthly ? focus ? picked ? BRONZE : "#9EC2B3" : P[0] : inBand(index) ? P[0] : BRONZE;
+          const dim = hover != null && hover !== index;
+          const label = monthly ? days[index]!.label : `${clock(index, locale)} – ${clock((index + 1) % 24, locale)}`;
+          const tick = monthly ? days[index]!.label.split(" ").slice(1).join(" ") : clock(index, locale);
+          const showTick = picked || (index % every === 0 && (focusIndex < 0 || Math.abs(index - focusIndex) * slot >= 46));
+          return <g key={`${when}-${index}`}>
+            {value == null
+              ? <circle cx={x + barW / 2} cy={y(0) - 4} r={3} fill="#fff" stroke="#A9B8B1" strokeDasharray="2 1.5" opacity={dim ? 0.4 : 1}>{!live && <title>{`${label} · ${t("readings.noReading")}`}</title>}</circle>
+              : value > 0 ? <path className="er-rd-bar er-dim" d={topRounded(x, y(value), barW, Math.max(2, y(0) - y(value)), 5)} fill={hover === index ? colour === BRONZE ? "#93641F" : "#174635" : colour} opacity={dim ? 0.45 : 1}>
+                {!live && <title>{`${label} · ${kwhFine(value)}`}</title>}
+              </path>
+              : <rect x={x} y={y(0) - 1.5} width={barW} height={1.5} rx={0.75} fill="#C9D6D0" />}
+            {picked && value != null && <text className="dark" x={x + barW / 2} y={y(value) - 8} textAnchor="middle" style={{ fontSize: 11.5 }}>{kwhFine(value)}</text>}
+            {showTick && <text className={picked ? "dark" : undefined} x={x + barW / 2} y={height - m.b + 18} textAnchor="middle">{tick}</text>}
+            {live && <rect className="er-hit" x={m.l + slot * index} y={m.t - 14} width={slot} height={ph + 14} tabIndex={0} aria-label={t("readings.barAria", { label, value: value == null ? t("readings.noReading") : kwhFine(value) })}
+              style={{ cursor: monthly ? "pointer" : "crosshair" }} onPointerEnter={() => setHover(index)} onFocus={() => setHover(index)} onBlur={() => setHover(null)}
+              onClick={() => { if (monthly) openDay(when); else setHover(index); }} onKeyDown={event => { if (monthly && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); openDay(when); } }} />}
+          </g>;
+        })}
+        <line x1={m.l} x2={width - m.r} y1={y(0)} y2={y(0)} stroke={MUTED} />
+      </svg></div>
+      {live && hover != null && <Tip x={m.l + slot * (hover + 0.5) - scrollLeft} y={y(hovered ?? 0)} width={measured}>
+        {monthly ? <>
+          <b>{days[hover]!.label}</b>
+          {hovered == null ? <em>{t("readings.noReading")}</em> : <>
+            <TipRow label={t("chart.energy")} value={kwhFine(hovered)} />
+            {cost(hovered) != null && <TipRow label={costLabel} value={moneyText(cost(hovered)!, review.currency, 2)} />}
+            <TipRow label={t("readings.inUse")} value={inUseSpan(hours[days[hover]!.date], locale, t) ?? t("readings.notUsed")} />
+            {usualKwh != null && <TipRow label={t("readings.usual")} value={kwhFine(usualKwh)} />}
+            {focus === days[hover]!.date && <em>{t("readings.stoodOut")}</em>}
+            <span className="er-tip-go">{t("readings.openDay")}</span>
+          </>}
+        </> : <>
+          <b>{`${labelOf(date)} · ${clock(hover, locale)} – ${clock((hover + 1) % 24, locale)}`}</b>
+          {hovered == null ? <em>{t("readings.noReading")}</em> : <>
+            <TipRow label={t("chart.energy")} value={kwhFine(hovered)} />
+            {cost(hovered) != null && <TipRow label={costLabel} value={moneyText(cost(hovered)!, review.currency, 2)} />}
+            <TipRow label={t("readings.power")} value={`${whole(hovered * 1000)} W`} />
+            <TipRow label={t("readings.inHours")} value={inBand(hover) ? t("readings.yes") : t("readings.no")} />
+            {hovered > 0.005 && !inBand(hover) && <em>{t("readings.outside")}</em>}
+          </>}
+        </>}
+      </Tip>}
+    </div>
+    <div className="er-rd-foot">
+      <span className="er-rd-key">{monthly
+        ? focus ? <><span><i style={{ background: BRONZE }} />{t("readings.focus")}</span><span><i style={{ background: "#9EC2B3" }} />{t("readings.otherDays")}</span></>
+          : <span><i style={{ background: P[0] }} />{t("readings.eachDay")}</span>
+        : <><span><i style={{ background: P[0] }} />{t("readings.inside")}</span><span><i style={{ background: BRONZE }} />{t("readings.outsideKey")}</span><span><i className="er-rd-swatch" />{t("readings.band", { hours: `${clock(band.from, locale)} – ${clock(band.to, locale)}` })}</span></>}
+        {monthly && usualKwh != null && usualKwh > 0 && <span><i className="er-rd-usual" />{t("readings.usualLine")}</span>}
+        {values.some(value => value == null) && <span><i className="er-rd-none" />{t("readings.noReading")}</span>}
+      </span>
+      {live && (monthly ? <span className="er-hint">{t("readings.hint")}</span>
+        : <button type="button" className="er-link er-rd-back" onClick={() => { setView("month"); setHover(null); }}>{t("readings.back")}</button>)}
+    </div>
+  </div>;
+}
+
 /**
  * The review itself, from one `EnergyReview` and nothing else. `standalone` is for a saved or downloaded copy: a title
  * block in place of the page's own heading, and no moving parts. `onCheckFeedback`: on the live page, each point to
@@ -1013,10 +1219,7 @@ export function EnergyReviewDocument({ review, standalone, onCheckFeedback, sect
         <div className="er-kicker">{t("nav.checks")}</div>
         <h2>{t("checks.heading")}</h2>
         <SectionSlot id="checks" />
-        <ol className="er-checks">{checks.map((check, index) => <li key={check.key || check.title}>
-          <b>{String(index + 1).padStart(2, "0")}</b><p><strong>{check.title}</strong>{check.text}</p>
-          {live && onCheckFeedback && check.key && <button type="button" className="er-ask" aria-label={t("checks.askAria", { title: check.title })} onClick={() => onCheckFeedback({ key: check.key, title: check.title })}>{t("checks.ask")}</button>}
-        </li>)}</ol>
+        <ol className="er-checks">{checks.map((check, index) => <CheckCard key={check.key || check.title} check={check} index={index} review={review} live={live} onCheckFeedback={onCheckFeedback} t={t} />)}</ol>
       </section>}
 
       {followUps.length > 0 && <section id={sectionId("followups")} className="er-sec">
