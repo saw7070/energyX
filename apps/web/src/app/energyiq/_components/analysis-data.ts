@@ -86,12 +86,13 @@ export async function loadAnalysis(projectId: string, range: AnalysisRange): Pro
   // All history does not depend on the dates the server picks, so it starts with the first request instead of after
   // it. It is the slowest request; it is kept only if it read the same data snapshot as the rest.
   const allHistory = range.kind === "all" ? null : execute(projectId, "project", { kind: "all" }).catch(() => null);
-  const [project, information, actions, health] = await Promise.all([
+  // Meter health says which quiet meters are only using nothing: their silence then never makes a day incomplete.
+  // It is only needed at the end, so the spaces and the period before start as soon as the project result is in.
+  const healthRequest = configApi.getEnergyProjectMeterHealth(projectId).catch(() => null);
+  const [project, information, actions] = await Promise.all([
     execute(projectId, "project", range),
     configApi.getEnergyProjectInformation<ProjectInformation>(projectId).catch(() => null),
     configApi.reportActionRequest<{ actions: ProjectAction[] }>(projectId, "project-list").then(result => result.actions ?? []).catch(() => [] as ProjectAction[]),
-    // Meter health says which quiet meters are only using nothing: their silence then never makes a day incomplete.
-    configApi.getEnergyProjectMeterHealth(projectId).catch(() => null),
   ]);
   const snapshotId = project.context.dataSnapshotId ?? undefined;
   const { dates, previous } = analysisComparisonDates(project);
@@ -107,6 +108,7 @@ export async function loadAnalysis(projectId: string, range: AnalysisRange): Pro
   ]);
   const history = !earlyHistory || !snapshotId || earlyHistory.context.dataSnapshotId === snapshotId ? earlyHistory
     : await execute(projectId, "project", { kind: "all" }, snapshotId).catch(() => null);
+  const health = await healthRequest;
   const assembled = assembleAnalysisData({ projectId, project, spaces, spaceCurrent, previousProject, spacePrevious, history, information, actions });
   const idle = idleThroughLastDay(health?.meters ?? [], assembled.current.project.dates.at(-1), assembled.timezone);
   const data: AnalysisData = idle.length ? { ...assembled, idleWhenQuiet: idle } : assembled;

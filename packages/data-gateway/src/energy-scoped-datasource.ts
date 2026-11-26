@@ -8,6 +8,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type * as DuckDbModule from "duckdb";
 import { getDuckDbDatabase } from "./duckdb-database-cache.js";
+import { readThroughSnapshotCache } from "./energy-snapshot-read-cache.js";
 import {
   readEnergyFactProjectState,
 } from "./energy-fact-writer.js";
@@ -222,6 +223,19 @@ const readEnergyCoverage = async (input: {
   if (databasePath !== ":memory:" && !existsSync(databasePath)) {
     throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
   }
+  return readThroughSnapshotCache(databasePath, ["coverage", eligibility, input.workspaceId, input.projectId, input.dataSnapshotId,
+    input.resource, (input.meterAttachments ?? []).map((attachment) => attachment.meterPointId)],
+  () => readEnergyCoverageFromStore(input, databasePath, eligibility));
+};
+
+const readEnergyCoverageFromStore = async (input: {
+  metadataStore: MetadataStore;
+  workspaceId: string;
+  projectId: string;
+  dataSnapshotId: string;
+  resource: "electricity" | "water";
+  meterAttachments?: ReadonlyArray<{ meterPointId: string }>;
+}, databasePath: string, eligibility: "all-facts" | "analysis-eligible"): Promise<EnergyFactCoverage | null> => {
   const factScope = await resolveValidatedSnapshotFactScope({
     metadataStore: input.metadataStore,
     workspaceId: input.workspaceId,
@@ -418,6 +432,19 @@ export const readEnergyMeterDataHealth = async (input: {
   if (databasePath !== ":memory:" && !existsSync(databasePath)) {
     throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
   }
+  return readThroughSnapshotCache(databasePath, ["meter-health", input.workspaceId, input.projectId, input.dataSnapshotId, input.resource,
+    input.meterPoints.map((meterPoint) => [meterPoint.meterPointId, meterPoint.sourceLabel])],
+  () => readEnergyMeterDataHealthFromStore(input, databasePath));
+};
+
+const readEnergyMeterDataHealthFromStore = async (input: {
+  metadataStore: MetadataStore;
+  workspaceId: string;
+  projectId: string;
+  dataSnapshotId: string;
+  resource: "electricity" | "water";
+  meterPoints: ReadonlyArray<{ meterPointId: string; sourceLabel: string }>;
+}, databasePath: string): Promise<EnergyMeterDataHealth[]> => {
   const factScope = await resolveValidatedSnapshotFactScope({
     metadataStore: input.metadataStore,
     workspaceId: input.workspaceId,
