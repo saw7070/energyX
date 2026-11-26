@@ -7,6 +7,7 @@ import { SsoSignInForm, SsoSignInLink } from "../../components/auth/sso-sign-in"
 import { TwoStepSignIn } from "../../components/auth/two-step-sign-in";
 import { configApi, isLocalDevAdminAvailable, isPasswordAuthMode } from "../../lib/config-api/client";
 import { ssoErrorMessage } from "../../lib/config-api/organisation-sign-in";
+import { SESSION_ENDED_QUERY } from "../../lib/config-api/session-ended";
 import type { TwoStepPromptDto } from "../../lib/config-api/types";
 
 export function LoginClient() {
@@ -19,6 +20,8 @@ export function LoginClient() {
   // Single sign-on: chosen on this page (?sso=1), or the organisation's sign-in sent the person back (?sso_error=).
   const ssoError = useMemo(() => ssoErrorMessage(searchParams.get("sso_error")), [searchParams]);
   const [ssoMode, setSsoMode] = useState(() => searchParams.get("sso") === "1" || ssoError !== null);
+  // A signed-in page sent the reader here because their session ended (see session-ended.ts).
+  const sessionEnded = searchParams.get(SESSION_ENDED_QUERY.name) === SESSION_ENDED_QUERY.value;
   const authEntry = useMemo<{ mode: AuthMode; token: string }>(() => {
     const invite = searchParams.get("invite");
     if (invite) return { mode: "invite", token: invite };
@@ -107,6 +110,7 @@ export function LoginClient() {
       initialMode={authEntry.mode}
       initialToken={authEntry.token}
       onAuthenticated={redirectAfterAuthentication}
+      notice={sessionEnded && authEntry.mode === "login" ? "Your session has ended. Please sign in again." : null}
       alternativeSignIn={<SsoSignInLink onClick={() => setSsoMode(true)} />}
       onTwoStep={setTwoStep}
     />

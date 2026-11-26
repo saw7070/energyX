@@ -33,6 +33,17 @@ it("sends a signed-out visitor to the sign-in page", async () => {
   await act(async () => root.unmount());
 });
 
+it("tells someone whose session ended, and brings them back to the same page", async () => {
+  window.history.replaceState({}, "", "/energyiq/portfolio");
+  document.cookie = "df_csrf=left-behind; path=/";
+  vi.spyOn(configApi, "getMe").mockRejectedValue(new Error("Authentication required"));
+  const { root } = await render();
+  expect(router.replace).toHaveBeenCalledWith("/login?session=ended&returnTo=%2Fenergyiq%2Fportfolio");
+  await act(async () => root.unmount());
+  document.cookie = "df_csrf=; path=/; max-age=0";
+  window.history.replaceState({}, "", "/");
+});
+
 it("keeps a signed-in person on the page and offers a retry when the server cannot be reached, then recovers", async () => {
   const getMe = vi.spyOn(configApi, "getMe").mockRejectedValueOnce(new Error("fetch failed")).mockResolvedValue(me as never);
   const { host, root } = await render();
